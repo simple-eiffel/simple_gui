@@ -249,15 +249,102 @@ feature -- The store contract
 			assert ("closed", s.is_closed and s.count = 0)
 		end
 
+feature -- Encryption
+
+	test_file_store_encrypted
+			-- The file store with encryption on: unreadable on disk, and the contract holds.
+		local
+			s: GUI_ROW_FILE_STORE
+		do
+			create s.make
+			check_encrypted_store (s, s.path)
+			create s.make
+			s.set_encrypted (True)
+			check_store_contract (s)
+		end
+
+	test_a_tampered_record_is_made_again
+			-- A byte changed on disk: the row will not open, so the cache makes it again
+			-- instead of showing something wrong.
+		local
+			s: GUI_ROW_FILE_STORE
+			c: GUI_ROW_CACHE
+			l_file: RAW_FILE
+			l_byte: CHARACTER_8
+		do
+			tag := "Row "
+			create s.make
+			s.set_encrypted (True)
+			create c.make_with_store (2, s, Void, agent tagged_row)
+			assert ("made", c.cells (1) [1].same_string ("Row 1") and c.made_count = 1)
+			s.flush_for_measure
+			create l_file.make_with_path (s.path)
+			l_file.open_read_write
+			l_file.go (20)
+			l_file.read_character
+			l_byte := l_file.last_character
+			l_file.go (20)
+			l_file.put_character ((l_byte.code.bit_xor (1)).to_character_8)
+			l_file.close
+			assert ("made again, and right", c.cells (1) [1].same_string ("Row 1") and c.made_count = 2)
+			c.close
+		end
+
+	test_make_encrypted
+			-- GUI_ROW_CACHE.make_encrypted: a sealed file store, rows as usual.
+		local
+			c: GUI_ROW_CACHE
+		do
+			tag := "Row "
+			create c.make_encrypted (2, agent tagged_row)
+			assert ("encrypted", c.store.is_encrypted)
+			assert ("rows as usual", c.cells (3) [2].same_string ("6") and c.cells (3) [1].same_string ("Row 3") and c.made_count = 1)
+			c.close
+		end
+
+	check_encrypted_store (s: GUI_ROW_STORE; a_path: PATH)
+			-- With encryption on, rows come back intact (any script), and the file at
+			-- `a_path' holds none of their text.
+		local
+			i: INTEGER
+			l_file: RAW_FILE
+			l_disk: STRING_8
+			l_hebrew: STRING_32
+		do
+			s.set_encrypted (True)
+			assert ("encrypted", s.is_encrypted)
+			l_hebrew := {STRING_32} "בְּרֵאשִׁית"
+			from i := 1 until i > 200 loop
+				s.put (i.out, {STRING_32} "Secret row " + i.out + "%/31/" + l_hebrew)
+				i := i + 1
+			end
+			s.flush_for_measure
+			assert ("rows come back", attached s.item ("1") as al and then al.same_string ({STRING_32} "Secret row 1%/31/" + l_hebrew))
+			assert ("the last too", attached s.item ("200") as al and then al.starts_with ({STRING_32} "Secret row 200"))
+			create l_file.make_with_path (a_path)
+			l_file.open_read
+			l_file.read_stream (l_file.count)
+			l_disk := l_file.last_string
+			l_file.close
+			assert ("the file is not empty: " + l_disk.count.out, l_disk.count > 200 * 20)
+			assert ("no text on disk", not l_disk.has_substring ("Secret") and not l_disk.has_substring ("row 1"))
+			assert ("no UTF-8 Hebrew on disk", not l_disk.has_substring ({UTF_CONVERTER}.string_32_to_utf_8_string_8 (l_hebrew)))
+			s.close
+			assert ("closed", s.is_closed and not s.is_encrypted)
+		end
+
 feature -- Measurements
 
 	measure_file_store
-			-- Report-only: the file store's numbers.
+			-- Report-only: the file store's numbers, with encryption off and on.
 		local
 			s: GUI_ROW_FILE_STORE
 		do
 			create s.make
 			measure_store ("file store", s, s.path)
+			create s.make
+			s.set_encrypted (True)
+			measure_store ("file store, encrypted", s, s.path)
 		end
 
 	measure_store (a_name: STRING; s: GUI_ROW_STORE; a_path: PATH)

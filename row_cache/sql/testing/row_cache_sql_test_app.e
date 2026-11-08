@@ -30,15 +30,31 @@ feature {NONE} -- Initialization
 			run_test (agent t.test_a_volatile_column_is_made_each_time, "a_volatile_column_is_made_each_time")
 			run_test (agent test_sql_store_contract (t), "sql_store_contract")
 			run_test (agent test_a_scratch_database_is_deleted_and_a_persistent_one_kept, "a_scratch_database_is_deleted_and_a_persistent_one_kept")
+			run_test (agent test_sql_store_encrypted (t), "sql_store_encrypted")
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
 				print ("ALL TESTS PASSED%N")
 			end
 			create s.make
 			t.measure_store ("SQL store", s, s.path)
+			create s.make
+			s.set_encrypted (True)
+			t.measure_store ("SQL store, encrypted", s, s.path)
 		end
 
 feature -- Tests
+
+	test_sql_store_encrypted (t: ROW_CACHE_TESTS)
+			-- The SQL store with encryption on: unreadable on disk, and the contract holds.
+		local
+			s: GUI_ROW_SQL_STORE
+		do
+			create s.make
+			t.check_encrypted_store (s, s.path)
+			create s.make
+			s.set_encrypted (True)
+			t.check_store_contract (s)
+		end
 
 	test_sql_store_contract (t: ROW_CACHE_TESTS)
 		do
