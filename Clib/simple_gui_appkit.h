@@ -9,7 +9,7 @@
  * Queue [type, id, a, b, c]: click 1, text changed 2, activate 3, selection 4 (a = row),
  * menu 5 (a = item id), close requested 6, pointer 7 (a = x, b = y, c = kind + button*16 +
  * modifiers*256), key 8 (a = code, b = character, c = modifiers*256), resize 9 (a, b),
- * appearance 10 (a = 1 dark), wake 11, toggled 12 (a = 1 checked). Modifiers: 1 shift, 2 control, 4 alt, 8 command.
+ * appearance 10 (a = 1 dark), wake 11, toggled 12 (a = 1 checked), page changed 13 (a = page). Modifiers: 1 shift, 2 control, 4 alt, 8 command.
  * Programmatic changes push no events.
  */
 #ifndef SIMPLE_GUI_APPKIT_H
@@ -62,6 +62,11 @@ int sga_text_area(void);
 void sga_text_area_set(int a_id, const char *a_text);   /* no event */
 const char *sga_text_area_get(int a_id);
 void sga_text_area_set_read_only(int a_id, int a_on);
+int sga_tabs(void);
+void sga_tabs_extend(int a_tabs, int a_page, const char *a_title);   /* the first page added is shown */
+void sga_tabs_select(int a_tabs, int a_page);   /* 1-based; no event */
+int sga_tabs_selected(int a_tabs);   /* 1-based; 0 none */
+void sga_tabs_set_title(int a_tabs, int a_page, const char *a_title);
 int sga_list(void);
 void sga_list_extend(int a_id, const char *a_text);
 void sga_list_wipe_out(int a_id);
