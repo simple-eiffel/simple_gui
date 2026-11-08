@@ -359,6 +359,19 @@ static int sga_wrap(NSView *a_inner, CGFloat a_margin)
 	return l_id;
 }
 
+/* A control is never squeezed below its natural size: AppKit would cut a button's
+   label to "Zoom\u2026" where GTK keeps the button whole, and the window grows
+   instead. */
+static void sga_keep_natural_size(NSView *a_view, int a_stretch)
+{
+	/* A stretching child keeps AppKit's default: lowering it ties with the stack's own
+	   priorities and hands the spare room to the wrong child. */
+	if (a_stretch) return;
+	NSLayoutPriority l_priority = NSLayoutPriorityRequired - 1;
+	[a_view setContentCompressionResistancePriority:l_priority forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[a_view setContentCompressionResistancePriority:l_priority forOrientation:NSLayoutConstraintOrientationVertical];
+}
+
 int sga_stack(int a_vertical, int a_spacing)
 {
 	NSStackView *s = [[NSStackView alloc] init];
@@ -378,6 +391,7 @@ void sga_stack_extend(int a_stack, int a_child, int a_stretch)
 	BOOL l_vertical = [s orientation] == NSUserInterfaceLayoutOrientationVertical;
 	NSLayoutConstraintOrientation l_main = l_vertical ? NSLayoutConstraintOrientationVertical : NSLayoutConstraintOrientationHorizontal;
 	[v setContentHuggingPriority:a_stretch ? 1 : NSLayoutPriorityDefaultHigh forOrientation:l_main];
+	sga_keep_natural_size(v, a_stretch);
 	[s addArrangedSubview:v];
 	if (l_vertical) [[v.widthAnchor constraintEqualToAnchor:s.widthAnchor] setActive:YES];
 	else [[v.heightAnchor constraintEqualToAnchor:s.heightAnchor] setActive:YES];
@@ -407,6 +421,7 @@ void sga_grid_put(int a_grid, int a_child, int a_row, int a_column, int a_rows, 
 		for (NSInteger i = 0; i < [g numberOfColumns]; i++) [l_empty addObject:[NSGridCell emptyContentView]];
 		[g addRowWithViews:l_empty];
 	}
+	sga_keep_natural_size(sga_get(a_child), 0);
 	[[g cellAtColumnIndex:a_column - 1 rowIndex:a_row - 1] setContentView:sga_get(a_child)];
 	if (a_rows > 1 || a_columns > 1) {
 		[g mergeCellsInHorizontalRange:NSMakeRange((NSUInteger)(a_column - 1), (NSUInteger)a_columns)
@@ -597,6 +612,10 @@ int sga_canvas(int a_width, int a_height)
 {
 	SGACanvas *c = [[SGACanvas alloc] initWithFrame:NSMakeRect(0, 0, a_width, a_height)];
 	c->wanted = NSMakeSize(a_width, a_height);
+	/* The requested size is a preference, not a minimum: the canvas gives way first, so
+	   the window keeps the size the program asked for. */
+	[c setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[c setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationVertical];
 	[c setAccessibilityRole:NSAccessibilityImageRole];
 	return sga_keep(c);
 }
