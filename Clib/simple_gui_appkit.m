@@ -1080,6 +1080,13 @@ void sga_menu_add_item(void *a_menu, const char *a_text, const char *a_shortcut,
 	NSMenu *m = (__bridge NSMenu *)a_menu;
 	NSMenu *l_app = [[[NSApp mainMenu] itemAtIndex:0] submenu];
 	NSString *l_text = sga_role_title(a_role, sga_string(a_text)), *l_shortcut = sga_string(a_shortcut);
+	/* On a Mac the Edit menu's key equivalents are what carry Command-Z, X, C, V and A to the
+	   focused text field (GTK and Windows text boxes take those keys themselves), so an edit
+	   role the program gave no shortcut gets the standard one. */
+	if ([l_shortcut length] == 0 && a_role >= 10 && a_role <= 15) {
+		static NSString *const l_standard[] = {@"primary+z", @"primary+shift+z", @"primary+x", @"primary+c", @"primary+v", @"primary+a"};
+		l_shortcut = l_standard[a_role - 10];
+	}
 	NSMenuItem *i;
 	switch (a_role) {
 		case 1:
