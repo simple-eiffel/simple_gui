@@ -851,22 +851,43 @@ int sga_snapshot(int a_window, const char *a_path)
 
 /* What an assistive client reads, walked from the window: one "role: name" line per
    node, two spaces per depth; groups and scroll areas pass through without a line. */
+/* An accessibility attribute, from the NSAccessibility protocol when the element has it,
+   else through the older attribute API: some elements in the tree (a table's rows)
+   answer only that. */
+static id sga_ax(id a_element, SEL a_modern, NSString *a_attribute)
+{
+	if ([a_element respondsToSelector:a_modern]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+		return [a_element performSelector:a_modern];
+#pragma clang diagnostic pop
+	}
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+	if ([a_element respondsToSelector:@selector(accessibilityAttributeValue:)]) return [a_element accessibilityAttributeValue:a_attribute];
+#pragma clang diagnostic pop
+	return nil;
+}
+
 static void sga_describe(id a_element, int a_depth, NSMutableString *a_out)
 {
-	NSString *l_role = [a_element accessibilityRole];
+	id l_role_value = sga_ax(a_element, @selector(accessibilityRole), NSAccessibilityRoleAttribute);
+	NSString *l_role = [l_role_value isKindOfClass:[NSString class]] ? l_role_value : nil;
 	NSString *l_name = sga_role_name(l_role);
 	int l_next = a_depth;
 	if ([l_role length] && ![l_name isEqualToString:@"generic"]) {
-		NSString *l_label = [a_element accessibilityLabel];
-		NSString *l_title = [a_element respondsToSelector:@selector(accessibilityTitle)] ? [a_element accessibilityTitle] : nil;
-		id l_value = [a_element accessibilityValue];
-		NSString *l_text = [l_label length] ? l_label : [l_title length] ? l_title
+		id l_label = sga_ax(a_element, @selector(accessibilityLabel), NSAccessibilityDescriptionAttribute);
+		id l_title = sga_ax(a_element, @selector(accessibilityTitle), NSAccessibilityTitleAttribute);
+		id l_value = sga_ax(a_element, @selector(accessibilityValue), NSAccessibilityValueAttribute);
+		NSString *l_text = ([l_label isKindOfClass:[NSString class]] && [l_label length]) ? l_label
+			: ([l_title isKindOfClass:[NSString class]] && [l_title length]) ? l_title
 			: ([l_value isKindOfClass:[NSString class]] ? l_value : @"");
 		for (int i = 0; i < a_depth; i++) [a_out appendString:@"  "];
 		[a_out appendFormat:@"%@: %@\n", l_name, l_text];
 		l_next = a_depth + 1;
 	}
-	if (a_depth < 16) for (id c in [a_element accessibilityChildren]) sga_describe(c, l_next, a_out);
+	id l_children = sga_ax(a_element, @selector(accessibilityChildren), NSAccessibilityChildrenAttribute);
+	if (a_depth < 16 && [l_children isKindOfClass:[NSArray class]]) for (id c in l_children) sga_describe(c, l_next, a_out);
 }
 
 const char *sga_describe_accessibility(int a_window)
