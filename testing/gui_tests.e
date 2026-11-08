@@ -573,6 +573,45 @@ feature -- Tests
 			l_window.close
 		end
 
+	test_tabs
+			-- The first page is shown; select_page is silent; a click on a tab fires page changed;
+			-- titles change in place; the page gets room; a screen reader finds the tabs.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_tabs: GUI_TABS
+			l_first, l_second: GUI_LABEL
+			l_tree: STRING_32
+		do
+			create l_window.make ("Tabs", 400, 260)
+			create l_stack.make_vertical
+			create l_tabs.make
+			create l_first.make ("The first page")
+			create l_second.make ("The second page")
+			l_tabs.page_changed_actions.extend (agent (p: INTEGER) do chosen_row := p end)
+			l_tabs.extend (l_first, "First")
+			l_tabs.extend (l_second, "Second")
+			l_stack.extend_stretching (l_tabs)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("two pages", l_tabs.count = 2)
+			assert ("the first is shown", l_tabs.selected_index = 1)
+			assert ("its page has room: " + l_first.width.out + " x " + l_first.height.out, l_first.width > 0 and l_first.height > 0)
+			l_tabs.select_page (2)
+			driver.pump_until_idle (200)
+			assert ("silent select", l_tabs.selected_index = 2 and l_tabs.page_changed_actions.fire_count = 0)
+			chosen_row := 0
+			driver.choose_page (l_tabs, 1)
+			assert ("a click is reported", l_tabs.page_changed_actions.fire_count = 1 and chosen_row = 1)
+			l_tabs.set_page_title (2, "Zweite")
+			assert ("retitled", l_tabs.page_title (2).same_string ("Zweite"))
+			l_tree := driver.describe_accessibility (l_window)
+			print (indented (l_tree))
+			assert ("tabs read by a screen reader", l_tree.has_substring ("tab: First") and l_tree.has_substring ("tab: Zweite"))
+			l_window.close
+		end
+
 feature {NONE} -- Fixtures
 
 	app: GUI_APPLICATION

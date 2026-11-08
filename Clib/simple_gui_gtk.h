@@ -28,7 +28,7 @@ __attribute__((weak)) int sg_q[SG_QCAP][5] = {{0}};
 __attribute__((weak)) int sg_qh = 0;
 __attribute__((weak)) int sg_qt = 0;
 __attribute__((weak)) GtkWidget *sg_w[SG_MAX] = {0};
-__attribute__((weak)) int sg_kind[SG_MAX] = {0};      /* 1 window 2 stack 3 grid 4 label 5 button 6 field 7 list 8 canvas */
+__attribute__((weak)) int sg_kind[SG_MAX] = {0};      /* 1 window 2 stack 3 grid 4 label 5 button 6 field 7 list 8 canvas (9 check box, 10 text area, 11 tabs) */
 __attribute__((weak)) int sg_n = 1;                   /* id 0 is "none" */
 __attribute__((weak)) int sg_quiet = 0;               /* >0 while a programmatic change runs */
 __attribute__((weak)) GThread *sg_gui_thread = NULL;
@@ -438,6 +438,55 @@ static void sg_set_direction(int id, int d) {
     }
 }
 
+/* ---------- tabs: a GtkNotebook (kind 11). Choosing a tab sends page changed (13);
+   appending and selecting from code send nothing. (MACMINI's first pass; PROD's GTK half.) ---------- */
+
+/* GTK 4.14 gives each tab ("tab" role, an internal widget) no accessible name: the title is a
+   label inside it (probed). Name the tab itself, so a screen reader reads "tab: First". The
+   tab label's parent is that tab widget. */
+static void sg_name_tab(GtkNotebook *nb, GtkWidget *page, const char *title) {
+    GtkWidget *label = gtk_notebook_get_tab_label(nb, page);
+    GtkWidget *tab = label ? gtk_widget_get_parent(label) : NULL;
+    if (tab) {
+        gtk_accessible_update_property(GTK_ACCESSIBLE(tab), GTK_ACCESSIBLE_PROPERTY_LABEL, title, -1);
+        g_object_set_data_full(G_OBJECT(tab), "sg-a11y", g_strdup(title), g_free);
+    }
+}
+
+static void sg_on_switch_page(GtkNotebook *nb, GtkWidget *page, guint num, gpointer d) {
+    (void) page; (void) d;
+    if (!sg_quiet) sg_push(13, sg_id_of(nb), (int) num + 1, 0);
+}
+static int sg_tabs(void) {
+    GtkWidget *nb = gtk_notebook_new();
+    gtk_notebook_set_scrollable(GTK_NOTEBOOK(nb), TRUE);
+    g_signal_connect(nb, "switch-page", G_CALLBACK(sg_on_switch_page), NULL);
+    return sg_reg(nb, 11);
+}
+static void sg_tabs_extend(int tabs, int page, const char *title) {
+    sg_quiet++;
+    gtk_notebook_append_page(GTK_NOTEBOOK(sg_w[tabs]), sg_w[page], gtk_label_new(title));
+    sg_name_tab(GTK_NOTEBOOK(sg_w[tabs]), sg_w[page], title);
+    sg_quiet--;
+}
+static void sg_tabs_select(int tabs, int page) {
+    sg_quiet++;
+    gtk_notebook_set_current_page(GTK_NOTEBOOK(sg_w[tabs]), page - 1);
+    sg_quiet--;
+}
+static int sg_tabs_selected(int tabs) {
+    int n = gtk_notebook_get_current_page(GTK_NOTEBOOK(sg_w[tabs]));
+    return n < 0 ? 0 : n + 1;
+}
+static void sg_tabs_set_title(int tabs, int page, const char *title) {
+    GtkNotebook *nb = GTK_NOTEBOOK(sg_w[tabs]);
+    GtkWidget *p = gtk_notebook_get_nth_page(nb, page - 1);
+    if (p) {
+        gtk_notebook_set_tab_label_text(nb, p, title);
+        sg_name_tab(nb, p, title);
+    }
+}
+
 /* ---------- canvas: present a finished Cairo image ---------- */
 
 /* Device pixels per logical pixel: the surface's own scale, fractional under Wayland's
@@ -520,6 +569,27 @@ static void sg_canvas_present(int id, void *image) {
 /* ---------- menus ---------- */
 
 /* Shortcut "primary+O" -> "<Control>o" (GTK has no Cmd); "" for none. */
+/* The GDK key name for a key in the shared shortcut vocabulary (SW_SHORTCUT's names): "Enter"
+   is GDK's "Return", "PageUp" its "Page_Up", "Backspace" its "BackSpace"; one character is
+   lowercased; F1..F12 stay. Anything else passes through. */
+static void sg_gdk_key_name(const char *part, char *out, size_t n) {
+    static const char *pairs[][2] = {
+        {"enter", "Return"}, {"return", "Return"}, {"esc", "Escape"}, {"escape", "Escape"},
+        {"del", "Delete"}, {"delete", "Delete"}, {"ins", "Insert"}, {"insert", "Insert"},
+        {"backspace", "BackSpace"}, {"pageup", "Page_Up"}, {"pgup", "Page_Up"},
+        {"pagedown", "Page_Down"}, {"pgdn", "Page_Down"}, {"home", "Home"}, {"end", "End"},
+        {"left", "Left"}, {"right", "Right"}, {"up", "Up"}, {"down", "Down"}, {"tab", "Tab"},
+        {"space", "space"}, {"plus", "plus"}, {"equal", "equal"}, {"minus", "minus"},
+        {"comma", "comma"}, {"period", "period"}, {NULL, NULL}};
+    int i;
+    for (i = 0; pairs[i][0]; i++)
+        if (!g_ascii_strcasecmp(part, pairs[i][0])) { g_strlcat(out, pairs[i][1], n); return; }
+    if ((part[0] == 'f' || part[0] == 'F') && part[1] >= '1' && part[1] <= '9') {
+        char up[8]; g_snprintf(up, sizeof up, "F%s", part + 1); g_strlcat(out, up, n); return;
+    }
+    if (strlen(part) == 1) { char c[2] = { g_ascii_tolower(part[0]), 0 }; g_strlcat(out, c, n); return; }
+    g_strlcat(out, part, n);
+}
 static void sg_accel(const char *neutral, char *out, size_t n) {
     const char *p = neutral; out[0] = 0;
     if (!neutral || !*neutral) return;
@@ -530,14 +600,13 @@ static void sg_accel(const char *neutral, char *out, size_t n) {
         if (len >= sizeof part) len = sizeof part - 1;
         memcpy(part, p, len); part[len] = 0;
         if (plus) {
-            if (!g_ascii_strcasecmp(part, "primary") || !g_ascii_strcasecmp(part, "ctrl")) g_strlcat(out, "<Control>", n);
+            if (!g_ascii_strcasecmp(part, "primary") || !g_ascii_strcasecmp(part, "ctrl")
+                || !g_ascii_strcasecmp(part, "control")) g_strlcat(out, "<Control>", n);
             else if (!g_ascii_strcasecmp(part, "shift")) g_strlcat(out, "<Shift>", n);
             else if (!g_ascii_strcasecmp(part, "alt")) g_strlcat(out, "<Alt>", n);
             p = plus + 1;
         } else {
-            gchar *low = g_ascii_strdown(part, -1);
-            g_strlcat(out, strlen(part) == 1 ? low : part, n);
-            g_free(low);
+            sg_gdk_key_name(part, out, n);
             break;
         }
     }
@@ -817,6 +886,7 @@ static void sg_test_type(int id, const char *t) {   /* emits, like a user */
     else gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), t);
 }
 static void sg_test_choose(int id, int row) {
+    if (sg_kind[id] == 11) { gtk_notebook_set_current_page(GTK_NOTEBOOK(sg_w[id]), row - 1); return; }   /* a click on the tab */
     GtkListBoxRow *r = gtk_list_box_get_row_at_index(sg_list_box(id), row - 1);
     if (r) gtk_list_box_select_row(sg_list_box(id), r);
 }
