@@ -1114,15 +1114,15 @@ static void sga_tabs_flip(NSTabView *t)
 
 /* A table (or list, or outline) whose direction changed: NSTableView places its columns by
    direction only when they are added, so they are added again (probed: setting the
-   direction later, or re-adding the view, changes nothing). The selection, the sort
-   indicators, the highlighted column and an outline's disclosure column are kept. */
+   direction later, or re-adding the view, changes nothing). The sort indicators, the
+   highlighted column and an outline's disclosure column are kept (the selection is kept by
+   sga_set_direction). */
 static void sga_table_relayout(NSTableView *t)
 {
 	NSArray<NSTableColumn *> *l_columns = [[t tableColumns] copy];
 	NSMutableArray *l_indicators = [NSMutableArray array];
 	NSTableColumn *l_highlighted = [t highlightedTableColumn];
 	NSTableColumn *l_outline = [t isKindOfClass:[NSOutlineView class]] ? [(NSOutlineView *)t outlineTableColumn] : nil;
-	NSIndexSet *l_selected = [[t selectedRowIndexes] copy];
 	for (NSTableColumn *c in l_columns) [l_indicators addObject:[t indicatorImageInTableColumn:c] ?: [NSNull null]];
 	s_suppress++;
 	for (NSTableColumn *c in l_columns) [t removeTableColumn:c];
@@ -1136,7 +1136,6 @@ static void sga_table_relayout(NSTableView *t)
 	for (NSTableColumn *c in l_columns) [[c headerCell] setAlignment:sga_start_alignment(t)];
 	[[t headerView] setNeedsDisplay:YES];
 	[t reloadData];   /* the cells take their new alignment (rows and expansion stay) */
-	[t selectRowIndexes:l_selected byExtendingSelection:NO];   /* removing the columns cleared it */
 	s_suppress--;
 }
 
@@ -1149,6 +1148,9 @@ void sga_set_direction(int a_id, int a_direction)
 	NSUserInterfaceLayoutDirection l_layout = a_direction == 2 ? NSUserInterfaceLayoutDirectionRightToLeft
 		: a_direction == 1 ? NSUserInterfaceLayoutDirectionLeftToRight : [NSApp userInterfaceLayoutDirection];
 	BOOL l_changed = [v userInterfaceLayoutDirection] != l_layout || [(NSView *)l_core userInterfaceLayoutDirection] != l_layout;
+	/* A table's selection, before anything changes: setting a list's direction clears it (seen
+	   on GUI_LIST), and re-adding the columns would too. */
+	NSIndexSet *l_selected = [l_core isKindOfClass:[NSTableView class]] ? [[(NSTableView *)l_core selectedRowIndexes] copy] : nil;
 	[v setUserInterfaceLayoutDirection:l_layout];
 	if (l_core != v) [(NSView *)l_core setUserInterfaceLayoutDirection:l_layout];
 	if (l_changed) {
@@ -1159,6 +1161,11 @@ void sga_set_direction(int a_id, int a_direction)
 	}
 	if (l_changed && [l_core isKindOfClass:[NSTabView class]]) sga_tabs_flip((NSTabView *)l_core);
 	if (l_changed && [l_core isKindOfClass:[NSTableView class]]) sga_table_relayout((NSTableView *)l_core);
+	if (l_selected && ![[(NSTableView *)l_core selectedRowIndexes] isEqualToIndexSet:l_selected]) {
+		s_suppress++;
+		[(NSTableView *)l_core selectRowIndexes:l_selected byExtendingSelection:NO];
+		s_suppress--;
+	}
 	/* Text: the direction places it (right-aligned under right to left, as GTK mirrors a
 	   label's alignment), but the text's own letters decide its writing direction, so an
 	   English sentence in a Hebrew window keeps its full stop at the end. A widget set left
