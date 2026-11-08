@@ -1005,11 +1005,21 @@ void sga_canvas_present(int a_id, void *a_cairo_surface)
 	[c setNeedsDisplay:YES];
 }
 
-int sga_scale_factor(int a_id)
+/* Device pixels per point: the window's backing scale (the main screen's before the canvas is in
+   a window). macOS uses 1.0 and 2.0 today; the API is a REAL so a future fractional scale
+   needs no change. */
+double sga_scale(int a_id)
 {
 	NSWindow *w = [(NSView *)sga_get(a_id) window];
 	CGFloat f = w ? [w backingScaleFactor] : [[NSScreen mainScreen] backingScaleFactor];
-	return f < 1 ? 1 : (int)lround(f);
+	return f > 0 ? (double)f : 1.0;
+}
+
+/* `sga_scale' rounded up (the superseded whole-number form). */
+int sga_scale_factor(int a_id)
+{
+	int f = (int)ceil(sga_scale(a_id));
+	return f < 1 ? 1 : f;
 }
 
 int sga_width(int a_id)

@@ -11,6 +11,9 @@ class
 
 inherit
 	GUI_BACKEND_API
+		redefine
+			scale
+		end
 
 feature -- Lifecycle and loop
 
@@ -326,6 +329,12 @@ feature -- Canvas
 	scale_factor (an_id: INTEGER): INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "{ int s = sga_scale_factor($an_id); return s < 1 ? 1 : s; }"
+		end
+
+	scale (an_id: INTEGER): REAL_64
+			-- The window's backingScaleFactor.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "{ double s = sga_scale($an_id); return s > 0.0 ? s : 1.0; }"
 		end
 
 	width (an_id: INTEGER): INTEGER
