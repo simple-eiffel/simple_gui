@@ -456,7 +456,14 @@ static GListModel *sg_tree_children(gpointer item, gpointer d) {
 }
 static GtkTreeListModel *sg_tree_model(int id) { return GTK_TREE_LIST_MODEL(g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-model")); }
 static GtkSingleSelection *sg_tree_selection(int id) { return GTK_SINGLE_SELECTION(g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-selection")); }
-static int sg_row_number(GtkTreeListRow *r) { return r ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(gtk_tree_list_row_get_item(r)), "sg-number")) : 0; }
+/* The node number a row shows, or 0. The row's item may be gone (a row being torn down as the
+   window closes); get_item hands over a reference, given back here. */
+static int sg_row_number(GtkTreeListRow *r) {
+    GObject *o = r ? gtk_tree_list_row_get_item(r) : NULL;
+    int n = o ? GPOINTER_TO_INT(g_object_get_data(o, "sg-number")) : 0;
+    if (o) g_object_unref(o);
+    return n;
+}
 /* The row showing node `n', or NULL when it is not shown (an ancestor is collapsed). */
 static GtkTreeListRow *sg_tree_row(int id, int n, guint *pos) {
     GtkTreeListModel *m = sg_tree_model(id);
@@ -471,13 +478,24 @@ static GtkTreeListRow *sg_tree_row(int id, int n, guint *pos) {
     }
     return NULL;
 }
+/* A row's "expanded" notification also arrives for rows that did not change: collapsing a
+   node notifies its never-opened children as their rows go (traced on GTK 4.14: one collapse
+   reported three times). So each node keeps its last known state ("sg-open", 1 closed /
+   2 open; never recorded counts as closed) and only a real change is reported. Quiet changes
+   update it silently. */
 static void sg_on_tree_expanded(GObject *row, GParamSpec *p, gpointer d) {
     GtkTreeListRow *r = GTK_TREE_LIST_ROW(row);
     GObject *o;
+    int open, known;
     (void) p;
-    if (sg_quiet) return;
     o = gtk_tree_list_row_get_item(r);
-    sg_push(15, GPOINTER_TO_INT(d), GPOINTER_TO_INT(g_object_get_data(o, "sg-number")), gtk_tree_list_row_get_expanded(r) ? 1 : 0);
+    if (!o) return;   /* a row being torn down (the window closing) has no item left */
+    open = gtk_tree_list_row_get_expanded(r) ? 2 : 1;
+    known = GPOINTER_TO_INT(g_object_get_data(o, "sg-open"));
+    if (known == 0) known = 1;   /* never recorded: nodes start closed */
+    g_object_set_data(o, "sg-open", GINT_TO_POINTER(open));
+    if (!sg_quiet && open != known)
+        sg_push(15, GPOINTER_TO_INT(d), GPOINTER_TO_INT(g_object_get_data(o, "sg-number")), open == 2 ? 1 : 0);
     g_object_unref(o);
 }
 static void sg_tree_setup(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
@@ -488,6 +506,16 @@ static void sg_tree_setup(GtkSignalListItemFactory *fa, GtkListItem *it, gpointe
     gtk_tree_expander_set_child(GTK_TREE_EXPANDER(x), l);
     gtk_list_item_set_child(it, x);
 }
+/* Disconnect the "expanded" watch item `it' put on the row it was bound to: that exact row and
+   handler (kept on the item), not whatever row the item holds now. Watches that stayed
+   connected made one collapse report three times. */
+static void sg_tree_forget_row(GtkListItem *it) {
+    GObject *r = g_object_get_data(G_OBJECT(it), "sg-expanded-row");
+    gulong h = GPOINTER_TO_SIZE(g_object_get_data(G_OBJECT(it), "sg-expanded-handler"));
+    if (r && h && g_signal_handler_is_connected(r, h)) g_signal_handler_disconnect(r, h);
+    g_object_set_data(G_OBJECT(it), "sg-expanded-handler", NULL);
+    g_object_set_data(G_OBJECT(it), "sg-expanded-row", NULL);
+}
 static void sg_tree_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
     GtkTreeListRow *r = GTK_TREE_LIST_ROW(gtk_list_item_get_item(it));
     GtkWidget *x = gtk_list_item_get_child(it);
@@ -497,19 +525,18 @@ static void sg_tree_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer
     gtk_tree_expander_set_list_row(GTK_TREE_EXPANDER(x), r);
     gtk_label_set_text(GTK_LABEL(gtk_tree_expander_get_child(GTK_TREE_EXPANDER(x))), gtk_string_object_get_string(GTK_STRING_OBJECT(o)));
     g_object_unref(o);
+    sg_tree_forget_row(it);   /* GTK 4.12+ may bind again without unbinding first */
     h = g_signal_connect(r, "notify::expanded", G_CALLBACK(sg_on_tree_expanded), d);
+    g_object_set_data_full(G_OBJECT(it), "sg-expanded-row", g_object_ref(r), g_object_unref);
     g_object_set_data(G_OBJECT(it), "sg-expanded-handler", GSIZE_TO_POINTER(h));
 }
 static void sg_tree_unbind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
-    GtkTreeListRow *r = GTK_TREE_LIST_ROW(gtk_list_item_get_item(it));
-    gulong h = GPOINTER_TO_SIZE(g_object_get_data(G_OBJECT(it), "sg-expanded-handler"));
     (void) fa; (void) d;
-    if (r && h) g_signal_handler_disconnect(r, h);
-    g_object_set_data(G_OBJECT(it), "sg-expanded-handler", NULL);
+    sg_tree_forget_row(it);
 }
 static void sg_on_tree_selection(GtkSelectionModel *m, guint pos, guint n, gpointer d) {
     (void) pos; (void) n;
-    if (sg_quiet) return;
+    if (sg_quiet || !gtk_widget_get_root(sg_w[GPOINTER_TO_INT(d)])) return;   /* not while closing */
     sg_push(4, GPOINTER_TO_INT(d), sg_row_number(GTK_TREE_LIST_ROW(gtk_single_selection_get_selected_item(GTK_SINGLE_SELECTION(m)))), 0);
 }
 static int sg_tree(void) {
@@ -530,7 +557,10 @@ static int sg_tree(void) {
     g_signal_connect(f, "unbind", G_CALLBACK(sg_tree_unbind), NULL);
     g_signal_connect(s, "selection-changed", G_CALLBACK(sg_on_tree_selection), GINT_TO_POINTER(id));
     g_object_set_data(G_OBJECT(scroll), "sg-view", v);
-    g_object_set_data_full(G_OBJECT(scroll), "sg-roots", roots, g_object_unref);
+    /* gtk_tree_list_model_new took the creation reference to `roots' (transfer full), so the
+       copy kept here needs a reference of its own: without it, closing the window released
+       `roots' twice (a segfault). */
+    g_object_set_data_full(G_OBJECT(scroll), "sg-roots", g_object_ref(roots), g_object_unref);
     g_object_set_data(G_OBJECT(scroll), "sg-tree-model", m);
     g_object_set_data(G_OBJECT(scroll), "sg-tree-selection", s);
     g_object_set_data_full(G_OBJECT(scroll), "sg-tree-nodes", nodes, (GDestroyNotify) g_ptr_array_unref);
