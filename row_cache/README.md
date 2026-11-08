@@ -16,6 +16,11 @@ l_cache.close                                  -- the scratch file is deleted
 **Rows that survive sorting.** Keep rows by the program's own key for a row with `make_keyed`.
 After a sort, `refresh_order` asks the table again, and every row comes back from the cache.
 
+**Encryption, when the table shows sensitive data.** It is off by default. `make_encrypted`
+(or `set_encrypted (True)` on a store before its first row) seals every row under a key held
+only in memory, through simple_encryption's session seal, so a scratch file left behind by a
+crash cannot be read. A row altered on disk is made again rather than shown wrong.
+
 **Two stores, one choice.**
 - **`GUI_ROW_FILE_STORE`** is the default: an append-only scratch file plus an in-memory index.
 - **`GUI_ROW_SQL_STORE`** (`sql/simple_gui_row_cache_sql.ecf`, over simple_sql) is for a cache
@@ -25,7 +30,8 @@ The reasons, with measurements, are in [docs/choosing-a-row-store.md](docs/choos
 and in `GUI_ROW_STORE`'s note.
 
 **ECFs:**
-- `simple_gui_row_cache.ecf`, needing simple_gui and simple_file. Its tests are
+- `simple_gui_row_cache.ecf`, needing simple_gui, simple_file and simple_encryption (2.2.0, for
+  the session seal). Its tests are
   `simple_gui_row_cache_tests`.
 - `sql/simple_gui_row_cache_sql.ecf`, which adds simple_sql. Its tests are
   `simple_gui_row_cache_sql_tests`, the same shared tests run over the SQL store.

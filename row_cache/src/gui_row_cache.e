@@ -23,6 +23,7 @@ class
 create
 	make,
 	make_keyed,
+	make_encrypted,
 	make_with_store
 
 feature {NONE} -- Initialization
@@ -48,6 +49,22 @@ feature {NONE} -- Initialization
 			make_with_store (a_columns, create {GUI_ROW_FILE_STORE}.make, a_key, a_make_row)
 		ensure
 			keyed: is_keyed
+		end
+
+	make_encrypted (a_columns: INTEGER; a_make_row: FUNCTION [INTEGER, ARRAY [READABLE_STRING_GENERAL]])
+			-- As `make', with every row sealed under a key held only in memory (for tables
+			-- that show sensitive data: a scratch file left by a crash cannot be read).
+		require
+			has_columns: a_columns >= 1
+		local
+			l_store: GUI_ROW_FILE_STORE
+		do
+			create l_store.make
+			l_store.set_encrypted (True)
+			make_with_store (a_columns, l_store, Void, a_make_row)
+		ensure
+			by_number: not is_keyed
+			encrypted: store.is_encrypted
 		end
 
 	make_with_store (a_columns: INTEGER; a_store: GUI_ROW_STORE; a_key: detachable FUNCTION [INTEGER, READABLE_STRING_GENERAL];

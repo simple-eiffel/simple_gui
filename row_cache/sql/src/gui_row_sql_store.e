@@ -60,6 +60,14 @@ feature -- Access
 			l_result := select_one.execute_returning_result
 			if not l_result.is_empty then
 				Result := l_result.first.string_value ("cells")
+				if is_encrypted then
+						-- Sealed records are kept as hex in the TEXT column.
+					if attached from_hex (Result.to_string_8) as al_sealed then
+						Result := cells_from_stored (al_sealed)
+					else
+						Result := Void
+					end
+				end
 			end
 		end
 
@@ -93,7 +101,11 @@ feature -- Element change
 				begin_batch
 				insert_one.reset
 				insert_one.bind_text (1, a_key)
-				insert_one.bind_text (2, a_cells)
+				if is_encrypted then
+					insert_one.bind_text (2, to_hex (stored_form (a_cells)))
+				else
+					insert_one.bind_text (2, a_cells)
+				end
 				insert_one.execute
 				if insert_one.has_error or database.has_error then
 					fail
@@ -147,6 +159,7 @@ feature -- Removal
 			end
 			database.close
 			held := 0
+			forget_key
 			is_closed := True
 			if not is_persistent then
 				(create {RAW_FILE}.make_with_path (path)).delete
@@ -195,6 +208,51 @@ feature {NONE} -- Implementation
 			end
 			has_failed := database.has_error
 		end
+
+	to_hex (a_bytes: READABLE_STRING_8): STRING_8
+			-- `a_bytes' as lowercase hex.
+		local
+			i, c: INTEGER
+		do
+			create Result.make (2 * a_bytes.count)
+			from i := 1 until i > a_bytes.count loop
+				c := a_bytes.code (i).to_integer_32
+				Result.append_character (Hex_digits [c // 16 + 1])
+				Result.append_character (Hex_digits [c \\ 16 + 1])
+				i := i + 1
+			end
+		end
+
+	from_hex (a_hex: READABLE_STRING_8): detachable STRING_8
+			-- The bytes `a_hex' spells, or Void when it is not hex.
+		local
+			i, hi, lo: INTEGER
+			l_bytes: STRING_8
+			l_ok: BOOLEAN
+		do
+			if a_hex.count \\ 2 = 0 then
+				create l_bytes.make (a_hex.count // 2)
+				from
+					i := 1
+					l_ok := True
+				until
+					i > a_hex.count or not l_ok
+				loop
+					hi := Hex_digits.index_of (a_hex [i], 1) - 1
+					lo := Hex_digits.index_of (a_hex [i + 1], 1) - 1
+					l_ok := hi >= 0 and lo >= 0
+					if l_ok then
+						l_bytes.append_code ((hi * 16 + lo).to_natural_32)
+					end
+					i := i + 2
+				end
+				if l_ok then
+					Result := l_bytes
+				end
+			end
+		end
+
+	Hex_digits: STRING = "0123456789abcdef"
 
 	make_table
 		do

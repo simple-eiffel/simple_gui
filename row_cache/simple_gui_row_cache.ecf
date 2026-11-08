@@ -20,6 +20,7 @@
 		<library name="base" location="$ISE_LIBRARY\library\base\base.ecf"/>
 		<library name="simple_gui" location="$SIMPLE_EIFFEL\simple_gui\simple_gui.ecf"/>
 		<library name="simple_file" location="$SIMPLE_EIFFEL\simple_file\simple_file.ecf"/>
+		<library name="simple_encryption" location="$SIMPLE_EIFFEL\simple_encryption\simple_encryption.ecf"/>
 		<cluster name="row_cache" location=".\src\" recursive="true"/>
 	</target>
 

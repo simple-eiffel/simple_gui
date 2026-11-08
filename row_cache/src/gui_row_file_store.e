@@ -50,7 +50,7 @@ feature -- Access
 			if attached index.item (a_key.to_string_8) as al_at then
 				l_bytes := bytes_at (al_at.offset, al_at.length)
 				if attached l_bytes then
-					Result := {UTF_CONVERTER}.utf_8_string_8_to_string_32 (l_bytes)
+					Result := cells_from_stored (l_bytes)
 				end
 			end
 		end
@@ -86,7 +86,7 @@ feature -- Element change
 			n: INTEGER
 		do
 			if not has_failed then
-				l_utf := {UTF_CONVERTER}.string_32_to_utf_8_string_8 (a_cells)
+				l_utf := stored_form (a_cells)
 				n := l_utf.count
 				create l_c.make (l_utf)
 				if buffer_count + n > buffer.count then
@@ -134,6 +134,7 @@ feature -- Removal
 			buffer_count := 0
 			disk_bytes := 0
 			close_reader
+			forget_key
 			if file.exists and then not file.delete then
 				has_failed := True
 			end

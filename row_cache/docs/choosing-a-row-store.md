@@ -100,11 +100,37 @@ Windows and Linux numbers follow from PROD.
 
 ## Encryption
 
-Encryption is optional and off by default, for both stores (Larry, 2026-11-08). When it is on,
-each record is sealed under a key made for the session and held only in memory, so a file left
-behind by a crash cannot be read. It comes through simple_encryption's `session_seal` and
-`session_open` (see port-coordination's SIMPLE_GUI_SPEC.md, 1f addendum). With it on, a
-persistent SQL store can only be read in the session that wrote it.
+Encryption is optional and off by default, for both stores (Larry, 2026-11-08). Turn it on for
+a table that shows sensitive data: `GUI_ROW_CACHE.make_encrypted`, or `set_encrypted (True)` on
+a store before its first row.
+
+**What it does:**
+- **The key:** each record is sealed under a key made for that store from the system's secure
+  random source and held only in memory, so a file left behind by a crash cannot be read.
+- **Altered records:** a record that will not open (a byte changed on disk) reads as Void, and
+  the cache makes the row again rather than show something wrong.
+- **The primitive:** simple_encryption's session seal (2.2.0). On macOS that is AES-256-CTR plus
+  HMAC-SHA-256 (encrypt-then-MAC, 48 bytes added a record); on Linux AES-256-GCM (28 bytes
+  added); on Windows AES-256-GCM through BCrypt, to come.
+- **Persistent SQL stores:** with encryption on, one can only be read in the session that wrote
+  it, because the key is gone afterwards.
+
+**What it costs** (macOS, contracts off, the same 100,000 rows and 1,000 random reads):
+
+| | File store, off → on | SQL store, off → on |
+|---|---|---|
+| Put 100,000 rows (with ~200 ms of making them) | 401 → 670 ms (the store's own cost a put: ~2 → ~4.7 µs) | 917 → 1,616 ms (~7.2 → ~14.2 µs) |
+| Read 1,000 random keys | 2.0 → 4.0 ms | 8.4 → 19.7 ms |
+| Size on disk | 4.4 → 8.9 MB | 6.0 → 20.9 MB |
+
+**Reading the costs:**
+- **Small enough to turn on whenever the data calls for it.** Sealing costs a few microseconds a
+  row, so a viewful still reads in well under a frame.
+- **The files grow** by the seal's fixed 48 bytes (macOS) on rows of about 45 bytes. Longer rows
+  grow proportionally less.
+- **The SQL store grows most** because a sealed record is kept as hex in its TEXT column, which
+  doubles it. A BLOB column would not, but simple_sql passes blobs into the SQL text as hex
+  literals as well (simple_sql #4). Revisit both once that is fixed.
 
 ## Scratch files
 
