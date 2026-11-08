@@ -24,15 +24,16 @@ create
 feature {NONE} -- Initialization
 
 	make (a_backend: GUI_BACKEND; a_id: INTEGER; a_title: READABLE_STRING_GENERAL; a_width, a_height: INTEGER)
-			-- Window `a_id' of `a_backend', `a_width' by `a_height' pixels.
+			-- Window `a_id' of `a_backend', `a_width' by `a_height' device pixels, in themes at the
+			-- desktop's scale.
 		require
 			numbered: a_id > 0
 			sized: a_width > 0 and a_height > 0
 		do
 			backend := a_backend
 			gui_id := a_id
-			make_window (a_title, 100, 100, a_width, a_height, create {SW_THEME}.make_light)
-			follow_system_theme (create {SW_THEME}.make_light, create {SW_THEME}.make_dark)
+			make_window (a_title, 100, 100, a_width, a_height, a_backend.themed (False))
+			follow_system_theme (a_backend.themed (False), a_backend.themed (True))
 		ensure
 			kept: backend = a_backend and gui_id = a_id
 		end

@@ -97,7 +97,10 @@ feature -- Windows and containers
 			l_w: GUI_SW_WINDOW
 		do
 			Result := register (Void)
-			create l_w.make (Current, Result, from_c (a_title), a_width.max (1), a_height.max (1))
+			create l_w.make (Current, Result, from_c (a_title), device (a_width.max (1)), device (a_height.max (1)))
+			if forced_dark_set then
+				l_w.set_theme (themed (forced_dark))
+			end
 			windows.put (l_w, Result)
 		end
 
@@ -583,8 +586,18 @@ feature -- Every widget
 			if attached widget (an_id) as al_w then
 				al_w.set_visible (a_on)
 				changed
-			elseif a_on and windows.has (an_id) then
-				window_show (an_id)
+			elseif attached windows.item (an_id) as al_win then
+				if not a_on then
+					if al_win.is_window_open then
+						al_win.hide_window
+					end
+					hidden_windows.force (True, an_id)
+				elseif al_win.is_window_open then
+					al_win.show_window
+					hidden_windows.remove (an_id)
+				else
+					window_show (an_id)
+				end
 			end
 		end
 
@@ -594,7 +607,7 @@ feature -- Every widget
 			if attached widget (an_id) as al_w then
 				Result := al_w.is_visible
 			elseif attached windows.item (an_id) as al_win then
-				Result := al_win.is_window_open
+				Result := al_win.is_window_open and not hidden_windows.has (an_id)
 			end
 		end
 
@@ -708,7 +721,7 @@ feature -- Canvas
 			if attached widget (an_id) as al_w then
 				Result := logical (al_w, al_w.width)
 			elseif attached windows.item (an_id) as al_win then
-				Result := al_win.win_w
+				Result := (al_win.win_w / dpi).rounded
 			end
 		end
 
@@ -717,7 +730,7 @@ feature -- Canvas
 			if attached widget (an_id) as al_w then
 				Result := logical (al_w, al_w.height)
 			elseif attached windows.item (an_id) as al_win then
-				Result := al_win.win_h
+				Result := (al_win.win_h / dpi).rounded
 			end
 		end
 
@@ -849,11 +862,7 @@ feature -- Appearance
 			forced_dark_set := True
 			forced_dark := a_on
 			across windows as ic loop
-				if a_on then
-					ic.set_theme (create {SW_THEME}.make_dark)
-				else
-					ic.set_theme (create {SW_THEME}.make_light)
-				end
+				ic.set_theme (themed (a_on))
 			end
 			push (10, 0, a_on.to_integer, 0, 0)
 			changed
@@ -988,7 +997,46 @@ feature {NONE} -- State
 	last_c: detachable C_STRING
 			-- The text handed out last (alive until the next).
 
+feature {GUI_SW_WINDOW} -- Themes
+
+	themed (a_dark: BOOLEAN): SW_THEME
+			-- A light or dark theme at the desktop's scale (150% draws everything half again as
+			-- large): simple_widgets lays out in device pixels.
+		do
+			if a_dark then
+				create Result.make_dark
+			else
+				create Result.make_light
+			end
+			Result.set_text_scale (dpi)
+		ensure
+			scaled: Result.text_scale = dpi
+		end
+
 feature {NONE} -- Implementation
+
+	dpi: REAL_64
+			-- Device pixels per logical pixel on the desktop.
+		do
+			Result := desktop.dpi_scale
+			if Result <= 0.0 then
+				Result := 1.0
+			end
+		ensure
+			positive: Result > 0.0
+		end
+
+	device (a_logical: INTEGER): INTEGER
+			-- Logical pixels as device pixels.
+		do
+			Result := (a_logical * dpi).rounded.max (1)
+		end
+
+	hidden_windows: HASH_TABLE [BOOLEAN, INTEGER]
+			-- Windows the program hid (open, not shown).
+		once ("OBJECT")
+			create Result.make (2)
+		end
 
 	pump_windowless (a_ms: INTEGER)
 			-- No window open: pump this thread in short slices so a processor's wake still
@@ -1202,7 +1250,7 @@ feature {NONE} -- Implementation
 				l_code := a_code
 			end
 			if a_code >= 8 and then attached {SW_CANVAS} widget (an_id) as al_c then
-				push (8, an_id, l_code, if a_code >= 32 then a_code else 0 end, al_c.modifiers * 256)
+				push (8, an_id, l_code, if a_code >= 32 or l_code /= a_code then a_code else 0 end, al_c.modifiers * 256)
 			end
 		end
 
