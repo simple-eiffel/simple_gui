@@ -53,6 +53,19 @@ feature -- Access
 
 	Default_spacing: INTEGER = 6
 
+	alignment: INTEGER
+			-- Cross-axis alignment of the children: Align_fill (each child's own default), start, centre or end.
+
+	Align_fill: INTEGER = 0
+	Align_start: INTEGER = 1
+	Align_centre: INTEGER = 2
+	Align_end: INTEGER = 3
+
+	is_valid_alignment (an_alignment: INTEGER): BOOLEAN
+		do
+			Result := an_alignment >= Align_fill and an_alignment <= Align_end
+		end
+
 feature -- Element change
 
 	extend (a_widget: GUI_WIDGET)
@@ -83,6 +96,33 @@ feature -- Element change
 			last: children.last = a_widget
 		end
 
+	extend_aligned (a_widget: GUI_WIDGET; an_alignment: INTEGER)
+			-- Add `a_widget' at the end, aligned on the cross axis by `an_alignment'.
+		require
+			gui_thread: is_gui_thread
+			not_parented: a_widget.parent = Void
+			not_self: a_widget /= Current
+			valid: is_valid_alignment (an_alignment)
+		do
+			extend (a_widget)
+			backend.stack_align_child (id, a_widget.id, an_alignment)
+		ensure
+			parent_set: a_widget.parent = Current
+			last: children.last = a_widget
+		end
+
+	set_alignment (an_alignment: INTEGER)
+			-- Align every child, existing and later, on the cross axis.
+		require
+			gui_thread: is_gui_thread
+			valid: is_valid_alignment (an_alignment)
+		do
+			alignment := an_alignment
+			backend.stack_set_alignment (id, an_alignment)
+		ensure
+			set: alignment = an_alignment
+		end
+
 	set_spacing (a_spacing: INTEGER)
 		require
 			gui_thread: is_gui_thread
@@ -96,5 +136,6 @@ feature -- Element change
 
 invariant
 	spacing_non_negative: spacing >= 0
+	alignment_valid: is_valid_alignment (alignment)
 
 end

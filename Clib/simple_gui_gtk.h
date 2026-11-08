@@ -148,17 +148,53 @@ static int sg_stack(int vertical, int spacing) {
     gtk_widget_set_margin_top(b, 12); gtk_widget_set_margin_bottom(b, 12);
     return sg_reg(b, 2);
 }
+/* Cross-axis alignment: 0 fill, 1 start, 2 centre, 3 end. */
+static GtkAlign sg_galign(int a) {
+    return a == 1 ? GTK_ALIGN_START : a == 2 ? GTK_ALIGN_CENTER : a == 3 ? GTK_ALIGN_END : GTK_ALIGN_FILL;
+}
+static int sg_is_vertical(int stack) {
+    return gtk_orientable_get_orientation(GTK_ORIENTABLE(sg_w[stack])) == GTK_ORIENTATION_VERTICAL;
+}
+static void sg_stack_align_child(int stack, int child, int a) {
+    if (sg_is_vertical(stack)) gtk_widget_set_halign(sg_w[child], sg_galign(a));
+    else gtk_widget_set_valign(sg_w[child], sg_galign(a));
+}
 static void sg_stack_extend(int stack, int child, int stretch) {
     GtkWidget *c = sg_w[child];
-    if (gtk_orientable_get_orientation(GTK_ORIENTABLE(sg_w[stack])) == GTK_ORIENTATION_VERTICAL) gtk_widget_set_vexpand(c, stretch ? TRUE : FALSE);
+    int stored = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[stack]), "sg-align"));
+    if (sg_is_vertical(stack)) gtk_widget_set_vexpand(c, stretch ? TRUE : FALSE);
     else gtk_widget_set_hexpand(c, stretch ? TRUE : FALSE);
+    if (stored) sg_stack_align_child(stack, child, stored - 1);
     gtk_box_append(GTK_BOX(sg_w[stack]), c);
+}
+/* The stack's alignment for its children, existing and later. */
+static void sg_stack_set_alignment(int stack, int a) {
+    GtkWidget *c;
+    g_object_set_data(G_OBJECT(sg_w[stack]), "sg-align", GINT_TO_POINTER(a + 1));
+    for (c = gtk_widget_get_first_child(sg_w[stack]); c; c = gtk_widget_get_next_sibling(c)) {
+        if (sg_is_vertical(stack)) gtk_widget_set_halign(c, sg_galign(a)); else gtk_widget_set_valign(c, sg_galign(a));
+    }
 }
 static void sg_stack_set_spacing(int stack, int s) { gtk_box_set_spacing(GTK_BOX(sg_w[stack]), s); }
 
 static int sg_grid(void) { return sg_reg(gtk_grid_new(), 3); }
 static void sg_grid_put(int grid, int child, int row, int col, int rows, int cols) {
+    int stretch = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[grid]), "sg-stretch"));
+    if (stretch && stretch == col) gtk_widget_set_hexpand(sg_w[child], TRUE);
     gtk_grid_attach(GTK_GRID(sg_w[grid]), sg_w[child], col - 1, row - 1, cols, rows);
+}
+static void sg_grid_set_homogeneous_columns(int grid, int on) {
+    gtk_grid_set_column_homogeneous(GTK_GRID(sg_w[grid]), on ? TRUE : FALSE);
+}
+/* Column col (1-based; 0 = none) takes the spare width. */
+static void sg_grid_set_stretching_column(int grid, int col) {
+    GtkWidget *c;
+    g_object_set_data(G_OBJECT(sg_w[grid]), "sg-stretch", GINT_TO_POINTER(col));
+    for (c = gtk_widget_get_first_child(sg_w[grid]); c; c = gtk_widget_get_next_sibling(c)) {
+        int column, row, w, h;
+        gtk_grid_query_child(GTK_GRID(sg_w[grid]), c, &column, &row, &w, &h);
+        gtk_widget_set_hexpand(c, col > 0 && column == col - 1);
+    }
 }
 static void sg_grid_set_spacing(int grid, int row_gap, int col_gap) {
     gtk_grid_set_row_spacing(GTK_GRID(sg_w[grid]), row_gap); gtk_grid_set_column_spacing(GTK_GRID(sg_w[grid]), col_gap);

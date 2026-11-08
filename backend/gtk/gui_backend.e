@@ -96,6 +96,26 @@ feature -- Windows and containers
 		alias "sg_stack_set_spacing($a_stack, $a_spacing);"
 		end
 
+	stack_set_alignment (a_stack, an_alignment: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_stack_set_alignment($a_stack, $an_alignment);"
+		end
+
+	stack_align_child (a_stack, a_child, an_alignment: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_stack_align_child($a_stack, $a_child, $an_alignment);"
+		end
+
+	grid_set_homogeneous_columns (a_grid: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_set_homogeneous_columns($a_grid, $a_on ? 1 : 0);"
+		end
+
+	grid_set_stretching_column (a_grid, a_column: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_set_stretching_column($a_grid, $a_column);"
+		end
+
 	grid: INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_grid();"

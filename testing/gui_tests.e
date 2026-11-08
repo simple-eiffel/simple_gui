@@ -308,6 +308,64 @@ feature -- Tests
 			assert ("words follow the container", l_word.base_direction = Direction_right_to_left)
 		end
 
+	test_stack_alignment
+			-- A centred child is narrower than a filling one; set_alignment reaches later children.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_filling, l_centred, l_later: GUI_LABEL
+		do
+			create l_window.make ("Alignment", 320, 200)
+			create l_stack.make_vertical
+			create l_filling.make ("fill")
+			create l_centred.make ("centre")
+			l_stack.extend_aligned (l_filling, l_stack.Align_fill)
+			l_stack.extend_aligned (l_centred, l_stack.Align_centre)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("filling spans: " + l_filling.width.out + " of " + l_stack.width.out, l_filling.width >= l_stack.width - 30)
+			assert ("centred is narrower: " + l_centred.width.out, l_centred.width < l_filling.width)
+			create l_later.make ("later")
+			l_stack.set_alignment (l_stack.Align_end)
+			l_stack.extend (l_later)
+			settle_window
+			assert ("later child aligned too: " + l_later.width.out, l_later.width < l_stack.width - 30)
+			l_window.close
+		end
+
+	test_grid_columns
+			-- Homogeneous columns are equal; a stretching column takes the spare width.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_even, l_stretch: GUI_GRID
+			a1, a2, b1, b2: GUI_LABEL
+		do
+			create l_window.make ("Grid columns", 420, 200)
+			create l_stack.make_vertical
+			create l_even.make
+			create a1.make ("a")
+			create a2.make ("a much longer caption")
+			l_even.set_homogeneous_columns (True)
+			l_even.put (a1, 1, 1)
+			l_even.put (a2, 1, 2)
+			create l_stretch.make
+			create b1.make ("b")
+			create b2.make ("c")
+			l_stretch.put (b1, 1, 1)
+			l_stretch.put (b2, 1, 2)
+			l_stretch.set_stretching_column (2)
+			l_stack.extend (l_even)
+			l_stack.extend (l_stretch)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("equal columns: " + a1.width.out + " vs " + a2.width.out, (a1.width - a2.width).abs <= 2)
+			assert ("column 2 stretches: " + b2.width.out + " vs " + b1.width.out, b2.width > 4 * b1.width)
+			l_window.close
+		end
+
 feature {NONE} -- Fixtures
 
 	app: GUI_APPLICATION
