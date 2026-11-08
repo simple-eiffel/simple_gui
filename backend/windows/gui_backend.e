@@ -24,8 +24,11 @@ inherit
 feature -- Lifecycle and loop
 
 	init (a_name, a_id: POINTER): BOOLEAN
-			-- Windows always has a display.
+			-- Windows always has a display. Become DPI aware first, before anything asks the
+			-- desktop's scale: until then Windows answers 96 DPI, so a window and its first
+			-- theme were sized at 100% on a 150% display and grew when a later theme came.
 		do
+			desktop.become_dpi_aware
 			Result := True
 		end
 
@@ -1326,6 +1329,15 @@ feature {NONE} -- Implementation
 			create Result
 		end
 
+	work_area_client_height: INTEGER
+			-- The tallest client area a window can have on screen: the work area less a
+			-- title bar (about 48 logical pixels).
+		do
+			Result := (desktop.work_area_height - (48 * dpi).rounded).max (1)
+		ensure
+			positive: Result > 0
+		end
+
 	desktop: SHELL_DESKTOP
 		once ("OBJECT")
 			create Result
@@ -1356,6 +1368,8 @@ feature {NONE} -- Implementation
 		do
 			hidden_windows.remove (a_window)
 			compose (a_window, a_w)
+				-- as large as the content needs, as GTK and AppKit open a window
+			a_w.grow_to_fit (desktop.work_area_width, work_area_client_height)
 			a_w.set_close_requests_are_events (True)
 			a_w.shell_open_window (a_w.title, a_w.win_x, a_w.win_y, a_w.win_w, a_w.win_h)
 			open_window := a_w
@@ -1372,6 +1386,7 @@ feature {NONE} -- Implementation
 		local
 			l_root: SW_COLUMN
 			l_f: SW_FLOATING_WINDOW
+			l_w, l_h: INTEGER
 		do
 			create l_root.make
 			l_root.set_padding (0.0)
@@ -1383,7 +1398,10 @@ feature {NONE} -- Implementation
 			if window_direction.has (a_window) then
 				l_root.set_layout_direction (window_direction.item (a_window))
 			end
-			l_f := a_owner.float_document (l_root, a_w.title, a_owner.win_x + 40, a_owner.win_y + 40, a_w.win_w, a_w.win_h)
+				-- as large as the content needs, like the main window (`grow_to_fit')
+			l_w := a_w.win_w.max (l_root.preferred_width (a_owner.painter).ceiling.min (desktop.work_area_width))
+			l_h := a_w.win_h.max (l_root.preferred_height (a_owner.painter, l_w).ceiling.min (work_area_client_height))
+			l_f := a_owner.float_document (l_root, a_w.title, a_owner.win_x + 40, a_owner.win_y + 40, l_w, l_h)
 			if l_f.is_open then
 				floats.force (l_f, a_window)
 				l_f.set_on_close_request (agent push (6, a_window, 0, 0, 0))

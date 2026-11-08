@@ -70,6 +70,27 @@ feature -- Operation
 			end
 		end
 
+feature {GUI_BACKEND} -- Sizing
+
+	grow_to_fit (a_max_width, a_max_height: INTEGER)
+			-- Before the window opens: grow it (never shrink it) so its root fits at its
+			-- natural size, as GTK and AppKit size a window to its content, but no larger
+			-- than `a_max_width' by `a_max_height' (device pixels) unless already asked to be.
+		require
+			not_open: not is_window_open
+			positive_limits: a_max_width > 0 and a_max_height > 0
+		local
+			l_w, l_h: INTEGER
+		do
+			if attached root as al_root then
+				l_w := win_w.max (al_root.preferred_width (painter).ceiling.min (a_max_width))
+				l_h := win_h.max (al_root.preferred_height (painter, l_w).ceiling.min (a_max_height))
+				resize_surface (l_w, l_h)
+			end
+		ensure
+			never_shrinks: win_w >= old win_w and win_h >= old win_h
+		end
+
 invariant
 	numbered: gui_id > 0
 
