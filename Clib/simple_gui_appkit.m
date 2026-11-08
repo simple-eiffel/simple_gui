@@ -1588,16 +1588,23 @@ int sga_scale_factor(int a_id)
 	return f < 1 ? 1 : f;
 }
 
+/* A window's size is its content's (what the program lays out in); a widget's, its own. */
+static NSView *sga_measured_view(int a_id)
+{
+	id o = sga_get(a_id);
+	return [o isKindOfClass:[NSWindow class]] ? [(NSWindow *)o contentView] : (NSView *)o;
+}
+
 int sga_width(int a_id)
 {
-	NSView *v = sga_get(a_id);
+	NSView *v = sga_measured_view(a_id);
 	int w = (int)[v bounds].size.width;
 	return w > 0 ? w : ([v isKindOfClass:[SGACanvas class]] ? (int)((SGACanvas *)v)->wanted.width : 0);
 }
 
 int sga_height(int a_id)
 {
-	NSView *v = sga_get(a_id);
+	NSView *v = sga_measured_view(a_id);
 	int h = (int)[v bounds].size.height;
 	return h > 0 ? h : ([v isKindOfClass:[SGACanvas class]] ? (int)((SGACanvas *)v)->wanted.height : 0);
 }
