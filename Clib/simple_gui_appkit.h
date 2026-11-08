@@ -40,6 +40,10 @@ void sga_grid_set_homogeneous_columns(int a_grid, int a_on);
 void sga_grid_set_stretching_column(int a_grid, int a_column);   /* 1-based; 0 none */
 void sga_grid_put(int a_grid, int a_child, int a_row, int a_column, int a_rows, int a_columns);
 void sga_grid_set_spacing(int a_grid, int a_row_gap, int a_column_gap);
+int sga_splitter(int a_vertical);   /* side by side unless a_vertical; the first pane holds its size */
+void sga_splitter_set_pane(int a_splitter, int a_pane, int a_child);   /* pane 1 leading or top, 2 trailing or bottom */
+int sga_splitter_position(int a_splitter);   /* points from the leading edge or the top */
+void sga_splitter_set_position(int a_splitter, int a_position);   /* no event; kept until the view has a size */
 
 /* Controls */
 int sga_label(const char *a_text);

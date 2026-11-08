@@ -134,6 +134,26 @@ feature -- Windows and containers
 		alias "sg_grid_set_spacing($a_grid, $a_row_gap, $a_column_gap);"
 		end
 
+	splitter (a_vertical: BOOLEAN): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_splitter($a_vertical ? 1 : 0);"
+		end
+
+	splitter_set_pane (a_splitter, a_pane, a_child: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_splitter_set_pane($a_splitter, $a_pane, $a_child);"
+		end
+
+	splitter_position (a_splitter: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_splitter_position($a_splitter);"
+		end
+
+	splitter_set_position (a_splitter, a_position: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_splitter_set_position($a_splitter, $a_position);"
+		end
+
 feature -- Controls
 
 	label (a_text: POINTER): INTEGER

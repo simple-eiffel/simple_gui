@@ -697,6 +697,77 @@ void sga_grid_set_spacing(int a_grid, int a_row_gap, int a_column_gap)
 	[g setColumnSpacing:a_column_gap];
 }
 
+/* Splitter: an NSSplitView with two holder panes made up front, so pane 1 is always the
+   leading (or top) one whichever is filled first; each widget is pinned inside its holder.
+   The first pane holds its size when the splitter grows. A position set before the view
+   has a size is kept and applied at the first layout (NSSplitView clamps it to nothing
+   otherwise). Positions count from the leading edge, which NSSplitView itself puts on the right
+   under right-to-left layout. */
+static void sga_split_apply(NSSplitView *s, NSInteger a_position);
+
+@interface SGASplit : NSSplitView
+{
+@public
+	NSInteger pending;   /* -1: none */
+}
+@end
+@implementation SGASplit
+- (void)layout
+{
+	[super layout];
+	if (pending >= 0 && NSWidth([self bounds]) > 0 && NSHeight([self bounds]) > 0) {
+		NSInteger p = pending;
+		pending = -1;
+		sga_split_apply(self, p);
+	}
+}
+@end
+
+static void sga_split_apply(NSSplitView *s, NSInteger a_position)
+{
+	[s setPosition:(CGFloat)a_position ofDividerAtIndex:0];   /* NSSplitView counts from the leading edge itself under right to left */
+}
+
+int sga_splitter(int a_vertical)
+{
+	SGASplit *s = [[SGASplit alloc] init];
+	s->pending = -1;
+	[s setVertical:a_vertical == 0];   /* NSSplitView's "vertical" means vertical dividers: side by side */
+	[s setDividerStyle:NSSplitViewDividerStyleThin];
+	[s addArrangedSubview:[[NSView alloc] init]];
+	[s addArrangedSubview:[[NSView alloc] init]];
+	[s setHoldingPriority:NSLayoutPriorityDefaultLow + 1 forSubviewAtIndex:0];
+	[s setHoldingPriority:NSLayoutPriorityDefaultLow forSubviewAtIndex:1];
+	return sga_keep(s);
+}
+
+void sga_splitter_set_pane(int a_splitter, int a_pane, int a_child)
+{
+	NSSplitView *s = sga_get(a_splitter);
+	NSView *l_holder = [s arrangedSubviews][(NSUInteger)(a_pane - 1)];
+	NSView *v = sga_get(a_child);
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[l_holder addSubview:v];
+	[NSLayoutConstraint activateConstraints:@[
+		[v.leadingAnchor constraintEqualToAnchor:l_holder.leadingAnchor], [v.trailingAnchor constraintEqualToAnchor:l_holder.trailingAnchor],
+		[v.topAnchor constraintEqualToAnchor:l_holder.topAnchor], [v.bottomAnchor constraintEqualToAnchor:l_holder.bottomAnchor]]];
+}
+
+int sga_splitter_position(int a_splitter)
+{
+	NSSplitView *s = sga_get(a_splitter);
+	NSView *l_first = [s arrangedSubviews][0];
+	[[[s window] contentView] layoutSubtreeIfNeeded];
+	return (int)lround([s isVertical] ? NSWidth([l_first frame]) : NSHeight([l_first frame]));
+}
+
+void sga_splitter_set_position(int a_splitter, int a_position)
+{
+	SGASplit *s = sga_get(a_splitter);
+	if (NSWidth([s bounds]) > 0 && NSHeight([s bounds]) > 0) sga_split_apply(s, a_position);
+	else { s->pending = a_position; [s setNeedsLayout:YES]; }
+}
+
 /* --------------------------------------------------------------- controls */
 
 /* A label is one line in 0.1 (wrapping comes in 0.2) and gives way before anything

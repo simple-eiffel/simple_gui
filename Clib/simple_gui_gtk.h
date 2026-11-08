@@ -213,6 +213,22 @@ static void sg_grid_set_stretching_column(int grid, int col) {
 static void sg_grid_set_spacing(int grid, int row_gap, int col_gap) {
     gtk_grid_set_row_spacing(GTK_GRID(sg_w[grid]), row_gap); gtk_grid_set_column_spacing(GTK_GRID(sg_w[grid]), col_gap);
 }
+/* ---------- splitter: a GtkPaned (kind 12). The first pane keeps its size when the paned
+   grows; neither pane shrinks below its minimum. (First pass by MACMINI, untested on GTK.) ---------- */
+static int sg_splitter(int vertical) {
+    GtkWidget *p = gtk_paned_new(vertical ? GTK_ORIENTATION_VERTICAL : GTK_ORIENTATION_HORIZONTAL);
+    gtk_paned_set_resize_start_child(GTK_PANED(p), FALSE);
+    gtk_paned_set_resize_end_child(GTK_PANED(p), TRUE);
+    gtk_paned_set_shrink_start_child(GTK_PANED(p), FALSE);
+    gtk_paned_set_shrink_end_child(GTK_PANED(p), FALSE);
+    return sg_reg(p, 12);
+}
+static void sg_splitter_set_pane(int s, int pane, int child) {
+    if (pane == 1) gtk_paned_set_start_child(GTK_PANED(sg_w[s]), sg_w[child]);
+    else gtk_paned_set_end_child(GTK_PANED(sg_w[s]), sg_w[child]);
+}
+static int sg_splitter_position(int s) { return gtk_paned_get_position(GTK_PANED(sg_w[s])); }
+static void sg_splitter_set_position(int s, int position) { gtk_paned_set_position(GTK_PANED(sg_w[s]), position); }
 
 /* ---------- controls ---------- */
 
