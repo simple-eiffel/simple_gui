@@ -146,7 +146,15 @@ static int sga_gdk_key(NSEvent *e)
 		CGContextSaveGState(l_cg);
 		CGContextTranslateCTM(l_cg, 0, b.size.height);
 		CGContextScaleCTM(l_cg, 1, -1);
-		CGContextDrawImage(l_cg, CGRectMake(0, 0, b.size.width, b.size.height), image);
+		if ([self inLiveResize]) {
+			/* While the user drags a window edge AppKit runs its own loop and the program cannot
+			   draw (it hears the final size when the drag ends): show the last picture at its own
+			   size, anchored at the top left, rather than stretched out of shape. */
+			CGFloat l_scale = [[self window] backingScaleFactor] > 0 ? [[self window] backingScaleFactor] : 1;
+			CGFloat w = (CGFloat)CGImageGetWidth(image) / l_scale, h = (CGFloat)CGImageGetHeight(image) / l_scale;
+			CGContextDrawImage(l_cg, CGRectMake(0, b.size.height - h, w, h), image);
+		}
+		else CGContextDrawImage(l_cg, CGRectMake(0, 0, b.size.width, b.size.height), image);
 		CGContextRestoreGState(l_cg);
 	}
 }
@@ -175,7 +183,16 @@ static int sga_gdk_key(NSEvent *e)
 {
 	NSSize l_old = [self frame].size;
 	[super setFrameSize:a_size];
-	if (!NSEqualSizes(l_old, a_size)) sga_push(9, sga_id_of(self), (int)a_size.width, (int)a_size.height, 0);
+	if (!NSEqualSizes(l_old, a_size) && ![self inLiveResize]) sga_push(9, sga_id_of(self), (int)a_size.width, (int)a_size.height, 0);
+}
+/* One resize event for a whole live resize: the final size, when the drag ends (the program
+   could not draw during it, and would otherwise redraw once per frame afterwards). */
+- (void)viewDidEndLiveResize
+{
+	[super viewDidEndLiveResize];
+	NSSize s = [self bounds].size;
+	sga_push(9, sga_id_of(self), (int)s.width, (int)s.height, 0);
+	[self setNeedsDisplay:YES];
 }
 @end
 
