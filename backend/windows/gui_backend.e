@@ -591,10 +591,15 @@ feature -- Controls
 		end
 
 	table_extend (a_table: INTEGER; a_cells: POINTER)
+			-- One row more: appended to the grid in place (`add_row'), not by handing it
+			-- every row again, so filling a table is linear (it copied every row so far).
+		local
+			l_cells: ARRAY [STRING_32]
 		do
 			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached table_rows.item (a_table) as al_rows then
-				al_rows.extend (cells_of (from_c (a_cells)))
-				al_g.set_rows (al_rows)
+				l_cells := cells_of (from_c (a_cells))
+				al_rows.extend (l_cells)
+				al_g.add_row (l_cells)
 				changed
 			end
 		end
@@ -1703,7 +1708,7 @@ feature {NONE} -- Implementation
 					and then attached splitters.item (splitter_info.key_for_iteration) as al_sp
 					and then splitter_extent (al_sp) > 0.0
 				then
-					al_sp.set_ratio (device (splitter_info.item_for_iteration.pending) / splitter_extent (al_sp))
+					al_sp.set_ratio_within (device (splitter_info.item_for_iteration.pending) / splitter_extent (al_sp), splitter_extent (al_sp))
 					splitter_info.item_for_iteration.pending := -1
 					last_positions_moved := True
 				end

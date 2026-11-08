@@ -265,6 +265,50 @@ feature -- Tests
 			assert ("closed", l_window.is_closed)
 		end
 
+	test_splitter_near_an_edge
+			-- A position close to an edge holds, down to a small minimum pane (Windows
+			-- stopped at 15% of the width before; GTK and AppKit allow it).
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_split: GUI_SPLITTER
+		do
+			create l_window.make ("Splitter edge", 600, 240)
+			create l_stack.make_vertical
+			create l_split.make_horizontal
+			l_split.set_first (create {GUI_LABEL}.make ("a"))
+			l_split.set_second (create {GUI_LABEL}.make ("b"))
+			l_split.set_position (40)
+			l_stack.extend_stretching (l_split)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("40 held: " + l_split.position.out, (l_split.position - 40).abs <= 3)
+			l_window.close
+		end
+
+	test_a_big_table_fills
+			-- Two thousand rows, one at a time, all there and in order.
+		local
+			l_window: GUI_WINDOW
+			l_table: GUI_TABLE
+			i: INTEGER
+		do
+			create l_window.make ("Big table", 400, 300)
+			create l_table.make (<<"Row", "Square">>)
+			l_window.set_content (l_table)
+			l_window.show
+			settle_window
+			from i := 1 until i > 2000 loop
+				l_table.extend_row (<<i.out, (i * i).out>>)
+				i := i + 1
+			end
+			settle_window
+			assert ("all there: " + l_table.row_count.out, l_table.row_count = 2000)
+			assert ("in order", l_table.cell (2000, 2).same_string ("4000000"))
+			l_window.close
+		end
+
 	test_splitter
 			-- A position set before showing holds; the second pane starts at the divider; moving
 			-- it later works; right to left, the first pane is on the right.
