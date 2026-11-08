@@ -232,6 +232,51 @@ static NSTimer *s_heartbeat;
 
 int sga_is_gui_thread(void) { return pthread_main_np() ? 1 : 0; }
 
+/* ------------------------------------------- the menus every Mac app has */
+
+/* The application menu a Mac user expects, before the program adds its own items:
+   Services, Hide, Hide Others, Show All. About and Settings are placed above Services and
+   Quit below the hiding items as the program adds them (sga_menu_add_item). */
+static NSMenuItem *s_services_item;
+/* The Window menu (Minimize, Zoom, Enter Full Screen, Bring All to Front; AppKit lists the
+   open windows itself). It stays after the program's menus and before Help. */
+static NSMenuItem *s_window_item;
+
+static NSMenu *sga_standard_app_menu(void)
+{
+	NSMenu *m = [[NSMenu alloc] initWithTitle:s_app_name];
+	NSMenu *l_services = [[NSMenu alloc] initWithTitle:@"Services"];
+	NSMenuItem *i;
+	s_services_item = [[NSMenuItem alloc] initWithTitle:@"Services" action:nil keyEquivalent:@""];
+	[s_services_item setSubmenu:l_services];
+	[NSApp setServicesMenu:l_services];
+	[m addItem:s_services_item];
+	[m addItem:[NSMenuItem separatorItem]];
+	[m addItem:[[NSMenuItem alloc] initWithTitle:[NSString stringWithFormat:@"Hide %@", s_app_name] action:@selector(hide:) keyEquivalent:@"h"]];
+	i = [[NSMenuItem alloc] initWithTitle:@"Hide Others" action:@selector(hideOtherApplications:) keyEquivalent:@"h"];
+	[i setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagOption];
+	[m addItem:i];
+	[m addItem:[[NSMenuItem alloc] initWithTitle:@"Show All" action:@selector(unhideAllApplications:) keyEquivalent:@""]];
+	return m;
+}
+
+static NSMenuItem *sga_standard_window_menu(void)
+{
+	NSMenu *m = [[NSMenu alloc] initWithTitle:@"Window"];
+	NSMenuItem *l_top = [[NSMenuItem alloc] initWithTitle:@"Window" action:nil keyEquivalent:@""];
+	[m addItem:[[NSMenuItem alloc] initWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@"m"]];
+	[m addItem:[[NSMenuItem alloc] initWithTitle:@"Zoom" action:@selector(performZoom:) keyEquivalent:@""]];
+	/* Enter Full Screen, with the Globe-F shortcut macOS uses (AppKit retitles it Exit Full
+	   Screen while the key window is full screen). */
+	NSMenuItem *l_full = [[NSMenuItem alloc] initWithTitle:@"Enter Full Screen" action:@selector(toggleFullScreen:) keyEquivalent:@"f"];
+	[l_full setKeyEquivalentModifierMask:NSEventModifierFlagFunction];
+	[m addItem:l_full];
+	[m addItem:[NSMenuItem separatorItem]];
+	[m addItem:[[NSMenuItem alloc] initWithTitle:@"Bring All to Front" action:@selector(arrangeInFront:) keyEquivalent:@""]];
+	[l_top setSubmenu:m];
+	return l_top;
+}
+
 int sga_init(const char *a_name, const char *a_id)
 {
 	(void)a_id;   /* a .app bundle supplies the identifier; a plain executable has none to set */
@@ -244,9 +289,12 @@ int sga_init(const char *a_name, const char *a_id)
 	s_app_name = sga_string(a_name);
 	NSMenu *l_bar = [[NSMenu alloc] init];
 	NSMenuItem *l_app = [[NSMenuItem alloc] init];
-	[l_app setSubmenu:[[NSMenu alloc] initWithTitle:s_app_name]];
+	[l_app setSubmenu:sga_standard_app_menu()];
 	[l_bar addItem:l_app];
+	s_window_item = sga_standard_window_menu();
+	[l_bar addItem:s_window_item];
 	[NSApp setMainMenu:l_bar];
+	[NSApp setWindowsMenu:[s_window_item submenu]];
 	[NSApp addObserver:s_target forKeyPath:@"effectiveAppearance" options:0 context:NULL];
 	[NSApp finishLaunching];
 	return NSApp != nil;
@@ -322,6 +370,7 @@ int sga_window(const char *a_title, int a_width, int a_height)
 		backing:NSBackingStoreBuffered defer:NO];
 	[w setReleasedWhenClosed:NO];
 	[w setTitle:sga_string(a_title)];
+	[w setCollectionBehavior:NSWindowCollectionBehaviorFullScreenPrimary];   /* the green button, and Window > Enter Full Screen */
 	[w setContentView:[[SGAContent alloc] initWithFrame:NSMakeRect(0, 0, a_width, a_height)]];
 	[w setDelegate:s_target];
 	return sga_keep(w);
@@ -1283,7 +1332,10 @@ void *sga_menu_new(const char *a_title)
 	NSMenuItem *l_top = [[NSMenuItem alloc] initWithTitle:l_title action:nil keyEquivalent:@""];
 	NSMenu *m = [[NSMenu alloc] initWithTitle:l_title];
 	[l_top setSubmenu:m];
-	[[NSApp mainMenu] addItem:l_top];
+	/* Before the Window menu, which stays after the program's own menus. */
+	NSMenu *l_bar = [NSApp mainMenu];
+	NSInteger l_window = s_window_item ? [l_bar indexOfItem:s_window_item] : -1;
+	if (l_window >= 0) [l_bar insertItem:l_top atIndex:l_window]; else [l_bar addItem:l_top];
 	return (__bridge void *)m;   /* the main menu keeps it alive */
 }
 
@@ -1314,12 +1366,28 @@ void sga_menu_add_item(void *a_menu, const char *a_text, const char *a_shortcut,
 	NSMenuItem *i;
 	switch (a_role) {
 		case 1:
+			/* About heads the application menu. The menu the program put it in is its Help
+			   menu: macOS adds the search field there, and the Window menu goes before it. */
 			i = sga_item(l_text, @selector(menuItem:), s_target, l_shortcut);
 			[l_app insertItem:i atIndex:0];
+			[l_app insertItem:[NSMenuItem separatorItem] atIndex:1];
+			if (m != l_app && [[NSApp mainMenu] indexOfItemWithSubmenu:m] >= 0) {
+				NSMenu *l_bar = [NSApp mainMenu];
+				[NSApp setHelpMenu:m];
+				if (s_window_item) {
+					[l_bar removeItem:s_window_item];
+					[l_bar insertItem:s_window_item atIndex:[l_bar indexOfItemWithSubmenu:m]];
+				}
+			}
 			break;
 		case 2:
+			/* Settings sits above Services, in a section of its own. */
 			i = sga_item(l_text, @selector(menuItem:), s_target, [l_shortcut length] ? l_shortcut : @"primary+comma");
-			[l_app addItem:i];
+			{
+				NSInteger l_at = s_services_item ? [l_app indexOfItem:s_services_item] : [l_app numberOfItems];
+				[l_app insertItem:i atIndex:l_at];
+				[l_app insertItem:[NSMenuItem separatorItem] atIndex:l_at + 1];
+			}
 			break;
 		case 3:
 			if ([l_app numberOfItems] > 0) [l_app addItem:[NSMenuItem separatorItem]];
