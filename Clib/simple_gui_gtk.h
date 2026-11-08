@@ -423,7 +423,19 @@ static void sg_set_direction(int id, int d) {
 }
 
 /* ---------- tabs: a GtkNotebook (kind 11). Choosing a tab sends page changed (13);
-   appending and selecting from code send nothing. (First pass by MACMINI, untested on GTK.) ---------- */
+   appending and selecting from code send nothing. (MACMINI's first pass; PROD's GTK half.) ---------- */
+
+/* GTK 4.14 gives each tab ("tab" role, an internal widget) no accessible name: the title is a
+   label inside it (probed). Name the tab itself, so a screen reader reads "tab: First". The
+   tab label's parent is that tab widget. */
+static void sg_name_tab(GtkNotebook *nb, GtkWidget *page, const char *title) {
+    GtkWidget *label = gtk_notebook_get_tab_label(nb, page);
+    GtkWidget *tab = label ? gtk_widget_get_parent(label) : NULL;
+    if (tab) {
+        gtk_accessible_update_property(GTK_ACCESSIBLE(tab), GTK_ACCESSIBLE_PROPERTY_LABEL, title, -1);
+        g_object_set_data_full(G_OBJECT(tab), "sg-a11y", g_strdup(title), g_free);
+    }
+}
 
 static void sg_on_switch_page(GtkNotebook *nb, GtkWidget *page, guint num, gpointer d) {
     (void) page; (void) d;
@@ -438,6 +450,7 @@ static int sg_tabs(void) {
 static void sg_tabs_extend(int tabs, int page, const char *title) {
     sg_quiet++;
     gtk_notebook_append_page(GTK_NOTEBOOK(sg_w[tabs]), sg_w[page], gtk_label_new(title));
+    sg_name_tab(GTK_NOTEBOOK(sg_w[tabs]), sg_w[page], title);
     sg_quiet--;
 }
 static void sg_tabs_select(int tabs, int page) {
@@ -452,7 +465,10 @@ static int sg_tabs_selected(int tabs) {
 static void sg_tabs_set_title(int tabs, int page, const char *title) {
     GtkNotebook *nb = GTK_NOTEBOOK(sg_w[tabs]);
     GtkWidget *p = gtk_notebook_get_nth_page(nb, page - 1);
-    if (p) gtk_notebook_set_tab_label_text(nb, p, title);
+    if (p) {
+        gtk_notebook_set_tab_label_text(nb, p, title);
+        sg_name_tab(nb, p, title);
+    }
 }
 
 /* ---------- canvas: present a finished Cairo image ---------- */
