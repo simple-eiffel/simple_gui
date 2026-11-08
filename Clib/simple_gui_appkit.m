@@ -864,6 +864,135 @@ void sga_list_select(int a_id, int a_row)
 
 int sga_list_selected(int a_id) { return (int)[(NSTableView *)s_inner[a_id] selectedRow] + 1; }
 
+/* Tables: an NSTableView subclass that is its own data source and delegate, holding its rows
+   (one NSArray of cell texts each). Columns cannot be reordered, so indices stay those of the
+   program. A user's selection sends selection (4, a = the first selected row); a click on a
+   header sends header clicked (14, a = column); the program sorts and refills, and the
+   sort indicator is set from code. Programmatic changes send nothing. */
+@interface SGAGridTable : NSTableView <NSTableViewDataSource, NSTableViewDelegate>
+{
+@public
+	NSMutableArray<NSArray<NSString *> *> *data;
+}
+@end
+@implementation SGAGridTable
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)a_table { return (NSInteger)[data count]; }
+- (NSView *)tableView:(NSTableView *)a_table viewForTableColumn:(NSTableColumn *)a_column row:(NSInteger)a_row
+{
+	NSTextField *f = [a_table makeViewWithIdentifier:@"sga_grid_cell" owner:self];
+	if (!f) {
+		f = [NSTextField labelWithString:@""];
+		[f setIdentifier:@"sga_grid_cell"];
+		[f setLineBreakMode:NSLineBreakByTruncatingTail];
+	}
+	NSUInteger k = [[a_table tableColumns] indexOfObject:a_column];
+	NSArray<NSString *> *l_row = data[(NSUInteger)a_row];
+	[f setStringValue:k < [l_row count] ? l_row[k] : @""];
+	return f;
+}
+- (void)tableViewSelectionDidChange:(NSNotification *)n
+{
+	if (s_suppress) return;
+	NSUInteger l_first = [[self selectedRowIndexes] firstIndex];
+	sga_push(4, sga_id_of(self), l_first == NSNotFound ? 0 : (int)l_first + 1, 0, 0);
+}
+- (void)tableView:(NSTableView *)a_table didClickTableColumn:(NSTableColumn *)a_column
+{
+	sga_push(14, sga_id_of(self), (int)[[a_table tableColumns] indexOfObject:a_column] + 1, 0, 0);
+}
+@end
+
+static NSArray<NSString *> *sga_fields(const char *a_joined)
+{
+	return [sga_string(a_joined) componentsSeparatedByString:@"\x1f"];
+}
+
+int sga_table(const char *a_titles)
+{
+	NSScrollView *l_scroll = [[NSScrollView alloc] init];
+	SGAGridTable *t = [[SGAGridTable alloc] init];
+	NSUInteger k = 0;
+	t->data = [NSMutableArray array];
+	for (NSString *l_title in sga_fields(a_titles)) {
+		NSTableColumn *c = [[NSTableColumn alloc] initWithIdentifier:[NSString stringWithFormat:@"c%lu", (unsigned long)++k]];
+		[c setTitle:l_title];
+		[c setResizingMask:NSTableColumnAutoresizingMask | NSTableColumnUserResizingMask];
+		[t addTableColumn:c];
+	}
+	[t setColumnAutoresizingStyle:NSTableViewUniformColumnAutoresizingStyle];
+	[t setAllowsColumnReordering:NO];
+	[t setUsesAlternatingRowBackgroundColors:YES];
+	[t setStyle:NSTableViewStyleFullWidth];
+	[t setDataSource:t];
+	[t setDelegate:t];
+	[l_scroll setDocumentView:t];
+	[l_scroll setHasVerticalScroller:YES];
+	[l_scroll setBorderType:NSBezelBorder];
+	int l_id = sga_keep(l_scroll);
+	s_inner[l_id] = t;
+	return l_id;
+}
+
+void sga_table_extend(int a_id, const char *a_cells)
+{
+	SGAGridTable *t = s_inner[a_id];
+	[t->data addObject:sga_fields(a_cells)];
+	s_suppress++;
+	[t reloadData];
+	s_suppress--;
+}
+
+void sga_table_wipe_out(int a_id)
+{
+	SGAGridTable *t = s_inner[a_id];
+	[t->data removeAllObjects];
+	s_suppress++;
+	[t deselectAll:nil];
+	[t reloadData];
+	s_suppress--;
+}
+
+void sga_table_set_multiple(int a_id, int a_on) { [(NSTableView *)s_inner[a_id] setAllowsMultipleSelection:a_on != 0]; }
+
+void sga_table_select(int a_id, int a_row, int a_extend)
+{
+	NSTableView *t = s_inner[a_id];
+	s_suppress++;
+	if (a_row <= 0) [t deselectAll:nil];
+	else [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)(a_row - 1)] byExtendingSelection:a_extend != 0];
+	s_suppress--;
+}
+
+int sga_table_selected_count(int a_id) { return (int)[[(NSTableView *)s_inner[a_id] selectedRowIndexes] count]; }
+
+int sga_table_selected_at(int a_id, int i)
+{
+	__block int l_seen = 0, l_row = 0;
+	[[(NSTableView *)s_inner[a_id] selectedRowIndexes] enumerateIndexesUsingBlock:^(NSUInteger r, BOOL *a_stop) {
+		if (++l_seen == i) { l_row = (int)r + 1; *a_stop = YES; }
+	}];
+	return l_row;
+}
+
+void sga_table_set_sort_indicator(int a_id, int a_column, int a_ascending)
+{
+	NSTableView *t = s_inner[a_id];
+	NSArray<NSTableColumn *> *l_columns = [t tableColumns];
+	for (NSTableColumn *c in l_columns) [t setIndicatorImage:nil inTableColumn:c];
+	if (a_column >= 1 && a_column <= (int)[l_columns count]) {
+		NSTableColumn *c = l_columns[(NSUInteger)(a_column - 1)];
+		[t setIndicatorImage:[NSImage imageNamed:a_ascending ? @"NSAscendingSortIndicator" : @"NSDescendingSortIndicator"] inTableColumn:c];
+		[t setHighlightedTableColumn:c];
+	} else [t setHighlightedTableColumn:nil];
+}
+
+/* A click on column `a_column''s header, as AppKit reports one to the table's delegate. */
+void sga_test_click_header(int a_id, int a_column)
+{
+	SGAGridTable *t = s_inner[a_id];
+	[t tableView:t didClickTableColumn:[t tableColumns][(NSUInteger)(a_column - 1)]];
+}
+
 /* ----------------------------------------------------------------- common */
 
 void sga_set_enabled(int a_id, int a_on)
@@ -967,7 +1096,11 @@ static NSString *sga_role_name(NSString *a_role)
 	return l_names[a_role] ?: @"generic";
 }
 
-const char *sga_accessible_role(int a_id) { return sga_return(Kind_role, sga_role_name([sga_accessible(a_id) accessibilityRole])); }
+const char *sga_accessible_role(int a_id)
+{
+	if ([sga_core(a_id) isKindOfClass:[SGAGridTable class]]) return sga_return(Kind_role, @"tree-grid");
+	return sga_return(Kind_role, sga_role_name([sga_accessible(a_id) accessibilityRole]));
+}
 
 /* ----------------------------------------------------------------- canvas */
 
@@ -1329,7 +1462,8 @@ void sga_test_type(int a_id, const char *a_text)
 void sga_test_choose(int a_id, int a_row)
 {
 	NSTableView *t = s_inner[a_id];
-	[t deselectAll:nil];
+	/* One step, as a click: replacing the selection sends one selection change (deselecting
+	   first would send two). */
 	[t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)(a_row - 1)] byExtendingSelection:NO];
 }
 
@@ -1387,11 +1521,22 @@ static id sga_ax(id a_element, SEL a_modern, NSString *a_attribute)
 	return nil;
 }
 
-static void sga_describe(id a_element, int a_depth, NSMutableString *a_out)
+/* `a_grid': the element is inside a GUI_TABLE, whose parts read as GTK's column view does
+   (probed on GTK 4.14): the table "tree-grid", its rows "row", cells "grid-cell", and the
+   header's sort buttons "column-header". */
+static void sga_describe(id a_element, int a_depth, BOOL a_grid, NSMutableString *a_out)
 {
 	id l_role_value = sga_ax(a_element, @selector(accessibilityRole), NSAccessibilityRoleAttribute);
 	NSString *l_role = [l_role_value isKindOfClass:[NSString class]] ? l_role_value : nil;
 	NSString *l_name = sga_role_name(l_role);
+	BOOL l_grid = a_grid || [a_element isKindOfClass:[SGAGridTable class]];
+	if ([a_element isKindOfClass:[SGAGridTable class]]) l_name = @"tree-grid";
+	else if (a_grid) {
+		id l_sub = sga_ax(a_element, @selector(accessibilitySubrole), NSAccessibilitySubroleAttribute);
+		if ([l_role isEqualToString:NSAccessibilityRowRole]) l_name = @"row";
+		else if ([l_role isEqualToString:NSAccessibilityCellRole]) l_name = @"grid-cell";
+		else if ([l_sub isKindOfClass:[NSString class]] && [l_sub isEqualToString:@"AXSortButton"]) l_name = @"column-header";
+	}
 	int l_next = a_depth;
 	if ([l_role length] && ![l_name isEqualToString:@"generic"]) {
 		id l_label = sga_ax(a_element, @selector(accessibilityLabel), NSAccessibilityDescriptionAttribute);
@@ -1405,7 +1550,7 @@ static void sga_describe(id a_element, int a_depth, NSMutableString *a_out)
 		l_next = a_depth + 1;
 	}
 	id l_children = sga_ax(a_element, @selector(accessibilityChildren), NSAccessibilityChildrenAttribute);
-	if (a_depth < 16 && [l_children isKindOfClass:[NSArray class]]) for (id c in l_children) sga_describe(c, l_next, a_out);
+	if (a_depth < 16 && [l_children isKindOfClass:[NSArray class]]) for (id c in l_children) sga_describe(c, l_next, l_grid, a_out);
 }
 
 const char *sga_describe_accessibility(int a_window)
@@ -1413,6 +1558,6 @@ const char *sga_describe_accessibility(int a_window)
 	NSMutableString *l_text = [NSMutableString stringWithString:@"application: "];
 	NSWindow *w = sga_get(a_window);
 	[l_text appendFormat:@"%@\n", [w title]];
-	for (id c in [[w contentView] accessibilityChildren]) sga_describe(c, 1, l_text);
+	for (id c in [[w contentView] accessibilityChildren]) sga_describe(c, 1, NO, l_text);
 	return sga_return(Kind_tree, l_text);
 }

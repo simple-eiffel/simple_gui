@@ -303,6 +303,146 @@ static int sg_list_selected(int id) {
     return r ? gtk_list_box_row_get_index(r) + 1 : 0;
 }
 
+/* ---------- tables: a GtkColumnView (kind 13) over a GtkStringList whose strings are the
+   rows, cells joined by U+001F; each column's factory shows its own field. A user's
+   selection sends 4 (a = first selected row); a click on a header (the view's sorter
+   changes) sends 14 (a = column). Every column has a sorter that keeps the order, so GTK
+   shows the indicator while the program does the sorting; the indicator is set from code
+   under sg_quiet. (First pass by MACMINI, untested on GTK.) ---------- */
+static char *sg_field(const char *joined, int k) {   /* field k (0-based), newly allocated */
+    gchar **f = g_strsplit(joined, "\x1f", -1);
+    char *r = g_strdup((guint) k < g_strv_length(f) ? f[k] : "");
+    g_strfreev(f);
+    return r;
+}
+static void sg_cell_setup(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
+    GtkWidget *l = gtk_label_new(NULL);
+    (void) fa; (void) d;
+    gtk_label_set_xalign(GTK_LABEL(l), 0.0);
+    gtk_label_set_ellipsize(GTK_LABEL(l), PANGO_ELLIPSIZE_END);
+    gtk_list_item_set_child(it, l);
+}
+static void sg_cell_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
+    GtkStringObject *o = GTK_STRING_OBJECT(gtk_list_item_get_item(it));
+    char *v = sg_field(gtk_string_object_get_string(o), GPOINTER_TO_INT(d));
+    (void) fa;
+    gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(it)), v);
+    g_free(v);
+}
+static GtkColumnView *sg_table_view(int id) { return GTK_COLUMN_VIEW(g_object_get_data(G_OBJECT(sg_w[id]), "sg-view")); }
+static GtkSelectionModel *sg_table_model(int id) { return gtk_column_view_get_model(sg_table_view(id)); }
+static void sg_on_table_selection(GtkSelectionModel *m, guint pos, guint n, gpointer d) {
+    GtkBitset *b;
+    int first;
+    (void) pos; (void) n;
+    if (sg_quiet) return;
+    b = gtk_selection_model_get_selection(m);
+    first = gtk_bitset_is_empty(b) ? 0 : (int) gtk_bitset_get_minimum(b) + 1;
+    gtk_bitset_unref(b);
+    sg_push(4, GPOINTER_TO_INT(d), first, 0);
+}
+static void sg_on_table_sorter(GtkSorter *s, GtkSorterChange change, gpointer d) {
+    GtkColumnViewColumn *col;
+    GListModel *cols;
+    guint i, n;
+    (void) change;
+    if (sg_quiet) return;
+    col = gtk_column_view_sorter_get_primary_sort_column(GTK_COLUMN_VIEW_SORTER(s));
+    if (!col) return;
+    cols = gtk_column_view_get_columns(sg_table_view(GPOINTER_TO_INT(d)));
+    n = g_list_model_get_n_items(cols);
+    for (i = 0; i < n; i++) {
+        GtkColumnViewColumn *k = g_list_model_get_item(cols, i);
+        g_object_unref(k);
+        if (k == col) { sg_push(14, GPOINTER_TO_INT(d), (int) i + 1, 0); return; }
+    }
+}
+static int sg_keep_order(gconstpointer a, gconstpointer b, gpointer d) { (void) a; (void) b; (void) d; return 0; }
+static void sg_table_use_selection(int id, int multiple) {
+    GListModel *rows = G_LIST_MODEL(g_object_get_data(G_OBJECT(sg_w[id]), "sg-rows"));
+    GtkSelectionModel *m;
+    if (multiple) m = GTK_SELECTION_MODEL(gtk_multi_selection_new(g_object_ref(rows)));
+    else {
+        GtkSingleSelection *s = gtk_single_selection_new(g_object_ref(rows));
+        gtk_single_selection_set_autoselect(s, FALSE);
+        gtk_single_selection_set_can_unselect(s, TRUE);
+        m = GTK_SELECTION_MODEL(s);
+    }
+    g_signal_connect(m, "selection-changed", G_CALLBACK(sg_on_table_selection), GINT_TO_POINTER(id));
+    gtk_column_view_set_model(sg_table_view(id), m);
+    g_object_unref(m);
+}
+static int sg_table(const char *titles) {
+    GtkStringList *rows = gtk_string_list_new(NULL);
+    GtkWidget *v = gtk_column_view_new(NULL);
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gchar **t = g_strsplit(titles, "\x1f", -1);
+    int i, id;
+    for (i = 0; t[i]; i++) {
+        GtkListItemFactory *f = gtk_signal_list_item_factory_new();
+        GtkColumnViewColumn *c;
+        g_signal_connect(f, "setup", G_CALLBACK(sg_cell_setup), NULL);
+        g_signal_connect(f, "bind", G_CALLBACK(sg_cell_bind), GINT_TO_POINTER(i));
+        c = gtk_column_view_column_new(t[i], f);
+        gtk_column_view_column_set_expand(c, TRUE);
+        gtk_column_view_column_set_resizable(c, TRUE);
+        gtk_column_view_column_set_sorter(c, GTK_SORTER(gtk_custom_sorter_new(sg_keep_order, NULL, NULL)));
+        gtk_column_view_append_column(GTK_COLUMN_VIEW(v), c);
+        g_object_unref(c);
+    }
+    g_strfreev(t);
+    gtk_column_view_set_reorderable(GTK_COLUMN_VIEW(v), FALSE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), v);
+    id = sg_reg(scroll, 13);
+    g_object_set_data_full(G_OBJECT(scroll), "sg-rows", rows, g_object_unref);
+    g_object_set_data(G_OBJECT(scroll), "sg-view", v);
+    sg_table_use_selection(id, 0);
+    g_signal_connect(gtk_column_view_get_sorter(GTK_COLUMN_VIEW(v)), "changed", G_CALLBACK(sg_on_table_sorter), GINT_TO_POINTER(id));
+    return id;
+}
+static void sg_table_extend(int id, const char *cells) {
+    sg_quiet++;
+    gtk_string_list_append(GTK_STRING_LIST(g_object_get_data(G_OBJECT(sg_w[id]), "sg-rows")), cells);
+    sg_quiet--;
+}
+static void sg_table_wipe_out(int id) {
+    GtkStringList *rows = GTK_STRING_LIST(g_object_get_data(G_OBJECT(sg_w[id]), "sg-rows"));
+    sg_quiet++;
+    gtk_selection_model_unselect_all(sg_table_model(id));
+    gtk_string_list_splice(rows, 0, g_list_model_get_n_items(G_LIST_MODEL(rows)), NULL);
+    sg_quiet--;
+}
+static void sg_table_set_multiple(int id, int on) { sg_quiet++; sg_table_use_selection(id, on); sg_quiet--; }
+static void sg_table_select(int id, int row, int extend) {
+    sg_quiet++;
+    if (row <= 0) gtk_selection_model_unselect_all(sg_table_model(id));
+    else gtk_selection_model_select_item(sg_table_model(id), (guint) (row - 1), extend ? FALSE : TRUE);
+    sg_quiet--;
+}
+static int sg_table_selected_count(int id) {
+    GtkBitset *b = gtk_selection_model_get_selection(sg_table_model(id));
+    int n = (int) gtk_bitset_get_size(b);
+    gtk_bitset_unref(b);
+    return n;
+}
+static int sg_table_selected_at(int id, int i) {
+    GtkBitset *b = gtk_selection_model_get_selection(sg_table_model(id));
+    int r = (int) gtk_bitset_get_nth(b, (guint) (i - 1)) + 1;
+    gtk_bitset_unref(b);
+    return r;
+}
+static void sg_table_sort_by(int id, int column, int ascending) {
+    GtkColumnView *v = sg_table_view(id);
+    if (column <= 0) gtk_column_view_sort_by_column(v, NULL, GTK_SORT_ASCENDING);
+    else {
+        GtkColumnViewColumn *c = g_list_model_get_item(gtk_column_view_get_columns(v), (guint) (column - 1));
+        gtk_column_view_sort_by_column(v, c, ascending ? GTK_SORT_ASCENDING : GTK_SORT_DESCENDING);
+        g_object_unref(c);
+    }
+}
+static void sg_table_set_sort_indicator(int id, int column, int ascending) { sg_quiet++; sg_table_sort_by(id, column, ascending); sg_quiet--; }
+static void sg_test_click_header(int id, int column) { sg_table_sort_by(id, column, 1); }   /* as a click: sorter changed -> 14 */
+
 /* ---------- check box (kind 9; event 12 toggled, a = 1 checked) ---------- */
 
 static void sg_on_toggled(GtkCheckButton *b, gpointer d) {
@@ -821,6 +961,7 @@ static void sg_test_type(int id, const char *t) {   /* emits, like a user */
     else gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), t);
 }
 static void sg_test_choose(int id, int row) {
+    if (sg_kind[id] == 13) { gtk_selection_model_select_item(sg_table_model(id), (guint) (row - 1), TRUE); return; }   /* a table row, as a click */
     GtkListBoxRow *r = gtk_list_box_get_row_at_index(sg_list_box(id), row - 1);
     if (r) gtk_list_box_select_row(sg_list_box(id), r);
 }

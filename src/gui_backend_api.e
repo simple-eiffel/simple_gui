@@ -280,6 +280,48 @@ feature -- Controls
 			not_negative: Result >= 0
 		end
 
+	table (a_titles: POINTER): INTEGER
+			-- Rows of text in columns titled by `a_titles' (joined by U+001F). A user's selection
+			-- sends selection (4, a = first selected row); a click on a header sends header
+			-- clicked (14, a = column, 1-based).
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	table_extend (a_table: INTEGER; a_cells: POINTER)
+			-- Add a row: one text per column, joined by U+001F.
+		deferred
+		end
+
+	table_wipe_out (a_table: INTEGER)
+			-- Remove every row and the selection, without an event.
+		deferred
+		end
+
+	table_set_multiple (a_table: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	table_select (a_table, a_row: INTEGER; a_extend: BOOLEAN)
+			-- Select row `a_row' (0: clear), adding to the selection when `a_extend'; no event.
+		deferred
+		end
+
+	table_selected_count (a_table: INTEGER): INTEGER
+		deferred
+		end
+
+	table_selected_at (a_table, i: INTEGER): INTEGER
+			-- The `i'-th selected row, ascending.
+		deferred
+		end
+
+	table_set_sort_indicator (a_table, a_column: INTEGER; a_ascending: BOOLEAN)
+			-- Show the sort indicator on `a_column' (0: none); no event.
+		deferred
+		end
+
 feature -- Common widget state
 
 	set_enabled (an_id: INTEGER; a_on: BOOLEAN)
@@ -451,6 +493,11 @@ feature -- Appearance
 feature -- Test driver
 
 	test_click (an_id: INTEGER)
+		deferred
+		end
+
+	test_click_header (a_table, a_column: INTEGER)
+			-- Click column `a_column's header AS A USER WOULD (emits header clicked, 14).
 		deferred
 		end
 
