@@ -1209,6 +1209,27 @@ void sga_menu_add_item(void *a_menu, const char *a_text, const char *a_shortcut,
 
 void sga_menu_add_separator(void *a_menu) { [(__bridge NSMenu *)a_menu addItem:[NSMenuItem separatorItem]]; }
 
+/* Context menus: an NSMenu outside the menu bar, kept alive here. A view's `menu' is what
+   AppKit shows on a right-click, a Control-click or a two-finger click, so attaching it is
+   all a widget needs; its items send menu events (5) like any other. */
+static NSMutableArray<NSMenu *> *s_context_menus;
+
+void *sga_context_menu_new(void)
+{
+	NSMenu *m = [[NSMenu alloc] initWithTitle:@""];
+	if (!s_context_menus) s_context_menus = [NSMutableArray array];
+	[s_context_menus addObject:m];
+	return (__bridge void *)m;
+}
+
+void sga_widget_set_context_menu(int a_id, void *a_menu)
+{
+	NSMenu *m = (__bridge NSMenu *)a_menu;
+	[(NSView *)sga_get(a_id) setMenu:m];
+	/* The core (a list's table, a text area's text view) is what the click lands on. */
+	if (sga_core(a_id) != sga_get(a_id) && [sga_core(a_id) isKindOfClass:[NSView class]]) [(NSView *)sga_core(a_id) setMenu:m];
+}
+
 /* Any item with this id, whatever its action. */
 static NSMenuItem *sga_find_numbered(NSMenu *a_menu, int a_id)
 {
@@ -1217,6 +1238,14 @@ static NSMenuItem *sga_find_numbered(NSMenu *a_menu, int a_id)
 		else if ([i tag] == a_id && [i representedObject]) return i;
 	}
 	return nil;
+}
+
+/* An item with this id in the menu bar or in any context menu. */
+static NSMenuItem *sga_find_numbered_anywhere(int a_id)
+{
+	NSMenuItem *i = sga_find_numbered([NSApp mainMenu], a_id);
+	for (NSMenu *m in s_context_menus) if (!i) i = sga_find_numbered(m, a_id);
+	return i;
 }
 
 /* The menu bar shows the menu's own title; its item in the bar is kept the same. */
@@ -1232,13 +1261,13 @@ const char *sga_menu_title(void *a_menu) { return sga_return(Kind_menu, [(__brid
 
 void sga_menu_set_item_text(int a_item_id, const char *a_text)
 {
-	NSMenuItem *i = sga_find_numbered([NSApp mainMenu], a_item_id);
+	NSMenuItem *i = sga_find_numbered_anywhere(a_item_id);
 	if (i) [i setTitle:sga_role_title([[i representedObject] intValue], sga_string(a_text))];
 }
 
 const char *sga_menu_item_text(int a_item_id)
 {
-	NSMenuItem *i = sga_find_numbered([NSApp mainMenu], a_item_id);
+	NSMenuItem *i = sga_find_numbered_anywhere(a_item_id);
 	return sga_return(Kind_menu, i ? [i title] : @"");
 }
 
@@ -1406,6 +1435,17 @@ void sga_test_menu(int a_item_id)
 {
 	NSMenuItem *i = sga_find_item([NSApp mainMenu], a_item_id);
 	if (i) [[i menu] performActionForItemAtIndex:[[i menu] indexOfItem:i]];
+}
+
+/* Choose item `a_item' from widget `a_id's context menu, as a user would; 0 when that menu has
+   no such item (or the widget has no context menu). */
+int sga_test_context_menu(int a_id, int a_item)
+{
+	NSMenu *m = [(NSView *)sga_get(a_id) menu];
+	NSMenuItem *i = m ? sga_find_numbered(m, a_item) : nil;
+	if (!i) return 0;
+	[[i menu] performActionForItemAtIndex:[[i menu] indexOfItem:i]];
+	return 1;
 }
 
 void sga_test_request_close(int a_window) { [(NSWindow *)sga_get(a_window) performClose:nil]; }
