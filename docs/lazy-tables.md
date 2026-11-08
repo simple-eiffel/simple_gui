@@ -49,6 +49,18 @@ Rows still in sight are never the ones given back.
 | Windows | `SW_DATA_GRID.put_row` puts an answer in place. | `set_rows` copies every row; a lazy table answers rows one at a time. |
 | All | A row asked for is **not asked for again** until answered or forgotten. | Without it a scroll asks for the same rows on every frame. |
 
+## GPU: where it helps and where it doesn't
+
+A lazy table spends its time **making rows** (the program's query, file read or computation),
+not drawing them: only the rows in sight are drawn, and on Windows a frame of a 100,000-row grid
+takes about 15 ms (simple_widgets' GW-29 test), inside the 60 Hz budget.
+
+| Idea | Verdict | Why |
+|---|---|---|
+| Keep rows in GPU memory as a cache | No | Rows are short text read and formatted on the CPU; each would cross to the GPU and back, costing more than ordinary memory. The bounded memory cache (and, if wanted, the session row cache's file) is the right home. |
+| Draw the table on the GPU | Already done where it pays | GTK 4 renders through the GPU (GSK on OpenGL or Vulkan) and AppKit through Core Animation, so those tables get it for free. simple_widgets draws with cairo on the CPU and copies the frame to the screen; a GPU-backed copy is part of GUI_PLAN.md's frame-rate check (item 3) and matters for very large or high-resolution windows, not for row counts. |
+| Compute heavy cells on the GPU | Yes, in the program's source | When a column is heavy, parallel number work over many rows, the source function can compute it on the GPU (for example simple_tensor's Vulkan backend). That is the program's choice and needs nothing from the table. |
+
 ## Measured
 
 All three platforms pass the shared tests `a_row_source_asks_only_for_rows_in_view` (a 100,000-row
