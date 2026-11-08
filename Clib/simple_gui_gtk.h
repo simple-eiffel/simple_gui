@@ -125,6 +125,19 @@ static int sg_window(const char *title, int w, int h) {
 /* The window's content: a box holding the menu bar (when there is one) above `child'. */
 /* GTK 4: a widget whose direction is NONE takes the global default, not its parent's, so
    the menu bar (no Eiffel widget, outside the cascade) is given the window's direction here. */
+/* Rows, cells and headers that GTK makes on the fly (a list's rows, a column view's, a tree's)
+   are born with no direction, and a widget with none takes GTK's global default, not its
+   parent's. A view whose direction was set keeps it ("sg-dir", the GtkTextDirection plus 1);
+   a widget born inside it later takes it, with every ancestor up to the view. */
+static void sg_follow_view_direction(GtkWidget *w) {
+    GtkWidget *a;
+    int stored = 0;
+    for (a = w ? gtk_widget_get_parent(w) : NULL; a && !stored; a = gtk_widget_get_parent(a))
+        stored = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(a), "sg-dir"));
+    if (stored)
+        for (a = w; a && !g_object_get_data(G_OBJECT(a), "sg-dir"); a = gtk_widget_get_parent(a))
+            gtk_widget_set_direction(a, (GtkTextDirection) (stored - 1));
+}
 static void sg_direction_tree(GtkWidget *w, GtkTextDirection d) {
     GtkWidget *c;
     gtk_widget_set_direction(w, d);
@@ -306,6 +319,7 @@ static void sg_list_extend(int id, const char *t) {
     gtk_label_set_xalign(GTK_LABEL(row), 0.0);
     gtk_widget_set_margin_start(row, 6); gtk_widget_set_margin_top(row, 3); gtk_widget_set_margin_bottom(row, 3);
     gtk_list_box_append(sg_list_box(id), row);
+    sg_follow_view_direction(row);
 }
 static void sg_list_wipe_out(int id) { sg_quiet++; gtk_list_box_remove_all(sg_list_box(id)); sg_quiet--; }
 static void sg_list_select(int id, int row) {
@@ -344,6 +358,7 @@ static void sg_cell_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer
     (void) fa;
     gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(it)), v);
     g_free(v);
+    sg_follow_view_direction(gtk_list_item_get_child(it));
 }
 static GtkColumnView *sg_table_view(int id) { return GTK_COLUMN_VIEW(g_object_get_data(G_OBJECT(sg_w[id]), "sg-view")); }
 static GtkSelectionModel *sg_table_model(int id) { return gtk_column_view_get_model(sg_table_view(id)); }
@@ -539,6 +554,7 @@ static void sg_tree_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer
     gulong h;
     (void) fa;
     gtk_tree_expander_set_list_row(GTK_TREE_EXPANDER(x), r);
+    sg_follow_view_direction(x);
     gtk_label_set_text(GTK_LABEL(gtk_tree_expander_get_child(GTK_TREE_EXPANDER(x))), gtk_string_object_get_string(GTK_STRING_OBJECT(o)));
     g_object_unref(o);
     sg_tree_forget_row(it);   /* GTK 4.12+ may bind again without unbinding first */
@@ -767,6 +783,10 @@ static int sg_is_visible(int id) { return gtk_widget_get_visible(sg_w[id]) ? 1 :
 static void sg_set_direction(int id, int d) {
     GtkTextDirection l_dir = d == 1 ? GTK_TEXT_DIR_LTR : d == 2 ? GTK_TEXT_DIR_RTL : GTK_TEXT_DIR_NONE;
     gtk_widget_set_direction(sg_w[id], l_dir);
+    if (sg_kind[id] == 7 || sg_kind[id] == 13 || sg_kind[id] == 14) {
+        g_object_set_data(G_OBJECT(sg_w[id]), "sg-dir", GINT_TO_POINTER((int) l_dir + 1));
+        sg_direction_tree(sg_w[id], l_dir);
+    }
     if (sg_kind[id] == 1) {
         GtkWidget *bar = g_object_get_data(G_OBJECT(sg_w[id]), "sg-bar");
         GtkWidget *outer = g_object_get_data(G_OBJECT(sg_w[id]), "sg-outer");
