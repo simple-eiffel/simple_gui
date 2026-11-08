@@ -20,7 +20,7 @@ The same program, unchanged, runs on all three: [simple_graph_calc](https://gith
 |---|---|---|---|---|
 | macOS (AppKit) | ![controls](docs/gallery/macos/showcase_1_controls.png) | ![table](docs/gallery/macos/showcase_2_table.png) | ![canvas](docs/gallery/macos/showcase_3_canvas.png) | ![right to left](docs/gallery/macos/showcase_6_right_to_left.png) |
 | Linux (GTK 4) | ![controls](docs/gallery/linux/showcase_1_controls.png) | ![table](docs/gallery/linux/showcase_2_table.png) | ![canvas](docs/gallery/linux/showcase_3_canvas.png) | ![right to left](docs/gallery/linux/showcase_6_right_to_left.png) |
-| Windows (simple_widgets) | ![controls](docs/gallery/windows/showcase_1_controls.png) | ![table](docs/gallery/windows/showcase_2_table.png) | ![canvas](docs/gallery/windows/showcase_3_canvas.png) | not yet (see below) |
+| Windows (simple_widgets) | ![controls](docs/gallery/windows/showcase_1_controls.png) | ![table](docs/gallery/windows/showcase_2_table.png) | ![canvas](docs/gallery/windows/showcase_3_canvas.png) | ![right to left](docs/gallery/windows/showcase_6_right_to_left.png) |
 
 Right to left, the tabs and the table's columns mirror; English text keeps its own reading order.
 
@@ -87,9 +87,7 @@ ec.sh test -config simple_gui.ecf -target simple_gui_tests
 ```
 
 **Not yet on Windows** (the shared tests pass; these are what they do not cover):
-- Right to left mirrors stacks, grids, lists, labels and text, but not yet the menu bar, the tabs or a table's columns.
 - A second window (opened while another is) is a floating document window of the first: it has no menu bar yet, and screen readers do not see it yet.
-- A window keeps the size the program asked for; GTK and AppKit grow one to fit its content.
 
 ## Build (macOS)
 
