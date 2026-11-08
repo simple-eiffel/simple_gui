@@ -11,6 +11,9 @@ class
 
 inherit
 	GUI_BACKEND_API
+		redefine
+			scale
+		end
 
 feature -- Lifecycle and loop
 
@@ -325,6 +328,12 @@ feature -- Canvas
 	scale_factor (an_id: INTEGER): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "{ int s = sg_scale_factor($an_id); return s < 1 ? 1 : s; }"
+		end
+
+	scale (an_id: INTEGER): REAL_64
+			-- The surface's own scale: fractional under Wayland's fractional scaling (GTK 4.12+).
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "{ double s = sg_scale($an_id); return s > 0.0 ? s : 1.0; }"
 		end
 
 	width (an_id: INTEGER): INTEGER

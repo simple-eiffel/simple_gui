@@ -34,8 +34,17 @@ feature {NONE} -- Initialization
 
 feature -- Access
 
+	scale: REAL_64
+			-- Device pixels per logical pixel, fractional where the platform is: what a program
+			-- multiplies line widths and font sizes by to draw a sharp image.
+		do
+			Result := backend.scale (id)
+		ensure
+			positive: Result > 0.0
+		end
+
 	scale_factor: INTEGER
-			-- Device pixels per logical pixel.
+			-- `scale' rounded up. Superseded by `scale'; kept for programs written before it.
 		do
 			Result := backend.scale_factor (id)
 		ensure
@@ -43,13 +52,15 @@ feature -- Access
 		end
 
 	pixel_width: INTEGER
+			-- The image width `present' wants: `width' times `scale', rounded.
 		do
-			Result := width * scale_factor
+			Result := (width * scale).rounded
 		end
 
 	pixel_height: INTEGER
+			-- The image height `present' wants: `height' times `scale', rounded.
 		do
-			Result := height * scale_factor
+			Result := (height * scale).rounded
 		end
 
 	pointer_actions: GUI_ACTIONS [TUPLE [kind, x, y, button, modifiers: INTEGER]]

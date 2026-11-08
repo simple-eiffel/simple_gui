@@ -202,6 +202,8 @@ feature -- Tests
 			l_canvas.present (l_image)
 			driver.pump_until_idle (200)
 			assert ("scale", l_canvas.scale_factor >= 1)
+			assert ("a real scale", l_canvas.scale > 0.0 and l_canvas.scale <= l_canvas.scale_factor)
+			assert ("pixel width is width times scale", l_canvas.pixel_width = (l_canvas.width * l_canvas.scale).rounded)
 			assert ("sized", l_canvas.width > 0 and l_canvas.height > 0)
 			l_window.close
 		end
