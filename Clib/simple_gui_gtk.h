@@ -173,8 +173,25 @@ static void sg_set_description_a11y(int id, const char *text) {
 static int sg_label(const char *text) {
     GtkWidget *l = gtk_label_new(text);
     gtk_label_set_xalign(GTK_LABEL(l), 0.0);
-    gtk_label_set_wrap(GTK_LABEL(l), TRUE);
+    /* One line, giving way with an ellipsis (matches AppKit, simple_gui #6); see sg_label_set_wrap_width. */
+    gtk_label_set_ellipsize(GTK_LABEL(l), PANGO_ELLIPSIZE_END);
     return sg_reg(l, 4);
+}
+/* chars > 0: wrap at about `chars' characters wide; 0: one line, ellipsized. */
+static void sg_label_set_wrap_width(int id, int chars) {
+    GtkLabel *l = GTK_LABEL(sg_w[id]);
+    if (chars > 0) {
+        gtk_label_set_ellipsize(l, PANGO_ELLIPSIZE_NONE);
+        gtk_label_set_wrap(l, TRUE);
+        gtk_label_set_wrap_mode(l, PANGO_WRAP_WORD_CHAR);
+        gtk_label_set_max_width_chars(l, chars);
+        gtk_label_set_width_chars(l, chars);
+    } else {
+        gtk_label_set_wrap(l, FALSE);
+        gtk_label_set_max_width_chars(l, -1);
+        gtk_label_set_width_chars(l, -1);
+        gtk_label_set_ellipsize(l, PANGO_ELLIPSIZE_END);
+    }
 }
 static void sg_label_set(int id, const char *t) { gtk_label_set_text(GTK_LABEL(sg_w[id]), t); }
 static const char *sg_label_get(int id) { return gtk_label_get_text(GTK_LABEL(sg_w[id])); }

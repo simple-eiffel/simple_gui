@@ -39,6 +39,8 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_snapshots_light_and_dark, "snapshots_light_and_dark")
 				run_test (agent t.test_worker_message_arrives_through_mailbox_and_wake, "worker_message_arrives_through_mailbox_and_wake")
 				run_test (agent t.test_close_request_without_agents_closes, "close_request_without_agents_closes")
+				run_test (agent t.test_wrapping_label_grows_taller, "wrapping_label_grows_taller")
+				run_test (agent t.test_number_label_stays_left_to_right, "number_label_stays_left_to_right")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
