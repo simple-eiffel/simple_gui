@@ -504,6 +504,27 @@ static void sg_canvas_present(int id, void *image) {
 /* ---------- menus ---------- */
 
 /* Shortcut "primary+O" -> "<Control>o" (GTK has no Cmd); "" for none. */
+/* The GDK key name for a key in the shared shortcut vocabulary (SW_SHORTCUT's names): "Enter"
+   is GDK's "Return", "PageUp" its "Page_Up", "Backspace" its "BackSpace"; one character is
+   lowercased; F1..F12 stay. Anything else passes through. */
+static void sg_gdk_key_name(const char *part, char *out, size_t n) {
+    static const char *pairs[][2] = {
+        {"enter", "Return"}, {"return", "Return"}, {"esc", "Escape"}, {"escape", "Escape"},
+        {"del", "Delete"}, {"delete", "Delete"}, {"ins", "Insert"}, {"insert", "Insert"},
+        {"backspace", "BackSpace"}, {"pageup", "Page_Up"}, {"pgup", "Page_Up"},
+        {"pagedown", "Page_Down"}, {"pgdn", "Page_Down"}, {"home", "Home"}, {"end", "End"},
+        {"left", "Left"}, {"right", "Right"}, {"up", "Up"}, {"down", "Down"}, {"tab", "Tab"},
+        {"space", "space"}, {"plus", "plus"}, {"equal", "equal"}, {"minus", "minus"},
+        {"comma", "comma"}, {"period", "period"}, {NULL, NULL}};
+    int i;
+    for (i = 0; pairs[i][0]; i++)
+        if (!g_ascii_strcasecmp(part, pairs[i][0])) { g_strlcat(out, pairs[i][1], n); return; }
+    if ((part[0] == 'f' || part[0] == 'F') && part[1] >= '1' && part[1] <= '9') {
+        char up[8]; g_snprintf(up, sizeof up, "F%s", part + 1); g_strlcat(out, up, n); return;
+    }
+    if (strlen(part) == 1) { char c[2] = { g_ascii_tolower(part[0]), 0 }; g_strlcat(out, c, n); return; }
+    g_strlcat(out, part, n);
+}
 static void sg_accel(const char *neutral, char *out, size_t n) {
     const char *p = neutral; out[0] = 0;
     if (!neutral || !*neutral) return;
@@ -514,14 +535,13 @@ static void sg_accel(const char *neutral, char *out, size_t n) {
         if (len >= sizeof part) len = sizeof part - 1;
         memcpy(part, p, len); part[len] = 0;
         if (plus) {
-            if (!g_ascii_strcasecmp(part, "primary") || !g_ascii_strcasecmp(part, "ctrl")) g_strlcat(out, "<Control>", n);
+            if (!g_ascii_strcasecmp(part, "primary") || !g_ascii_strcasecmp(part, "ctrl")
+                || !g_ascii_strcasecmp(part, "control")) g_strlcat(out, "<Control>", n);
             else if (!g_ascii_strcasecmp(part, "shift")) g_strlcat(out, "<Shift>", n);
             else if (!g_ascii_strcasecmp(part, "alt")) g_strlcat(out, "<Alt>", n);
             p = plus + 1;
         } else {
-            gchar *low = g_ascii_strdown(part, -1);
-            g_strlcat(out, strlen(part) == 1 ? low : part, n);
-            g_free(low);
+            sg_gdk_key_name(part, out, n);
             break;
         }
     }
