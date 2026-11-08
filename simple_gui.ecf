@@ -62,4 +62,10 @@
 		<setting name="console_application" value="true"/>
 		<cluster name="testing" location=".\testing\" recursive="true"/>
 	</target>
+
+	<target name="simple_gui_showcase" extends="simple_gui">
+		<description>Every simple_gui control in one window; with --gallery &lt;folder&gt; it works the window as a user would and saves the README pictures.</description>
+		<root class="SHOWCASE_APP" feature="make"/>
+		<cluster name="showcase" location=".\examples\showcase\"/>
+	</target>
 </system>

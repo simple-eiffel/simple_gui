@@ -4,9 +4,21 @@ Native GUI for Eiffel: write the program once, and it **is and looks native** on
 
 | Platform | Backend | Status |
 |---|---|---|
-| Linux | GTK 4 (native GtkButton, GtkEntry, GtkListBox...) | 0.1: 16 of 16 tests pass |
-| macOS | AppKit (native NSButton, NSTextField, NSTableView...) | in progress |
-| Windows | simple_widgets (the Cairo look) | planned for 0.2 |
+| Linux | GTK 4 (native GtkButton, GtkEntry, GtkColumnView, GtkNotebook...) | 0.2: the shared test suite passes |
+| macOS | AppKit (native NSButton, NSTextField, NSTableView, NSTabView...) | 0.2: the shared test suite passes (30 tests) |
+| Windows | simple_widgets on simple_shell (the Cairo look) | backend in progress; its groundwork (W1 to W11) is done |
+
+**Controls:** windows, menus (and context menus), labels (wrapping, numbers kept left to right), buttons, check boxes, text fields, text areas, lists, tables (sortable columns, several rows), tabs, grids and stacks (with alignment), a Cairo canvas, file and message dialogs; splitters and trees are in review. Light and dark follow the system; any window can turn right to left.
+
+## Showcase
+
+`examples/showcase` puts every control in one window, each on the platform's own toolkit, with a status line reporting each event the program hears. Run with `--gallery <folder>`, it works the window through `GUI_TEST_DRIVER` as a user would and saves these pictures (macOS, AppKit):
+
+| Controls | Table, sorted by Chapters | Canvas | Right to left |
+|---|---|---|---|
+| ![controls](docs/gallery/macos/showcase_1_controls.png) | ![table](docs/gallery/macos/showcase_2_table.png) | ![canvas](docs/gallery/macos/showcase_3_canvas.png) | ![right to left](docs/gallery/macos/showcase_6_right_to_left.png) |
+
+Right to left, the tabs and the table's columns mirror; English text keeps its own reading order.
 
 ## Example
 
@@ -60,6 +72,16 @@ Needs GTK 4 development files (`sudo apt install libgtk-4-dev` on Ubuntu 24.04) 
 
 ```
 ec_linux.sh test -config simple_gui.ecf -target simple_gui_tests
+```
+
+## Build (macOS)
+
+Needs EiffelStudio and Cairo from Homebrew (`brew install eiffelstudio cairo`).
+
+```
+make -C Clib                      # the AppKit backend's object
+ec -batch -config simple_gui.ecf -target simple_gui_tests -finalize -keep -c_compile
+ec -batch -config simple_gui.ecf -target simple_gui_showcase -finalize -c_compile
 ```
 
 Design record: the GUI verdict and spec in the port-coordination repository.
