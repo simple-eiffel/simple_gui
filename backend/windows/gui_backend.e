@@ -1118,8 +1118,14 @@ feature -- Test doors (act on the widget as a user would)
 		end
 
 	snapshot (an_id: INTEGER; a_path: POINTER): BOOLEAN
+			-- The window's last frame as a PNG; a floating window's from its own panel.
 		do
-			if attached windows.item (an_id) as al_w then
+			if attached floats.item (an_id) as al_f then
+				if al_f.is_open then
+					al_f.render
+					Result := al_f.export_frame_png (from_c (a_path))
+				end
+			elseif attached windows.item (an_id) as al_w then
 				al_w.request_render
 				Result := al_w.write_frame (from_c (a_path))
 			end
