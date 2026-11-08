@@ -537,6 +537,42 @@ feature -- Tests
 			l_window.close
 		end
 
+	test_splitter
+			-- A position set before showing holds; the second pane starts at the divider; moving
+			-- it later works; right to left, the first pane is on the right.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_split: GUI_SPLITTER
+			a, b: GUI_LABEL
+		do
+			create l_window.make ("Splitter", 520, 240)
+			create l_stack.make_vertical
+			create l_split.make_horizontal
+			create a.make ("leading pane")
+			create b.make ("trailing pane")
+			l_split.set_first (a)
+			l_split.set_second (b)
+			l_split.set_position (180)
+			l_stack.extend_stretching (l_split)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("position held: " + l_split.position.out, (l_split.position - 180).abs <= 2)
+			assert ("side by side: " + a.x.out + " < " + b.x.out, a.x < b.x)
+			assert ("second pane at the divider: " + (b.x - l_split.x).out, (b.x - l_split.x - 180).abs <= 12)
+			l_split.set_position (120)
+			settle_window
+			assert ("moved: " + l_split.position.out, (l_split.position - 120).abs <= 2)
+			l_window.set_base_direction (Direction_right_to_left)
+			settle_window
+			assert ("right to left, the first pane is on the right: " + a.x.out + " > " + b.x.out, a.x > b.x)
+			l_split.set_position (150)
+			settle_window
+			assert ("right to left, the position still counts from the leading edge: " + l_split.position.out, (l_split.position - 150).abs <= 2)
+			l_window.close
+		end
+
 feature {NONE} -- Fixtures
 
 	app: GUI_APPLICATION

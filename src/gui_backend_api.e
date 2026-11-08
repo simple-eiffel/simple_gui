@@ -142,6 +142,31 @@ feature -- Windows and containers
 		deferred
 		end
 
+	splitter (a_vertical: BOOLEAN): INTEGER
+			-- Two panes and a divider: side by side, or stacked when `a_vertical'. When it grows,
+			-- the first pane keeps its size.
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	splitter_set_pane (a_splitter, a_pane, a_child: INTEGER)
+			-- Put `a_child' in pane `a_pane' (1 leading or top, 2 trailing or bottom).
+		require
+			pane: a_pane = 1 or a_pane = 2
+		deferred
+		end
+
+	splitter_position (a_splitter: INTEGER): INTEGER
+			-- The divider's distance from the leading edge (or the top), in logical pixels.
+		deferred
+		end
+
+	splitter_set_position (a_splitter, a_position: INTEGER)
+			-- Move the divider (no event).
+		deferred
+		end
+
 	grid_set_homogeneous_columns (a_grid: INTEGER; a_on: BOOLEAN)
 			-- Give every column the same width.
 		deferred
