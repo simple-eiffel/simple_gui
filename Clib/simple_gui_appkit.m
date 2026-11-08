@@ -1094,6 +1094,32 @@ int sga_height(int a_id)
 
 /* ------------------------------------------------------------------ menus */
 
+/* The key of a neutral shortcut ("F5", "Delete", "PageUp", "comma", or a letter or digit) as
+   an AppKit key equivalent. The vocabulary is SW_SHORTCUT's (simple_widgets W8), shared by
+   every backend; an unknown name gives no key rather than a nonsense one. */
+static NSString *sga_named_key(NSString *a_name)
+{
+	static NSDictionary<NSString *, NSString *> *l_names;
+	if (!l_names) {
+		unichar f[] = {NSUpArrowFunctionKey, NSDownArrowFunctionKey, NSLeftArrowFunctionKey, NSRightArrowFunctionKey,
+			NSHomeFunctionKey, NSEndFunctionKey, NSPageUpFunctionKey, NSPageDownFunctionKey,
+			NSInsertFunctionKey, NSDeleteFunctionKey};
+		NSString *(^k)(unichar) = ^(unichar c) { return [NSString stringWithCharacters:&c length:1]; };
+		l_names = @{@"up": k(f[0]), @"down": k(f[1]), @"left": k(f[2]), @"right": k(f[3]),
+			@"home": k(f[4]), @"end": k(f[5]), @"pageup": k(f[6]), @"pagedown": k(f[7]),
+			@"insert": k(f[8]), @"delete": k(f[9]), @"backspace": k(0x08), @"escape": k(0x1b), @"esc": k(0x1b),
+			@"enter": @"\r", @"return": @"\r", @"tab": @"\t", @"space": @" ",
+			@"plus": @"+", @"minus": @"-", @"comma": @",", @"period": @"."};
+	}
+	if ([a_name length] == 1) return a_name;
+	if ([a_name length] >= 2 && [a_name characterAtIndex:0] == 'f') {
+		NSInteger n = [[a_name substringFromIndex:1] integerValue];
+		if (n >= 1 && n <= 12 && [[NSString stringWithFormat:@"f%ld", (long)n] isEqualToString:a_name])
+			{ unichar c = (unichar)(NSF1FunctionKey + n - 1); return [NSString stringWithCharacters:&c length:1]; }
+	}
+	return l_names[a_name] ?: @"";
+}
+
 static NSString *sga_key_of(NSString *a_shortcut, NSEventModifierFlags *a_mask)
 {
 	NSString *l_key = @"";
@@ -1103,8 +1129,7 @@ static NSString *sga_key_of(NSString *a_shortcut, NSEventModifierFlags *a_mask)
 		else if ([l_part isEqualToString:@"shift"]) *a_mask |= NSEventModifierFlagShift;
 		else if ([l_part isEqualToString:@"alt"] || [l_part isEqualToString:@"option"]) *a_mask |= NSEventModifierFlagOption;
 		else if ([l_part isEqualToString:@"control"] || [l_part isEqualToString:@"ctrl"]) *a_mask |= NSEventModifierFlagControl;
-		else if ([l_part isEqualToString:@"comma"]) l_key = @",";
-		else if ([l_part length]) l_key = l_part;
+		else if ([l_part length]) l_key = sga_named_key(l_part);
 	}
 	return l_key;
 }
@@ -1140,12 +1165,19 @@ static NSString *sga_role_title(int a_role, NSString *a_text)
    menu (and still come back as menu events, so the application decides); the edit
    roles go through the responder chain, so text fields get them with no Eiffel code.
    Every item carries its id as its tag (edit items raise no event; the tag finds them
-   for relabelling) and its role as its represented object. */
+   for relabeling) and its role as its represented object. */
 void sga_menu_add_item(void *a_menu, const char *a_text, const char *a_shortcut, int a_item_id, int a_role)
 {
 	NSMenu *m = (__bridge NSMenu *)a_menu;
 	NSMenu *l_app = [[[NSApp mainMenu] itemAtIndex:0] submenu];
 	NSString *l_text = sga_role_title(a_role, sga_string(a_text)), *l_shortcut = sga_string(a_shortcut);
+	/* On a Mac the Edit menu's key equivalents are what carry Command-Z, X, C, V and A to the
+	   focused text field (GTK and Windows text boxes take those keys themselves), so an edit
+	   role the program gave no shortcut gets the standard one. */
+	if ([l_shortcut length] == 0 && a_role >= 10 && a_role <= 15) {
+		static NSString *const l_standard[] = {@"primary+z", @"primary+shift+z", @"primary+x", @"primary+c", @"primary+v", @"primary+a"};
+		l_shortcut = l_standard[a_role - 10];
+	}
 	NSMenuItem *i;
 	switch (a_role) {
 		case 1:

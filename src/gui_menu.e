@@ -84,7 +84,7 @@ feature -- Element change
 
 	add_edit_item (a_role: INTEGER; a_text: READABLE_STRING_GENERAL)
 			-- An Edit item acting on the focused text field (the toolkit's own action; its id is
-			-- for relabelling only).
+			-- for relabeling only).
 		require
 			gui_thread: is_gui_thread
 			has_text: not a_text.is_empty
