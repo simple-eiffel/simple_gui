@@ -368,7 +368,9 @@ static void sga_keep_natural_size(NSView *a_view, int a_stretch)
 	   priorities and hands the spare room to the wrong child. */
 	if (a_stretch) return;
 	NSLayoutPriority l_priority = NSLayoutPriorityRequired - 1;
-	[a_view setContentCompressionResistancePriority:l_priority forOrientation:NSLayoutConstraintOrientationHorizontal];
+	/* A label may narrow: it truncates instead (SGALabel). */
+	if (![a_view isKindOfClass:NSClassFromString(@"SGALabel")])
+		[a_view setContentCompressionResistancePriority:l_priority forOrientation:NSLayoutConstraintOrientationHorizontal];
 	[a_view setContentCompressionResistancePriority:l_priority forOrientation:NSLayoutConstraintOrientationVertical];
 }
 
@@ -393,7 +395,10 @@ void sga_stack_extend(int a_stack, int a_child, int a_stretch)
 	[v setContentHuggingPriority:a_stretch ? 1 : NSLayoutPriorityDefaultHigh forOrientation:l_main];
 	sga_keep_natural_size(v, a_stretch);
 	[s addArrangedSubview:v];
-	if (l_vertical) [[v.widthAnchor constraintEqualToAnchor:s.widthAnchor] setActive:YES];
+	/* Children fill across the stack, except buttons, which keep their natural width as
+	   GTK's do (halign START). */
+	if ([v isKindOfClass:[NSButton class]]) {}
+	else if (l_vertical) [[v.widthAnchor constraintEqualToAnchor:s.widthAnchor] setActive:YES];
 	else [[v.heightAnchor constraintEqualToAnchor:s.heightAnchor] setActive:YES];
 }
 
@@ -422,6 +427,9 @@ void sga_grid_put(int a_grid, int a_child, int a_row, int a_column, int a_rows, 
 		[g addRowWithViews:l_empty];
 	}
 	sga_keep_natural_size(sga_get(a_child), 0);
+	/* A label in a grid is a caption: it keeps its whole width (GTK sizes grid columns the same way). */
+	if ([sga_get(a_child) isKindOfClass:NSClassFromString(@"SGALabel")])
+		[(NSView *)sga_get(a_child) setContentCompressionResistancePriority:NSLayoutPriorityRequired - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
 	[[g cellAtColumnIndex:a_column - 1 rowIndex:a_row - 1] setContentView:sga_get(a_child)];
 	if (a_rows > 1 || a_columns > 1) {
 		[g mergeCellsInHorizontalRange:NSMakeRange((NSUInteger)(a_column - 1), (NSUInteger)a_columns)
@@ -438,7 +446,21 @@ void sga_grid_set_spacing(int a_grid, int a_row_gap, int a_column_gap)
 
 /* --------------------------------------------------------------- controls */
 
-int sga_label(const char *a_text) { return sga_keep([NSTextField labelWithString:sga_string(a_text)]); }
+/* A label is one line in 0.1 (wrapping comes in 0.2) and gives way before anything
+   else, a canvas included: a long label ends in "\u2026" instead of widening its
+   container. */
+@interface SGALabel : NSTextField
+@end
+@implementation SGALabel
+@end
+
+int sga_label(const char *a_text)
+{
+	SGALabel *l = [SGALabel labelWithString:sga_string(a_text)];
+	[l setLineBreakMode:NSLineBreakByTruncatingTail];
+	[l setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	return sga_keep(l);
+}
 void sga_label_set(int a_id, const char *a_text) { [(NSTextField *)sga_get(a_id) setStringValue:sga_string(a_text)]; }
 const char *sga_label_get(int a_id) { return sga_return(Kind_label, [(NSTextField *)sga_get(a_id) stringValue]); }
 
