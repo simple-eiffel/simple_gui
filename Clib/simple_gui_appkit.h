@@ -9,7 +9,7 @@
  * Queue [type, id, a, b, c]: click 1, text changed 2, activate 3, selection 4 (a = row),
  * menu 5 (a = item id), close requested 6, pointer 7 (a = x, b = y, c = kind + button*16 +
  * modifiers*256), key 8 (a = code, b = character, c = modifiers*256), resize 9 (a, b),
- * appearance 10 (a = 1 dark), wake 11. Modifiers: 1 shift, 2 control, 4 alt, 8 command.
+ * appearance 10 (a = 1 dark), wake 11, toggled 12 (a = 1 checked). Modifiers: 1 shift, 2 control, 4 alt, 8 command.
  * Programmatic changes push no events.
  */
 #ifndef SIMPLE_GUI_APPKIT_H
@@ -53,6 +53,11 @@ int sga_field(void);
 void sga_field_set(int a_id, const char *a_text);
 const char *sga_field_get(int a_id);
 void sga_field_set_placeholder(int a_id, const char *a_text);
+int sga_check_box(const char *a_text);
+void sga_check_box_set(int a_id, int a_on);   /* no event */
+int sga_check_box_is_checked(int a_id);
+void sga_check_box_set_text(int a_id, const char *a_text);
+const char *sga_check_box_text(int a_id);
 int sga_list(void);
 void sga_list_extend(int a_id, const char *a_text);
 void sga_list_wipe_out(int a_id);
@@ -81,6 +86,10 @@ int sga_height(int a_id);
 void *sga_menu_new(const char *a_title);
 void sga_menu_add_item(void *a_menu, const char *a_text, const char *a_shortcut, int a_item_id, int a_role);
 void sga_menu_add_separator(void *a_menu);
+void sga_menu_set_title(void *a_menu, const char *a_title);
+const char *sga_menu_title(void *a_menu);   /* what the menu bar shows */
+void sga_menu_set_item_text(int a_item_id, const char *a_text);   /* About and Quit keep the app name */
+const char *sga_menu_item_text(int a_item_id);   /* what the item shows */
 
 /* Dialogs (blocking) */
 const char *sga_open_file(int a_window, const char *a_title, int a_save, const char *a_extensions);

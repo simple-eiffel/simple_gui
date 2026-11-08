@@ -20,6 +20,17 @@ feature -- User actions
 			settle
 		end
 
+	toggle (a_box: GUI_CHECK_BOX)
+			-- Click the box as a user would (fires toggled).
+		require
+			has_application: has_application
+		do
+			backend.test_click (a_box.id)
+			settle
+		ensure
+			flipped: a_box.is_checked /= old a_box.is_checked
+		end
+
 	type_text (a_field: GUI_TEXT_FIELD; a_text: READABLE_STRING_GENERAL)
 			-- Replace the field's text as a user would (fires change events).
 		require

@@ -286,6 +286,24 @@ static int sg_list_selected(int id) {
     return r ? gtk_list_box_row_get_index(r) + 1 : 0;
 }
 
+/* ---------- check box (kind 9; event 12 toggled, a = 1 checked) ---------- */
+
+static void sg_on_toggled(GtkCheckButton *b, gpointer d) {
+    (void) d;
+    if (!sg_quiet) sg_push(12, sg_id_of(b), gtk_check_button_get_active(b) ? 1 : 0, 0);
+}
+static int sg_check_box(const char *text) {
+    GtkWidget *b = gtk_check_button_new_with_label(text);
+    int id = sg_reg(b, 9);
+    gtk_widget_set_halign(b, GTK_ALIGN_START);
+    g_signal_connect(b, "toggled", G_CALLBACK(sg_on_toggled), NULL);
+    return id;
+}
+static void sg_check_box_set(int id, int on) { sg_quiet++; gtk_check_button_set_active(GTK_CHECK_BUTTON(sg_w[id]), on ? TRUE : FALSE); sg_quiet--; }
+static int sg_check_box_is_checked(int id) { return gtk_check_button_get_active(GTK_CHECK_BUTTON(sg_w[id])) ? 1 : 0; }
+static void sg_check_box_set_text(int id, const char *t) { gtk_check_button_set_label(GTK_CHECK_BUTTON(sg_w[id]), t); }
+static const char *sg_check_box_text(int id) { const char *s = gtk_check_button_get_label(GTK_CHECK_BUTTON(sg_w[id])); return s ? s : ""; }
+
 /* ---------- common widget state ---------- */
 
 static void sg_set_enabled(int id, int on) { gtk_widget_set_sensitive(sg_w[id], on ? TRUE : FALSE); }
@@ -395,10 +413,56 @@ static void sg_accel(const char *neutral, char *out, size_t n) {
 __attribute__((weak)) GtkShortcutController *sg_shortcuts = NULL;
 
 /* A top-level menu (returns its GMenu as an opaque handle). */
+/* Where each item lives, so it can be relabelled (a GMenu item cannot change in place:
+   it is replaced at the same position with the same action and accelerator). */
+#define SG_MAX_ITEMS 1024
+__attribute__((weak)) GMenu *sg_item_menu[SG_MAX_ITEMS] = {0};
+__attribute__((weak)) int sg_item_pos[SG_MAX_ITEMS] = {0};
+__attribute__((weak)) char *sg_item_action[SG_MAX_ITEMS] = {0};
+__attribute__((weak)) char *sg_item_accel[SG_MAX_ITEMS] = {0};
+
+static void sg_remember_item(int item_id, GMenu *m, int pos, const char *action, const char *accel) {
+    if (item_id <= 0 || item_id >= SG_MAX_ITEMS) return;
+    sg_item_menu[item_id] = m;
+    sg_item_pos[item_id] = pos;
+    g_free(sg_item_action[item_id]); sg_item_action[item_id] = g_strdup(action);
+    g_free(sg_item_accel[item_id]); sg_item_accel[item_id] = (accel && *accel) ? g_strdup(accel) : NULL;
+}
+
 static void *sg_menu_new(const char *title) {   /* menus live at application level, as the spec says */
     GMenu *m = g_menu_new();
+    g_object_set_data(G_OBJECT(m), "sg-index", GINT_TO_POINTER(g_menu_model_get_n_items(G_MENU_MODEL(sg_menubar))));
     g_menu_append_submenu(sg_menubar, title, G_MENU_MODEL(m));
     return m;
+}
+static void sg_menu_set_title(void *menu, const char *title) {
+    int pos = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(menu), "sg-index"));
+    g_menu_remove(sg_menubar, pos);
+    g_menu_insert_submenu(sg_menubar, pos, title, G_MENU_MODEL(menu));
+}
+__attribute__((weak)) char *sg_label_buf = NULL;
+/* The label GTK's menu model holds now for the top-level `menu'. */
+static const char *sg_menu_title(void *menu) {
+    int pos = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(menu), "sg-index"));
+    g_free(sg_label_buf); sg_label_buf = NULL;
+    g_menu_model_get_item_attribute(G_MENU_MODEL(sg_menubar), pos, G_MENU_ATTRIBUTE_LABEL, "s", &sg_label_buf);
+    return sg_label_buf ? sg_label_buf : "";
+}
+static void sg_menu_set_item_text(int item_id, const char *text) {
+    GMenuItem *mi;
+    if (item_id <= 0 || item_id >= SG_MAX_ITEMS || !sg_item_menu[item_id]) return;
+    mi = g_menu_item_new(text, sg_item_action[item_id]);
+    if (sg_item_accel[item_id]) g_menu_item_set_attribute(mi, "accel", "s", sg_item_accel[item_id]);
+    g_menu_remove(sg_item_menu[item_id], sg_item_pos[item_id]);
+    g_menu_insert_item(sg_item_menu[item_id], sg_item_pos[item_id], mi);
+    g_object_unref(mi);
+}
+/* The label GTK's menu model holds now for item `item_id'. */
+static const char *sg_menu_item_text(int item_id) {
+    g_free(sg_label_buf); sg_label_buf = NULL;
+    if (item_id > 0 && item_id < SG_MAX_ITEMS && sg_item_menu[item_id])
+        g_menu_model_get_item_attribute(G_MENU_MODEL(sg_item_menu[item_id]), sg_item_pos[item_id], G_MENU_ATTRIBUTE_LABEL, "s", &sg_label_buf);
+    return sg_label_buf ? sg_label_buf : "";
 }
 /* Item `item_id' (> 0): activating it pushes event 5 with a = item_id. */
 static void sg_menu_add_item(void *menu, const char *text, const char *shortcut, int item_id) {
@@ -413,6 +477,7 @@ static void sg_menu_add_item(void *menu, const char *text, const char *shortcut,
         GMenuItem *mi = g_menu_item_new(text, detailed);
         sg_accel(shortcut, accel, sizeof accel);
         if (accel[0]) g_menu_item_set_attribute(mi, "accel", "s", accel);
+        sg_remember_item(item_id, G_MENU(menu), g_menu_model_get_n_items(G_MENU_MODEL(menu)), detailed, accel);
         g_menu_append_item(G_MENU(menu), mi);
         g_object_unref(mi);
     }
@@ -455,7 +520,7 @@ static void sg_on_edit(GSimpleAction *a, GVariant *p, gpointer d) {
     }
 }
 /* role: 10 undo 11 redo 12 cut 13 copy 14 paste 15 select all */
-static void sg_menu_add_edit_role(void *menu, const char *text, int role) {
+static void sg_menu_add_edit_role(void *menu, const char *text, int role, int item_id) {
     static const char *names[] = {"undo", "redo", "cut", "copy", "paste", "select_all"};
     static const char *actions[] = {"text.undo", "text.redo", "clipboard.cut", "clipboard.copy", "clipboard.paste", "selection.select-all"};
     char name[32], detailed[40];
@@ -467,6 +532,7 @@ static void sg_menu_add_edit_role(void *menu, const char *text, int role) {
         g_signal_connect(a, "activate", G_CALLBACK(sg_on_edit), (gpointer) actions[role - 10]);
         g_action_map_add_action(G_ACTION_MAP(sg_actions), G_ACTION(a));
     }
+    sg_remember_item(item_id, G_MENU(menu), g_menu_model_get_n_items(G_MENU_MODEL(menu)), detailed, NULL);
     g_menu_append(G_MENU(menu), text, detailed);
 }
 
@@ -491,6 +557,7 @@ static void sg_describe_walk(GtkWidget *w, int depth) {
     const char *name = g_object_get_data(G_OBJECT(w), "sg-a11y");
     if (!name && GTK_IS_LABEL(w)) name = gtk_label_get_text(GTK_LABEL(w));
     if (!name && GTK_IS_BUTTON(w)) name = gtk_button_get_label(GTK_BUTTON(w));
+    if (!name && GTK_IS_CHECK_BUTTON(w)) name = gtk_check_button_get_label(GTK_CHECK_BUTTON(w));
     if (strcmp(role, "generic") && strcmp(role, "none") && strcmp(role, "presentation")) {
         int i; for (i = 0; i < depth; i++) g_string_append(sg_describe_buf, "  ");
         g_string_append_printf(sg_describe_buf, "%s: %s\n", role, name ? name : "");
@@ -588,7 +655,10 @@ static void sg_set_dark(int on) { g_object_set(gtk_settings_get_default(), "gtk-
 /* ---------- test driver ---------- */
 
 /* A user's click is the "clicked" signal; gtk_widget_activate would emit it only after a 250 ms press animation. */
-static void sg_test_click(int id) { g_signal_emit_by_name(sg_w[id], "clicked"); }
+static void sg_test_click(int id) {
+    if (sg_kind[id] == 9) gtk_check_button_set_active(GTK_CHECK_BUTTON(sg_w[id]), !gtk_check_button_get_active(GTK_CHECK_BUTTON(sg_w[id])));
+    else g_signal_emit_by_name(sg_w[id], "clicked");
+}
 static void sg_test_type(int id, const char *t) { gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), t); }   /* emits, like a user */
 static void sg_test_choose(int id, int row) {
     GtkListBoxRow *r = gtk_list_box_get_row_at_index(sg_list_box(id), row - 1);

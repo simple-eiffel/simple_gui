@@ -83,7 +83,8 @@ feature -- Element change
 		end
 
 	add_edit_item (a_role: INTEGER; a_text: READABLE_STRING_GENERAL)
-			-- An Edit item acting on the focused text field.
+			-- An Edit item acting on the focused text field (the toolkit's own action; its id is
+			-- for relabelling only).
 		require
 			gui_thread: is_gui_thread
 			has_text: not a_text.is_empty
@@ -91,11 +92,60 @@ feature -- Element change
 		local
 			l_t, l_s: C_STRING
 		do
+			model.register_item (agent do_nothing, "")
+			last_item_id := model.item_count
 			l_t := backend.to_c (a_text)
 			l_s := backend.to_c ("")
-			backend.menu_add_item (handle, l_t.item, l_s.item, 0, a_role)
+			backend.menu_add_item (handle, l_t.item, l_s.item, last_item_id, a_role)
 		ensure
-			no_agent: model.item_count = old model.item_count
+			numbered: last_item_id = model.item_count
+			one_more: model.item_count = old model.item_count + 1
+		end
+
+	set_title (a_title: READABLE_STRING_GENERAL)
+			-- Relabel this menu (for example on a change of language).
+		require
+			gui_thread: is_gui_thread
+			has_text: not a_title.is_empty
+		local
+			l_c: C_STRING
+		do
+			title := a_title.to_string_32
+			l_c := backend.to_c (a_title)
+			backend.menu_set_title (handle, l_c.item)
+		ensure
+			set: title.same_string_general (a_title)
+			shown: shown_title.same_string_general (a_title)
+		end
+
+	shown_title: STRING_32
+			-- The title the toolkit shows now.
+		do
+			Result := backend.from_c (backend.menu_title (handle))
+		end
+
+	set_item_text (an_item_id: INTEGER; a_text: READABLE_STRING_GENERAL)
+			-- Relabel item `an_item_id' (from `last_item_id'), keeping its action and shortcut.
+		require
+			gui_thread: is_gui_thread
+			numbered: an_item_id >= 1 and an_item_id <= model.item_count
+			has_text: not a_text.is_empty
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_text)
+			backend.menu_set_item_text (an_item_id, l_c.item)
+		ensure
+			shown: item_text (an_item_id).has_substring (a_text)
+				-- Contains, not equals: a Mac shows About and Quit as "About <app>", "Quit <app>".
+		end
+
+	item_text (an_item_id: INTEGER): STRING_32
+			-- The label the toolkit shows now for item `an_item_id'.
+		require
+			numbered: an_item_id >= 1 and an_item_id <= model.item_count
+		do
+			Result := backend.from_c (backend.menu_item_text (an_item_id))
 		end
 
 	add_standard_edit_items

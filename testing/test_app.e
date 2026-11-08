@@ -43,6 +43,8 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_number_label_stays_left_to_right, "number_label_stays_left_to_right")
 				run_test (agent t.test_stack_alignment, "stack_alignment")
 				run_test (agent t.test_grid_columns, "grid_columns")
+				run_test (agent t.test_menus_relabel, "menus_relabel")
+				run_test (agent t.test_check_box_events, "check_box_events")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
