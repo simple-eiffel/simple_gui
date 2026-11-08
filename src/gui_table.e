@@ -12,6 +12,8 @@ note
 		Lazy rows (1f): `set_row_source' gives the table a row count and a function from a
 		row number to its texts; the table asks for rows only as they come into view (the
 		backend sends rows wanted, 16, and the table answers), and keeps no row data itself.
+		When to use it, and why it is built this way (asking rather than being called, the
+		bounded cache, each backend's choices): docs/lazy-tables.md.
 	]"
 
 class
