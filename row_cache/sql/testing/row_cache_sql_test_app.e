@@ -30,6 +30,7 @@ feature {NONE} -- Initialization
 			run_test (agent t.test_a_volatile_column_is_made_each_time, "a_volatile_column_is_made_each_time")
 			run_test (agent test_sql_store_contract (t), "sql_store_contract")
 			run_test (agent test_a_scratch_database_is_deleted_and_a_persistent_one_kept, "a_scratch_database_is_deleted_and_a_persistent_one_kept")
+			run_test (agent t.test_encryption_is_available, "encryption_is_available")
 			run_test (agent test_sql_store_encrypted (t), "sql_store_encrypted")
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
@@ -38,8 +39,12 @@ feature {NONE} -- Initialization
 			create s.make
 			t.measure_store ("SQL store", s, s.path)
 			create s.make
-			s.set_encrypted (True)
-			t.measure_store ("SQL store, encrypted", s, s.path)
+			if s.is_encryption_available then
+				s.set_encrypted (True)
+				t.measure_store ("SQL store, encrypted", s, s.path)
+			else
+				s.close
+			end
 		end
 
 feature -- Tests
@@ -50,10 +55,15 @@ feature -- Tests
 			s: GUI_ROW_SQL_STORE
 		do
 			create s.make
-			t.check_encrypted_store (s, s.path)
-			create s.make
-			s.set_encrypted (True)
-			t.check_store_contract (s)
+			if s.is_encryption_available then
+				t.check_encrypted_store (s, s.path)
+				create s.make
+				s.set_encrypted (True)
+				t.check_store_contract (s)
+			else
+				print ("        (skipped: no session seal on this platform yet)%N")
+				s.close
+			end
 		end
 
 	test_sql_store_contract (t: ROW_CACHE_TESTS)

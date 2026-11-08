@@ -29,6 +29,7 @@ feature {NONE} -- Initialization
 			run_test (agent t.test_close_deletes_the_scratch_file, "close_deletes_the_scratch_file")
 			run_test (agent t.test_leftovers_of_ended_processes_are_swept, "leftovers_of_ended_processes_are_swept")
 			run_test (agent t.test_file_store_contract, "file_store_contract")
+			run_test (agent t.test_encryption_is_available, "encryption_is_available")
 			run_test (agent t.test_file_store_encrypted, "file_store_encrypted")
 			run_test (agent t.test_a_tampered_record_is_made_again, "a_tampered_record_is_made_again")
 			run_test (agent t.test_make_encrypted, "make_encrypted")

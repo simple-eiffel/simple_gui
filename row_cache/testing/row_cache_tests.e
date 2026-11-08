@@ -251,16 +251,32 @@ feature -- The store contract
 
 feature -- Encryption
 
+	test_encryption_is_available
+			-- macOS, Linux and Windows all have the session seal (simple_encryption 2.2.0), so
+			-- the encryption tests below run for real; they skip, printing so, only elsewhere.
+		local
+			s: GUI_ROW_FILE_STORE
+		do
+			create s.make
+			assert ("the session seal is available here", s.is_encryption_available)
+			s.close
+		end
+
 	test_file_store_encrypted
 			-- The file store with encryption on: unreadable on disk, and the contract holds.
 		local
 			s: GUI_ROW_FILE_STORE
 		do
 			create s.make
-			check_encrypted_store (s, s.path)
-			create s.make
-			s.set_encrypted (True)
-			check_store_contract (s)
+			if s.is_encryption_available then
+				check_encrypted_store (s, s.path)
+				create s.make
+				s.set_encrypted (True)
+				check_store_contract (s)
+			else
+				print ("        (skipped: no session seal on this platform yet)%N")
+				s.close
+			end
 		end
 
 	test_a_tampered_record_is_made_again
@@ -274,20 +290,25 @@ feature -- Encryption
 		do
 			tag := "Row "
 			create s.make
-			s.set_encrypted (True)
-			create c.make_with_store (2, s, Void, agent tagged_row)
-			assert ("made", c.cells (1) [1].same_string ("Row 1") and c.made_count = 1)
-			s.flush_for_measure
-			create l_file.make_with_path (s.path)
-			l_file.open_read_write
-			l_file.go (20)
-			l_file.read_character
-			l_byte := l_file.last_character
-			l_file.go (20)
-			l_file.put_character ((l_byte.code.bit_xor (1)).to_character_8)
-			l_file.close
-			assert ("made again, and right", c.cells (1) [1].same_string ("Row 1") and c.made_count = 2)
-			c.close
+			if not s.is_encryption_available then
+				print ("        (skipped: no session seal on this platform yet)%N")
+				s.close
+			else
+				s.set_encrypted (True)
+				create c.make_with_store (2, s, Void, agent tagged_row)
+				assert ("made", c.cells (1) [1].same_string ("Row 1") and c.made_count = 1)
+				s.flush_for_measure
+				create l_file.make_with_path (s.path)
+				l_file.open_read_write
+				l_file.go (20)
+				l_file.read_character
+				l_byte := l_file.last_character
+				l_file.go (20)
+				l_file.put_character ((l_byte.code.bit_xor (1)).to_character_8)
+				l_file.close
+				assert ("made again, and right", c.cells (1) [1].same_string ("Row 1") and c.made_count = 2)
+				c.close
+			end
 		end
 
 	test_make_encrypted
@@ -296,10 +317,14 @@ feature -- Encryption
 			c: GUI_ROW_CACHE
 		do
 			tag := "Row "
-			create c.make_encrypted (2, agent tagged_row)
-			assert ("encrypted", c.store.is_encrypted)
-			assert ("rows as usual", c.cells (3) [2].same_string ("6") and c.cells (3) [1].same_string ("Row 3") and c.made_count = 1)
-			c.close
+			if (create {SIMPLE_ENCRYPTION}.make).is_session_seal_available then
+				create c.make_encrypted (2, agent tagged_row)
+				assert ("encrypted", c.store.is_encrypted)
+				assert ("rows as usual", c.cells (3) [2].same_string ("6") and c.cells (3) [1].same_string ("Row 3") and c.made_count = 1)
+				c.close
+			else
+				print ("        (skipped: no session seal on this platform yet)%N")
+			end
 		end
 
 	check_encrypted_store (s: GUI_ROW_STORE; a_path: PATH)
@@ -343,8 +368,12 @@ feature -- Measurements
 			create s.make
 			measure_store ("file store", s, s.path)
 			create s.make
-			s.set_encrypted (True)
-			measure_store ("file store, encrypted", s, s.path)
+			if s.is_encryption_available then
+				s.set_encrypted (True)
+				measure_store ("file store, encrypted", s, s.path)
+			else
+				s.close
+			end
 		end
 
 	measure_store (a_name: STRING; s: GUI_ROW_STORE; a_path: PATH)
