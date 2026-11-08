@@ -53,6 +53,10 @@ feature -- Lifecycle and loop
 			if attached open_window as al_w and then al_w.is_window_open then
 				al_w.shell_turn_pending
 				al_w.request_render
+				apply_pending_positions
+				if last_positions_moved then
+					al_w.request_render
+				end
 				al_w.shell_turn_pending
 			end
 		end
@@ -125,6 +129,10 @@ feature -- Windows and containers
 				al_w.shell_open_window (al_w.title, al_w.win_x, al_w.win_y, al_w.win_w, al_w.win_h)
 				open_window := al_w
 				al_w.request_render
+				apply_pending_positions
+				if last_positions_moved then
+					al_w.request_render
+				end
 			end
 		end
 
@@ -255,23 +263,60 @@ feature -- Windows and containers
 		end
 
 	splitter (a_vertical: BOOLEAN): INTEGER
+			-- A holder column; the SW_SPLITTER goes into it once both panes are set (simple_widgets
+			-- takes both at creation).
+		local
+			l_holder: SW_COLUMN
 		do
-			not_yet ("splitter")
+			create l_holder.make
+			l_holder.set_padding (0.0)
+			l_holder.set_gap (0.0)
+			Result := register (l_holder)
+			splitter_info.force ([a_vertical, 0, 0, -1], Result)
 		end
 
 	splitter_set_pane (a_splitter, a_pane, a_child: INTEGER)
+		local
+			l_sp: SW_SPLITTER
 		do
-			not_yet ("splitter")
+			if attached splitter_info.item (a_splitter) as al_info and then not splitters.has (a_splitter) then
+				if a_pane = 1 then
+					al_info.first := a_child
+				else
+					al_info.second := a_child
+				end
+				if al_info.first > 0 and al_info.second > 0 and then attached {SW_COLUMN} widget (a_splitter) as al_holder
+					and then attached widget (al_info.first) as al_a and then attached widget (al_info.second) as al_b
+				then
+					create l_sp.make (al_a, al_b)
+					l_sp.set_horizontal (al_info.vertical)
+					l_sp.set_grow (1.0)
+					al_holder.put (l_sp)
+					splitters.force (l_sp, a_splitter)
+					changed
+				end
+			end
 		end
 
 	splitter_position (a_splitter: INTEGER): INTEGER
+			-- Logical pixels from the leading edge to the divider.
 		do
-			not_yet ("splitter")
+			apply_pending_positions
+			if attached splitters.item (a_splitter) as al_sp and then splitter_extent (al_sp) > 0.0 then
+				Result := logical (al_sp, splitter_extent (al_sp) * al_sp.ratio)
+			elseif attached splitter_info.item (a_splitter) as al_info and then al_info.pending >= 0 then
+				Result := al_info.pending
+			end
 		end
 
 	splitter_set_position (a_splitter, a_position: INTEGER)
+			-- Kept until the splitter has a size, then applied (a position set before showing holds).
 		do
-			not_yet ("splitter")
+			if attached splitter_info.item (a_splitter) as al_info then
+				al_info.pending := a_position.max (0)
+				apply_pending_positions
+				changed
+			end
 		end
 
 feature -- Controls
@@ -430,28 +475,47 @@ feature -- Controls
 		end
 
 	tabs: INTEGER
+		local
+			l_t: SW_TABS
 		do
-			not_yet ("tabs")
+			create l_t.make
+			Result := register (l_t)
+			l_t.set_on_change (agent report_page (Result, ?))
 		end
 
 	tabs_extend (a_tabs, a_page: INTEGER; a_title: POINTER)
 		do
-			not_yet ("tabs")
+			if attached {SW_TABS} widget (a_tabs) as al_t and then attached widget (a_page) as al_p then
+				quiet := quiet + 1
+				al_t.add_page (from_c (a_title), al_p)
+				quiet := quiet - 1
+				changed
+			end
 		end
 
 	tabs_select (a_tabs, a_page: INTEGER)
 		do
-			not_yet ("tabs")
+			if attached {SW_TABS} widget (a_tabs) as al_t and then a_page >= 1 and then a_page <= al_t.pages.count then
+				quiet := quiet + 1
+				al_t.select_tab (a_page)
+				quiet := quiet - 1
+				changed
+			end
 		end
 
 	tabs_selected (a_tabs: INTEGER): INTEGER
 		do
-			not_yet ("tabs")
+			if attached {SW_TABS} widget (a_tabs) as al_t then
+				Result := al_t.selected_index
+			end
 		end
 
 	tabs_set_title (a_tabs, a_page: INTEGER; a_title: POINTER)
 		do
-			not_yet ("tabs")
+			if attached {SW_TABS} widget (a_tabs) as al_t and then a_page >= 1 and then a_page <= al_t.labels.count then
+				al_t.labels.put_i_th (from_c (a_title), a_page)
+				changed
+			end
 		end
 
 	list: INTEGER
@@ -498,73 +562,150 @@ feature -- Controls
 		end
 
 	table (a_titles: POINTER): INTEGER
+			-- An SW_DATA_GRID over rows of text cells (titles and cells joined by U+001F). A header
+			-- click is reported, not sorted: the program sorts by refilling.
+		local
+			g: SW_DATA_GRID [ARRAY [STRING_32]]
+			i: INTEGER
 		do
-			not_yet ("table")
+			create g.make (150.0)
+			i := 0
+			across from_c (a_titles).split ('%/31/') as ic loop
+				i := i + 1
+				g.add_column (create {SW_GRID_COLUMN [ARRAY [STRING_32]]}.make (ic, 150.0, agent cell_of (?, i)))
+			end
+			Result := register (g)
+			table_rows.force (create {ARRAYED_LIST [ARRAY [STRING_32]]}.make (16), Result)
+			g.set_on_header_click (agent report_header (Result, ?, ?))
+			g.set_on_select (agent report_table_select (Result, ?))
 		end
 
 	table_extend (a_table: INTEGER; a_cells: POINTER)
 		do
-			not_yet ("table")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached table_rows.item (a_table) as al_rows then
+				al_rows.extend (cells_of (from_c (a_cells)))
+				al_g.set_rows (al_rows)
+				changed
+			end
 		end
 
 	table_wipe_out (a_table: INTEGER)
 		do
-			not_yet ("table")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached table_rows.item (a_table) as al_rows then
+				al_rows.wipe_out
+				al_g.set_rows (al_rows)
+				changed
+			end
 		end
 
 	table_set_multiple (a_table: INTEGER; a_on: BOOLEAN)
 		do
-			not_yet ("table")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g then
+				al_g.set_multiple (a_on)
+			end
 		end
 
 	table_select (a_table, a_row: INTEGER; a_extend: BOOLEAN)
 		do
-			not_yet ("table")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then a_row >= 0 and then a_row <= al_g.rows.count then
+				al_g.select_model_row_quietly (a_row, a_extend)
+				changed
+			end
 		end
 
 	table_selected_count (a_table: INTEGER): INTEGER
 		do
-			not_yet ("table")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g then
+				Result := al_g.selected_count
+			end
 		end
 
 	table_selected_at (a_table, i: INTEGER): INTEGER
 		do
-			not_yet ("table")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then i >= 1 and then i <= al_g.selected_count then
+				Result := al_g.selected_at (i)
+			end
 		end
 
 	table_set_sort_indicator (a_table, a_column: INTEGER; a_ascending: BOOLEAN)
 		do
-			not_yet ("table")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then a_column >= 0 and then a_column <= al_g.columns.count then
+				al_g.set_sort_indicator (a_column, a_ascending)
+				changed
+			end
 		end
 
 	tree: INTEGER
+			-- An SW_TREE over node numbers; the backend keeps the texts, parents and children.
+		local
+			l_t: SW_TREE [INTEGER]
+			l_roots: ARRAYED_LIST [INTEGER]
 		do
-			not_yet ("tree")
+			create l_t.make (150.0)
+			Result := register (l_t)
+			create l_roots.make (8)
+			tree_roots.force (l_roots, Result)
+			l_t.set_roots (l_roots)
+			l_t.set_children (agent tree_children (Result, ?))
+			l_t.set_label (agent tree_label (Result, ?))
+			l_t.set_on_select (agent report_tree_select (Result, ?))
+			l_t.set_on_expansion (agent report_expansion (Result, ?, ?))
 		end
 
 	tree_add (a_tree, a_node, a_parent: INTEGER; a_text: POINTER)
 		do
-			not_yet ("tree")
+			if attached {SW_TREE [INTEGER]} widget (a_tree) as al_t and then attached tree_roots.item (a_tree) as al_roots then
+				node_text.force (from_c (a_text), node_key (a_tree, a_node))
+				node_parent.force (a_parent, node_key (a_tree, a_node))
+				if a_parent = 0 then
+					al_roots.extend (a_node)
+				else
+					if not node_children.has (node_key (a_tree, a_parent)) then
+						node_children.force (create {ARRAYED_LIST [INTEGER]}.make (4), node_key (a_tree, a_parent))
+					end
+					if attached node_children.item (node_key (a_tree, a_parent)) as al_kids then
+						al_kids.extend (a_node)
+					end
+				end
+				al_t.set_roots (al_roots)
+				changed
+			end
 		end
 
 	tree_set_expanded (a_tree, a_node: INTEGER; a_on: BOOLEAN)
+			-- The program's: silent (SW_TREE reports only the user's).
 		do
-			not_yet ("tree")
+			if attached {SW_TREE [INTEGER]} widget (a_tree) as al_t then
+				reveal (a_tree, al_t, a_node)
+				if a_on then
+					al_t.expand_node (a_node)
+				else
+					al_t.collapse_node (a_node)
+				end
+				changed
+			end
 		end
 
 	tree_is_expanded (a_tree, a_node: INTEGER): BOOLEAN
 		do
-			not_yet ("tree")
+			Result := attached {SW_TREE [INTEGER]} widget (a_tree) as al_t and then al_t.is_expanded (a_node)
 		end
 
 	tree_select (a_tree, a_node: INTEGER)
+			-- Select silently, showing the node (its ancestors open).
 		do
-			not_yet ("tree")
+			if attached {SW_TREE [INTEGER]} widget (a_tree) as al_t then
+				reveal (a_tree, al_t, a_node)
+				al_t.select_node_quietly (a_node)
+				changed
+			end
 		end
 
 	tree_selected (a_tree: INTEGER): INTEGER
 		do
-			not_yet ("tree")
+			if attached {SW_TREE [INTEGER]} widget (a_tree) as al_t then
+				Result := al_t.selected_node
+			end
 		end
 
 feature -- Every widget
@@ -797,13 +938,19 @@ feature -- Menus
 		end
 
 	context_menu_new: POINTER
+			-- A menu outside the bar, for one widget's right-click.
 		do
-			not_yet ("context menus")
+			context_menus.extend ([{STRING_32} "", create {ARRAYED_LIST [TUPLE [text, shortcut: STRING_32; id, role: INTEGER; separator: BOOLEAN]]}.make (8)])
+			Result := default_pointer + (Context_base + context_menus.count)
 		end
 
 	widget_set_context_menu (an_id: INTEGER; a_menu: POINTER)
+			-- The widget's right-click menu offers the model's items first (SW's menu_extension).
 		do
-			not_yet ("context menus")
+			if attached widget (an_id) as al_w then
+				widget_context.force (menu_index (a_menu), an_id)
+				al_w.set_menu_extension (agent fill_context (?, ?, ?, menu_index (a_menu)))
+			end
 		end
 
 feature -- Dialogs
@@ -881,13 +1028,25 @@ feature -- Test doors (act on the widget as a user would)
 		end
 
 	test_click_header (a_table, a_column: INTEGER)
+			-- As a click on the header: reported with the next direction, not sorted.
 		do
-			not_yet ("table")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g then
+				report_header (a_table, a_column, not (al_g.indicator_column = a_column and not al_g.indicator_descending))
+			end
 		end
 
 	test_expand (a_tree, a_node: INTEGER; a_on: BOOLEAN)
+			-- As the user's click on the triangle: reported.
 		do
-			not_yet ("tree")
+			if attached {SW_TREE [INTEGER]} widget (a_tree) as al_t then
+				reveal (a_tree, al_t, a_node)
+				if a_on then
+					al_t.user_expand (a_node)
+				else
+					al_t.user_collapse (a_node)
+				end
+				changed
+			end
 		end
 
 	test_type (an_id: INTEGER; a_text: POINTER)
@@ -899,13 +1058,22 @@ feature -- Test doors (act on the widget as a user would)
 		end
 
 	test_choose (an_id, a_row: INTEGER)
+			-- As the user choosing a row, a table row, a tree node or a tab: reported.
 		do
 			if attached {SW_TEXT_LIST} widget (an_id) as al_l and then a_row >= 1 and then a_row <= al_l.count then
 				al_l.select_row (a_row)
-				changed
-			else
-				not_yet ("choosing in this control")
+			elseif attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (an_id) as al_g and then a_row >= 1 and then a_row <= al_g.rows.count then
+				quiet := quiet + 1
+				al_g.select_model_row_quietly (0, False)
+				quiet := quiet - 1
+				al_g.select_model_row (a_row)
+			elseif attached {SW_TREE [INTEGER]} widget (an_id) as al_t then
+				reveal (an_id, al_t, a_row)
+				al_t.select_node (a_row)
+			elseif attached {SW_TABS} widget (an_id) as al_tabs and then a_row >= 1 and then a_row <= al_tabs.pages.count then
+				al_tabs.select_tab (a_row)
 			end
+			changed
 		end
 
 	test_menu (an_item_id: INTEGER)
@@ -921,8 +1089,19 @@ feature -- Test doors (act on the widget as a user would)
 		end
 
 	test_context_menu (an_id, an_item_id: INTEGER): BOOLEAN
+			-- Choose item `an_item_id' from the widget's right-click menu: False when that menu
+			-- has no such item (or the widget has none).
 		do
-			not_yet ("context menus")
+			if widget_context.has (an_id) and then attached menu_of (default_pointer + widget_context.item (an_id)) as al_m then
+				across al_m.items as ic loop
+					if not Result and then not ic.separator and then ic.id = an_item_id then
+						Result := True
+					end
+				end
+				if Result then
+					push (5, 0, an_item_id, 0, 0)
+				end
+			end
 		end
 
 	snapshot (an_id: INTEGER; a_path: POINTER): BOOLEAN
@@ -990,6 +1169,60 @@ feature {NONE} -- State
 		once ("OBJECT")
 			create Result
 		end
+
+	splitter_info: HASH_TABLE [TUPLE [vertical: BOOLEAN; first, second, pending: INTEGER], INTEGER]
+			-- Each splitter's orientation, panes and a position waiting for a size (-1: none).
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	splitters: HASH_TABLE [SW_SPLITTER, INTEGER]
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	table_rows: HASH_TABLE [ARRAYED_LIST [ARRAY [STRING_32]], INTEGER]
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	tree_roots: HASH_TABLE [ARRAYED_LIST [INTEGER], INTEGER]
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	node_text: HASH_TABLE [STRING_32, INTEGER_64]
+			-- Keyed by `node_key'.
+		once ("OBJECT")
+			create Result.make (32)
+		end
+
+	node_parent: HASH_TABLE [INTEGER, INTEGER_64]
+		once ("OBJECT")
+			create Result.make (32)
+		end
+
+	node_children: HASH_TABLE [ARRAYED_LIST [INTEGER], INTEGER_64]
+		once ("OBJECT")
+			create Result.make (32)
+		end
+
+	context_menus: ARRAYED_LIST [TUPLE [title: STRING_32; items: ARRAYED_LIST [TUPLE [text, shortcut: STRING_32; id, role: INTEGER; separator: BOOLEAN]]]]
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	widget_context: HASH_TABLE [INTEGER, INTEGER]
+			-- Each widget's context menu (its handle's number).
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	Context_base: INTEGER = 100_000
+			-- Context menu handles count from here (bar menus from 1).
+
+	quiet: INTEGER
+			-- Above 0 while the program changes a control: its reports are not queued.
 
 	open_window: detachable GUI_SW_WINDOW
 			-- The native window open now.
@@ -1177,6 +1410,8 @@ feature {NONE} -- Implementation
 		do
 			if menu_index (a_menu) >= 1 and menu_index (a_menu) <= menus.count then
 				Result := menus.i_th (menu_index (a_menu))
+			elseif menu_index (a_menu) > Context_base and menu_index (a_menu) <= Context_base + context_menus.count then
+				Result := context_menus.i_th (menu_index (a_menu) - Context_base)
 			end
 		end
 
@@ -1189,7 +1424,168 @@ feature {NONE} -- Implementation
 					end
 				end
 			end
+			across context_menus as m loop
+				across m.items as ic loop
+					if Result = Void and then not ic.separator and then ic.id = an_item_id then
+						Result := ic
+					end
+				end
+			end
 		end
+
+	report_page (an_id, a_page: INTEGER)
+		do
+			if quiet = 0 then
+				push (13, an_id, a_page, 0, 0)
+			end
+		end
+
+	report_header (an_id, a_column: INTEGER; a_ascending: BOOLEAN)
+		do
+			push (14, an_id, a_column, a_ascending.to_integer, 0)
+		end
+
+	report_table_select (an_id, a_model: INTEGER)
+			-- Selection (4): a = the first selected row.
+		do
+			if quiet = 0 and then attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (an_id) as al_g then
+				if al_g.selected_count > 0 then
+					push (4, an_id, al_g.selected_at (1), 0, 0)
+				else
+					push (4, an_id, 0, 0, 0)
+				end
+			end
+		end
+
+	report_tree_select (an_id, a_node: INTEGER)
+		do
+			if quiet = 0 then
+				push (4, an_id, a_node, 0, 0)
+			end
+		end
+
+	report_expansion (an_id, a_node: INTEGER; a_open: BOOLEAN)
+		do
+			if quiet = 0 then
+				push (15, an_id, a_node, a_open.to_integer, 0)
+			end
+		end
+
+	cells_of (a_joined: STRING_32): ARRAY [STRING_32]
+			-- The cells of a row joined by U+001F.
+		local
+			l_parts: LIST [STRING_32]
+			i: INTEGER
+		do
+			l_parts := a_joined.split ('%/31/')
+			create Result.make_filled ({STRING_32} "", 1, l_parts.count)
+			from i := 1 until i > l_parts.count loop
+				Result.put (l_parts.i_th (i), i)
+				i := i + 1
+			end
+		end
+
+	cell_of (a_row: ARRAY [STRING_32]; a_column: INTEGER): STRING_32
+		do
+			if a_column >= a_row.lower and a_column <= a_row.upper then
+				Result := a_row.item (a_column)
+			else
+				create Result.make_empty
+			end
+		end
+
+	node_key (a_tree, a_node: INTEGER): INTEGER_64
+			-- One key per tree and node.
+		do
+			Result := a_tree.to_integer_64 * 1_000_000_000 + a_node
+		end
+
+	tree_children (a_tree, a_node: INTEGER): ARRAYED_LIST [INTEGER]
+		do
+			if attached node_children.item (node_key (a_tree, a_node)) as al_kids then
+				Result := al_kids.twin
+			else
+				create Result.make (0)
+			end
+		end
+
+	tree_label (a_tree, a_node: INTEGER): STRING_32
+		do
+			if attached node_text.item (node_key (a_tree, a_node)) as al_text then
+				Result := al_text
+			else
+				create Result.make_empty
+			end
+		end
+
+	reveal (a_tree: INTEGER; a_t: SW_TREE [INTEGER]; a_node: INTEGER)
+			-- Open every ancestor of `a_node' (silently).
+		local
+			l_chain: ARRAYED_LIST [INTEGER]
+			k, l_guard: INTEGER
+		do
+			create l_chain.make (4)
+			from
+				k := node_parent.item (node_key (a_tree, a_node))
+			until
+				k = 0 or l_guard > 1000
+			loop
+				l_chain.put_front (k)
+				k := node_parent.item (node_key (a_tree, k))
+				l_guard := l_guard + 1
+			end
+			across l_chain as ic loop
+				a_t.expand_node (ic)
+			end
+		end
+
+	fill_context (a_menu: SW_MENU; a_x, a_y: REAL_64; a_index: INTEGER)
+			-- A right-click: the context menu's items, as they stand now.
+		do
+			if a_index > Context_base and a_index <= Context_base + context_menus.count then
+				across context_menus.i_th (a_index - Context_base).items as ic loop
+					if ic.separator then
+						a_menu.add_separator
+					else
+						a_menu.add_item (ic.text, shortcut_text (ic.shortcut), True, agent push (5, 0, ic.id, 0, 0))
+					end
+				end
+			end
+		end
+
+	splitter_extent (a_sp: SW_SPLITTER): REAL_64
+			-- The length the divider moves along, in device pixels.
+		do
+			if a_sp.is_horizontal then
+				Result := a_sp.height - {SW_SPLITTER}.Divider_w
+			else
+				Result := a_sp.width - {SW_SPLITTER}.Divider_w
+			end
+		end
+
+	apply_pending_positions
+			-- Place every splitter whose position was set before it had a size
+			-- (`last_positions_moved' tells whether one moved).
+		do
+			last_positions_moved := False
+			from
+				splitter_info.start
+			until
+				splitter_info.after
+			loop
+				if splitter_info.item_for_iteration.pending >= 0
+					and then attached splitters.item (splitter_info.key_for_iteration) as al_sp
+					and then splitter_extent (al_sp) > 0.0
+				then
+					al_sp.set_ratio (device (splitter_info.item_for_iteration.pending) / splitter_extent (al_sp))
+					splitter_info.item_for_iteration.pending := -1
+					last_positions_moved := True
+				end
+				splitter_info.forth
+			end
+		end
+
+	last_positions_moved: BOOLEAN
 
 	report_toggle (an_id: INTEGER)
 		do
@@ -1289,10 +1685,15 @@ feature {NONE} -- Implementation
 		end
 
 	changed
-			-- A programmatic change: lay out and draw again.
+			-- A programmatic change: lay out and draw again (and place a splitter whose position
+			-- was set before it had a size).
 		do
 			if attached open_window as al_w and then al_w.is_window_open then
 				al_w.request_render
+				apply_pending_positions
+				if last_positions_moved then
+					al_w.request_render
+				end
 			end
 		end
 
