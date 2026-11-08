@@ -87,7 +87,7 @@ ec.sh test -config simple_gui.ecf -target simple_gui_tests
 ```
 
 **Not yet on Windows** (the shared tests pass; these are what they do not cover):
-- A second window (opened while another is) is a floating document window of the first: it has no menu bar yet, and screen readers do not see it yet.
+- A second window (opened while another is) is a floating document window of the first, with the menu bar like the first; screen readers do not see it yet.
 
 ## Build (macOS)
 

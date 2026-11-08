@@ -1381,16 +1381,27 @@ feature {NONE} -- Implementation
 		end
 
 	float_window (a_window: INTEGER; a_w: GUI_SW_WINDOW; a_owner: GUI_SW_WINDOW)
-			-- Window `a_window' as a floating document window of `a_owner': its content only (a
-			-- floating window shows no popups yet, so no menu bar); its close button reports 6.
+			-- Window `a_window' as a floating document window of `a_owner': the application's
+			-- menu bar above its content, as GTK gives every window (its drop-downs open in
+			-- the floating window, its Edit items act on that window's focus); its close
+			-- button reports 6.
 		local
 			l_root: SW_COLUMN
+			l_bar: SW_MENU_BAR
 			l_f: SW_FLOATING_WINDOW
-			l_w, l_h: INTEGER
+			l_w, l_h, i: INTEGER
 		do
 			create l_root.make
 			l_root.set_padding (0.0)
 			l_root.set_gap (0.0)
+			if not menus.is_empty then
+				create l_bar.make
+				from i := 1 until i > menus.count loop
+					l_bar.add_menu (menus.i_th (i).title, agent build_float_menu (i, a_window, a_owner))
+					i := i + 1
+				end
+				l_root.put (l_bar)
+			end
 			if window_content.has (a_window) and then attached widget (window_content.item (a_window)) as al_content then
 				al_content.set_grow (1.0)
 				l_root.put (al_content)
@@ -1406,6 +1417,17 @@ feature {NONE} -- Implementation
 				floats.force (l_f, a_window)
 				l_f.set_on_close_request (agent push (6, a_window, 0, 0, 0))
 				changed
+			end
+		end
+
+	build_float_menu (a_index, a_window: INTEGER; a_owner: GUI_SW_WINDOW): SW_MENU
+			-- Menu `a_index' for floating window `a_window''s menu bar: its Edit items act on that
+			-- window's focus (on `a_owner''s if it has closed meanwhile).
+		do
+			if attached floats.item (a_window) as al_f then
+				Result := build_menu (a_index, al_f)
+			else
+				Result := build_menu (a_index, a_owner)
 			end
 		end
 
@@ -1438,9 +1460,10 @@ feature {NONE} -- Implementation
 			a_w.set_root (l_root)
 		end
 
-	build_menu (a_index: INTEGER; a_w: GUI_SW_WINDOW): SW_MENU
+	build_menu (a_index: INTEGER; a_w: SW_POINTER_ROUTING): SW_MENU
 			-- Menu `a_index' as it stands now: items report event 5; edit roles act on the
-			-- focused widget and gray when it cannot act.
+			-- widget focused in `a_w' (the window the menu bar is in) and gray when it
+			-- cannot act.
 		local
 			l_hint: STRING_32
 		do
