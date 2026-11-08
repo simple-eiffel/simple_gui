@@ -158,9 +158,10 @@ feature -- Tests
 			l_stack: GUI_STACK
 			l_field: GUI_TEXT_FIELD
 			l_button: GUI_BUTTON
+			l_list: GUI_LIST
 			l_tree: STRING_32
 		do
-			create l_window.make ("Accessibility", 320, 200)
+			create l_window.make ("Accessibility", 320, 260)
 			create l_stack.make_vertical
 			create l_field.make
 			l_field.set_placeholder ("Your name")
@@ -168,6 +169,12 @@ feature -- Tests
 			create l_button.make ("Save")
 			l_stack.extend (l_field)
 			l_stack.extend (l_button)
+				-- A list with rows: the walk meets elements that answer only the older
+				-- accessibility API (found by simple_graph_calc on macOS).
+			create l_list.make
+			l_list.extend ("Genesis")
+			l_list.extend ("Exodus")
+			l_stack.extend_stretching (l_list)
 			l_window.set_content (l_stack)
 			l_window.show
 			settle_window
@@ -176,6 +183,7 @@ feature -- Tests
 			assert ("button read", l_tree.has_substring ("button: Save"))
 			assert ("field labelled, not by placeholder", l_tree.has_substring ("text-box: Name"))
 			assert ("field label query", l_field.accessible_label.same_string ("Name"))
+			assert ("list read", l_tree.has_substring ("list:"))
 			l_window.close
 		end
 
