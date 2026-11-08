@@ -11,28 +11,37 @@ Native GUI for Eiffel: write the program once, and it **is and looks native** on
 ## Example
 
 ```eiffel
+class GREETER create make
+feature
+	app: GUI_APPLICATION
+	field: GUI_TEXT_FIELD
+
 	make
 		local
-			l_app: GUI_APPLICATION
 			l_window: GUI_WINDOW
 			l_stack: GUI_STACK
-			l_field: GUI_TEXT_FIELD
 			l_button: GUI_BUTTON
 		do
-			create l_app.make ("Greeter", "org.simple-eiffel.greeter")
+			create app.make ("Greeter", "org.simple-eiffel.greeter")
 			create l_window.make ("Greeter", 360, 160)
 			create l_stack.make_vertical
-			create l_field.make
-			l_field.set_accessible_label ("Name")
-			l_field.set_placeholder ("Your name")
+			create field.make
+			field.set_accessible_label ("Name")
+			field.set_placeholder ("Your name")
 			create l_button.make ("Greet")
-			l_button.click_actions.extend (agent l_app.dialogs.inform ("Hello", l_field.text))
-			l_stack.extend (l_field)
+			l_button.click_actions.extend (agent greet)
+			l_stack.extend (field)
 			l_stack.extend (l_button)
 			l_window.set_content (l_stack)
 			l_window.show
-			l_app.run
+			app.run
 		end
+
+	greet
+		do
+			app.dialogs.inform ("Hello", field.text)
+		end
+end
 ```
 
 ## Rules the API keeps
