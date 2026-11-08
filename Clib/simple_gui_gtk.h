@@ -139,6 +139,8 @@ static void sg_bar_items(GMenuModel *m, int pos, int removed, int added, gpointe
 }
 static void sg_window_set_content(int win, int child) {
     GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    /* Positions (sg_x, sg_y) are measured from the content's top-left: no title bar, no menu bar. */
+    g_object_set_data(G_OBJECT(sg_w[win]), "sg-content", sg_w[child]);
     GtkWidget *bar = gtk_popover_menu_bar_new_from_model(G_MENU_MODEL(sg_menubar));
     /* The bar follows the application's menu model: hidden while it is empty. */
     gtk_widget_set_visible(bar, g_menu_model_get_n_items(G_MENU_MODEL(sg_menubar)) > 0);
@@ -316,6 +318,86 @@ static int sg_check_box_is_checked(int id) { return gtk_check_button_get_active(
 static void sg_check_box_set_text(int id, const char *t) { gtk_check_button_set_label(GTK_CHECK_BUTTON(sg_w[id]), t); }
 static const char *sg_check_box_text(int id) { const char *s = gtk_check_button_get_label(GTK_CHECK_BUTTON(sg_w[id])); return s ? s : ""; }
 
+/* ---------- text area (kind 10; event 2 on change) ---------- */
+
+__attribute__((weak)) char *sg_text_buf = NULL;
+static void sg_on_buffer_changed(GtkTextBuffer *b, gpointer d) { (void) b; if (!sg_quiet) sg_push(2, GPOINTER_TO_INT(d), 0, 0); }
+static int sg_text_area(void) {
+    GtkWidget *view = gtk_text_view_new();
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    int id;
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(view), GTK_WRAP_WORD_CHAR);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), view);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 80);
+    gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(scroll), TRUE);
+    id = sg_reg(scroll, 10);
+    g_object_set_data(G_OBJECT(scroll), "sg-view", view);
+    g_object_set_data(G_OBJECT(view), "sg-id", GINT_TO_POINTER(id));
+    g_signal_connect(gtk_text_view_get_buffer(GTK_TEXT_VIEW(view)), "changed", G_CALLBACK(sg_on_buffer_changed), GINT_TO_POINTER(id));
+    return id;
+}
+static GtkTextView *sg_view_of(int id) { return GTK_TEXT_VIEW(g_object_get_data(G_OBJECT(sg_w[id]), "sg-view")); }
+static void sg_text_area_set(int id, const char *t) { sg_quiet++; gtk_text_buffer_set_text(gtk_text_view_get_buffer(sg_view_of(id)), t, -1); sg_quiet--; }
+static const char *sg_text_area_get(int id) {
+    GtkTextBuffer *b = gtk_text_view_get_buffer(sg_view_of(id));
+    GtkTextIter s, e;
+    gtk_text_buffer_get_bounds(b, &s, &e);
+    g_free(sg_text_buf);
+    sg_text_buf = gtk_text_buffer_get_text(b, &s, &e, FALSE);
+    return sg_text_buf;
+}
+static void sg_text_area_set_read_only(int id, int on) {
+    gtk_text_view_set_editable(sg_view_of(id), on ? FALSE : TRUE);
+    gtk_text_view_set_cursor_visible(sg_view_of(id), on ? FALSE : TRUE);
+}
+
+/* ---------- system colours (0xRRGGBB) ---------- */
+
+static int sg_is_dark(void);
+
+/* role: 1 window background, 2 text, 3 secondary text, 4 accent, 5 selection, 6 separator.
+   Read from the theme's named colours (Adwaita defines them); a fallback if a theme lacks one. */
+static int sg_system_color(int role) {
+    static const char *names[7][2] = {
+        {NULL, NULL}, {"window_bg_color", "theme_bg_color"}, {"window_fg_color", "theme_fg_color"},
+        {"insensitive_fg_color", "unfocused_insensitive_color"}, {"accent_bg_color", "theme_selected_bg_color"},
+        {"theme_selected_bg_color", "accent_bg_color"}, {"borders", "unfocused_borders"}};
+    GtkWidget *probe = NULL;
+    GtkStyleContext *ctx;
+    GdkRGBA c;
+    int i, found = 0, dark;
+    if (role < 1 || role > 6) return 0;
+    for (i = 1; i < sg_n && !probe; i++) if (sg_kind[i] == 1 && sg_w[i]) probe = sg_w[i];
+    if (!probe) return 0;
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    ctx = gtk_widget_get_style_context(probe);
+    for (i = 0; i < 2 && !found; i++) found = gtk_style_context_lookup_color(ctx, names[role][i], &c);
+G_GNUC_END_IGNORE_DEPRECATIONS
+    if (found)
+        return ((int) (c.red * 255.0 + 0.5) << 16) | ((int) (c.green * 255.0 + 0.5) << 8) | (int) (c.blue * 255.0 + 0.5);
+    dark = sg_is_dark();
+    switch (role) {
+        case 1: return dark ? 0x242424 : 0xFAFAFA;
+        case 2: return dark ? 0xFFFFFF : 0x1E1E1E;
+        case 3: return dark ? 0x9A9A9A : 0x6A6A6A;
+        case 6: return dark ? 0x3A3A3A : 0xD0D0D0;
+        default: return 0x3584E4;
+    }
+}
+
+/* ---------- position in the window's content (logical pixels, y down) ---------- */
+
+static int sg_point(int id, int want_y) {
+    GtkWidget *w = sg_w[id];
+    GtkRoot *root = gtk_widget_get_root(w);
+    GtkWidget *content = root ? g_object_get_data(G_OBJECT(root), "sg-content") : NULL;
+    graphene_point_t src = GRAPHENE_POINT_INIT(0, 0), dst;
+    if (!content || !gtk_widget_compute_point(w, content, &src, &dst)) return 0;
+    return (int) (want_y ? dst.y : dst.x);
+}
+static int sg_x(int id) { return sg_point(id, 0); }
+static int sg_y(int id) { return sg_point(id, 1); }
+
 /* ---------- common widget state ---------- */
 
 static void sg_set_enabled(int id, int on) { gtk_widget_set_sensitive(sg_w[id], on ? TRUE : FALSE); }
@@ -451,8 +533,22 @@ static void sg_remember_item(int item_id, GMenu *m, int pos, const char *action,
     g_free(sg_item_accel[item_id]); sg_item_accel[item_id] = (accel && *accel) ? g_strdup(accel) : NULL;
 }
 
+/* An item relabel rebuilds a submenu's rows with direction NONE (MACMINI, #12 review):
+   after the popover has rebuilt them, give every window's bar its direction again. */
+static void sg_submenu_items(GMenuModel *m, int pos, int removed, int added, gpointer d) {
+    int i;
+    (void) m; (void) pos; (void) removed; (void) added; (void) d;
+    for (i = 1; i < sg_n; i++) {
+        if (sg_kind[i] == 1 && sg_w[i]) {
+            GtkWidget *bar = g_object_get_data(G_OBJECT(sg_w[i]), "sg-bar");
+            int dir = bar ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(bar), "sg-dir")) : 0;
+            if (dir) sg_direction_tree(bar, (GtkTextDirection) dir);
+        }
+    }
+}
 static void *sg_menu_new(const char *title) {   /* menus live at application level, as the spec says */
     GMenu *m = g_menu_new();
+    g_signal_connect_after(m, "items-changed", G_CALLBACK(sg_submenu_items), NULL);
     g_object_set_data(G_OBJECT(m), "sg-index", GINT_TO_POINTER(g_menu_model_get_n_items(G_MENU_MODEL(sg_menubar))));
     g_menu_append_submenu(sg_menubar, title, G_MENU_MODEL(m));
     return m;
@@ -561,9 +657,15 @@ static void sg_menu_add_edit_role(void *menu, const char *text, int role, int it
 /* ---------- accessibility description (what GTK exposes, walked from the window) ---------- */
 
 __attribute__((weak)) GString *sg_describe_buf = NULL;
+/* The widget a screen reader meets: a text area's view, not its scrolled window. */
+static GtkWidget *sg_a11y_target(int id) {
+    GtkWidget *v = g_object_get_data(G_OBJECT(sg_w[id]), "sg-view");
+    return v ? v : sg_w[id];
+}
 static void sg_set_a11y_label(int id, const char *text) {
-    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-a11y", g_strdup(text), g_free);
-    gtk_accessible_update_property(GTK_ACCESSIBLE(sg_w[id]), GTK_ACCESSIBLE_PROPERTY_LABEL, text, -1);
+    GtkWidget *w = sg_a11y_target(id);
+    g_object_set_data_full(G_OBJECT(w), "sg-a11y", g_strdup(text), g_free);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(w), GTK_ACCESSIBLE_PROPERTY_LABEL, text, -1);
 }
 static const char *sg_role_nick(GtkWidget *w) {
     GtkAccessibleRole r = gtk_accessible_get_accessible_role(GTK_ACCESSIBLE(w));
@@ -681,7 +783,11 @@ static void sg_test_click(int id) {
     if (sg_kind[id] == 9) gtk_check_button_set_active(GTK_CHECK_BUTTON(sg_w[id]), !gtk_check_button_get_active(GTK_CHECK_BUTTON(sg_w[id])));
     else g_signal_emit_by_name(sg_w[id], "clicked");
 }
-static void sg_test_type(int id, const char *t) { gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), t); }   /* emits, like a user */
+static void sg_test_type(int id, const char *t) {   /* emits, like a user */
+    GtkWidget *v = g_object_get_data(G_OBJECT(sg_w[id]), "sg-view");
+    if (v) gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(v)), t, -1);
+    else gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), t);
+}
 static void sg_test_choose(int id, int row) {
     GtkListBoxRow *r = gtk_list_box_get_row_at_index(sg_list_box(id), row - 1);
     if (r) gtk_list_box_select_row(sg_list_box(id), r);

@@ -10,6 +10,7 @@ note
 		| 7 pointer (a = x, b = y, c = kind + buttons << 4 + modifiers << 8)
 		| 8 key (a = key code, b = character, c = modifiers << 8) | 9 resize (a, b)
 		| 10 appearance (a = 1 dark) | 11 wake | 12 toggled (a = 1 checked).
+		Text areas report text changed (2) like fields.
 
 		Menu roles: 0 none | 1 about | 2 settings | 3 quit | 10 undo | 11 redo | 12 cut
 		| 13 copy | 14 paste | 15 select all. A backend places role items where its
@@ -232,6 +233,25 @@ feature -- Controls
 		deferred
 		end
 
+	text_area: INTEGER
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	text_area_set (an_id: INTEGER; a_text: POINTER)
+			-- Set the text WITHOUT a text-changed event.
+		deferred
+		end
+
+	text_area_get (an_id: INTEGER): POINTER
+		deferred
+		end
+
+	text_area_set_read_only (an_id: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
 	list: INTEGER
 		deferred
 		ensure
@@ -290,6 +310,18 @@ feature -- Common widget state
 		end
 
 	set_accessible_description (an_id: INTEGER; a_text: POINTER)
+		deferred
+		end
+
+	widget_x (an_id: INTEGER): INTEGER
+			-- Left edge of `an_id''s own frame, from the top-left of its window's content area
+			-- (no title bar, no menu bar), logical pixels, after layout. For a container, its
+			-- inner stack or grid (margins excluded).
+		deferred
+		end
+
+	widget_y (an_id: INTEGER): INTEGER
+			-- Top edge, measured like `widget_x', y growing downward.
 		deferred
 		end
 
@@ -388,6 +420,16 @@ feature -- Appearance
 
 	is_dark: BOOLEAN
 		deferred
+		end
+
+	system_color (a_role: INTEGER): INTEGER
+			-- The theme's colour as 0xRRGGBB: 1 window background, 2 text, 3 secondary text,
+			-- 4 accent, 5 selection, 6 separator. It follows the light or dark appearance.
+		require
+			known: a_role >= 1 and a_role <= 6
+		deferred
+		ensure
+			rgb: Result >= 0 and Result <= 0xFFFFFF
 		end
 
 	set_dark (a_on: BOOLEAN)

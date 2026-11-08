@@ -44,6 +44,18 @@ feature -- Status
 			Result := backend.height (id)
 		end
 
+	x: INTEGER
+			-- Left edge in the window's content area (logical pixels; no title or menu bar).
+		do
+			Result := backend.widget_x (id)
+		end
+
+	y: INTEGER
+			-- Top edge in the window's content area, growing downward.
+		do
+			Result := backend.widget_y (id)
+		end
+
 feature -- Status setting
 
 	enable

@@ -213,6 +213,26 @@ feature -- Controls
 		alias "return (EIF_POINTER) sg_check_box_text($an_id);"
 		end
 
+	text_area: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_text_area();"
+		end
+
+	text_area_set (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_text_area_set($an_id, (const char *) $a_text);"
+		end
+
+	text_area_get (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_text_area_get($an_id);"
+		end
+
+	text_area_set_read_only (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_text_area_set_read_only($an_id, $a_on ? 1 : 0);"
+		end
+
 	list: INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_list();"
@@ -273,6 +293,16 @@ feature -- Common widget state
 	set_accessible_description (an_id: INTEGER; a_text: POINTER)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_set_description_a11y($an_id, (const char *) $a_text);"
+		end
+
+	widget_x (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_x($an_id);"
+		end
+
+	widget_y (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_y($an_id);"
 		end
 
 	accessible_role (an_id: INTEGER): POINTER
@@ -367,6 +397,11 @@ feature -- Appearance
 	is_dark: BOOLEAN
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_is_dark() ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	system_color (a_role: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_system_color($a_role);"
 		end
 
 	set_dark (a_on: BOOLEAN)
