@@ -309,7 +309,7 @@ static int sg_list_selected(int id) {
    changes) sends 14 (a = column). Every column has a sorter that keeps the order, so GTK
    shows the indicator while the program does the sorting; the indicator is set from code
    under sg_quiet. (First pass by MACMINI, untested on GTK.) ---------- */
-static char *sg_field(const char *joined, int k) {   /* field k (0-based), newly allocated */
+static char *sg_row_field(const char *joined, int k) {   /* field k (0-based), newly allocated */
     gchar **f = g_strsplit(joined, "\x1f", -1);
     char *r = g_strdup((guint) k < g_strv_length(f) ? f[k] : "");
     g_strfreev(f);
@@ -324,7 +324,7 @@ static void sg_cell_setup(GtkSignalListItemFactory *fa, GtkListItem *it, gpointe
 }
 static void sg_cell_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
     GtkStringObject *o = GTK_STRING_OBJECT(gtk_list_item_get_item(it));
-    char *v = sg_field(gtk_string_object_get_string(o), GPOINTER_TO_INT(d));
+    char *v = sg_row_field(gtk_string_object_get_string(o), GPOINTER_TO_INT(d));
     (void) fa;
     gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(it)), v);
     g_free(v);
@@ -896,6 +896,23 @@ static const char *sg_role_nick(GtkWidget *w) {
     g_type_class_unref(k);
     return nick;
 }
+/* The text of the first label below `w' (depth first), or NULL. */
+static const char *sg_first_label_text(GtkWidget *w) {
+    GtkWidget *c;
+    for (c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) {
+        const char *s = GTK_IS_LABEL(c) ? gtk_label_get_text(GTK_LABEL(c)) : sg_first_label_text(c);
+        if (s && *s) return s;
+    }
+    return NULL;
+}
+/* ARIA's "name from content" roles: with no name of their own, a screen reader reads their text. */
+static int sg_named_from_content(const char *role) {
+    static const char *roles[] = {"tab", "column-header", "row-header", "grid-cell", "cell",
+        "tree-item", "list-item", "row", "menu-item", NULL};
+    int i;
+    for (i = 0; roles[i]; i++) if (!strcmp(role, roles[i])) return 1;
+    return 0;
+}
 static void sg_describe_walk(GtkWidget *w, int depth) {
     GtkWidget *c;
     const char *role = sg_role_nick(w);
@@ -903,6 +920,7 @@ static void sg_describe_walk(GtkWidget *w, int depth) {
     if (!name && GTK_IS_LABEL(w)) name = gtk_label_get_text(GTK_LABEL(w));
     if (!name && GTK_IS_BUTTON(w)) name = gtk_button_get_label(GTK_BUTTON(w));
     if (!name && GTK_IS_CHECK_BUTTON(w)) name = gtk_check_button_get_label(GTK_CHECK_BUTTON(w));
+    if (!name && sg_named_from_content(role)) name = sg_first_label_text(w);
     if (strcmp(role, "generic") && strcmp(role, "none") && strcmp(role, "presentation")) {
         int i; for (i = 0; i < depth; i++) g_string_append(sg_describe_buf, "  ");
         g_string_append_printf(sg_describe_buf, "%s: %s\n", role, name ? name : "");
