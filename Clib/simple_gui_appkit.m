@@ -60,7 +60,7 @@ static int sga_id_of(id a_object)
 static NSString *sga_string(const char *a_text) { return [NSString stringWithUTF8String:a_text ? a_text : ""] ?: @""; }
 
 /* Returned strings stay valid until the next call of the same kind. */
-enum { Kind_label, Kind_button, Kind_field, Kind_role, Kind_path, Kind_tree, Kind_check, Kind_menu, Kind_count };
+enum { Kind_label, Kind_button, Kind_field, Kind_role, Kind_path, Kind_tree, Kind_check, Kind_menu, Kind_area, Kind_count };
 static NSString *s_returned[Kind_count];
 static const char *sga_return(int a_kind, NSString *a_text)
 {
@@ -198,6 +198,7 @@ static int s_setting_dark;
 - (void)menuItem:(NSMenuItem *)a_item { sga_push(5, 0, (int)[a_item tag], 0, 0); }
 - (void)toggled:(NSButton *)a_box { sga_push(12, sga_id_of(a_box), [a_box state] == NSControlStateValueOn ? 1 : 0, 0, 0); }
 - (void)controlTextDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
+- (void)textDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
 - (NSMutableArray<NSString *> *)rowsOf:(NSTableView *)t { return rows[[NSValue valueWithNonretainedObject:t]]; }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)t { return (NSInteger)[[self rowsOf:t] count]; }
 - (NSView *)tableView:(NSTableView *)t viewForTableColumn:(NSTableColumn *)c row:(NSInteger)r
@@ -737,6 +738,40 @@ int sga_field(void)
 	return sga_keep(f);
 }
 
+/* A text area: an NSTextView in a bordered scroll view. The scroll view is the widget (it is
+   what a stack places and what x/y measure); the text view is its core, so the accessible
+   label and the role are the text view's. Typing sends text changed (2); setting the text
+   from code sends nothing (AppKit sends textDidChange only for the user's edits). */
+int sga_text_area(void)
+{
+	NSScrollView *l_scroll = [NSTextView scrollableTextView];
+	NSTextView *t = [l_scroll documentView];
+	[l_scroll setBorderType:NSBezelBorder];
+	[l_scroll setHasVerticalScroller:YES];
+	[l_scroll setAutohidesScrollers:YES];
+	[t setFont:[NSFont systemFontOfSize:0]];
+	[t setRichText:NO];
+	[t setAllowsUndo:YES];
+	[t setAutomaticQuoteSubstitutionEnabled:NO];
+	[t setAutomaticDashSubstitutionEnabled:NO];
+	[t setDelegate:(id<NSTextViewDelegate>)s_target];
+	/* No natural height of its own: ask for a few lines, weakly, so a stack can give it more. */
+	NSLayoutConstraint *k = [l_scroll.heightAnchor constraintGreaterThanOrEqualToConstant:64];
+	[k setPriority:NSLayoutPriorityDefaultHigh];
+	[k setActive:YES];
+	int l_id = sga_keep(l_scroll);
+	s_inner[l_id] = t;
+	return l_id;
+}
+void sga_text_area_set(int a_id, const char *a_text)
+{
+	s_suppress++;
+	[(NSTextView *)sga_core(a_id) setString:sga_string(a_text)];
+	s_suppress--;
+}
+const char *sga_text_area_get(int a_id) { return sga_return(Kind_area, [(NSTextView *)sga_core(a_id) string]); }
+void sga_text_area_set_read_only(int a_id, int a_on) { [(NSTextView *)sga_core(a_id) setEditable:a_on == 0]; }
+
 void sga_field_set(int a_id, const char *a_text)
 {
 	s_suppress++;
@@ -845,6 +880,12 @@ void sga_set_direction(int a_id, int a_direction)
 		/* In a stack, the child is placed in its slot by the child's own direction. */
 		SGASlot *l_slot = sga_slot_of(v);
 		if (l_slot) { [l_slot setUserInterfaceLayoutDirection:l_layout]; sga_place(l_slot, l_slot->alignment); }
+	}
+	if ([l_core isKindOfClass:[NSTextView class]]) {
+		NSTextView *t = (NSTextView *)l_core;
+		[t setBaseWritingDirection:a_direction == 2 ? NSWritingDirectionRightToLeft
+			: a_direction == 1 ? NSWritingDirectionLeftToRight : NSWritingDirectionNatural];
+		[t setAlignment:NSTextAlignmentNatural];
 	}
 	if ([l_core isKindOfClass:[NSTextField class]]) {
 		NSTextField *f = (NSTextField *)l_core;
@@ -1146,13 +1187,67 @@ void sga_set_dark(int a_on)
 	sga_push(10, 0, sga_is_dark(), 0, 0);
 }
 
+/* The theme's colours as 0xRRGGBB, resolved in the application's current appearance. A
+   translucent colour (text and separators are) is given as it looks over the window
+   background, which is how it is seen. */
+static void sga_rgb(NSColor *a_color, CGFloat *r, CGFloat *g, CGFloat *b, CGFloat *a)
+{
+	NSColor *c = [a_color colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
+	*r = [c redComponent]; *g = [c greenComponent]; *b = [c blueComponent]; *a = [c alphaComponent];
+}
+int sga_system_color(int a_role)
+{
+	__block int l_result = 0;
+	[[NSApp effectiveAppearance] performAsCurrentDrawingAppearance:^{
+		NSColor *l_color;
+		switch (a_role) {
+			case 1: l_color = [NSColor windowBackgroundColor]; break;
+			case 2: l_color = [NSColor labelColor]; break;
+			case 3: l_color = [NSColor secondaryLabelColor]; break;
+			case 4: l_color = [NSColor controlAccentColor]; break;
+			case 5: l_color = [NSColor selectedContentBackgroundColor]; break;
+			default: l_color = [NSColor separatorColor]; break;
+		}
+		CGFloat r, g, b, a, br, bg, bb, ba;
+		sga_rgb(l_color, &r, &g, &b, &a);
+		sga_rgb([NSColor windowBackgroundColor], &br, &bg, &bb, &ba);
+		r = r * a + br * (1 - a); g = g * a + bg * (1 - a); b = b * a + bb * (1 - a);
+		l_result = ((int)lround(r * 255) << 16) | ((int)lround(g * 255) << 8) | (int)lround(b * 255);
+	}];
+	return l_result;
+}
+
+/* Where a widget is: its own frame (a container's inner stack or grid, margins excluded),
+   from the top-left of its window's content area, y down, in points, after layout. */
+static NSRect sga_frame_in_window(int a_id)
+{
+	NSView *v = s_margins[a_id][0] ? s_inner[a_id] : sga_get(a_id);
+	NSView *l_content = [[v window] contentView];
+	if (!l_content) return NSZeroRect;
+	[l_content layoutSubtreeIfNeeded];
+	NSRect r = [v convertRect:[v bounds] toView:l_content];
+	if (![l_content isFlipped]) r.origin.y = [l_content bounds].size.height - NSMaxY(r);
+	return r;
+}
+int sga_widget_x(int a_id) { return (int)lround(sga_frame_in_window(a_id).origin.x); }
+int sga_widget_y(int a_id) { return (int)lround(sga_frame_in_window(a_id).origin.y); }
+
 /* ------------------------------------------------------------ test driver */
 
 void sga_test_click(int a_id) { [(NSButton *)sga_core(a_id) performClick:nil]; }
 
 void sga_test_type(int a_id, const char *a_text)
 {
-	NSTextField *f = sga_core(a_id);
+	id o = sga_core(a_id);
+	if ([o isKindOfClass:[NSTextView class]]) {
+		/* As a user: replace everything through the text system, which sends textDidChange. */
+		NSTextView *t = o;
+		NSRange l_all = NSMakeRange(0, [[t string] length]);
+		[t setSelectedRange:l_all];
+		[t insertText:sga_string(a_text) replacementRange:l_all];
+		return;
+	}
+	NSTextField *f = o;
 	[f setStringValue:sga_string(a_text)];
 	[[NSNotificationCenter defaultCenter] postNotificationName:NSControlTextDidChangeNotification object:f];
 }

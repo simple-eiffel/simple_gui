@@ -213,6 +213,27 @@ feature -- Controls
 		alias "sga_field_set_placeholder($an_id, (const char *) $a_text);"
 		end
 
+	text_area: INTEGER
+			-- An NSTextView in a scroll view; the label and role are the text view's.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_text_area();"
+		end
+
+	text_area_set (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_text_area_set($an_id, (const char *) $a_text);"
+		end
+
+	text_area_get (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_text_area_get($an_id);"
+		end
+
+	text_area_set_read_only (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_text_area_set_read_only($an_id, $a_on ? 1 : 0);"
+		end
+
 	list: INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_list();"
@@ -273,6 +294,16 @@ feature -- Common widget state
 	set_accessible_description (an_id: INTEGER; a_text: POINTER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_set_accessible_description($an_id, (const char *) $a_text);"
+		end
+
+	widget_x (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_widget_x($an_id);"
+		end
+
+	widget_y (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_widget_y($an_id);"
 		end
 
 	accessible_role (an_id: INTEGER): POINTER
@@ -364,6 +395,13 @@ feature -- Appearance
 	is_dark: BOOLEAN
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_is_dark() ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	system_color (a_role: INTEGER): INTEGER
+			-- NSColor's semantic colours in the current appearance; translucent ones as seen
+			-- over the window background.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_system_color($a_role);"
 		end
 
 	set_dark (a_on: BOOLEAN)

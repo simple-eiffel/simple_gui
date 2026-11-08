@@ -58,6 +58,10 @@ void sga_check_box_set(int a_id, int a_on);   /* no event */
 int sga_check_box_is_checked(int a_id);
 void sga_check_box_set_text(int a_id, const char *a_text);
 const char *sga_check_box_text(int a_id);
+int sga_text_area(void);
+void sga_text_area_set(int a_id, const char *a_text);   /* no event */
+const char *sga_text_area_get(int a_id);
+void sga_text_area_set_read_only(int a_id, int a_on);
 int sga_list(void);
 void sga_list_extend(int a_id, const char *a_text);
 void sga_list_wipe_out(int a_id);
@@ -73,6 +77,8 @@ void sga_set_direction(int a_id, int a_direction);   /* 0 auto, 1 left to right,
 void sga_set_accessible_label(int a_id, const char *a_text);
 void sga_set_accessible_description(int a_id, const char *a_text);
 const char *sga_accessible_role(int a_id);
+int sga_widget_x(int a_id);   /* own frame, from the content area's top-left, y down, points, after layout */
+int sga_widget_y(int a_id);
 
 /* Canvas */
 int sga_canvas(int a_width, int a_height);
@@ -98,6 +104,7 @@ int sga_message(int a_window, const char *a_title, const char *a_text, int a_con
 /* Appearance */
 int sga_is_dark(void);
 void sga_set_dark(int a_on);
+int sga_system_color(int a_role);   /* 0xRRGGBB: 1 window background, 2 text, 3 secondary text, 4 accent, 5 selection, 6 separator */
 
 /* Test driver */
 void sga_test_click(int a_id);
