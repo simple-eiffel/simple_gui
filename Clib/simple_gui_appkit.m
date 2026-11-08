@@ -77,6 +77,33 @@ static int sga_modifiers(NSEventModifierFlags a_flags)
 	return m;
 }
 
+/* A key as a GDK key value, the shared vocabulary (SIMPLE_GUI_SPEC.md): named keys
+   by their GDK values, anything else by the character it types. */
+static int sga_gdk_key(NSEvent *e)
+{
+	NSString *s = [e charactersIgnoringModifiers];
+	unichar k = [s length] ? [s characterAtIndex:0] : 0;
+	switch (k) {
+		case NSLeftArrowFunctionKey: return 0xff51;
+		case NSUpArrowFunctionKey: return 0xff52;
+		case NSRightArrowFunctionKey: return 0xff53;
+		case NSDownArrowFunctionKey: return 0xff54;
+		case NSHomeFunctionKey: return 0xff50;
+		case NSPageUpFunctionKey: return 0xff55;
+		case NSPageDownFunctionKey: return 0xff56;
+		case NSEndFunctionKey: return 0xff57;
+		case NSDeleteFunctionKey: return 0xffff;
+		case 0x7f: return 0xff08;          /* the Mac's delete key is BackSpace */
+		case '\r': case 0x03: return 0xff0d;   /* Return, and Enter on the keypad */
+		case '\t': case 0x19: return 0xff09;
+		case 0x1b: return 0xff1b;
+	}
+	if (k >= NSF1FunctionKey && k <= NSF12FunctionKey) return 0xffbe + (k - NSF1FunctionKey);
+	/* Letters and digits as the character typed, shift included, as GDK reports them. */
+	s = [e characters];
+	return [s length] ? (int)[s characterAtIndex:0] : (int)k;
+}
+
 /* ------------------------------------------------------------------ views */
 
 @interface SGAContent : NSView
@@ -139,7 +166,9 @@ static int sga_modifiers(NSEventModifierFlags a_flags)
 - (void)keyDown:(NSEvent *)e
 {
 	NSString *s = [e characters];
-	sga_push(8, sga_id_of(self), [e keyCode], [s length] ? [s characterAtIndex:0] : 0, sga_modifiers([e modifierFlags]) * 256);
+	unichar l_char = [s length] ? [s characterAtIndex:0] : 0;
+	sga_push(8, sga_id_of(self), sga_gdk_key(e), (l_char >= 0xF700 && l_char <= 0xF8FF) ? 0 : l_char,
+		sga_modifiers([e modifierFlags]) * 256);
 }
 - (void)setFrameSize:(NSSize)a_size
 {
