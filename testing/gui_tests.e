@@ -303,6 +303,34 @@ feature -- Tests
 			l_window.close
 		end
 
+	test_small_window_grows_to_fit
+			-- A window asked to be smaller than its content opens large enough to show all of
+			-- it, as GTK and AppKit open a window at its content's natural size.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_last: GUI_BUTTON
+			i: INTEGER
+		do
+			create l_window.make ("Grows", 160, 60)
+			create l_stack.make_vertical
+			from i := 1 until i > 5 loop
+				l_stack.extend (create {GUI_BUTTON}.make ("Button number " + i.out))
+				i := i + 1
+			end
+			create l_last.make ("Button number 6")
+			l_stack.extend (l_last)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("taller than asked: " + l_window.height.out, l_window.height > 60)
+			assert ("the last button is inside: " + (l_last.y + l_last.height).out + " of " + l_window.height.out,
+				l_last.y + l_last.height <= l_window.height)
+			assert ("wide enough for the buttons: " + l_last.width.out + " of " + l_window.width.out,
+				l_last.x + l_last.width <= l_window.width)
+			l_window.close
+		end
+
 	test_wrapping_label_grows_taller
 			-- A long label wraps when given a width in characters; otherwise it stays one line.
 		local

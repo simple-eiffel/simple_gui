@@ -55,6 +55,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_right_to_left_keeps_numbering, "right_to_left_keeps_numbering")
 				run_test (agent t.test_tree, "tree")
 				run_test (agent t.test_positions_mirror, "positions_mirror")
+				run_test (agent t.test_small_window_grows_to_fit, "small_window_grows_to_fit")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
