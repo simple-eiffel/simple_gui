@@ -40,6 +40,7 @@ void sga_grid_set_spacing(int a_grid, int a_row_gap, int a_column_gap);
 /* Controls */
 int sga_label(const char *a_text);
 void sga_label_set(int a_id, const char *a_text);
+void sga_label_set_wrap_width(int a_id, int a_characters);   /* > 0: wrap at about that many characters; 0: one line ending in an ellipsis */
 const char *sga_label_get(int a_id);
 int sga_button(const char *a_text);
 void sga_button_set(int a_id, const char *a_text);
