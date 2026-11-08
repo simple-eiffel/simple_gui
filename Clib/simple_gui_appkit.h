@@ -83,7 +83,8 @@ int sga_widget_y(int a_id);
 /* Canvas */
 int sga_canvas(int a_width, int a_height);
 void sga_canvas_present(int a_id, void *a_cairo_surface);
-int sga_scale_factor(int a_id);
+double sga_scale(int a_id);   /* device pixels per point */
+int sga_scale_factor(int a_id);   /* sga_scale rounded up */
 int sga_width(int a_id);
 int sga_height(int a_id);
 
