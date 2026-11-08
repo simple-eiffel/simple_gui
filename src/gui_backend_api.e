@@ -484,6 +484,17 @@ feature -- Menus
 		deferred
 		end
 
+	context_menu_new: POINTER
+			-- A menu that is not in the menu bar, for `widget_set_context_menu'; items are added to
+			-- it like any menu's and send menu events (5).
+		deferred
+		end
+
+	widget_set_context_menu (an_id: INTEGER; a_menu: POINTER)
+			-- Show `a_menu' on a secondary click on widget `an_id'.
+		deferred
+		end
+
 feature -- Dialogs
 
 	open_file (a_window: INTEGER; a_title: POINTER; a_save: BOOLEAN; an_extensions: POINTER): POINTER
@@ -545,6 +556,12 @@ feature -- Test driver
 
 	test_request_close (a_window: INTEGER)
 			-- Ask to close window `a_window' as the user would (emits close requested).
+		deferred
+		end
+
+	test_context_menu (an_id, an_item_id: INTEGER): BOOLEAN
+			-- Choose item `an_item_id' from widget `an_id's context menu AS A USER WOULD (emits the
+			-- menu event); False when that widget's context menu has no such item.
 		deferred
 		end
 

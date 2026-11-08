@@ -141,6 +141,23 @@ feature -- Accessibility
 			Result := backend.from_c (backend.accessible_role (id))
 		end
 
+feature -- Context menu
+
+	context_menu: detachable GUI_MENU
+			-- The menu a secondary click (right-click, Control-click, a two-finger tap) shows.
+
+	set_context_menu (a_menu: GUI_MENU)
+			-- Show `a_menu' on a secondary click on this widget.
+		require
+			gui_thread: is_gui_thread
+			context: a_menu.is_context
+		do
+			context_menu := a_menu
+			backend.widget_set_context_menu (id, a_menu.handle)
+		ensure
+			set: context_menu = a_menu
+		end
+
 feature -- Text direction
 
 	base_direction: INTEGER
