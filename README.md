@@ -70,6 +70,10 @@ end
 - **Accessible by default:** every control has an accessible label (its visible text unless set); a placeholder is never the label.
 - **Testable:** `GUI_TEST_DRIVER` clicks, types, chooses rows and menu items as a user would, takes PNG snapshots, and reads the assistive tree.
 
+## Large tables
+
+`GUI_TABLE.set_row_source (count, agent row_texts)` makes a table lazy: it asks for rows only as they come into view, so 100,000 rows cost what one screenful does. To have the program make each row only once in a session, put the row cache in front of it. The row cache is its own library, [row_cache/](row_cache/README.md), over a scratch file by default or SQLite as an option, with notes on choosing between the two.
+
 ## Build (Linux)
 
 Needs GTK 4 development files (`sudo apt install libgtk-4-dev` on Ubuntu 24.04) and a display.
