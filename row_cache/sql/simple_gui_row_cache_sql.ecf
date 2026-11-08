@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration-1-23-0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.eiffel.com/developers/xml/configuration-1-23-0 http://www.eiffel.com/developers/xml/configuration-1-23-0.xsd" name="simple_gui_row_cache_sql" uuid="3E91A6C2-7D48-4B05-8F2A-C61D0B97E354" library_target="simple_gui_row_cache_sql">
+	<description>GUI_ROW_SQL_STORE: the row cache's optional SQLite store, over simple_sql, for caches that must outlive the session, be queried, or take several writers. Its own ECF, so SQLite comes in only for programs that choose it. See ../docs/choosing-a-row-store.md.</description>
+
+	<target name="simple_gui_row_cache_sql">
+		<root all_classes="true"/>
+		<file_rule>
+			<exclude>/EIFGENs$</exclude>
+			<exclude>/\..*$</exclude>
+		</file_rule>
+		<option warning="warning">
+			<assertions precondition="true" postcondition="true" check="true" invariant="true" loop="true" supplier_precondition="true"/>
+		</option>
+		<setting name="dead_code_removal" value="feature"/>
+		<capability>
+			<concurrency support="scoop" use="scoop"/>
+			<void_safety support="all"/>
+		</capability>
+		<library name="base" location="$ISE_LIBRARY\library\base\base.ecf"/>
+		<library name="simple_gui_row_cache" location="$SIMPLE_EIFFEL\simple_gui\row_cache\simple_gui_row_cache.ecf"/>
+		<library name="simple_gui" location="$SIMPLE_EIFFEL\simple_gui\simple_gui.ecf"/>
+		<library name="simple_sql" location="$SIMPLE_EIFFEL\simple_sql\simple_sql.ecf"/>
+		<cluster name="row_cache_sql" location=".\src\" recursive="true"/>
+	</target>
+
+	<target name="simple_gui_row_cache_sql_tests" extends="simple_gui_row_cache_sql">
+		<root class="ROW_CACHE_SQL_TEST_APP" feature="make"/>
+		<setting name="console_application" value="true"/>
+		<cluster name="shared_tests" location="..\testing\" recursive="true">
+			<file_rule>
+				<exclude>/row_cache_test_app\.e$</exclude>
+			</file_rule>
+		</cluster>
+		<cluster name="testing" location=".\testing\" recursive="true"/>
+	</target>
+</system>
