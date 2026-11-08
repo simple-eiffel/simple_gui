@@ -415,6 +415,93 @@ feature -- Tests
 			l_window.close
 		end
 
+	test_text_area
+			-- Several lines round-trip; set_text is silent; typing fires; read-only is recorded.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_area: GUI_TEXT_AREA
+			l_text: STRING_32
+		do
+			create l_window.make ("Text area", 360, 220)
+			create l_stack.make_vertical
+			create l_area.make
+			l_area.set_accessible_label ("Notes")
+			l_stack.extend_stretching (l_area)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_text := {STRING_32} "first line%Nsecond line%N%/1488/%/1489/"
+			l_area.set_text (l_text)
+			driver.pump_until_idle (200)
+			assert ("round trip", l_area.text.same_string (l_text))
+			assert ("silent", l_area.change_count = 0)
+			driver.type_into_area (l_area, "typed")
+			assert ("typing fires", l_area.change_count >= 1)
+			l_area.set_read_only (True)
+			assert ("read only", l_area.is_read_only)
+			assert ("labelled for the screen reader", driver.describe_accessibility (l_window).has_substring ("text-box: Notes"))
+			l_window.close
+		end
+
+	test_system_colors_follow_the_appearance
+			-- Light: a light background and dark text; dark: the reverse.
+		local
+			l_window: GUI_WINDOW
+		do
+			create l_window.make ("Colours", 200, 100)
+			l_window.set_content (create {GUI_LABEL}.make ("colours"))
+			l_window.show
+			settle_window
+			driver.set_dark (False)
+			settle_window
+			assert ("light background is light", luma (app.system_color (app.Color_window_background)) > 0.5)
+			assert ("light text is dark", luma (app.system_color (app.Color_text)) < 0.5)
+			driver.set_dark (True)
+			settle_window
+			assert ("dark background is dark", luma (app.system_color (app.Color_window_background)) < 0.5)
+			assert ("dark text is light", luma (app.system_color (app.Color_text)) > 0.5)
+			driver.set_dark (False)
+			settle_window
+			l_window.close
+		end
+
+	test_positions_mirror
+			-- Left to right: the first child is left of the second; right to left: right of it.
+			-- The same for two grid columns (the half that silently stayed left to right on macOS).
+		local
+			l_window: GUI_WINDOW
+			l_column, l_row: GUI_STACK
+			l_grid: GUI_GRID
+			a, b, c1, c2: GUI_LABEL
+		do
+			create l_window.make ("Positions", 360, 200)
+			create l_column.make_vertical
+			create l_row.make_horizontal
+			create a.make ("first")
+			create b.make ("second")
+			l_row.extend (a)
+			l_row.extend (b)
+			create l_grid.make
+			create c1.make ("column one")
+			create c2.make ("column two")
+			l_grid.put (c1, 1, 1)
+			l_grid.put (c2, 1, 2)
+			l_column.extend (l_row)
+			l_column.extend (l_grid)
+			l_window.set_content (l_column)
+			l_window.show
+			settle_window
+			assert ("ltr row: " + a.x.out + " < " + b.x.out, a.x < b.x)
+			assert ("ltr grid: " + c1.x.out + " < " + c2.x.out, c1.x < c2.x)
+			assert ("grid below row", l_grid.y > l_row.y)
+			l_window.set_base_direction (Direction_right_to_left)
+			settle_window
+			assert ("rtl row: " + a.x.out + " > " + b.x.out, a.x > b.x)
+			assert ("rtl grid: " + c1.x.out + " > " + c2.x.out, c1.x > c2.x)
+			l_window.close
+		end
+
 feature {NONE} -- Fixtures
 
 	app: GUI_APPLICATION
@@ -508,6 +595,13 @@ feature {NONE} -- Fixtures
 				app.process_events (30)
 				i := i + 1
 			end
+		end
+
+	luma (a_rgb: NATURAL_32): REAL_64
+			-- Perceived brightness, 0 (black) to 1 (white).
+		do
+			Result := (0.299 * ((a_rgb |>> 16) & 0xFF).to_real_64 + 0.587 * ((a_rgb |>> 8) & 0xFF).to_real_64
+				+ 0.114 * (a_rgb & 0xFF).to_real_64) / 255.0
 		end
 
 	indented (a_text: STRING_32): STRING_8

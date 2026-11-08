@@ -45,6 +45,20 @@ feature -- User actions
 			typed: a_field.text.same_string_general (a_text)
 		end
 
+	type_into_area (an_area: GUI_TEXT_AREA; a_text: READABLE_STRING_GENERAL)
+			-- Replace a text area's text as a user would (fires change events).
+		require
+			has_application: has_application
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_text)
+			backend.test_type (an_area.id, l_c.item)
+			settle
+		ensure
+			typed: an_area.text.same_string_general (a_text)
+		end
+
 	choose_row (a_list: GUI_LIST; a_row: INTEGER)
 			-- Select a row as a user would (fires selection).
 		require
