@@ -181,7 +181,7 @@ feature -- Tests
 			l_tree := driver.describe_accessibility (l_window)
 			print (indented (l_tree))
 			assert ("button read", l_tree.has_substring ("button: Save"))
-			assert ("field labelled, not by placeholder", l_tree.has_substring ("text-box: Name"))
+			assert ("field labeled, not by placeholder", l_tree.has_substring ("text-box: Name"))
 			assert ("field label query", l_field.accessible_label.same_string ("Name"))
 			assert ("list read", l_tree.has_substring ("list:"))
 			l_window.close
@@ -311,23 +311,23 @@ feature -- Tests
 		end
 
 	test_stack_alignment
-			-- A centred child is narrower than a filling one; set_alignment reaches later children.
+			-- A centered child is narrower than a filling one; set_alignment reaches later children.
 		local
 			l_window: GUI_WINDOW
 			l_stack: GUI_STACK
-			l_filling, l_centred, l_later: GUI_LABEL
+			l_filling, l_centered, l_later: GUI_LABEL
 		do
 			create l_window.make ("Alignment", 320, 200)
 			create l_stack.make_vertical
 			create l_filling.make ("fill")
-			create l_centred.make ("centre")
+			create l_centered.make ("center")
 			l_stack.extend_aligned (l_filling, l_stack.Align_fill)
-			l_stack.extend_aligned (l_centred, l_stack.Align_centre)
+			l_stack.extend_aligned (l_centered, l_stack.Align_center)
 			l_window.set_content (l_stack)
 			l_window.show
 			settle_window
 			assert ("filling spans: " + l_filling.width.out + " of " + l_stack.width.out, l_filling.width >= l_stack.width - 30)
-			assert ("centred is narrower: " + l_centred.width.out, l_centred.width < l_filling.width)
+			assert ("centered is narrower: " + l_centered.width.out, l_centered.width < l_filling.width)
 			create l_later.make ("later")
 			l_stack.set_alignment (l_stack.Align_end)
 			l_stack.extend (l_later)
@@ -475,7 +475,7 @@ feature -- Tests
 			assert ("typing fires", l_area.change_count >= 1)
 			l_area.set_read_only (True)
 			assert ("read only", l_area.is_read_only)
-			assert ("labelled for the screen reader", driver.describe_accessibility (l_window).has_substring ("text-box: Notes"))
+			assert ("labeled for the screen reader", driver.describe_accessibility (l_window).has_substring ("text-box: Notes"))
 			l_window.close
 		end
 
@@ -484,8 +484,8 @@ feature -- Tests
 		local
 			l_window: GUI_WINDOW
 		do
-			create l_window.make ("Colours", 200, 100)
-			l_window.set_content (create {GUI_LABEL}.make ("colours"))
+			create l_window.make ("Colors", 200, 100)
+			l_window.set_content (create {GUI_LABEL}.make ("colors"))
 			l_window.show
 			settle_window
 			driver.set_dark (False)

@@ -162,7 +162,7 @@ static int sg_stack(int vertical, int spacing) {
     gtk_widget_set_margin_top(b, 12); gtk_widget_set_margin_bottom(b, 12);
     return sg_reg(b, 2);
 }
-/* Cross-axis alignment: 0 fill, 1 start, 2 centre, 3 end. */
+/* Cross-axis alignment: 0 fill, 1 start, 2 center, 3 end. */
 static GtkAlign sg_galign(int a) {
     return a == 1 ? GTK_ALIGN_START : a == 2 ? GTK_ALIGN_CENTER : a == 3 ? GTK_ALIGN_END : GTK_ALIGN_FILL;
 }
@@ -229,7 +229,7 @@ static int sg_label(const char *text) {
 }
 /* chars > 0: wrap at about `chars' characters wide; 0: one line, ellipsized.
    `chars' is the label's natural width (max_width_chars), not its minimum: a minimum of
-   `chars' made a grid squeeze its neighbours (the calculator's captions turned to "...")
+   `chars' made a grid squeeze its neighbors (the calculator's captions turned to "...")
    rather than wrap the label sooner. The minimum is the longest word, as GTK's default. */
 static void sg_label_set_wrap_width(int id, int chars) {
     GtkLabel *l = GTK_LABEL(sg_w[id]);
@@ -354,12 +354,12 @@ static void sg_text_area_set_read_only(int id, int on) {
     gtk_text_view_set_cursor_visible(sg_view_of(id), on ? FALSE : TRUE);
 }
 
-/* ---------- system colours (0xRRGGBB) ---------- */
+/* ---------- system colors (0xRRGGBB) ---------- */
 
 static int sg_is_dark(void);
 
 /* role: 1 window background, 2 text, 3 secondary text, 4 accent, 5 selection, 6 separator.
-   Read from the theme's named colours (Adwaita defines them); a fallback if a theme lacks one. */
+   Read from the theme's named colors (Adwaita defines them); a fallback if a theme lacks one. */
 static int sg_system_color(int role) {
     static const char *names[7][2] = {
         {NULL, NULL}, {"window_bg_color", "theme_bg_color"}, {"window_fg_color", "theme_fg_color"},

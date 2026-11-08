@@ -398,7 +398,7 @@ feature -- Appearance
 		end
 
 	system_color (a_role: INTEGER): INTEGER
-			-- NSColor's semantic colours in the current appearance; translucent ones as seen
+			-- NSColor's semantic colors in the current appearance; translucent ones as seen
 			-- over the window background.
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_system_color($a_role);"

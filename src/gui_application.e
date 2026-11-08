@@ -88,7 +88,7 @@ feature -- Status
 			Result := backend.is_dark
 		end
 
-feature -- Theme colours
+feature -- Theme colors
 
 	Color_window_background: INTEGER = 1
 	Color_text: INTEGER = 2
@@ -98,7 +98,7 @@ feature -- Theme colours
 	Color_separator: INTEGER = 6
 
 	system_color (a_role: INTEGER): NATURAL_32
-			-- The theme's colour for `a_role' as 0xRRGGBB; it follows light and dark, so a canvas
+			-- The theme's color for `a_role' as 0xRRGGBB; it follows light and dark, so a canvas
 			-- can draw to match the window around it.
 		require
 			available: is_available

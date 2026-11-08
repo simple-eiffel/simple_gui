@@ -54,11 +54,11 @@ feature -- Access
 	Default_spacing: INTEGER = 6
 
 	alignment: INTEGER
-			-- Cross-axis alignment of the children: Align_fill (each child's own default), start, centre or end.
+			-- Cross-axis alignment of the children: Align_fill (each child's own default), start, center or end.
 
 	Align_fill: INTEGER = 0
 	Align_start: INTEGER = 1
-	Align_centre: INTEGER = 2
+	Align_center: INTEGER = 2
 	Align_end: INTEGER = 3
 
 	is_valid_alignment (an_alignment: INTEGER): BOOLEAN
