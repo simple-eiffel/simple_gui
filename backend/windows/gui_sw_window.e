@@ -34,6 +34,9 @@ feature {NONE} -- Initialization
 			gui_id := a_id
 			make_window (a_title, 100, 100, a_width, a_height, a_backend.themed (False))
 			follow_system_theme (a_backend.themed (False), a_backend.themed (True))
+				-- shaped text everywhere: Hebrew right to left, Greek and mathematics intact
+				-- (cairo's toy path draws them as empty boxes)
+			enable_shaped_text
 		ensure
 			kept: backend = a_backend and gui_id = a_id
 		end

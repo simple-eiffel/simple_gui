@@ -189,6 +189,8 @@ feature -- Windows and containers
 			else
 				create l_row.make
 				l_row.set_gap (a_spacing.max (0).to_double)
+					-- children fill the row's height, as in a GTK box and an NSStackView
+				l_row.set_cross_axis ({SW_ROW}.Cross_stretch)
 				Result := register (l_row)
 			end
 		end
@@ -1089,8 +1091,12 @@ feature -- Test doors (act on the widget as a user would)
 		end
 
 	test_request_close (a_window: INTEGER)
+			-- As the title bar's close button: the main window through simple_shell (event 66,
+			-- then 6); a floating window reports 6 as its panel's close button does.
 		do
-			if attached windows.item (a_window) as al_w and then al_w.is_window_open then
+			if floats.has (a_window) then
+				push (6, a_window, 0, 0, 0)
+			elseif attached windows.item (a_window) as al_w and then al_w.is_window_open then
 				al_w.request_close
 			end
 		end
