@@ -1,4 +1,4 @@
-note
+﻿note
 	description: "[
 		simple_gui tests on the real toolkit. Each builds a small window, acts through
 		GUI_TEST_DRIVER as a user would, and checks the events and state that result.
@@ -43,6 +43,7 @@ feature -- Tests
 			l_text := {STRING_32} "בְּרֵאשִׁית ἐν ἀρχῇ"
 			create l_field.make
 			l_field.set_text (l_text)
+			assert ("source really is Hebrew (bet, U+05D1)", l_text.item (1).code = 0x05D1)
 			assert ("utf-8 both ways", l_field.text.same_string (l_text))
 		end
 
@@ -318,7 +319,7 @@ feature {NONE} -- Fixtures
 			l_list: GUI_LIST
 			l_button: GUI_BUTTON
 		do
-			create Result.make ("simple_gui on GTK 4", 460, 380)
+			create Result.make ("simple_gui test", 460, 380)
 			create l_stack.make_vertical
 			create l_grid.make
 			create l_name.make ("Name")
