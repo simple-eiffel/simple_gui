@@ -41,6 +41,17 @@
 		</external_linker_flag>
 		<library name="base" location="$ISE_LIBRARY\library\base\base.ecf"/>
 		<library name="simple_cairo" location="$SIMPLE_EIFFEL\simple_cairo\simple_cairo.ecf"/>
+		<!-- Windows: simple_widgets (the Cairo look) on simple_shell -->
+		<library name="simple_widgets" location="$SIMPLE_EIFFEL\simple_widgets\simple_widgets.ecf">
+			<condition>
+				<platform value="windows"/>
+			</condition>
+		</library>
+		<library name="simple_shell" location="$SIMPLE_EIFFEL\simple_shell\simple_shell.ecf">
+			<condition>
+				<platform value="windows"/>
+			</condition>
+		</library>
 		<cluster name="src" location=".\src\" recursive="true"/>
 		<cluster name="backend_gtk" location=".\backend\gtk\">
 			<condition>
@@ -50,6 +61,11 @@
 		<cluster name="backend_appkit" location=".\backend\appkit\">
 			<condition>
 				<platform value="macintosh"/>
+			</condition>
+		</cluster>
+		<cluster name="backend_windows" location=".\backend\windows\">
+			<condition>
+				<platform value="windows"/>
 			</condition>
 		</cluster>
 	</target>
