@@ -12,11 +12,12 @@ Native GUI for Eiffel: write the program once, and it **is and looks native** on
 
 ## Showcase
 
-`examples/showcase` puts every control in one window, each on the platform's own toolkit, with a status line reporting each event the program hears. Run with `--gallery <folder>`, it works the window through `GUI_TEST_DRIVER` as a user would and saves these pictures (macOS, AppKit):
+`examples/showcase` puts every control in one window, each on the platform's own toolkit, with a status line reporting each event the program hears. Run with `--gallery <folder>`, it works the window through `GUI_TEST_DRIVER` as a user would and saves these pictures:
 
-| Controls | Table, sorted by Chapters | Canvas | Right to left |
-|---|---|---|---|
-| ![controls](docs/gallery/macos/showcase_1_controls.png) | ![table](docs/gallery/macos/showcase_2_table.png) | ![canvas](docs/gallery/macos/showcase_3_canvas.png) | ![right to left](docs/gallery/macos/showcase_6_right_to_left.png) |
+| | Controls | Table, sorted by Chapters | Canvas | Right to left |
+|---|---|---|---|---|
+| macOS (AppKit) | ![controls](docs/gallery/macos/showcase_1_controls.png) | ![table](docs/gallery/macos/showcase_2_table.png) | ![canvas](docs/gallery/macos/showcase_3_canvas.png) | ![right to left](docs/gallery/macos/showcase_6_right_to_left.png) |
+| Linux (GTK 4) | ![controls](docs/gallery/linux/showcase_1_controls.png) | ![table](docs/gallery/linux/showcase_2_table.png) | ![canvas](docs/gallery/linux/showcase_3_canvas.png) | ![right to left](docs/gallery/linux/showcase_6_right_to_left.png) |
 
 Right to left, the tabs and the table's columns mirror; English text keeps its own reading order.
 
