@@ -374,6 +374,41 @@ feature -- Controls
 		deferred
 		end
 
+	table_set_source (a_table, a_count: INTEGER)
+			-- Rows 1 .. `a_count' come from the program from now on (1f): drop the rows held and the
+			-- selection; when a row to be drawn is not held, draw it empty and send rows wanted
+			-- (16, a = first, b = last) for the rows in view plus a margin, never again for rows
+			-- asked for and not yet answered; a count of 0 asks for nothing. No other event.
+		deferred
+		end
+
+	table_set_row (a_table, a_row: INTEGER; a_cells: POINTER)
+			-- Row `a_row''s texts (one per column, joined by U+001F), answering rows wanted: hold
+			-- them (a bounded cache) and draw the row.
+		deferred
+		end
+
+	table_set_row_count (a_table, a_count: INTEGER)
+			-- The source now has `a_count' rows: rows held past it go, and so do selected rows past
+			-- it; no event.
+		deferred
+		end
+
+	table_forget_rows (a_table: INTEGER)
+			-- Every row may have changed: drop what is held and ask again for what is in view.
+		deferred
+		end
+
+	table_forget_row (a_table, a_row: INTEGER)
+			-- Row `a_row' changed: drop it and ask again if it is in view.
+		deferred
+		end
+
+	table_scroll_to (a_table, a_row: INTEGER)
+			-- Bring row `a_row' into view.
+		deferred
+		end
+
 	tree: INTEGER
 			-- A hierarchy of text nodes. A user's selection sends selection (4, a = node); a user's
 			-- expanding or collapsing sends expansion (15, a = node, b = 1 when expanded).

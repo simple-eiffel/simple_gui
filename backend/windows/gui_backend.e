@@ -628,6 +628,37 @@ feature -- Controls
 			end
 		end
 
+	table_set_source (a_table, a_count: INTEGER)
+			-- PLACEHOLDER for PROD (1f, Windows half): an SW_DATA_GRID provider mode.
+		do
+			not_yet ("lazy tables (1f)")
+		end
+
+	table_set_row (a_table, a_row: INTEGER; a_cells: POINTER)
+		do
+			not_yet ("lazy tables (1f)")
+		end
+
+	table_set_row_count (a_table, a_count: INTEGER)
+		do
+			not_yet ("lazy tables (1f)")
+		end
+
+	table_forget_rows (a_table: INTEGER)
+		do
+			not_yet ("lazy tables (1f)")
+		end
+
+	table_forget_row (a_table, a_row: INTEGER)
+		do
+			not_yet ("lazy tables (1f)")
+		end
+
+	table_scroll_to (a_table, a_row: INTEGER)
+		do
+			not_yet ("lazy tables (1f)")
+		end
+
 	table_selected_count (a_table: INTEGER): INTEGER
 		do
 			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g then

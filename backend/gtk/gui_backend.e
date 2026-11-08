@@ -332,6 +332,47 @@ feature -- Controls
 		alias "sg_table_select($a_table, $a_row, $a_extend ? 1 : 0);"
 		end
 
+	table_set_source (a_table, a_count: INTEGER)
+			-- PLACEHOLDER for PROD (1f, GTK half): a GListModel of row numbers.
+		do
+			not_yet_lazy_tables
+		end
+
+	table_set_row (a_table, a_row: INTEGER; a_cells: POINTER)
+		do
+			not_yet_lazy_tables
+		end
+
+	table_set_row_count (a_table, a_count: INTEGER)
+		do
+			not_yet_lazy_tables
+		end
+
+	table_forget_rows (a_table: INTEGER)
+		do
+			not_yet_lazy_tables
+		end
+
+	table_forget_row (a_table, a_row: INTEGER)
+		do
+			not_yet_lazy_tables
+		end
+
+	table_scroll_to (a_table, a_row: INTEGER)
+		do
+			not_yet_lazy_tables
+		end
+
+	not_yet_lazy_tables
+			-- Fail loudly until the GTK half of 1f is written.
+		local
+			l_e: DEVELOPER_EXCEPTION
+		do
+			create l_e
+			l_e.set_description ("not yet on GTK: lazy tables (1f)")
+			l_e.raise
+		end
+
 	table_selected_count (a_table: INTEGER): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_table_selected_count($a_table);"

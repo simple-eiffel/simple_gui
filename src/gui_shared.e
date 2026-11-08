@@ -17,6 +17,13 @@ feature {NONE} -- Access
 			create Result
 		end
 
+	rows_wanted_answered: CELL [INTEGER]
+			-- How many "rows wanted" requests (event 16) tables have answered on this processor:
+			-- the test driver settles until it stops rising.
+		once
+			create Result.put (0)
+		end
+
 	application_cell: CELL [detachable GUI_APPLICATION]
 			-- The application, once made (per processor: only the GUI processor sets it).
 		once

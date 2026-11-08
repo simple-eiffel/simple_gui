@@ -333,6 +333,36 @@ feature -- Controls
 		alias "sga_table_select($a_table, $a_row, $a_extend ? 1 : 0);"
 		end
 
+	table_set_source (a_table, a_count: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_table_set_source($a_table, $a_count);"
+		end
+
+	table_set_row (a_table, a_row: INTEGER; a_cells: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_table_set_row($a_table, $a_row, (const char *) $a_cells);"
+		end
+
+	table_set_row_count (a_table, a_count: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_table_set_row_count($a_table, $a_count);"
+		end
+
+	table_forget_rows (a_table: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_table_forget_rows($a_table);"
+		end
+
+	table_forget_row (a_table, a_row: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_table_forget_row($a_table, $a_row);"
+		end
+
+	table_scroll_to (a_table, a_row: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_table_scroll_to($a_table, $a_row);"
+		end
+
 	table_selected_count (a_table: INTEGER): INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_table_selected_count($a_table);"
