@@ -615,31 +615,62 @@ void sga_grid_put(int a_grid, int a_child, int a_row, int a_column, int a_rows, 
 
 static int s_grid_homogeneous[SGA_MAX];
 static int s_grid_stretching[SGA_MAX];
+static NSMutableArray<NSLayoutConstraint *> *s_grid_equal[SGA_MAX];
 
-/* Column widths: homogeneous columns all get the widest column's natural width; with a
-   stretching column, the others are fixed at their natural width and it alone stays
-   sized by the grid, so the spare width goes to it. Recomputed whenever a cell is put. */
+/* Column widths. Homogeneous columns are kept equal by constraints between one content
+   view per column, cells fill their columns, and the grid fills its wrapper: the spare width
+   is shared equally (as GTK does), and the grid can still shrink back to the widest natural
+   width (fixed column widths would hold a window wide). Homogeneous takes precedence over a
+   stretching column. With a stretching column, the others are fixed at their natural width
+   and it alone takes the spare width. Recomputed whenever a cell is put. */
 static void sga_grid_columns(int a_grid)
 {
 	NSGridView *g = s_inner[a_grid];
 	NSInteger n = [g numberOfColumns];
-	CGFloat l_widest = 0;
 	CGFloat l_natural[256] = {0};
 	if (n > 256) n = 256;
+	if (s_grid_equal[a_grid]) { [NSLayoutConstraint deactivateConstraints:s_grid_equal[a_grid]]; [s_grid_equal[a_grid] removeAllObjects]; }
 	if (!s_grid_homogeneous[a_grid] && !s_grid_stretching[a_grid]) return;
-	for (NSInteger c = 0; c < n; c++) {
+	if (s_grid_homogeneous[a_grid]) {
+		NSView *l_first = nil;
+		if (!s_grid_equal[a_grid]) s_grid_equal[a_grid] = [NSMutableArray array];
+		for (NSInteger c = 0; c < n; c++) {
+			NSGridColumn *k = [g columnAtIndex:c];
+			[k setWidth:NSGridViewSizeForContent];
+			[k setXPlacement:NSGridCellPlacementFill];
+			/* One single-column cell's view stands for the column (a merged cell's view
+			   also sits in its neighbours, so it is skipped). */
+			NSView *l_view = nil;
+			for (NSInteger r = 0; r < [g numberOfRows] && !l_view; r++) {
+				NSView *v = [[g cellAtColumnIndex:c rowIndex:r] contentView];
+				BOOL l_merged = (c > 0 && [[g cellAtColumnIndex:c - 1 rowIndex:r] contentView] == v)
+					|| (c + 1 < [g numberOfColumns] && [[g cellAtColumnIndex:c + 1 rowIndex:r] contentView] == v);
+				if (v && v != [NSGridCell emptyContentView] && !l_merged) l_view = v;
+			}
+			if (l_view && l_first) [s_grid_equal[a_grid] addObject:[l_view.widthAnchor constraintEqualToAnchor:l_first.widthAnchor]];
+			else if (l_view) l_first = l_view;
+		}
+		[NSLayoutConstraint activateConstraints:s_grid_equal[a_grid]];
+		return;
+	}
+	for (NSInteger c = 0; c < n; c++)
 		for (NSInteger r = 0; r < [g numberOfRows]; r++) {
 			NSView *v = [[g cellAtColumnIndex:c rowIndex:r] contentView];
 			if (v && v != [NSGridCell emptyContentView]) l_natural[c] = MAX(l_natural[c], [v fittingSize].width);
 		}
-		l_widest = MAX(l_widest, l_natural[c]);
-	}
 	for (NSInteger c = 0; c < n; c++) {
 		NSGridColumn *k = [g columnAtIndex:c];
-		if (s_grid_homogeneous[a_grid]) { [k setWidth:ceil(l_widest)]; [k setXPlacement:NSGridCellPlacementFill]; }
-		else if (c + 1 == s_grid_stretching[a_grid]) { [k setWidth:NSGridViewSizeForContent]; [k setXPlacement:NSGridCellPlacementFill]; }
+		if (c + 1 == s_grid_stretching[a_grid]) { [k setWidth:NSGridViewSizeForContent]; [k setXPlacement:NSGridCellPlacementFill]; }
 		else [k setWidth:ceil(l_natural[c])];
 	}
+}
+
+/* A grid fills its wrapper (its end margin holds) while it has homogeneous or stretching
+   columns; otherwise it packs at the start, as a GTK grid does. */
+static void sga_grid_fill(int a_grid)
+{
+	BOOL l_fill = s_grid_homogeneous[a_grid] || s_grid_stretching[a_grid] > 0;
+	[s_margins[a_grid][2] setPriority:l_fill ? NSLayoutPriorityRequired - 1 : NSLayoutPriorityDefaultLow - 2];
 }
 
 void sga_grid_set_homogeneous_columns(int a_grid, int a_on)
@@ -647,13 +678,14 @@ void sga_grid_set_homogeneous_columns(int a_grid, int a_on)
 	s_grid_homogeneous[a_grid] = a_on != 0;
 	if (!a_on) for (NSInteger c = 0; c < [(NSGridView *)s_inner[a_grid] numberOfColumns]; c++)
 		[[(NSGridView *)s_inner[a_grid] columnAtIndex:c] setWidth:NSGridViewSizeForContent];
+	sga_grid_fill(a_grid);
 	sga_grid_columns(a_grid);
 }
 
 void sga_grid_set_stretching_column(int a_grid, int a_column)
 {
 	s_grid_stretching[a_grid] = a_column;
-	[s_margins[a_grid][2] setPriority:a_column > 0 ? NSLayoutPriorityRequired - 1 : NSLayoutPriorityDefaultLow - 2];
+	sga_grid_fill(a_grid);
 	sga_grid_columns(a_grid);
 }
 
