@@ -112,6 +112,8 @@ int sga_height(int a_id);
 void *sga_menu_new(const char *a_title);
 void sga_menu_add_item(void *a_menu, const char *a_text, const char *a_shortcut, int a_item_id, int a_role);
 void sga_menu_add_separator(void *a_menu);
+void *sga_context_menu_new(void);   /* a menu outside the menu bar */
+void sga_widget_set_context_menu(int a_id, void *a_menu);   /* shown on a secondary click */
 void sga_menu_set_title(void *a_menu, const char *a_title);
 const char *sga_menu_title(void *a_menu);   /* what the menu bar shows */
 void sga_menu_set_item_text(int a_item_id, const char *a_text);   /* About and Quit keep the app name */
@@ -134,6 +136,7 @@ void sga_test_type(int a_id, const char *a_text);
 void sga_test_choose(int a_id, int a_row);
 void sga_test_menu(int a_item_id);
 void sga_test_request_close(int a_window);
+int sga_test_context_menu(int a_id, int a_item);   /* 0: no such item in that widget's context menu */
 void sga_test_auto_cancel_dialogs(int a_ms);
 int sga_snapshot(int a_window, const char *a_path);
 const char *sga_describe_accessibility(int a_window);

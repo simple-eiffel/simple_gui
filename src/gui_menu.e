@@ -1,6 +1,7 @@
 note
 	description: "[
-		One top-level menu. Role items (about, settings, quit) go where the platform
+		One top-level menu, or a context menu a widget shows on a secondary click
+		(`GUI_MENU_MODEL.new_context_menu', `GUI_WIDGET.set_context_menu'). Role items (about, settings, quit) go where the platform
 		expects: macOS moves them to the application menu. Edit items (undo ... select
 		all) act on the focused text field through the toolkit's own text actions.
 	]"
@@ -12,7 +13,7 @@ inherit
 	GUI_SHARED
 
 create {GUI_MENU_MODEL}
-	make
+	make, make_context
 
 feature {NONE} -- Initialization
 
@@ -28,7 +29,22 @@ feature {NONE} -- Initialization
 			model_set: model = a_model
 		end
 
+	make_context (a_model: GUI_MENU_MODEL)
+			-- A context menu: no title, never in the menu bar; its items share `a_model's numbering.
+		do
+			model := a_model
+			create title.make_empty
+			is_context := True
+			handle := backend.context_menu_new
+		ensure
+			model_set: model = a_model
+			context: is_context
+		end
+
 feature -- Access
+
+	is_context: BOOLEAN
+			-- Is this a context menu (else a top-level menu in the menu bar)?
 
 	title: STRING_32
 
@@ -68,6 +84,7 @@ feature -- Element change
 		require
 			gui_thread: is_gui_thread
 			has_text: not a_text.is_empty
+			bar_roles_in_the_bar: is_context implies a_role = Role_none
 			role: a_role >= Role_none and a_role <= Role_quit
 		local
 			l_t, l_s: C_STRING
@@ -107,6 +124,7 @@ feature -- Element change
 		require
 			gui_thread: is_gui_thread
 			has_text: not a_title.is_empty
+			top_level: not is_context
 		local
 			l_c: C_STRING
 		do
@@ -169,7 +187,7 @@ feature -- Element change
 			backend.menu_add_separator (handle)
 		end
 
-feature {NONE} -- Implementation
+feature {GUI_WIDGET} -- Implementation
 
 	handle: POINTER
 			-- The backend's menu.

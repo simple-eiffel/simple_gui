@@ -309,7 +309,7 @@ static int sg_list_selected(int id) {
    changes) sends 14 (a = column). Every column has a sorter that keeps the order, so GTK
    shows the indicator while the program does the sorting; the indicator is set from code
    under sg_quiet. (First pass by MACMINI, untested on GTK.) ---------- */
-static char *sg_field(const char *joined, int k) {   /* field k (0-based), newly allocated */
+static char *sg_row_field(const char *joined, int k) {   /* field k (0-based), newly allocated */
     gchar **f = g_strsplit(joined, "\x1f", -1);
     char *r = g_strdup((guint) k < g_strv_length(f) ? f[k] : "");
     g_strfreev(f);
@@ -324,7 +324,7 @@ static void sg_cell_setup(GtkSignalListItemFactory *fa, GtkListItem *it, gpointe
 }
 static void sg_cell_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
     GtkStringObject *o = GTK_STRING_OBJECT(gtk_list_item_get_item(it));
-    char *v = sg_field(gtk_string_object_get_string(o), GPOINTER_TO_INT(d));
+    char *v = sg_row_field(gtk_string_object_get_string(o), GPOINTER_TO_INT(d));
     (void) fa;
     gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(it)), v);
     g_free(v);
@@ -733,7 +733,19 @@ static void sg_set_direction(int id, int d) {
 }
 
 /* ---------- tabs: a GtkNotebook (kind 11). Choosing a tab sends page changed (13);
-   appending and selecting from code send nothing. (First pass by MACMINI, untested on GTK.) ---------- */
+   appending and selecting from code send nothing. (MACMINI's first pass; PROD's GTK half.) ---------- */
+
+/* GTK 4.14 gives each tab ("tab" role, an internal widget) no accessible name: the title is a
+   label inside it (probed). Name the tab itself, so a screen reader reads "tab: First". The
+   tab label's parent is that tab widget. */
+static void sg_name_tab(GtkNotebook *nb, GtkWidget *page, const char *title) {
+    GtkWidget *label = gtk_notebook_get_tab_label(nb, page);
+    GtkWidget *tab = label ? gtk_widget_get_parent(label) : NULL;
+    if (tab) {
+        gtk_accessible_update_property(GTK_ACCESSIBLE(tab), GTK_ACCESSIBLE_PROPERTY_LABEL, title, -1);
+        g_object_set_data_full(G_OBJECT(tab), "sg-a11y", g_strdup(title), g_free);
+    }
+}
 
 static void sg_on_switch_page(GtkNotebook *nb, GtkWidget *page, guint num, gpointer d) {
     (void) page; (void) d;
@@ -748,6 +760,7 @@ static int sg_tabs(void) {
 static void sg_tabs_extend(int tabs, int page, const char *title) {
     sg_quiet++;
     gtk_notebook_append_page(GTK_NOTEBOOK(sg_w[tabs]), sg_w[page], gtk_label_new(title));
+    sg_name_tab(GTK_NOTEBOOK(sg_w[tabs]), sg_w[page], title);
     sg_quiet--;
 }
 static void sg_tabs_select(int tabs, int page) {
@@ -762,7 +775,10 @@ static int sg_tabs_selected(int tabs) {
 static void sg_tabs_set_title(int tabs, int page, const char *title) {
     GtkNotebook *nb = GTK_NOTEBOOK(sg_w[tabs]);
     GtkWidget *p = gtk_notebook_get_nth_page(nb, page - 1);
-    if (p) gtk_notebook_set_tab_label_text(nb, p, title);
+    if (p) {
+        gtk_notebook_set_tab_label_text(nb, p, title);
+        sg_name_tab(nb, p, title);
+    }
 }
 
 /* ---------- canvas: present a finished Cairo image ---------- */
@@ -1050,6 +1066,23 @@ static const char *sg_role_nick(GtkWidget *w) {
     g_type_class_unref(k);
     return nick;
 }
+/* The text of the first label below `w' (depth first), or NULL. */
+static const char *sg_first_label_text(GtkWidget *w) {
+    GtkWidget *c;
+    for (c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) {
+        const char *s = GTK_IS_LABEL(c) ? gtk_label_get_text(GTK_LABEL(c)) : sg_first_label_text(c);
+        if (s && *s) return s;
+    }
+    return NULL;
+}
+/* ARIA's "name from content" roles: with no name of their own, a screen reader reads their text. */
+static int sg_named_from_content(const char *role) {
+    static const char *roles[] = {"tab", "column-header", "row-header", "grid-cell", "cell",
+        "tree-item", "list-item", "row", "menu-item", NULL};
+    int i;
+    for (i = 0; roles[i]; i++) if (!strcmp(role, roles[i])) return 1;
+    return 0;
+}
 static void sg_describe_walk(GtkWidget *w, int depth) {
     GtkWidget *c;
     const char *role = sg_role_nick(w);
@@ -1057,6 +1090,7 @@ static void sg_describe_walk(GtkWidget *w, int depth) {
     if (!name && GTK_IS_LABEL(w)) name = gtk_label_get_text(GTK_LABEL(w));
     if (!name && GTK_IS_BUTTON(w)) name = gtk_button_get_label(GTK_BUTTON(w));
     if (!name && GTK_IS_CHECK_BUTTON(w)) name = gtk_check_button_get_label(GTK_CHECK_BUTTON(w));
+    if (!name && sg_named_from_content(role)) name = sg_first_label_text(w);
     if (strcmp(role, "generic") && strcmp(role, "none") && strcmp(role, "presentation")) {
         int i; for (i = 0; i < depth; i++) g_string_append(sg_describe_buf, "  ");
         g_string_append_printf(sg_describe_buf, "%s: %s\n", role, name ? name : "");
@@ -1174,6 +1208,50 @@ static void sg_test_request_close(int win) { gtk_window_close(GTK_WINDOW(sg_w[wi
 static void sg_test_menu(int item_id) {
     char name[32]; snprintf(name, sizeof name, "item%d", item_id);
     g_action_group_activate_action(G_ACTION_GROUP(sg_actions), name, NULL);
+}
+/* ---------- context menus: a GMenu outside the bar, shown by a GtkPopoverMenu where a
+   secondary click lands. Its items are app.itemN actions like the bar's (event 5).
+   (First pass by MACMINI, untested on GTK.) ---------- */
+static void *sg_context_menu_new(void) { return g_menu_new(); }
+static void sg_on_secondary(GtkGestureClick *g, int n, double x, double y, gpointer pop) {
+    GdkRectangle r = { (int) x, (int) y, 1, 1 };
+    (void) n;
+    gtk_popover_set_pointing_to(GTK_POPOVER(pop), &r);
+    gtk_popover_popup(GTK_POPOVER(pop));
+    gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_CLAIMED);
+}
+static void sg_on_context_owner_destroy(GtkWidget *w, gpointer pop) { (void) w; gtk_widget_unparent(GTK_WIDGET(pop)); }
+static void sg_widget_set_context_menu(int id, void *menu) {
+    GtkWidget *w = sg_w[id];
+    GtkWidget *pop = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    GtkGesture *g = gtk_gesture_click_new();
+    gtk_widget_set_parent(pop, w);
+    gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(g), GDK_BUTTON_SECONDARY);
+    g_signal_connect(g, "pressed", G_CALLBACK(sg_on_secondary), pop);
+    gtk_widget_add_controller(w, GTK_EVENT_CONTROLLER(g));
+    g_signal_connect(w, "destroy", G_CALLBACK(sg_on_context_owner_destroy), pop);
+    g_object_set_data(G_OBJECT(w), "sg-context", menu);
+}
+/* Choose item `item_id' from widget `id''s context menu as a user would: 0 when that menu
+   has no such item (or the widget has none). */
+static int sg_test_context_menu(int id, int item_id) {
+    GMenuModel *m = g_object_get_data(G_OBJECT(sg_w[id]), "sg-context");
+    char want[32];
+    int i, n;
+    if (!m) return 0;
+    snprintf(want, sizeof want, "app.item%d", item_id);
+    n = g_menu_model_get_n_items(m);
+    for (i = 0; i < n; i++) {
+        gchar *a = NULL;
+        if (g_menu_model_get_item_attribute(m, i, G_MENU_ATTRIBUTE_ACTION, "s", &a) && a && !strcmp(a, want)) {
+            g_free(a);
+            sg_test_menu(item_id);
+            return 1;
+        }
+        g_free(a);
+    }
+    return 0;
 }
 /* A snapshot shows the window as its user sees it while using it. A window the desktop has
    not focused (WSLg gives a new window the focus or not, depending on what else is happening)

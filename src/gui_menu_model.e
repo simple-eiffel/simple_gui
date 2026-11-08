@@ -19,6 +19,7 @@ feature {NONE} -- Initialization
 	make
 		do
 			create menus.make (4)
+			create context_menus.make (2)
 			create actions.make (16)
 			create shortcut_spec.make_empty
 		ensure
@@ -49,6 +50,22 @@ feature -- Element change
 		ensure
 			added: menus.last = Result
 		end
+
+	new_context_menu: GUI_MENU
+			-- A context menu for `GUI_WIDGET.set_context_menu': not in the menu bar; its items are
+			-- numbered with every other item, and choosing one runs its agent.
+		require
+			gui_thread: is_gui_thread
+		do
+			create Result.make_context (Current)
+			context_menus.extend (Result)
+		ensure
+			context: Result.is_context
+			not_in_the_bar: not menus.has (Result)
+		end
+
+	context_menus: ARRAYED_LIST [GUI_MENU]
+			-- The context menus made so far.
 
 feature {GUI_APPLICATION, GUI_TEST_DRIVER} -- Events
 

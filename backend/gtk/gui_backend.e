@@ -465,6 +465,18 @@ feature -- Menus
 		alias "sg_menu_add_separator((void *) $a_menu);"
 		end
 
+	context_menu_new: POINTER
+			-- A GMenu outside the bar (first pass by MACMINI; PROD to verify on GTK).
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_context_menu_new();"
+		end
+
+	widget_set_context_menu (an_id: INTEGER; a_menu: POINTER)
+			-- A GtkPopoverMenu shown where a secondary click lands.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_widget_set_context_menu($an_id, (void *) $a_menu);"
+		end
+
 	menu_set_title (a_menu: POINTER; a_title: POINTER)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_menu_set_title((void *) $a_menu, (const char *) $a_title);"
@@ -549,6 +561,11 @@ feature -- Test driver
 	test_request_close (a_window: INTEGER)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_test_request_close($a_window);"
+		end
+
+	test_context_menu (an_id, an_item_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_context_menu($an_id, $an_item_id) ? EIF_TRUE : EIF_FALSE;"
 		end
 
 	snapshot (an_id: INTEGER; a_path: POINTER): BOOLEAN

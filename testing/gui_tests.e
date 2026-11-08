@@ -401,6 +401,45 @@ feature -- Tests
 			l_window.close
 		end
 
+	test_context_menu
+			-- A context menu is not in the bar; its item runs its agent when chosen from that
+			-- widget, and is not found in another widget's menu; it relabels like a bar item.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_with, l_other: GUI_LABEL
+			l_menu, l_other_menu: GUI_MENU
+			l_copy: INTEGER
+		do
+			create l_window.make ("Context menu", 320, 160)
+			create l_stack.make_vertical
+			create l_with.make ("Right-click me")
+			create l_other.make ("Another menu")
+			l_menu := app.menu.new_context_menu
+			menu_runs := 0
+			l_menu.add_item ("Copy value", "", agent do menu_runs := menu_runs + 1 end)
+			l_copy := l_menu.last_item_id
+			l_menu.add_separator
+			l_menu.add_edit_item (l_menu.Role_copy, "Copy")
+			l_with.set_context_menu (l_menu)
+			l_other_menu := app.menu.new_context_menu
+			l_other_menu.add_item ("Something else", "", agent do end)
+			l_other.set_context_menu (l_other_menu)
+			l_stack.extend (l_with)
+			l_stack.extend (l_other)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("not in the menu bar", not app.menu.menus.has (l_menu) and l_menu.is_context)
+			driver.invoke_context_item (l_with, l_copy)
+			assert ("chosen from its widget, it runs", driver.last_context_item_found and menu_runs = 1)
+			driver.invoke_context_item (l_other, l_copy)
+			assert ("another widget's menu does not have it", not driver.last_context_item_found and menu_runs = 1)
+			l_menu.set_item_text (l_copy, "Kopieren")
+			assert ("relabeled", l_menu.item_text (l_copy).same_string ("Kopieren"))
+			l_window.close
+		end
+
 	test_menus_relabel
 			-- A menu title and its items (agent and edit items alike) change language in place.
 		local
