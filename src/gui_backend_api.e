@@ -347,9 +347,20 @@ feature -- Canvas
 		end
 
 	scale_factor (an_id: INTEGER): INTEGER
+			-- `scale' rounded up (superseded by `scale').
 		deferred
 		ensure
 			positive: Result >= 1
+		end
+
+	scale (an_id: INTEGER): REAL_64
+			-- Device pixels per logical pixel for canvas `an_id', fractional where the platform
+			-- is (Windows 1.25 and 1.5, GTK's fractional scaling, AppKit's backingScaleFactor).
+			-- By default the whole-number `scale_factor'; a backend redefines it.
+		do
+			Result := scale_factor (an_id)
+		ensure
+			positive: Result > 0.0
 		end
 
 	width (an_id: INTEGER): INTEGER

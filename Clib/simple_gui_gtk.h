@@ -424,10 +424,19 @@ static void sg_set_direction(int id, int d) {
 
 /* ---------- canvas: present a finished Cairo image ---------- */
 
+/* Device pixels per logical pixel: the surface's own scale, fractional under Wayland's
+   fractional scaling (GTK 4.12+); the whole-number factor before the widget is realized. */
+static double sg_scale(int id) {
+    GtkNative *n = gtk_widget_get_native(sg_w[id]);
+    GdkSurface *s = n ? gtk_native_get_surface(n) : NULL;
+    double v = s ? gdk_surface_get_scale(s) : 0.0;
+    return v > 0.0 ? v : (double) gtk_widget_get_scale_factor(sg_w[id]);
+}
 static void sg_canvas_draw(GtkDrawingArea *a, cairo_t *cr, int w, int h, gpointer d) {
     int id = GPOINTER_TO_INT(d);
     cairo_surface_t *img = sg_canvas_image[id];
-    double scale = gtk_widget_get_scale_factor(GTK_WIDGET(a));
+    double scale = sg_scale(id);
+    (void) a;
     (void) w; (void) h;
     if (!img) return;
     cairo_save(cr);
