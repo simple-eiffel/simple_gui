@@ -51,6 +51,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_text_area, "text_area")
 				run_test (agent t.test_table, "table")
 				run_test (agent t.test_system_colors_follow_the_appearance, "system_colors_follow_the_appearance")
+				run_test (agent t.test_right_to_left_keeps_numbering, "right_to_left_keeps_numbering")
 				run_test (agent t.test_positions_mirror, "positions_mirror")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
