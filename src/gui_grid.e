@@ -32,6 +32,12 @@ feature -- Access
 	row_spacing: INTEGER
 	column_spacing: INTEGER
 
+	has_homogeneous_columns: BOOLEAN
+			-- Do all columns have the same width?
+
+	stretching_column: INTEGER
+			-- The column that takes the spare width (0 = none).
+
 feature -- Element change
 
 	put (a_widget: GUI_WIDGET; a_row, a_column: INTEGER)
@@ -61,6 +67,28 @@ feature -- Element change
 		ensure
 			parent_set: a_widget.parent = Current
 			added: count = old count + 1
+		end
+
+	set_homogeneous_columns (a_on: BOOLEAN)
+		require
+			gui_thread: is_gui_thread
+		do
+			has_homogeneous_columns := a_on
+			backend.grid_set_homogeneous_columns (id, a_on)
+		ensure
+			set: has_homogeneous_columns = a_on
+		end
+
+	set_stretching_column (a_column: INTEGER)
+			-- Let column `a_column' take the spare width (0: none).
+		require
+			gui_thread: is_gui_thread
+			non_negative: a_column >= 0
+		do
+			stretching_column := a_column
+			backend.grid_set_stretching_column (id, a_column)
+		ensure
+			set: stretching_column = a_column
 		end
 
 	set_spacing (a_row_gap, a_column_gap: INTEGER)

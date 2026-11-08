@@ -110,6 +110,21 @@ feature -- Windows and containers
 		deferred
 		end
 
+	stack_set_alignment (a_stack, an_alignment: INTEGER)
+			-- Cross-axis alignment for the stack's children, existing and later:
+			-- 0 fill, 1 start, 2 centre, 3 end.
+		require
+			known: an_alignment >= 0 and an_alignment <= 3
+		deferred
+		end
+
+	stack_align_child (a_stack, a_child, an_alignment: INTEGER)
+			-- Cross-axis alignment for one child.
+		require
+			known: an_alignment >= 0 and an_alignment <= 3
+		deferred
+		end
+
 	grid: INTEGER
 		deferred
 		ensure
@@ -123,6 +138,18 @@ feature -- Windows and containers
 		end
 
 	grid_set_spacing (a_grid, a_row_gap, a_column_gap: INTEGER)
+		deferred
+		end
+
+	grid_set_homogeneous_columns (a_grid: INTEGER; a_on: BOOLEAN)
+			-- Give every column the same width.
+		deferred
+		end
+
+	grid_set_stretching_column (a_grid, a_column: INTEGER)
+			-- Column `a_column' (1-based; 0 = none) takes the spare width.
+		require
+			non_negative: a_column >= 0
 		deferred
 		end
 
