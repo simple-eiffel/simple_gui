@@ -2,3 +2,6 @@ EIFGENs/
 *.png
 !docs/**/*.png
 *.o
+# Windows build and run artifacts
+*.rc
+sw_session.log

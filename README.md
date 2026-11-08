@@ -4,11 +4,13 @@ Native GUI for Eiffel: write the program once, and it **is and looks native** on
 
 | Platform | Backend | Status |
 |---|---|---|
-| Linux | GTK 4 (native GtkButton, GtkEntry, GtkColumnView, GtkNotebook...) | 0.2: the shared test suite passes |
-| macOS | AppKit (native NSButton, NSTextField, NSTableView, NSTabView...) | 0.2: the shared test suite passes (30 tests) |
-| Windows | simple_widgets on simple_shell (the Cairo look) | backend in progress; its groundwork (W1 to W11) is done |
+| Linux | GTK 4 (native GtkButton, GtkEntry, GtkColumnView, GtkNotebook...) | 0.2: all 32 shared tests pass |
+| macOS | AppKit (native NSButton, NSTextField, NSTableView, NSTabView...) | 0.2: all 32 shared tests pass |
+| Windows | simple_widgets on simple_shell (the Cairo look, drawn) | 0.2: all 32 shared tests pass |
 
-**Controls:** windows, menus (and context menus), labels (wrapping, numbers kept left to right), buttons, check boxes, text fields, text areas, lists, tables (sortable columns, several rows), tabs, grids and stacks (with alignment), a Cairo canvas, file and message dialogs; splitters and trees are in review. Light and dark follow the system; any window can turn right to left.
+The same program, unchanged, runs on all three: [simple_graph_calc](https://github.com/simple-eiffel/simple_graph_calc), a graphing calculator, passes its 19 tests on each.
+
+**Controls:** windows, menus (and context menus), labels (wrapping, numbers kept left to right), buttons, check boxes, text fields, text areas, lists, tables (sortable columns, several rows), trees, tabs, splitters, grids and stacks (with alignment), a Cairo canvas at the screen's scale (fractional too), file and message dialogs. Light and dark follow the system; any window can turn right to left.
 
 ## Showcase
 
@@ -18,6 +20,7 @@ Native GUI for Eiffel: write the program once, and it **is and looks native** on
 |---|---|---|---|---|
 | macOS (AppKit) | ![controls](docs/gallery/macos/showcase_1_controls.png) | ![table](docs/gallery/macos/showcase_2_table.png) | ![canvas](docs/gallery/macos/showcase_3_canvas.png) | ![right to left](docs/gallery/macos/showcase_6_right_to_left.png) |
 | Linux (GTK 4) | ![controls](docs/gallery/linux/showcase_1_controls.png) | ![table](docs/gallery/linux/showcase_2_table.png) | ![canvas](docs/gallery/linux/showcase_3_canvas.png) | ![right to left](docs/gallery/linux/showcase_6_right_to_left.png) |
+| Windows (simple_widgets) | ![controls](docs/gallery/windows/showcase_1_controls.png) | ![table](docs/gallery/windows/showcase_2_table.png) | ![canvas](docs/gallery/windows/showcase_3_canvas.png) | not yet (see below) |
 
 Right to left, the tabs and the table's columns mirror; English text keeps its own reading order.
 
@@ -74,6 +77,19 @@ Needs GTK 4 development files (`sudo apt install libgtk-4-dev` on Ubuntu 24.04) 
 ```
 ec_linux.sh test -config simple_gui.ecf -target simple_gui_tests
 ```
+
+## Build (Windows)
+
+Needs EiffelStudio 25.02 and the simple_* libraries beside this one (`SIMPLE_EIFFEL`); the backend is pure Eiffel over simple_widgets and simple_shell.
+
+```
+ec.sh test -config simple_gui.ecf -target simple_gui_tests
+```
+
+**Not yet on Windows** (the shared tests pass; these are what they do not cover):
+- Right to left mirrors stacks, grids, lists, labels and text, but not yet the menu bar, the tabs or a table's columns.
+- A second window (opened while another is) is a floating document window of the first: it has no menu bar yet, and screen readers do not see it yet.
+- A window keeps the size the program asked for; GTK and AppKit grow one to fit its content.
 
 ## Build (macOS)
 
