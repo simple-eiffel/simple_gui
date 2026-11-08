@@ -4,9 +4,9 @@ Native GUI for Eiffel: write the program once, and it **is and looks native** on
 
 | Platform | Backend | Status |
 |---|---|---|
-| Linux | GTK 4 (native GtkButton, GtkEntry, GtkColumnView, GtkNotebook...) | 0.2: all 32 shared tests pass |
-| macOS | AppKit (native NSButton, NSTextField, NSTableView, NSTabView...) | 0.2: all 32 shared tests pass |
-| Windows | simple_widgets on simple_shell (the Cairo look, drawn) | 0.2: all 32 shared tests pass |
+| Linux | GTK 4 (native GtkButton, GtkEntry, GtkColumnView, GtkNotebook...) | all 40 shared tests pass |
+| macOS | AppKit (native NSButton, NSTextField, NSTableView, NSTabView...) | all 40 shared tests pass |
+| Windows | simple_widgets on simple_shell (the Cairo look, drawn) | all 40 shared tests pass |
 
 The same program, unchanged, runs on all three: [simple_graph_calc](https://github.com/simple-eiffel/simple_graph_calc), a graphing calculator, passes its 19 tests on each.
 
@@ -72,11 +72,11 @@ end
 
 ## Large tables
 
-`GUI_TABLE.set_row_source (count, agent row_texts)` makes a table lazy: it asks for rows only as they come into view, so 100,000 rows cost what one screenful does. To have the program make each row only once in a session, put the row cache in front of it. The row cache is its own library, [row_cache/](row_cache/README.md), over a scratch file by default or SQLite as an option, with notes on choosing between the two.
+`GUI_TABLE.set_row_source (count, agent row_texts)` makes a table lazy: it asks for rows only as they come into view, so 100,000 rows cost what one screenful does. To have the program make each row only once in a session, put the row cache in front of it. The row cache is its own library, [row_cache/](row_cache/README.md), over a scratch file by default or SQLite as an option, and either can encrypt what it keeps (simple_encryption's session seal, under a key that lives only in memory). [docs/lazy-tables.md](docs/lazy-tables.md) and the row cache's choosing notes say when to use which, with measurements on all three platforms.
 
 ## Build (Linux)
 
-Needs GTK 4 development files (`sudo apt install libgtk-4-dev` on Ubuntu 24.04) and a display.
+Needs GTK 4 development files (`sudo apt install libgtk-4-dev` on Ubuntu 24.04) and a display. Pictures taken by the test driver come out at the screen's scale (a 200% window gives a 200% picture).
 
 ```
 ec_linux.sh test -config simple_gui.ecf -target simple_gui_tests
