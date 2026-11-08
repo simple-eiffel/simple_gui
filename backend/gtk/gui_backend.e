@@ -327,6 +327,36 @@ feature -- Controls
 		alias "sg_table_set_sort_indicator($a_table, $a_column, $a_ascending ? 1 : 0);"
 		end
 
+	tree: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_tree();"
+		end
+
+	tree_add (a_tree, a_node, a_parent: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_tree_add($a_tree, $a_node, $a_parent, (const char *) $a_text);"
+		end
+
+	tree_set_expanded (a_tree, a_node: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_tree_set_expanded($a_tree, $a_node, $a_on ? 1 : 0);"
+		end
+
+	tree_is_expanded (a_tree, a_node: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_tree_is_expanded($a_tree, $a_node) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	tree_select (a_tree, a_node: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_tree_select($a_tree, $a_node);"
+		end
+
+	tree_selected (a_tree: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_tree_selected($a_tree);"
+		end
+
 feature -- Common widget state
 
 	set_enabled (an_id: INTEGER; a_on: BOOLEAN)
@@ -494,6 +524,11 @@ feature -- Test driver
 	test_click_header (a_table, a_column: INTEGER)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_test_click_header($a_table, $a_column);"
+		end
+
+	test_expand (a_tree, a_node: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_expand($a_tree, $a_node, $a_on ? 1 : 0);"
 		end
 
 	test_type (an_id: INTEGER; a_text: POINTER)

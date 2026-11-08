@@ -81,6 +81,28 @@ feature -- User actions
 			selected: a_table.selected_row = a_row
 		end
 
+	choose_node (a_tree: GUI_TREE; a_node: INTEGER)
+			-- Select a node as a user would (fires selection_actions).
+		require
+			has_application: has_application
+			valid: a_tree.is_node (a_node)
+		do
+			backend.test_choose (a_tree.id, a_node)
+			settle
+		ensure
+			selected: a_tree.selected_node = a_node
+		end
+
+	expand_node (a_tree: GUI_TREE; a_node: INTEGER; a_on: BOOLEAN)
+			-- Expand (or collapse) a node as a user would (fires expansion_actions).
+		require
+			has_application: has_application
+			valid: a_tree.is_node (a_node)
+		do
+			backend.test_expand (a_tree.id, a_node, a_on)
+			settle
+		end
+
 	choose_row (a_list: GUI_LIST; a_row: INTEGER)
 			-- Select a row as a user would (fires selection).
 		require

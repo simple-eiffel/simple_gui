@@ -443,6 +443,176 @@ static void sg_table_sort_by(int id, int column, int ascending) {
 static void sg_table_set_sort_indicator(int id, int column, int ascending) { sg_quiet++; sg_table_sort_by(id, column, ascending); sg_quiet--; }
 static void sg_test_click_header(int id, int column) { sg_table_sort_by(id, column, 1); }   /* as a click: sorter changed -> 14 */
 
+/* ---------- trees: a GtkListView (kind 14) over a GtkTreeListModel. Each node is a
+   GtkStringObject carrying its number ("sg-number") and a GListStore of children
+   ("sg-children"); a GtkTreeExpander in each row shows the triangle. A user's selection sends 4
+   (a = node); a row's "expanded" changing, unless quiet, sends 15 (a = node, b = 1 expanded).
+   A node becomes expandable when its first child is added; build the tree before showing it
+   for the expanders to appear on first display. (First pass by MACMINI, untested on GTK.) ---------- */
+static GListModel *sg_tree_children(gpointer item, gpointer d) {
+    GListStore *c = g_object_get_data(G_OBJECT(item), "sg-children");
+    (void) d;
+    return (c && g_list_model_get_n_items(G_LIST_MODEL(c)) > 0) ? G_LIST_MODEL(g_object_ref(c)) : NULL;
+}
+static GtkTreeListModel *sg_tree_model(int id) { return GTK_TREE_LIST_MODEL(g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-model")); }
+static GtkSingleSelection *sg_tree_selection(int id) { return GTK_SINGLE_SELECTION(g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-selection")); }
+static int sg_row_number(GtkTreeListRow *r) { return r ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(gtk_tree_list_row_get_item(r)), "sg-number")) : 0; }
+/* The row showing node `n', or NULL when it is not shown (an ancestor is collapsed). */
+static GtkTreeListRow *sg_tree_row(int id, int n, guint *pos) {
+    GtkTreeListModel *m = sg_tree_model(id);
+    guint i, k = g_list_model_get_n_items(G_LIST_MODEL(m));
+    for (i = 0; i < k; i++) {
+        GtkTreeListRow *r = gtk_tree_list_model_get_row(m, i);
+        GObject *o = gtk_tree_list_row_get_item(r);
+        int num = GPOINTER_TO_INT(g_object_get_data(o, "sg-number"));
+        g_object_unref(o);
+        if (num == n) { if (pos) *pos = i; return r; }
+        g_object_unref(r);
+    }
+    return NULL;
+}
+static void sg_on_tree_expanded(GObject *row, GParamSpec *p, gpointer d) {
+    GtkTreeListRow *r = GTK_TREE_LIST_ROW(row);
+    GObject *o;
+    (void) p;
+    if (sg_quiet) return;
+    o = gtk_tree_list_row_get_item(r);
+    sg_push(15, GPOINTER_TO_INT(d), GPOINTER_TO_INT(g_object_get_data(o, "sg-number")), gtk_tree_list_row_get_expanded(r) ? 1 : 0);
+    g_object_unref(o);
+}
+static void sg_tree_setup(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
+    GtkWidget *x = gtk_tree_expander_new();
+    GtkWidget *l = gtk_label_new(NULL);
+    (void) fa; (void) d;
+    gtk_label_set_xalign(GTK_LABEL(l), 0.0);
+    gtk_tree_expander_set_child(GTK_TREE_EXPANDER(x), l);
+    gtk_list_item_set_child(it, x);
+}
+static void sg_tree_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
+    GtkTreeListRow *r = GTK_TREE_LIST_ROW(gtk_list_item_get_item(it));
+    GtkWidget *x = gtk_list_item_get_child(it);
+    GObject *o = gtk_tree_list_row_get_item(r);
+    gulong h;
+    (void) fa;
+    gtk_tree_expander_set_list_row(GTK_TREE_EXPANDER(x), r);
+    gtk_label_set_text(GTK_LABEL(gtk_tree_expander_get_child(GTK_TREE_EXPANDER(x))), gtk_string_object_get_string(GTK_STRING_OBJECT(o)));
+    g_object_unref(o);
+    h = g_signal_connect(r, "notify::expanded", G_CALLBACK(sg_on_tree_expanded), d);
+    g_object_set_data(G_OBJECT(it), "sg-expanded-handler", GSIZE_TO_POINTER(h));
+}
+static void sg_tree_unbind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
+    GtkTreeListRow *r = GTK_TREE_LIST_ROW(gtk_list_item_get_item(it));
+    gulong h = GPOINTER_TO_SIZE(g_object_get_data(G_OBJECT(it), "sg-expanded-handler"));
+    (void) fa; (void) d;
+    if (r && h) g_signal_handler_disconnect(r, h);
+    g_object_set_data(G_OBJECT(it), "sg-expanded-handler", NULL);
+}
+static void sg_on_tree_selection(GtkSelectionModel *m, guint pos, guint n, gpointer d) {
+    (void) pos; (void) n;
+    if (sg_quiet) return;
+    sg_push(4, GPOINTER_TO_INT(d), sg_row_number(GTK_TREE_LIST_ROW(gtk_single_selection_get_selected_item(GTK_SINGLE_SELECTION(m)))), 0);
+}
+static int sg_tree(void) {
+    GListStore *roots = g_list_store_new(GTK_TYPE_STRING_OBJECT);
+    GtkTreeListModel *m = gtk_tree_list_model_new(G_LIST_MODEL(roots), FALSE, FALSE, sg_tree_children, NULL, NULL);
+    GtkSingleSelection *s = gtk_single_selection_new(G_LIST_MODEL(m));
+    GtkListItemFactory *f = gtk_signal_list_item_factory_new();
+    GtkWidget *v, *scroll = gtk_scrolled_window_new();
+    GPtrArray *nodes = g_ptr_array_new();
+    int id;
+    gtk_single_selection_set_autoselect(s, FALSE);
+    gtk_single_selection_set_can_unselect(s, TRUE);
+    v = gtk_list_view_new(GTK_SELECTION_MODEL(s), f);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), v);
+    id = sg_reg(scroll, 14);
+    g_signal_connect(f, "setup", G_CALLBACK(sg_tree_setup), NULL);
+    g_signal_connect(f, "bind", G_CALLBACK(sg_tree_bind), GINT_TO_POINTER(id));
+    g_signal_connect(f, "unbind", G_CALLBACK(sg_tree_unbind), NULL);
+    g_signal_connect(s, "selection-changed", G_CALLBACK(sg_on_tree_selection), GINT_TO_POINTER(id));
+    g_object_set_data(G_OBJECT(scroll), "sg-view", v);
+    g_object_set_data_full(G_OBJECT(scroll), "sg-roots", roots, g_object_unref);
+    g_object_set_data(G_OBJECT(scroll), "sg-tree-model", m);
+    g_object_set_data(G_OBJECT(scroll), "sg-tree-selection", s);
+    g_object_set_data_full(G_OBJECT(scroll), "sg-tree-nodes", nodes, (GDestroyNotify) g_ptr_array_unref);
+    return id;
+}
+static void sg_tree_add(int id, int node, int parent, const char *text) {
+    GPtrArray *nodes = g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-nodes");
+    GtkStringObject *o = gtk_string_object_new(text);
+    GListStore *into;
+    g_object_set_data(G_OBJECT(o), "sg-number", GINT_TO_POINTER(node));
+    g_object_set_data(G_OBJECT(o), "sg-parent", GINT_TO_POINTER(parent));
+    g_object_set_data_full(G_OBJECT(o), "sg-children", g_list_store_new(GTK_TYPE_STRING_OBJECT), g_object_unref);
+    g_ptr_array_add(nodes, o);   /* node n at index n - 1; the stores keep it alive */
+    if (parent >= 1 && (guint) parent <= nodes->len)
+        into = g_object_get_data(G_OBJECT(g_ptr_array_index(nodes, parent - 1)), "sg-children");
+    else
+        into = G_LIST_STORE(g_object_get_data(G_OBJECT(sg_w[id]), "sg-roots"));
+    sg_quiet++;
+    g_list_store_append(into, o);
+    sg_quiet--;
+    g_object_unref(o);
+}
+/* Expand every ancestor of `node', root first (silently), so its row is shown. */
+static void sg_tree_reveal(int id, int node) {
+    GPtrArray *nodes = g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-nodes");
+    int chain[256], n = 0, k = node;
+    while (k >= 1 && (guint) k <= nodes->len && n < 256) {
+        k = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(g_ptr_array_index(nodes, k - 1)), "sg-parent"));
+        if (k >= 1) chain[n++] = k;
+    }
+    sg_quiet++;
+    while (n > 0) {
+        GtkTreeListRow *r = sg_tree_row(id, chain[--n], NULL);
+        if (r) { gtk_tree_list_row_set_expanded(r, TRUE); g_object_unref(r); }
+    }
+    sg_quiet--;
+}
+static void sg_tree_set_expanded(int id, int node, int on) {
+    GtkTreeListRow *r;
+    sg_tree_reveal(id, node);
+    r = sg_tree_row(id, node, NULL);
+    sg_quiet++;
+    if (r) { gtk_tree_list_row_set_expanded(r, on ? TRUE : FALSE); g_object_unref(r); }
+    sg_quiet--;
+}
+static int sg_tree_is_expanded(int id, int node) {
+    GtkTreeListRow *r = sg_tree_row(id, node, NULL);
+    int e = r ? (gtk_tree_list_row_get_expanded(r) ? 1 : 0) : 0;
+    if (r) g_object_unref(r);
+    return e;
+}
+static void sg_tree_select(int id, int node) {
+    guint pos = GTK_INVALID_LIST_POSITION;
+    GtkTreeListRow *r;
+    if (node <= 0) { sg_quiet++; gtk_single_selection_set_selected(sg_tree_selection(id), GTK_INVALID_LIST_POSITION); sg_quiet--; return; }
+    sg_tree_reveal(id, node);
+    r = sg_tree_row(id, node, &pos);
+    if (r) g_object_unref(r);
+    sg_quiet++;
+    gtk_single_selection_set_selected(sg_tree_selection(id), pos);
+    sg_quiet--;
+}
+static int sg_tree_selected(int id) {
+    return sg_row_number(GTK_TREE_LIST_ROW(gtk_single_selection_get_selected_item(sg_tree_selection(id))));
+}
+/* As a user: the expander clicked (the row's "expanded" changes, not quietly: 15). */
+static void sg_test_expand(int id, int node, int on) {
+    GtkTreeListRow *r;
+    sg_tree_reveal(id, node);
+    r = sg_tree_row(id, node, NULL);
+    if (r) { gtk_tree_list_row_set_expanded(r, on ? TRUE : FALSE); g_object_unref(r); }
+}
+/* As a user: the node shown, then its row clicked (4). */
+static void sg_test_choose_node(int id, int node) {
+    guint pos = GTK_INVALID_LIST_POSITION;
+    GtkTreeListRow *r;
+    sg_tree_reveal(id, node);
+    r = sg_tree_row(id, node, &pos);
+    if (r) g_object_unref(r);
+    if (pos != GTK_INVALID_LIST_POSITION) gtk_single_selection_set_selected(sg_tree_selection(id), pos);
+}
+
 /* ---------- check box (kind 9; event 12 toggled, a = 1 checked) ---------- */
 
 static void sg_on_toggled(GtkCheckButton *b, gpointer d) {
@@ -994,6 +1164,7 @@ static void sg_test_type(int id, const char *t) {   /* emits, like a user */
     else gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), t);
 }
 static void sg_test_choose(int id, int row) {
+    if (sg_kind[id] == 14) { sg_test_choose_node(id, row); return; }   /* a tree node, by its number */
     if (sg_kind[id] == 13) { gtk_selection_model_select_item(sg_table_model(id), (guint) (row - 1), TRUE); return; }   /* a table row, as a click */
     if (sg_kind[id] == 11) { gtk_notebook_set_current_page(GTK_NOTEBOOK(sg_w[id]), row - 1); return; }   /* a click on the tab */
     GtkListBoxRow *r = gtk_list_box_get_row_at_index(sg_list_box(id), row - 1);
