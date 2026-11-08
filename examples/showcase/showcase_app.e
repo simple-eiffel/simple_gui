@@ -74,10 +74,22 @@ feature {NONE} -- Gallery
 		end
 
 	shot (d: GUI_TEST_DRIVER; a_main: SHOWCASE_WINDOW; a_folder: STRING_32; a_name: STRING)
+			-- Settle by time, as the shared tests do, then save the window: `pump_until_idle'
+			-- returns when the queue is empty for a moment, which under WSLg can be before GTK
+			-- has mapped and sized a new window (every picture failed to save).
 		local
 			l_path: PATH
+			i: INTEGER
 		do
 			d.pump_until_idle (400)
+			from
+				i := 1
+			until
+				i > 10
+			loop
+				a_main.app.process_events (30)
+				i := i + 1
+			end
 			create l_path.make_from_string (a_folder + {STRING_32} "/" + a_name + ".png")
 			if d.snapshot (a_main.window, l_path) then
 				print (a_name + ".png%N")
