@@ -962,11 +962,13 @@ feature -- Menus
 		end
 
 	widget_set_context_menu (an_id: INTEGER; a_menu: POINTER)
-			-- The widget's right-click menu offers the model's items first (SW's menu_extension).
+			-- The widget's right-click menu is the model's items in place of the widget's own
+			-- (SW's menu_extension, replacing), as AppKit's and GTK's context menus are.
 		do
 			if attached widget (an_id) as al_w then
 				widget_context.force (menu_index (a_menu), an_id)
 				al_w.set_menu_extension (agent fill_context (?, ?, ?, menu_index (a_menu)))
+				al_w.set_menu_extension_replaces (True)
 			end
 		end
 
