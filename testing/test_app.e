@@ -56,6 +56,8 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_tree, "tree")
 				run_test (agent t.test_positions_mirror, "positions_mirror")
 				run_test (agent t.test_small_window_grows_to_fit, "small_window_grows_to_fit")
+				run_test (agent t.test_splitter_near_an_edge, "splitter_near_an_edge")
+				run_test (agent t.test_a_big_table_fills, "a_big_table_fills")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then

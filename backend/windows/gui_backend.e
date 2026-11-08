@@ -591,10 +591,15 @@ feature -- Controls
 		end
 
 	table_extend (a_table: INTEGER; a_cells: POINTER)
+			-- One row more: appended to the grid in place (`add_row'), not by handing it
+			-- every row again, so filling a table is linear (it copied every row so far).
+		local
+			l_cells: ARRAY [STRING_32]
 		do
 			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached table_rows.item (a_table) as al_rows then
-				al_rows.extend (cells_of (from_c (a_cells)))
-				al_g.set_rows (al_rows)
+				l_cells := cells_of (from_c (a_cells))
+				al_rows.extend (l_cells)
+				al_g.add_row (l_cells)
 				changed
 			end
 		end
@@ -957,11 +962,13 @@ feature -- Menus
 		end
 
 	widget_set_context_menu (an_id: INTEGER; a_menu: POINTER)
-			-- The widget's right-click menu offers the model's items first (SW's menu_extension).
+			-- The widget's right-click menu is the model's items in place of the widget's own
+			-- (SW's menu_extension, replacing), as AppKit's and GTK's context menus are.
 		do
 			if attached widget (an_id) as al_w then
 				widget_context.force (menu_index (a_menu), an_id)
 				al_w.set_menu_extension (agent fill_context (?, ?, ?, menu_index (a_menu)))
+				al_w.set_menu_extension_replaces (True)
 			end
 		end
 
@@ -1703,7 +1710,7 @@ feature {NONE} -- Implementation
 					and then attached splitters.item (splitter_info.key_for_iteration) as al_sp
 					and then splitter_extent (al_sp) > 0.0
 				then
-					al_sp.set_ratio (device (splitter_info.item_for_iteration.pending) / splitter_extent (al_sp))
+					al_sp.set_ratio_within (device (splitter_info.item_for_iteration.pending) / splitter_extent (al_sp), splitter_extent (al_sp))
 					splitter_info.item_for_iteration.pending := -1
 					last_positions_moved := True
 				end
