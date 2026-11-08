@@ -366,6 +366,39 @@ feature -- Tests
 			l_window.close
 		end
 
+	test_homogeneous_columns_fill
+			-- Homogeneous columns share the grid's spare width equally (GTK's rule, and SW_GRID's);
+			-- a plain grid keeps its columns at their natural width.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_even, l_plain: GUI_GRID
+			a1, a2, p1, p2: GUI_LABEL
+		do
+			create l_window.make ("Homogeneous fill", 600, 200)
+			create l_stack.make_vertical
+			create l_even.make
+			l_even.set_homogeneous_columns (True)
+			create a1.make ("a")
+			create a2.make ("bb")
+			l_even.put (a1, 1, 1)
+			l_even.put (a2, 1, 2)
+			create l_plain.make
+			create p1.make ("a")
+			create p2.make ("bb")
+			l_plain.put (p1, 1, 1)
+			l_plain.put (p2, 1, 2)
+			l_stack.extend (l_even)
+			l_stack.extend (l_plain)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("equal: " + a1.width.out + " vs " + a2.width.out, (a1.width - a2.width).abs <= 2)
+			assert ("they share the spare width: " + a1.width.out, a1.width > 150)
+			assert ("a plain column stays natural: " + p1.width.out, p1.width < 100)
+			l_window.close
+		end
+
 	test_menus_relabel
 			-- A menu title and its items (agent and edit items alike) change language in place.
 		local
