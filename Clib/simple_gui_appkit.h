@@ -140,6 +140,8 @@ void sga_test_type(int a_id, const char *a_text);
 void sga_test_choose(int a_id, int a_row);
 void sga_test_menu(int a_item_id);
 void sga_test_request_close(int a_window);
+void sga_test_focus(int a_id);   /* as a click: key window, first responder */
+int sga_test_edit_enabled(int a_role);   /* 10 undo .. 15 select all: AppKit's menu validation now */
 int sga_test_context_menu(int a_id, int a_item);   /* 0: no such item in that widget's context menu */
 void sga_test_auto_cancel_dialogs(int a_ms);
 int sga_snapshot(int a_window, const char *a_path);
