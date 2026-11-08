@@ -34,6 +34,7 @@ __attribute__((weak)) int sg_quiet = 0;               /* >0 while a programmatic
 __attribute__((weak)) GThread *sg_gui_thread = NULL;
 __attribute__((weak)) volatile gint sg_wake_pending = 0;
 __attribute__((weak)) GSimpleActionGroup *sg_actions = NULL;
+static void sg_update_edit_enabled(void);   /* below, with the Edit roles */
 __attribute__((weak)) GMenu *sg_menubar = NULL;
 __attribute__((weak)) int sg_dark_seen = -1;
 __attribute__((weak)) cairo_surface_t *sg_canvas_image[SG_MAX] = {0};
@@ -75,6 +76,7 @@ static void sg_pump(int ms) {
     gint64 until = g_get_monotonic_time() + (gint64) ms * 1000;
     do {
         while (g_main_context_iteration(NULL, FALSE)) { }
+        sg_update_edit_enabled();
         if (sg_qh != sg_qt) return;
         if (g_atomic_int_compare_and_exchange(&sg_wake_pending, 1, 0)) { sg_push(11, 0, 0, 0); return; }
         g_main_context_iteration(NULL, TRUE);   /* blocks until a source fires; the heartbeat below bounds it */
@@ -1095,12 +1097,12 @@ static void sg_on_edit(GSimpleAction *a, GVariant *p, gpointer d) {
     }
 }
 /* role: 10 undo 11 redo 12 cut 13 copy 14 paste 15 select all */
+static const char *sg_edit_names[] = {"undo", "redo", "cut", "copy", "paste", "select_all"};
 static void sg_menu_add_edit_role(void *menu, const char *text, int role, int item_id) {
-    static const char *names[] = {"undo", "redo", "cut", "copy", "paste", "select_all"};
     static const char *actions[] = {"text.undo", "text.redo", "clipboard.cut", "clipboard.copy", "clipboard.paste", "selection.select-all"};
     char name[32], detailed[40];
     if (role < 10 || role > 15) return;
-    snprintf(name, sizeof name, "edit_%s", names[role - 10]);
+    snprintf(name, sizeof name, "edit_%s", sg_edit_names[role - 10]);
     snprintf(detailed, sizeof detailed, "app.%s", name);
     if (!g_action_map_lookup_action(G_ACTION_MAP(sg_actions), name)) {
         GSimpleAction *a = g_simple_action_new(name, NULL);
@@ -1109,6 +1111,85 @@ static void sg_menu_add_edit_role(void *menu, const char *text, int role, int it
     }
     sg_remember_item(item_id, G_MENU(menu), g_menu_model_get_n_items(G_MENU_MODEL(menu)), detailed, NULL);
     g_menu_append(G_MENU(menu), text, detailed);
+}
+
+/* ---------- the Edit roles' enabled state (1e). GTK 4 has no public query for whether a
+   widget's own action (clipboard.copy and the rest) is enabled, so it is worked out here from
+   the focused widget of the active window, and set on our six edit actions whenever the loop
+   is pumped (only changes are applied). A disabled app action lets the key fall through to the
+   field's own binding, so Ctrl+C still works there. ---------- */
+static GtkWidget *sg_active_focus(void) {
+    int i;
+    GtkWidget *f = NULL;
+    for (i = 1; i < sg_n; i++)
+        if (sg_kind[i] == 1 && sg_w[i] && gtk_window_is_active(GTK_WINDOW(sg_w[i])))
+            return gtk_root_get_focus(GTK_ROOT(sg_w[i]));
+    /* no active window (a test run's window may never be activated): the first with a focus */
+    for (i = 1; i < sg_n && !f; i++)
+        if (sg_kind[i] == 1 && sg_w[i] && gtk_widget_get_visible(sg_w[i])) f = gtk_root_get_focus(GTK_ROOT(sg_w[i]));
+    return f;
+}
+static int sg_clipboard_has_text(GtkWidget *w) {
+    GdkContentFormats *f = gdk_clipboard_get_formats(gtk_widget_get_clipboard(w));
+    return gdk_content_formats_contain_gtype(f, G_TYPE_STRING)
+        || gdk_content_formats_contain_mime_type(f, "text/plain;charset=utf-8")
+        || gdk_content_formats_contain_mime_type(f, "text/plain");
+}
+static int sg_edit_can(GtkWidget *f, int role) {
+    if (!f) return 0;
+    if (GTK_IS_TEXT_VIEW(f)) {
+        GtkTextBuffer *b = gtk_text_view_get_buffer(GTK_TEXT_VIEW(f));
+        int ed = gtk_text_view_get_editable(GTK_TEXT_VIEW(f));
+        int sel = gtk_text_buffer_get_has_selection(b);
+        switch (role) {
+        case 10: return ed && gtk_text_buffer_get_can_undo(b);
+        case 11: return ed && gtk_text_buffer_get_can_redo(b);
+        case 12: return ed && sel;
+        case 13: return sel;
+        case 14: return ed && sg_clipboard_has_text(f);
+        case 15: return gtk_text_buffer_get_char_count(b) > 0;
+        }
+    } else if (GTK_IS_EDITABLE(f)) {
+        int s = 0, e = 0;
+        int ed = gtk_editable_get_editable(GTK_EDITABLE(f));
+        int sel = gtk_editable_get_selection_bounds(GTK_EDITABLE(f), &s, &e);
+        const char *t = gtk_editable_get_text(GTK_EDITABLE(f));
+        switch (role) {
+        case 10: case 11: return ed && gtk_editable_get_enable_undo(GTK_EDITABLE(f));
+        case 12: return ed && sel;
+        case 13: return sel;
+        case 14: return ed && sg_clipboard_has_text(f);
+        case 15: return t != NULL && *t != 0;
+        }
+    }
+    return 0;
+}
+static void sg_update_edit_enabled(void) {
+    int r;
+    char name[32];
+    GtkWidget *f;
+    if (!sg_actions) return;
+    f = sg_active_focus();
+    for (r = 10; r <= 15; r++) {
+        GAction *a;
+        snprintf(name, sizeof name, "edit_%s", sg_edit_names[r - 10]);
+        a = g_action_map_lookup_action(G_ACTION_MAP(sg_actions), name);
+        if (a) {
+            gboolean on = sg_edit_can(f, r) != 0;
+            if (g_action_get_enabled(a) != on) g_simple_action_set_enabled(G_SIMPLE_ACTION(a), on);
+        }
+    }
+}
+/* Test doors: focus a widget as a click would; is Edit role `role' enabled now? */
+static void sg_test_focus(int id) { if (sg_w[id]) gtk_widget_grab_focus(sg_w[id]); }
+static int sg_test_edit_enabled(int role) {
+    char name[32];
+    GAction *a;
+    if (role < 10 || role > 15 || !sg_actions) return 0;
+    sg_update_edit_enabled();
+    snprintf(name, sizeof name, "edit_%s", sg_edit_names[role - 10]);
+    a = g_action_map_lookup_action(G_ACTION_MAP(sg_actions), name);
+    return a ? (g_action_get_enabled(a) ? 1 : 0) : sg_edit_can(sg_active_focus(), role);
 }
 
 /* ---------- accessibility description (what GTK exposes, walked from the window) ---------- */
@@ -1272,7 +1353,13 @@ static void sg_test_choose(int id, int row) {
 }
 static void sg_test_request_close(int win) { gtk_window_close(GTK_WINDOW(sg_w[win])); }   /* emits close-request */
 static void sg_test_menu(int item_id) {
-    char name[32]; snprintf(name, sizeof name, "item%d", item_id);
+    /* the item's own action (an Edit role's is edit_cut and the like, not itemN); a disabled
+       action does nothing, as a grayed item does */
+    const char *detailed = (item_id > 0 && item_id < SG_MAX_ITEMS) ? sg_item_action[item_id] : NULL;
+    char name[40];
+    if (detailed && g_str_has_prefix(detailed, "app.")) snprintf(name, sizeof name, "%s", detailed + 4);
+    else snprintf(name, sizeof name, "item%d", item_id);
+    sg_update_edit_enabled();
     g_action_group_activate_action(G_ACTION_GROUP(sg_actions), name, NULL);
 }
 /* ---------- context menus: a GMenu outside the bar, shown by a GtkPopoverMenu where a
@@ -1289,8 +1376,17 @@ static void sg_on_secondary(GtkGestureClick *g, int n, double x, double y, gpoin
 static void sg_on_context_owner_destroy(GtkWidget *w, gpointer pop) { (void) w; gtk_widget_unparent(GTK_WIDGET(pop)); }
 static void sg_widget_set_context_menu(int id, void *menu) {
     GtkWidget *w = sg_w[id];
-    GtkWidget *pop = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
-    GtkGesture *g = gtk_gesture_click_new();
+    GtkWidget *pop = g_object_get_data(G_OBJECT(w), "sg-context-popover");
+    GtkGesture *g;
+    if (pop) {
+        /* set again: the same popover shows the new menu (a second gesture and popover would
+           stack, both opening on one right-click) */
+        gtk_popover_menu_set_menu_model(GTK_POPOVER_MENU(pop), G_MENU_MODEL(menu));
+        g_object_set_data(G_OBJECT(w), "sg-context", menu);
+        return;
+    }
+    pop = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    g = gtk_gesture_click_new();
     gtk_widget_set_parent(pop, w);
     gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(g), GDK_BUTTON_SECONDARY);
@@ -1298,6 +1394,7 @@ static void sg_widget_set_context_menu(int id, void *menu) {
     gtk_widget_add_controller(w, GTK_EVENT_CONTROLLER(g));
     g_signal_connect(w, "destroy", G_CALLBACK(sg_on_context_owner_destroy), pop);
     g_object_set_data(G_OBJECT(w), "sg-context", menu);
+    g_object_set_data(G_OBJECT(w), "sg-context-popover", pop);
 }
 /* Choose item `item_id' from widget `id''s context menu as a user would: 0 when that menu
    has no such item (or the widget has none). */

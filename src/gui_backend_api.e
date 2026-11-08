@@ -622,6 +622,19 @@ feature -- Test driver
 		deferred
 		end
 
+	test_focus (an_id: INTEGER)
+			-- Give widget `an_id' the keyboard focus, as a click on it would.
+		deferred
+		end
+
+	test_edit_enabled (a_role: INTEGER): BOOLEAN
+			-- Would Edit role `a_role' (10 undo .. 15 select all) be enabled now, for the focus
+			-- of the window in front?
+		require
+			edit_role: a_role >= 10 and a_role <= 15
+		deferred
+		end
+
 	test_context_menu (an_id, an_item_id: INTEGER): BOOLEAN
 			-- Choose item `an_item_id' from widget `an_id's context menu AS A USER WOULD (emits the
 			-- menu event); False when that widget's context menu has no such item.

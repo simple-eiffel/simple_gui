@@ -1968,19 +1968,101 @@ void sga_test_choose(int a_id, int a_row)
 	[t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)(a_row - 1)] byExtendingSelection:NO];
 }
 
-static NSMenuItem *sga_find_item(NSMenu *a_menu, int a_tag)
+static id sga_edit_target(SEL a_action);
+
+/* Item `a_tag' of the program's own items or its Edit role items (10 .. 15). */
+static NSMenuItem *sga_find_program_item(NSMenu *a_menu, int a_tag)
 {
 	for (NSMenuItem *i in [a_menu itemArray]) {
-		if ([i action] == @selector(menuItem:) && [i tag] == a_tag) return i;
-		if ([i submenu]) { NSMenuItem *f = sga_find_item([i submenu], a_tag); if (f) return f; }
+		int l_role = [[i representedObject] isKindOfClass:[NSNumber class]] ? [[i representedObject] intValue] : 0;
+		if ([i tag] == a_tag && ([i action] == @selector(menuItem:) || (l_role >= 10 && l_role <= 15))) return i;
+		if ([i submenu]) { NSMenuItem *f = sga_find_program_item([i submenu], a_tag); if (f) return f; }
 	}
 	return nil;
 }
 
+/* Choose item `a_item_id' as a user would. An Edit role item goes along the front window's
+   responder chain, as it would with the application active (a test run from a terminal may
+   leave it inactive, with no key window for AppKit to send to). */
 void sga_test_menu(int a_item_id)
 {
-	NSMenuItem *i = sga_find_item([NSApp mainMenu], a_item_id);
-	if (i) [[i menu] performActionForItemAtIndex:[[i menu] indexOfItem:i]];
+	NSMenuItem *i = sga_find_program_item([NSApp mainMenu], a_item_id);
+	if (!i) return;
+	if (![i target] && ![NSApp targetForAction:[i action] to:nil from:i]) {
+		id l_target = sga_edit_target([i action]);
+		if (l_target) [NSApp sendAction:[i action] to:l_target from:i];
+		return;
+	}
+	[[i menu] performActionForItemAtIndex:[[i menu] indexOfItem:i]];
+}
+
+/* Focus widget `a_id' as a click on it would: its window comes to the front as the key window
+   and the widget becomes first responder. A field's caret goes to the end of its text
+   (AppKit would select it all, which a click does not). */
+void sga_test_focus(int a_id)
+{
+	NSView *v = sga_core(a_id);
+	NSWindow *w = [v window];
+	if (!w) return;
+	[w makeKeyAndOrderFront:nil];
+	if ([w makeFirstResponder:v]) {
+		id l_first = [w firstResponder];
+		if ([l_first isKindOfClass:[NSTextView class]] && [(NSTextView *)l_first isFieldEditor])
+			[(NSTextView *)l_first setSelectedRange:NSMakeRange([[(NSTextView *)l_first string] length], 0)];
+	}
+}
+
+/* The window whose first responder the Edit menu acts on: the key window, else the frontmost
+   visible window that can be key. */
+static NSWindow *sga_front_window(void)
+{
+	NSWindow *w = [NSApp keyWindow];
+	if (w && [w isVisible]) return w;
+	for (NSWindow *o in [NSApp orderedWindows]) if ([o isVisible] && [o canBecomeKeyWindow]) return o;
+	return nil;
+}
+
+/* What an item with action `a_action' and no target would go to: the first object along the
+   front window's responder chain that implements it, then the window, its delegate, the
+   application and its delegate (AppKit's order); nil when none does. */
+static id sga_edit_target(SEL a_action)
+{
+	NSWindow *w = sga_front_window();
+	id l_target = nil;
+	for (NSResponder *r = [w firstResponder]; r && !l_target; r = [r nextResponder])
+		if ([r respondsToSelector:a_action]) l_target = r;
+	if (!l_target && w && [w respondsToSelector:a_action]) l_target = w;
+	if (!l_target && [[w delegate] respondsToSelector:a_action]) l_target = [w delegate];
+	if (!l_target && [NSApp respondsToSelector:a_action]) l_target = NSApp;
+	if (!l_target && [[NSApp delegate] respondsToSelector:a_action]) l_target = [NSApp delegate];
+	return l_target;
+}
+
+/* Would the Edit item for role `a_role' (10 undo .. 15 select all) be enabled now? As AppKit's
+   menu validation decides it: the first object along the front window's responder chain (then
+   the window's delegate, the application and its delegate) that implements the item's action
+   is asked through validateMenuItem: or validateUserInterfaceItem:; no such object, disabled. */
+int sga_test_edit_enabled(int a_role)
+{
+	SEL l_actions[6] = { @selector(undo:), @selector(redo:), @selector(cut:), @selector(copy:), @selector(paste:), @selector(selectAll:) };
+	if (a_role < 10 || a_role > 15) return 0;
+	SEL l_action = l_actions[a_role - 10];
+	NSMenuItem *l_item = nil;
+	NSMutableArray<NSMenu *> *l_menus = [NSMutableArray arrayWithObject:[NSApp mainMenu] ?: [[NSMenu alloc] init]];
+	while (!l_item && [l_menus count] > 0) {
+		NSMenu *m = l_menus[0];
+		[l_menus removeObjectAtIndex:0];
+		for (NSMenuItem *i in [m itemArray]) {
+			if ([i action] == l_action && [[i representedObject] isEqual:@(a_role)]) { l_item = i; break; }
+			if ([i submenu]) [l_menus addObject:[i submenu]];
+		}
+	}
+	if (!l_item) l_item = [[NSMenuItem alloc] initWithTitle:@"" action:l_action keyEquivalent:@""];
+	id l_target = sga_edit_target(l_action);
+	if (!l_target) return 0;
+	if ([l_target respondsToSelector:@selector(validateMenuItem:)]) return [l_target validateMenuItem:l_item] ? 1 : 0;
+	if ([l_target respondsToSelector:@selector(validateUserInterfaceItem:)]) return [l_target validateUserInterfaceItem:l_item] ? 1 : 0;
+	return 1;
 }
 
 /* Choose item `a_item' from widget `a_id's context menu, as a user would; 0 when that menu has
