@@ -554,7 +554,7 @@ static void sg_tree_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer
     gulong h;
     (void) fa;
     gtk_tree_expander_set_list_row(GTK_TREE_EXPANDER(x), r);
-    sg_follow_view_direction(x);
+    sg_follow_view_direction(gtk_tree_expander_get_child(GTK_TREE_EXPANDER(x)));   /* the label, then the expander and up */
     gtk_label_set_text(GTK_LABEL(gtk_tree_expander_get_child(GTK_TREE_EXPANDER(x))), gtk_string_object_get_string(GTK_STRING_OBJECT(o)));
     g_object_unref(o);
     sg_tree_forget_row(it);   /* GTK 4.12+ may bind again without unbinding first */
