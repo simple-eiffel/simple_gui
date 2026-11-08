@@ -489,6 +489,62 @@ feature -- Tests
 			l_window.close
 		end
 
+	test_table
+			-- Cells round-trip; selecting from code is silent and a user's choice is reported;
+			-- several rows can be selected; a header click asks for ascending, then descending, and
+			-- the program refills in that order; a screen reader reads a grid with column headers.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_table: GUI_TABLE
+			l_rows: ARRAYED_LIST [INTEGER]
+			l_column: INTEGER
+			l_ascending: BOOLEAN
+			l_tree: STRING_32
+		do
+			create l_window.make ("Table", 420, 260)
+			create l_stack.make_vertical
+			create l_table.make (<<"Book", "Chapters">>)
+			l_table.extend_row (<<"Genesis", "50">>)
+			l_table.extend_row (<<"Exodus", "40">>)
+			l_table.extend_row (<<"Leviticus", "27">>)
+			l_table.selection_actions.extend (agent (r: INTEGER) do chosen_row := r end)
+			l_table.header_actions.extend (agent (c: INTEGER; up: BOOLEAN) do received_tag := c; last_checked := up end)
+			l_stack.extend_stretching (l_table)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("rows", l_table.row_count = 3 and l_table.column_count = 2)
+			assert ("cells", l_table.cell (2, 1).same_string ("Exodus") and l_table.cell (3, 2).same_string ("27"))
+			l_table.select_row (2)
+			driver.pump_until_idle (200)
+			assert ("silent select", l_table.selected_row = 2 and l_table.selection_actions.fire_count = 0)
+			chosen_row := 0
+			driver.choose_table_row (l_table, 3)
+			assert ("a user's choice is reported", l_table.selection_actions.fire_count = 1 and chosen_row = 3)
+			l_table.set_multiple_selection (True)
+			l_table.select_rows (<<1, 3>>)
+			l_rows := l_table.selected_rows
+			assert ("two selected, in order", l_rows.count = 2 and then (l_rows [1] = 1 and l_rows [2] = 3))
+			driver.click_header (l_table, 2)
+			l_column := received_tag
+			l_ascending := last_checked
+			assert ("a new column asks for ascending", l_column = 2 and l_ascending and l_table.sort_column = 2)
+			driver.click_header (l_table, 2)
+			assert ("the same column again reverses", received_tag = 2 and not last_checked and not l_table.is_sort_ascending)
+			l_table.wipe_out
+			l_table.extend_row (<<"Genesis", "50">>)
+			l_table.extend_row (<<"Exodus", "40">>)
+			l_table.extend_row (<<"Leviticus", "27">>)
+			assert ("refilled by the program", l_table.row_count = 3 and l_table.selected_row = 0)
+			l_tree := driver.describe_accessibility (l_window)
+			print (indented (l_tree))
+			assert ("a grid", l_tree.has_substring ("tree-grid:"))
+			assert ("its column headers", l_tree.has_substring ("column-header: Book") and l_tree.has_substring ("column-header: Chapters"))
+			assert ("its cells", l_tree.has_substring ("Exodus"))
+			l_window.close
+		end
+
 	test_text_area
 			-- Several lines round-trip; set_text is silent; typing fires; read-only is recorded.
 		local

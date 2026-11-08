@@ -49,6 +49,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_context_menu, "context_menu")
 				run_test (agent t.test_check_box_events, "check_box_events")
 				run_test (agent t.test_text_area, "text_area")
+				run_test (agent t.test_table, "table")
 				run_test (agent t.test_system_colors_follow_the_appearance, "system_colors_follow_the_appearance")
 				run_test (agent t.test_positions_mirror, "positions_mirror")
 			end

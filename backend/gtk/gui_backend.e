@@ -287,6 +287,46 @@ feature -- Controls
 		alias "return sg_list_selected($an_id);"
 		end
 
+	table (a_titles: POINTER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_table((const char *) $a_titles);"
+		end
+
+	table_extend (a_table: INTEGER; a_cells: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_table_extend($a_table, (const char *) $a_cells);"
+		end
+
+	table_wipe_out (a_table: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_table_wipe_out($a_table);"
+		end
+
+	table_set_multiple (a_table: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_table_set_multiple($a_table, $a_on ? 1 : 0);"
+		end
+
+	table_select (a_table, a_row: INTEGER; a_extend: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_table_select($a_table, $a_row, $a_extend ? 1 : 0);"
+		end
+
+	table_selected_count (a_table: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_table_selected_count($a_table);"
+		end
+
+	table_selected_at (a_table, i: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_table_selected_at($a_table, $i);"
+		end
+
+	table_set_sort_indicator (a_table, a_column: INTEGER; a_ascending: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_table_set_sort_indicator($a_table, $a_column, $a_ascending ? 1 : 0);"
+		end
+
 feature -- Common widget state
 
 	set_enabled (an_id: INTEGER; a_on: BOOLEAN)
@@ -461,6 +501,11 @@ feature -- Test driver
 	test_click (an_id: INTEGER)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_test_click($an_id);"
+		end
+
+	test_click_header (a_table, a_column: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_click_header($a_table, $a_column);"
 		end
 
 	test_type (an_id: INTEGER; a_text: POINTER)

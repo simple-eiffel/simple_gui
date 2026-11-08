@@ -72,6 +72,14 @@ void sga_list_extend(int a_id, const char *a_text);
 void sga_list_wipe_out(int a_id);
 void sga_list_select(int a_id, int a_row);
 int sga_list_selected(int a_id);
+int sga_table(const char *a_titles);   /* titles joined by U+001F; selection 4 (a = first row), header clicked 14 (a = column) */
+void sga_table_extend(int a_id, const char *a_cells);   /* one row, cells joined by U+001F */
+void sga_table_wipe_out(int a_id);   /* no event */
+void sga_table_set_multiple(int a_id, int a_on);
+void sga_table_select(int a_id, int a_row, int a_extend);   /* 0 clears; no event */
+int sga_table_selected_count(int a_id);
+int sga_table_selected_at(int a_id, int i);   /* the i-th selected row, ascending */
+void sga_table_set_sort_indicator(int a_id, int a_column, int a_ascending);   /* 0: none */
 
 /* Common */
 void sga_set_enabled(int a_id, int a_on);
@@ -116,6 +124,7 @@ int sga_system_color(int a_role);   /* 0xRRGGBB: 1 window background, 2 text, 3 
 
 /* Test driver */
 void sga_test_click(int a_id);
+void sga_test_click_header(int a_id, int a_column);   /* header clicked, as a user */
 void sga_test_type(int a_id, const char *a_text);
 void sga_test_choose(int a_id, int a_row);
 void sga_test_menu(int a_item_id);

@@ -59,6 +59,28 @@ feature -- User actions
 			typed: an_area.text.same_string_general (a_text)
 		end
 
+	click_header (a_table: GUI_TABLE; a_column: INTEGER)
+			-- Click a column's header as a user would (fires header_actions).
+		require
+			has_application: has_application
+			valid: 1 <= a_column and a_column <= a_table.column_count
+		do
+			backend.test_click_header (a_table.id, a_column)
+			settle
+		end
+
+	choose_table_row (a_table: GUI_TABLE; a_row: INTEGER)
+			-- Select only row `a_row' as a user would (fires selection_actions).
+		require
+			has_application: has_application
+			valid: 1 <= a_row and a_row <= a_table.row_count
+		do
+			backend.test_choose (a_table.id, a_row)
+			settle
+		ensure
+			selected: a_table.selected_row = a_row
+		end
+
 	choose_row (a_list: GUI_LIST; a_row: INTEGER)
 			-- Select a row as a user would (fires selection).
 		require
