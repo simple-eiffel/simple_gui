@@ -38,7 +38,8 @@ feature -- Lifecycle and loop
 		end
 
 	pump (a_ms: INTEGER)
-			-- Run the open window's loop until an event is queued or `a_ms' pass.
+			-- Run the open window's loop until an event is queued or `a_ms' pass; then ask
+			-- for the rows lazy tables are about to show.
 		do
 			if events.is_empty then
 				if attached open_window as al_w and then al_w.is_window_open then
@@ -47,6 +48,7 @@ feature -- Lifecycle and loop
 					pump_windowless (a_ms.max (0))
 				end
 			end
+			check_rows_wanted
 		end
 
 	pump_until_idle (a_ms: INTEGER)
@@ -62,6 +64,7 @@ feature -- Lifecycle and loop
 				end
 				al_w.shell_turn_pending
 			end
+			check_rows_wanted
 		end
 
 	start_heartbeat (a_ms: INTEGER)
@@ -605,7 +608,9 @@ feature -- Controls
 		end
 
 	table_wipe_out (a_table: INTEGER)
+			-- No rows; a table in source mode leaves it (1f).
 		do
+			row_sources.remove (a_table)
 			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached table_rows.item (a_table) as al_rows then
 				al_rows.wipe_out
 				al_g.set_rows (al_rows)
@@ -629,34 +634,175 @@ feature -- Controls
 		end
 
 	table_set_source (a_table, a_count: INTEGER)
-			-- PLACEHOLDER for PROD (1f, Windows half): an SW_DATA_GRID provider mode.
+			-- Source mode (1f): `a_count' rows, every one the shared empty row until answered;
+			-- the selection and the rows held are dropped.
+		local
+			l_source: GUI_SW_ROW_SOURCE
 		do
-			not_yet ("lazy tables (1f)")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g then
+				create l_source.make (a_count, al_g.columns.count)
+				row_sources.force (l_source, a_table)
+				if attached table_rows.item (a_table) as al_rows then
+					al_rows.wipe_out
+				end
+				al_g.select_model_row_quietly (0, False)
+				al_g.set_rows (empty_rows (l_source, a_count, Void))
+				changed
+				check_rows_wanted
+			end
 		end
 
 	table_set_row (a_table, a_row: INTEGER; a_cells: POINTER)
+			-- An answer to rows wanted: hold the row and draw it; past `Cache_limit' answered
+			-- rows the oldest out of sight go back to empty.
+		local
+			l_shown: TUPLE [first, last: INTEGER]
+			l_old, l_kept: INTEGER
 		do
-			not_yet ("lazy tables (1f)")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached row_sources.item (a_table) as al_s
+				and then a_row >= 1 and then a_row <= al_s.count and then a_row <= al_g.rows.count
+			then
+				al_g.put_row (cells_of (from_c (a_cells)), a_row)
+				al_s.pending.remove (a_row)
+				al_s.answered.extend (a_row)
+				l_shown := al_g.shown_positions
+				from
+					l_kept := 0
+				until
+					al_s.answered.count <= al_s.Cache_limit or l_kept >= al_s.answered.count
+				loop
+					l_old := al_s.answered.item
+					al_s.answered.remove
+					if l_old >= l_shown.first and l_old <= l_shown.last then
+							-- in sight: keep it, at the back
+						al_s.answered.extend (l_old)
+						l_kept := l_kept + 1
+					elseif l_old <= al_g.rows.count then
+						al_g.put_row (al_s.empty, l_old)
+					end
+				end
+				changed
+			end
 		end
 
 	table_set_row_count (a_table, a_count: INTEGER)
+			-- The source now has `a_count' rows: rows held past it go, and so do selected rows
+			-- past it (SW_DATA_GRID.set_rows drops them); no event.
 		do
-			not_yet ("lazy tables (1f)")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached row_sources.item (a_table) as al_s then
+				al_s.set_count (a_count)
+				al_g.set_rows (empty_rows (al_s, a_count, al_g.rows))
+				changed
+				check_rows_wanted
+			end
 		end
 
 	table_forget_rows (a_table: INTEGER)
+			-- Every row may have changed: all back to empty, asked for again as they show; the
+			-- selection stays by row number.
 		do
-			not_yet ("lazy tables (1f)")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached row_sources.item (a_table) as al_s then
+				al_s.forget_all
+				al_g.set_rows (empty_rows (al_s, al_s.count, Void))
+				changed
+				check_rows_wanted
+			end
 		end
 
 	table_forget_row (a_table, a_row: INTEGER)
+			-- Row `a_row' changed: back to empty, asked for again if it shows.
 		do
-			not_yet ("lazy tables (1f)")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached row_sources.item (a_table) as al_s
+				and then a_row >= 1 and then a_row <= al_g.rows.count
+			then
+				al_g.put_row (al_s.empty, a_row)
+				al_s.pending.remove (a_row)
+				changed
+				check_rows_wanted
+			end
 		end
 
 	table_scroll_to (a_table, a_row: INTEGER)
+			-- Bring row `a_row' into view (any table; in source mode its rows are then asked for).
 		do
-			not_yet ("lazy tables (1f)")
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then a_row >= 1 and then a_row <= al_g.view.count then
+				al_g.scroll_to_position (a_row)
+				changed
+				check_rows_wanted
+			end
+		end
+
+	row_sources: HASH_TABLE [GUI_SW_ROW_SOURCE, INTEGER]
+			-- The tables in source mode (1f), by id.
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	empty_rows (a_source: GUI_SW_ROW_SOURCE; a_count: INTEGER; a_keep: detachable LIST [ARRAY [STRING_32]]): ARRAYED_LIST [ARRAY [STRING_32]]
+			-- `a_count' rows: those of `a_keep' that fit, then the shared empty row.
+		local
+			i: INTEGER
+		do
+			create Result.make (a_count)
+			from
+				i := 1
+			until
+				i > a_count
+			loop
+				if attached a_keep as al_keep and then i <= al_keep.count then
+					Result.extend (al_keep.i_th (i))
+				else
+					Result.extend (a_source.empty)
+				end
+				i := i + 1
+			end
+		ensure
+			counted: Result.count = a_count
+		end
+
+	check_rows_wanted
+			-- For each table in source mode: the rows in sight plus one viewful either side that
+			-- are still empty and not yet asked for are asked for, as one span (event 16).
+		local
+			l_shown: TUPLE [first, last: INTEGER]
+			l_lo, l_hi, l_margin, l_first, l_last, r: INTEGER
+		do
+			from
+				row_sources.start
+			until
+				row_sources.after
+			loop
+				if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (row_sources.key_for_iteration) as al_g
+					and then attached row_sources.item_for_iteration as al_s and then al_s.count > 0
+				then
+					l_shown := al_g.shown_positions
+					if l_shown.first > 0 then
+						l_margin := l_shown.last - l_shown.first + 1
+						l_lo := (l_shown.first - l_margin).max (1)
+						l_hi := (l_shown.last + l_margin).min (al_s.count).min (al_g.rows.count)
+						l_first := 0
+						l_last := 0
+						from
+							r := l_lo
+						until
+							r > l_hi
+						loop
+							if al_g.rows.i_th (r) = al_s.empty and then not al_s.pending.has (r) then
+								al_s.pending.force (True, r)
+								if l_first = 0 then
+									l_first := r
+								end
+								l_last := r
+							end
+							r := r + 1
+						end
+						if l_first > 0 then
+							push (16, row_sources.key_for_iteration, l_first, l_last, 0)
+						end
+					end
+				end
+				row_sources.forth
+			end
 		end
 
 	table_selected_count (a_table: INTEGER): INTEGER
