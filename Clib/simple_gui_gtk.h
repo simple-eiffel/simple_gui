@@ -267,7 +267,12 @@ static void sg_pointer(GtkGesture *g, int kind, double x, double y, gpointer d) 
     int button = (int) gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(g));
     sg_push5(7, GPOINTER_TO_INT(d), (int) x, (int) y, kind | (button << 4) | (sg_mods(m) << 8));
 }
-static void sg_canvas_pressed(GtkGestureClick *g, int n, double x, double y, gpointer d) { (void) n; sg_pointer(GTK_GESTURE(g), 1, x, y, d); }
+/* A click gives the canvas keyboard focus, so arrow keys reach it (AppKit: makeFirstResponder). */
+static void sg_canvas_pressed(GtkGestureClick *g, int n, double x, double y, gpointer d) {
+    (void) n;
+    gtk_widget_grab_focus(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(g)));
+    sg_pointer(GTK_GESTURE(g), 1, x, y, d);
+}
 static void sg_canvas_released(GtkGestureClick *g, int n, double x, double y, gpointer d) { (void) n; sg_pointer(GTK_GESTURE(g), 2, x, y, d); }
 static void sg_canvas_motion(GtkEventControllerMotion *c, double x, double y, gpointer d) {
     GdkModifierType m = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(c));
