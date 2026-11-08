@@ -176,8 +176,16 @@ static int sga_gdk_key(NSEvent *e)
 {
 	NSString *s = [e characters];
 	unichar l_char = [s length] ? [s characterAtIndex:0] : 0;
-	sga_push(8, sga_id_of(self), sga_gdk_key(e), (l_char >= 0xF700 && l_char <= 0xF8FF) ? 0 : l_char,
-		sga_modifiers([e modifierFlags]) * 256);
+	/* The character as GTK's gdk_keyval_to_unicode gives it: the Mac's delete key is
+	   BackSpace (8), forward delete is 0x7F, keypad Enter is Return (13), Shift-Tab is Tab. */
+	switch (l_char) {
+		case 0x7f: l_char = 0x08; break;
+		case NSDeleteFunctionKey: l_char = 0x7f; break;
+		case 0x03: l_char = 0x0d; break;
+		case 0x19: l_char = 0x09; break;
+		default: if (l_char >= 0xF700 && l_char <= 0xF8FF) l_char = 0;
+	}
+	sga_push(8, sga_id_of(self), sga_gdk_key(e), l_char, sga_modifiers([e modifierFlags]) * 256);
 }
 - (void)setFrameSize:(NSSize)a_size
 {
