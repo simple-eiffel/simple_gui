@@ -1084,7 +1084,7 @@ static NSString *sga_role_title(int a_role, NSString *a_text)
    menu (and still come back as menu events, so the application decides); the edit
    roles go through the responder chain, so text fields get them with no Eiffel code.
    Every item carries its id as its tag (edit items raise no event; the tag finds them
-   for relabelling) and its role as its represented object. */
+   for relabeling) and its role as its represented object. */
 void sga_menu_add_item(void *a_menu, const char *a_text, const char *a_shortcut, int a_item_id, int a_role)
 {
 	NSMenu *m = (__bridge NSMenu *)a_menu;

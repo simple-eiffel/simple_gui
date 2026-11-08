@@ -134,7 +134,7 @@ static void sg_bar_items(GMenuModel *m, int pos, int removed, int added, gpointe
     int d = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(bar), "sg-dir"));
     (void) pos; (void) removed; (void) added;
     gtk_widget_set_visible(GTK_WIDGET(bar), g_menu_model_get_n_items(m) > 0);
-    /* Relabelling rebuilds the bar's items: give the new ones the window's direction. */
+    /* Relabeling rebuilds the bar's items: give the new ones the window's direction. */
     if (d) sg_direction_tree(GTK_WIDGET(bar), (GtkTextDirection) d);
 }
 static void sg_window_set_content(int win, int child) {
@@ -529,7 +529,7 @@ static void sg_accel(const char *neutral, char *out, size_t n) {
 __attribute__((weak)) GtkShortcutController *sg_shortcuts = NULL;
 
 /* A top-level menu (returns its GMenu as an opaque handle). */
-/* Where each item lives, so it can be relabelled (a GMenu item cannot change in place:
+/* Where each item lives, so it can be relabeled (a GMenu item cannot change in place:
    it is replaced at the same position with the same action and accelerator). */
 #define SG_MAX_ITEMS 1024
 __attribute__((weak)) GMenu *sg_item_menu[SG_MAX_ITEMS] = {0};
@@ -811,7 +811,7 @@ static void sg_test_menu(int item_id) {
 }
 /* A snapshot shows the window as its user sees it while using it. A window the desktop has
    not focused (WSLg gives a new window the focus or not, depending on what else is happening)
-   wears GTK's "backdrop" style: grey title, every control greyed as if disabled. So the
+   wears GTK's "backdrop" style: gray title, every control grayed as if disabled. So the
    snapshot lifts the backdrop state, lets one frame restyle, draws, and puts it back. */
 static int sg_snapshot(int id, const char *path) {
     GtkWidget *w = sg_w[id];
