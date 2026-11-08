@@ -628,7 +628,7 @@ feature -- Controls
 	table_selected_at (a_table, i: INTEGER): INTEGER
 		do
 			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then i >= 1 and then i <= al_g.selected_count then
-				Result := al_g.selected_at (i)
+				Result := ascending_selection (al_g).i_th (i)
 			end
 		end
 
@@ -1503,7 +1503,7 @@ feature {NONE} -- Implementation
 		do
 			if quiet = 0 and then attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (an_id) as al_g then
 				if al_g.selected_count > 0 then
-					push (4, an_id, al_g.selected_at (1), 0, 0)
+					push (4, an_id, ascending_selection (al_g).first, 0, 0)
 				else
 					push (4, an_id, 0, 0, 0)
 				end
@@ -1522,6 +1522,26 @@ feature {NONE} -- Implementation
 			if quiet = 0 then
 				push (15, an_id, a_node, a_open.to_integer, 0)
 			end
+		end
+
+	ascending_selection (a_g: SW_DATA_GRID [ARRAY [STRING_32]]): ARRAYED_LIST [INTEGER]
+			-- The selected rows, lowest first, as AppKit and GTK give them (SW_DATA_GRID keeps
+			-- them in the order they were chosen).
+		local
+			i, j, l_row: INTEGER
+		do
+			create Result.make (a_g.selected_count)
+			from i := 1 until i > a_g.selected_count loop
+				l_row := a_g.selected_at (i)
+				from j := 1 until j > Result.count or else Result.i_th (j) > l_row loop
+					j := j + 1
+				end
+				Result.go_i_th (j)
+				Result.put_left (l_row)
+				i := i + 1
+			end
+		ensure
+			all_of_them: Result.count = a_g.selected_count
 		end
 
 	cells_of (a_joined: STRING_32): ARRAY [STRING_32]
