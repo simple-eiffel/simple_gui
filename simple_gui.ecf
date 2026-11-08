@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration-1-23-0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.eiffel.com/developers/xml/configuration-1-23-0 http://www.eiffel.com/developers/xml/configuration-1-23-0.xsd" name="simple_gui" uuid="5E3A9C47-2B81-4F6D-A0C3-7D19E4B26F58" library_target="simple_gui">
+	<description>Native GUI for Eiffel: one API, native controls per platform (GTK 4 on Linux, AppKit on macOS; Windows over simple_widgets in v0.2). Polled event queue, agents per control, SCOOP mailbox and wake.</description>
+
+	<target name="simple_gui">
+		<root all_classes="true"/>
+		<file_rule>
+			<exclude>/EIFGENs$</exclude>
+			<exclude>/\..*$</exclude>
+		</file_rule>
+		<option warning="warning">
+			<assertions precondition="true" postcondition="true" check="true" invariant="true" loop="true" supplier_precondition="true"/>
+		</option>
+		<setting name="dead_code_removal" value="feature"/>
+		<capability>
+			<concurrency support="scoop" use="scoop"/>
+			<void_safety support="all"/>
+		</capability>
+		<external_include location="$(SIMPLE_EIFFEL)/simple_gui/Clib"/>
+		<!-- GTK 4 (Linux) -->
+		<external_cflag value="`pkg-config --cflags gtk4`">
+			<condition>
+				<platform value="unix"/>
+			</condition>
+		</external_cflag>
+		<external_linker_flag value="`pkg-config --libs gtk4`">
+			<condition>
+				<platform value="unix"/>
+			</condition>
+		</external_linker_flag>
+		<library name="base" location="$ISE_LIBRARY\library\base\base.ecf"/>
+		<library name="simple_cairo" location="$SIMPLE_EIFFEL\simple_cairo\simple_cairo.ecf"/>
+		<cluster name="src" location=".\src\" recursive="true"/>
+		<cluster name="backend_gtk" location=".\backend\gtk\">
+			<condition>
+				<platform value="unix"/>
+			</condition>
+		</cluster>
+		<cluster name="backend_appkit" location=".\backend\appkit\">
+			<condition>
+				<platform value="macintosh"/>
+			</condition>
+		</cluster>
+	</target>
+
+	<target name="simple_gui_tests" extends="simple_gui">
+		<root class="TEST_APP" feature="make"/>
+		<option warning="warning">
+			<assertions precondition="true" postcondition="true" check="true" invariant="true" loop="true" supplier_precondition="true"/>
+		</option>
+		<setting name="console_application" value="true"/>
+		<cluster name="testing" location=".\testing\" recursive="true"/>
+	</target>
+</system>
