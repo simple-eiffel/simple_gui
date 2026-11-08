@@ -1111,6 +1111,23 @@ feature -- Test doors (act on the widget as a user would)
 			end
 		end
 
+	test_focus (an_id: INTEGER)
+			-- As a click on it: the main window's focus moves to the widget.
+		do
+			if attached widget (an_id) as al_w and then al_w.accepts_focus and then attached open_window as al_win then
+				al_win.give_focus (al_w)
+				changed
+			end
+		end
+
+	test_edit_enabled (a_role: INTEGER): BOOLEAN
+			-- As the Edit menu would show it: the main window's focus can carry the role out.
+		do
+			if attached open_window as al_win then
+				Result := al_win.can_edit_focused (a_role)
+			end
+		end
+
 	test_context_menu (an_id, an_item_id: INTEGER): BOOLEAN
 			-- Choose item `an_item_id' from the widget's right-click menu: False when that menu
 			-- has no such item (or the widget has none).

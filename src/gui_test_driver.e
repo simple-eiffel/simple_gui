@@ -147,6 +147,25 @@ feature -- User actions
 			settle
 		end
 
+	focus (a_widget: GUI_WIDGET)
+			-- Give `a_widget' the keyboard focus, as a click on it would.
+		require
+			has_application: has_application
+		do
+			backend.test_focus (a_widget.id)
+			settle
+		end
+
+	edit_enabled (a_role: INTEGER): BOOLEAN
+			-- Would the Edit menu's item for `a_role' ({GUI_MENU}.Role_undo .. Role_select_all) be
+			-- enabled now, for the focus of the window in front?
+		require
+			has_application: has_application
+			edit_role: a_role >= 10 and a_role <= 15
+		do
+			Result := backend.test_edit_enabled (a_role)
+		end
+
 	invoke_context_item (a_widget: GUI_WIDGET; an_item_id: INTEGER)
 			-- Open `a_widget's context menu and choose item `an_item_id', as a user would.
 		require
