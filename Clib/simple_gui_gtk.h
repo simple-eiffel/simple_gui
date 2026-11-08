@@ -123,9 +123,19 @@ static int sg_window(const char *title, int w, int h) {
     return id;
 }
 /* The window's content: a box holding the menu bar (when there is one) above `child'. */
+/* GTK 4: a widget whose direction is NONE takes the global default, not its parent's, so
+   the menu bar (no Eiffel widget, outside the cascade) is given the window's direction here. */
+static void sg_direction_tree(GtkWidget *w, GtkTextDirection d) {
+    GtkWidget *c;
+    gtk_widget_set_direction(w, d);
+    for (c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) sg_direction_tree(c, d);
+}
 static void sg_bar_items(GMenuModel *m, int pos, int removed, int added, gpointer bar) {
+    int d = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(bar), "sg-dir"));
     (void) pos; (void) removed; (void) added;
     gtk_widget_set_visible(GTK_WIDGET(bar), g_menu_model_get_n_items(m) > 0);
+    /* Relabelling rebuilds the bar's items: give the new ones the window's direction. */
+    if (d) sg_direction_tree(GTK_WIDGET(bar), (GtkTextDirection) d);
 }
 static void sg_window_set_content(int win, int child) {
     GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
@@ -133,6 +143,8 @@ static void sg_window_set_content(int win, int child) {
     /* The bar follows the application's menu model: hidden while it is empty. */
     gtk_widget_set_visible(bar, g_menu_model_get_n_items(G_MENU_MODEL(sg_menubar)) > 0);
     g_signal_connect_object(sg_menubar, "items-changed", G_CALLBACK(sg_bar_items), bar, 0);
+    g_object_set_data(G_OBJECT(sg_w[win]), "sg-bar", bar);
+    g_object_set_data(G_OBJECT(sg_w[win]), "sg-outer", outer);
     gtk_box_append(GTK_BOX(outer), bar);
     gtk_widget_set_vexpand(sg_w[child], TRUE);
     gtk_box_append(GTK_BOX(outer), sg_w[child]);
@@ -312,7 +324,17 @@ static void sg_set_visible(int id, int on) { gtk_widget_set_visible(sg_w[id], on
 static int sg_is_visible(int id) { return gtk_widget_get_visible(sg_w[id]) ? 1 : 0; }
 /* 0 auto, 1 left to right, 2 right to left */
 static void sg_set_direction(int id, int d) {
-    gtk_widget_set_direction(sg_w[id], d == 1 ? GTK_TEXT_DIR_LTR : d == 2 ? GTK_TEXT_DIR_RTL : GTK_TEXT_DIR_NONE);
+    GtkTextDirection l_dir = d == 1 ? GTK_TEXT_DIR_LTR : d == 2 ? GTK_TEXT_DIR_RTL : GTK_TEXT_DIR_NONE;
+    gtk_widget_set_direction(sg_w[id], l_dir);
+    if (sg_kind[id] == 1) {
+        GtkWidget *bar = g_object_get_data(G_OBJECT(sg_w[id]), "sg-bar");
+        GtkWidget *outer = g_object_get_data(G_OBJECT(sg_w[id]), "sg-outer");
+        if (outer) gtk_widget_set_direction(outer, l_dir);
+        if (bar) {
+            g_object_set_data(G_OBJECT(bar), "sg-dir", GINT_TO_POINTER((int) l_dir));
+            sg_direction_tree(bar, l_dir);
+        }
+    }
 }
 
 /* ---------- canvas: present a finished Cairo image ---------- */
