@@ -33,7 +33,7 @@ void sga_window_set_title(int a_window, const char *a_title);
 int sga_stack(int a_vertical, int a_spacing);
 void sga_stack_extend(int a_stack, int a_child, int a_stretch);
 void sga_stack_set_spacing(int a_stack, int a_spacing);
-void sga_stack_set_alignment(int a_stack, int a_alignment);   /* 0 fill, 1 start, 2 centre, 3 end */
+void sga_stack_set_alignment(int a_stack, int a_alignment);   /* 0 fill, 1 start, 2 center, 3 end */
 void sga_stack_align_child(int a_stack, int a_child, int a_alignment);
 int sga_grid(void);
 void sga_grid_set_homogeneous_columns(int a_grid, int a_on);

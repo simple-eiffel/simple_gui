@@ -444,7 +444,7 @@ int sga_stack(int a_vertical, int a_spacing)
 }
 
 /* Each child sits in a slot: the slot fills the stack across, and the child is placed
-   inside it by alignment (0 fill, 1 start, 2 centre, 3 end). NSStackView applies one
+   inside it by alignment (0 fill, 1 start, 2 center, 3 end). NSStackView applies one
    alignment to all its children, and extra constraints fight its own, so per-child
    alignment lives in the slot. Main axis: the child fills its slot, and a stretching
    child's slot takes the spare room. */
@@ -639,7 +639,7 @@ static void sga_grid_columns(int a_grid)
 			[k setWidth:NSGridViewSizeForContent];
 			[k setXPlacement:NSGridCellPlacementFill];
 			/* One single-column cell's view stands for the column (a merged cell's view
-			   also sits in its neighbours, so it is skipped). */
+			   also sits in its neighbors, so it is skipped). */
 			NSView *l_view = nil;
 			for (NSInteger r = 0; r < [g numberOfRows] && !l_view; r++) {
 				NSView *v = [[g cellAtColumnIndex:c rowIndex:r] contentView];
@@ -984,7 +984,7 @@ int sga_canvas(int a_width, int a_height)
 }
 
 /* A finished Cairo image surface at device scale: copied (so the caller may reuse
-   it), and tagged sRGB so macOS colour-manages it (spike mac_color). */
+   it), and tagged sRGB so macOS color-manages it (spike mac_color). */
 void sga_canvas_present(int a_id, void *a_cairo_surface)
 {
 	SGACanvas *c = sga_get(a_id);
@@ -1219,8 +1219,8 @@ void sga_set_dark(int a_on)
 	sga_push(10, 0, sga_is_dark(), 0, 0);
 }
 
-/* The theme's colours as 0xRRGGBB, resolved in the application's current appearance. A
-   translucent colour (text and separators are) is given as it looks over the window
+/* The theme's colors as 0xRRGGBB, resolved in the application's current appearance. A
+   translucent color (text and separators are) is given as it looks over the window
    background, which is how it is seen. */
 static void sga_rgb(NSColor *a_color, CGFloat *r, CGFloat *g, CGFloat *b, CGFloat *a)
 {

@@ -113,7 +113,7 @@ feature -- Windows and containers
 
 	stack_set_alignment (a_stack, an_alignment: INTEGER)
 			-- Cross-axis alignment for the stack's children, existing and later:
-			-- 0 fill, 1 start, 2 centre, 3 end.
+			-- 0 fill, 1 start, 2 center, 3 end.
 		require
 			known: an_alignment >= 0 and an_alignment <= 3
 		deferred
@@ -418,7 +418,7 @@ feature -- Menus
 feature -- Dialogs
 
 	open_file (a_window: INTEGER; a_title: POINTER; a_save: BOOLEAN; an_extensions: POINTER): POINTER
-			-- Chosen path (UTF-8), or default_pointer when cancelled. `an_extensions' is "txt;md" or "".
+			-- Chosen path (UTF-8), or default_pointer when canceled. `an_extensions' is "txt;md" or "".
 		deferred
 		end
 
@@ -434,7 +434,7 @@ feature -- Appearance
 		end
 
 	system_color (a_role: INTEGER): INTEGER
-			-- The theme's colour as 0xRRGGBB: 1 window background, 2 text, 3 secondary text,
+			-- The theme's color as 0xRRGGBB: 1 window background, 2 text, 3 secondary text,
 			-- 4 accent, 5 selection, 6 separator. It follows the light or dark appearance.
 		require
 			known: a_role >= 1 and a_role <= 6
