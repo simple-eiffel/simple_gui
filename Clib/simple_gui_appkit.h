@@ -84,6 +84,12 @@ void sga_table_select(int a_id, int a_row, int a_extend);   /* 0 clears; no even
 int sga_table_selected_count(int a_id);
 int sga_table_selected_at(int a_id, int i);   /* the i-th selected row, ascending */
 void sga_table_set_sort_indicator(int a_id, int a_column, int a_ascending);   /* 0: none */
+int sga_tree(void);   /* selection 4 (a = node), expansion 15 (a = node, b = 1 expanded) */
+void sga_tree_add(int a_id, int a_node, int a_parent, const char *a_text);   /* nodes numbered 1, 2, 3... by the caller; parent 0: a root */
+void sga_tree_set_expanded(int a_id, int a_node, int a_on);   /* no event */
+int sga_tree_is_expanded(int a_id, int a_node);
+void sga_tree_select(int a_id, int a_node);   /* 0 clears; expands the ancestors; no event */
+int sga_tree_selected(int a_id);   /* 0: none */
 
 /* Common */
 void sga_set_enabled(int a_id, int a_on);
@@ -129,6 +135,7 @@ int sga_system_color(int a_role);   /* 0xRRGGBB: 1 window background, 2 text, 3 
 /* Test driver */
 void sga_test_click(int a_id);
 void sga_test_click_header(int a_id, int a_column);   /* header clicked, as a user */
+void sga_test_expand(int a_id, int a_node, int a_on);   /* expansion, as a user */
 void sga_test_type(int a_id, const char *a_text);
 void sga_test_choose(int a_id, int a_row);
 void sga_test_menu(int a_item_id);

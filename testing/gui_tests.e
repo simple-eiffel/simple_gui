@@ -612,6 +612,59 @@ feature -- Tests
 			l_window.close
 		end
 
+	test_tree
+			-- Nodes keep their parents; expanding and selecting from code are silent, and selecting
+			-- a hidden node shows it; a user's choice and a user's collapse are reported; a screen
+			-- reader reads the shown nodes.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_tree: GUI_TREE
+			l_law, l_genesis, l_exodus, l_prophets, l_isaiah: INTEGER
+			l_reading: STRING_32
+		do
+			create l_window.make ("Tree", 360, 280)
+			create l_stack.make_vertical
+			create l_tree.make
+			l_tree.add_root ("Law")
+			l_law := l_tree.last_node
+			l_tree.add_child (l_law, "Genesis")
+			l_genesis := l_tree.last_node
+			l_tree.add_child (l_law, "Exodus")
+			l_exodus := l_tree.last_node
+			l_tree.add_root ("Prophets")
+			l_prophets := l_tree.last_node
+			l_tree.add_child (l_prophets, "Isaiah")
+			l_isaiah := l_tree.last_node
+			l_tree.selection_actions.extend (agent (n: INTEGER) do chosen_row := n end)
+			l_tree.expansion_actions.extend (agent (n: INTEGER; open: BOOLEAN) do received_tag := n; last_checked := open end)
+			l_stack.extend_stretching (l_tree)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("five nodes", l_tree.node_count = 5 and l_tree.node_text (l_exodus).same_string ("Exodus"))
+			assert ("parents kept", l_tree.parent_of (l_genesis) = l_law and l_tree.parent_of (l_law) = 0)
+			l_tree.expand (l_law)
+			driver.pump_until_idle (200)
+			assert ("silent expand", l_tree.is_expanded (l_law) and l_tree.expansion_actions.fire_count = 0)
+			l_tree.select_node (l_isaiah)
+			driver.pump_until_idle (200)
+			assert ("silent select shows the node", l_tree.selected_node = l_isaiah and l_tree.is_expanded (l_prophets) and l_tree.selection_actions.fire_count = 0)
+			assert ("and opens its parents silently (expansions " + l_tree.expansion_actions.fire_count.out + ")", l_tree.expansion_actions.fire_count = 0)
+			chosen_row := 0
+			driver.choose_node (l_tree, l_exodus)
+			assert ("a user's choice is reported once", l_tree.selection_actions.fire_count = 1 and chosen_row = l_exodus)
+			assert ("choosing opens nothing (expansions " + l_tree.expansion_actions.fire_count.out + ")", l_tree.expansion_actions.fire_count = 0)
+			l_reading := driver.describe_accessibility (l_window)
+			print (indented (l_reading))
+			assert ("the shown nodes are read", l_reading.has_substring ("Genesis") and l_reading.has_substring ("Isaiah"))
+			driver.expand_node (l_tree, l_law, False)
+			assert ("a user's collapse is reported (fired " + l_tree.expansion_actions.fire_count.out + ", node " + received_tag.out + ", open " + last_checked.out + ", expanded now " + l_tree.is_expanded (l_law).out + ")",
+				l_tree.expansion_actions.fire_count = 1 and received_tag = l_law and not last_checked)
+			assert ("collapsed", not l_tree.is_expanded (l_law))
+			l_window.close
+		end
+
 	test_system_colors_follow_the_appearance
 			-- Light: a light background and dark text; dark: the reverse.
 		local
