@@ -143,6 +143,31 @@ feature -- Windows and containers
 		deferred
 		end
 
+	splitter (a_vertical: BOOLEAN): INTEGER
+			-- Two panes and a divider: side by side, or stacked when `a_vertical'. When it grows,
+			-- the first pane keeps its size.
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	splitter_set_pane (a_splitter, a_pane, a_child: INTEGER)
+			-- Put `a_child' in pane `a_pane' (1 leading or top, 2 trailing or bottom).
+		require
+			pane: a_pane = 1 or a_pane = 2
+		deferred
+		end
+
+	splitter_position (a_splitter: INTEGER): INTEGER
+			-- The divider's distance from the leading edge (or the top), in logical pixels.
+		deferred
+		end
+
+	splitter_set_position (a_splitter, a_position: INTEGER)
+			-- Move the divider (no event).
+		deferred
+		end
+
 	grid_set_homogeneous_columns (a_grid: INTEGER; a_on: BOOLEAN)
 			-- Give every column the same width.
 		deferred
@@ -349,6 +374,38 @@ feature -- Controls
 		deferred
 		end
 
+	tree: INTEGER
+			-- A hierarchy of text nodes. A user's selection sends selection (4, a = node); a user's
+			-- expanding or collapsing sends expansion (15, a = node, b = 1 when expanded).
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	tree_add (a_tree, a_node, a_parent: INTEGER; a_text: POINTER)
+			-- Add node `a_node' (numbered by the caller, 1, 2, 3...) under `a_parent' (0: a root).
+		deferred
+		end
+
+	tree_set_expanded (a_tree, a_node: INTEGER; a_on: BOOLEAN)
+			-- Expand or collapse `a_node', without an event.
+		deferred
+		end
+
+	tree_is_expanded (a_tree, a_node: INTEGER): BOOLEAN
+		deferred
+		end
+
+	tree_select (a_tree, a_node: INTEGER)
+			-- Select `a_node' (0: clear), expanding its ancestors; no event.
+		deferred
+		end
+
+	tree_selected (a_tree: INTEGER): INTEGER
+			-- The selected node, or 0.
+		deferred
+		end
+
 feature -- Common widget state
 
 	set_enabled (an_id: INTEGER; a_on: BOOLEAN)
@@ -536,6 +593,12 @@ feature -- Test driver
 
 	test_click_header (a_table, a_column: INTEGER)
 			-- Click column `a_column's header AS A USER WOULD (emits header clicked, 14).
+		deferred
+		end
+
+	test_expand (a_tree, a_node: INTEGER; a_on: BOOLEAN)
+			-- Expand or collapse `a_node' AS A USER WOULD (emits expansion, 15). Choosing a node as
+			-- a user is `test_choose' with the node's number.
 		deferred
 		end
 
