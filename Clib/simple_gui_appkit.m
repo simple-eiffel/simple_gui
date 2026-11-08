@@ -344,6 +344,8 @@ void sga_window_set_title(int a_window, const char *a_title) { [(NSWindow *)sga_
 
 /* A container: a flipped wrapper holding a stack or grid inside leading, top,
    trailing and bottom margin constraints (12 px, as the API states). */
+static NSLayoutConstraint *sga_end_margin(int a_stack);
+
 static int sga_wrap(NSView *a_inner, CGFloat a_margin)
 {
 	SGAWrapper *w = [[SGAWrapper alloc] init];
@@ -355,6 +357,9 @@ static int sga_wrap(NSView *a_inner, CGFloat a_margin)
 	s_margins[l_id][1] = [a_inner.topAnchor constraintEqualToAnchor:w.topAnchor constant:a_margin];
 	s_margins[l_id][2] = [w.trailingAnchor constraintEqualToAnchor:a_inner.trailingAnchor constant:a_margin];
 	s_margins[l_id][3] = [w.bottomAnchor constraintEqualToAnchor:a_inner.bottomAnchor constant:a_margin];
+	/* Just below required, so a stack can later weaken its end margin (AppKit will not move an
+	   active constraint between required and optional). */
+	for (int i = 0; i < 4; i++) [s_margins[l_id][i] setPriority:NSLayoutPriorityRequired - 1];
 	[NSLayoutConstraint activateConstraints:@[s_margins[l_id][0], s_margins[l_id][1], s_margins[l_id][2], s_margins[l_id][3]]];
 	return l_id;
 }
@@ -374,6 +379,13 @@ static void sga_keep_natural_size(NSView *a_view, int a_stretch)
 	[a_view setContentCompressionResistancePriority:l_priority forOrientation:NSLayoutConstraintOrientationVertical];
 }
 
+/* The margin at the end of a stack's main axis: bottom when vertical, trailing when not. */
+static NSLayoutConstraint *sga_end_margin(int a_stack)
+{
+	NSStackView *s = s_inner[a_stack];
+	return s_margins[a_stack][[s orientation] == NSUserInterfaceLayoutOrientationVertical ? 3 : 2];
+}
+
 int sga_stack(int a_vertical, int a_spacing)
 {
 	NSStackView *s = [[NSStackView alloc] init];
@@ -381,25 +393,135 @@ int sga_stack(int a_vertical, int a_spacing)
 	[s setDistribution:NSStackViewDistributionFill];
 	[s setAlignment:a_vertical ? NSLayoutAttributeLeading : NSLayoutAttributeTop];
 	[s setSpacing:a_spacing];
-	return sga_wrap(s, 12);
+	int l_id = sga_wrap(s, 12);
+	/* Like a GTK box, a stack packs its children at the start and leaves the spare room at
+	   the end, until a child stretches: its end margin holds only weakly till then. */
+	[sga_end_margin(l_id) setPriority:NSLayoutPriorityDefaultLow - 2];
+	[s setHuggingPriority:NSLayoutPriorityDefaultLow - 1 forOrientation:a_vertical ? NSLayoutConstraintOrientationVertical : NSLayoutConstraintOrientationHorizontal];
+	return l_id;
 }
 
-/* Children fill the cross axis, as GTK boxes do; `a_stretch' children take the
-   main axis's spare room. */
+/* Each child sits in a slot: the slot fills the stack across, and the child is placed
+   inside it by alignment (0 fill, 1 start, 2 centre, 3 end). NSStackView applies one
+   alignment to all its children, and extra constraints fight its own, so per-child
+   alignment lives in the slot. Main axis: the child fills its slot, and a stretching
+   child's slot takes the spare room. */
+@interface SGASlot : NSView
+{
+@public
+	NSView *child;
+	NSMutableArray<NSLayoutConstraint *> *placing;
+	int alignment;
+	BOOL vertical;
+}
+@end
+@implementation SGASlot
+- (BOOL)isFlipped { return YES; }
+@end
+
+static NSMutableDictionary<NSValue *, SGASlot *> *s_slots;   /* child view -> its slot */
+static int s_stack_alignment[SGA_MAX];                        /* -1: per-child defaults */
+
+static SGASlot *sga_slot_of(NSView *a_child)
+{
+	return s_slots ? s_slots[[NSValue valueWithNonretainedObject:a_child]] : nil;
+}
+
+static void sga_place(SGASlot *a_slot, int a_alignment)
+{
+	NSView *c = a_slot->child;
+	[NSLayoutConstraint deactivateConstraints:a_slot->placing];
+	[a_slot->placing removeAllObjects];
+	a_slot->alignment = a_alignment;
+	if (a_slot->vertical) {
+		switch (a_alignment) {
+			case 0: [a_slot->placing addObjectsFromArray:@[[c.leadingAnchor constraintEqualToAnchor:a_slot.leadingAnchor],
+				[c.trailingAnchor constraintEqualToAnchor:a_slot.trailingAnchor]]]; break;
+			case 1: [a_slot->placing addObjectsFromArray:@[[c.leadingAnchor constraintEqualToAnchor:a_slot.leadingAnchor],
+				[c.trailingAnchor constraintLessThanOrEqualToAnchor:a_slot.trailingAnchor]]]; break;
+			case 2: [a_slot->placing addObjectsFromArray:@[[c.centerXAnchor constraintEqualToAnchor:a_slot.centerXAnchor],
+				[c.leadingAnchor constraintGreaterThanOrEqualToAnchor:a_slot.leadingAnchor]]]; break;
+			default: [a_slot->placing addObjectsFromArray:@[[c.trailingAnchor constraintEqualToAnchor:a_slot.trailingAnchor],
+				[c.leadingAnchor constraintGreaterThanOrEqualToAnchor:a_slot.leadingAnchor]]]; break;
+		}
+	} else {
+		switch (a_alignment) {
+			case 0: [a_slot->placing addObjectsFromArray:@[[c.topAnchor constraintEqualToAnchor:a_slot.topAnchor],
+				[c.bottomAnchor constraintEqualToAnchor:a_slot.bottomAnchor]]]; break;
+			case 1: [a_slot->placing addObjectsFromArray:@[[c.topAnchor constraintEqualToAnchor:a_slot.topAnchor],
+				[c.bottomAnchor constraintLessThanOrEqualToAnchor:a_slot.bottomAnchor]]]; break;
+			case 2: [a_slot->placing addObjectsFromArray:@[[c.centerYAnchor constraintEqualToAnchor:a_slot.centerYAnchor],
+				[c.topAnchor constraintGreaterThanOrEqualToAnchor:a_slot.topAnchor]]]; break;
+			default: [a_slot->placing addObjectsFromArray:@[[c.bottomAnchor constraintEqualToAnchor:a_slot.bottomAnchor],
+				[c.topAnchor constraintGreaterThanOrEqualToAnchor:a_slot.topAnchor]]]; break;
+		}
+	}
+	/* Unless it fills, the child does not reach across the whole slot; this weak pull makes
+	   the stack hug its tallest (or widest) child instead of growing without limit. */
+	if (a_alignment != 0) {
+		NSLayoutConstraint *k = a_slot->vertical ? [c.widthAnchor constraintEqualToAnchor:a_slot.widthAnchor]
+			: [c.heightAnchor constraintEqualToAnchor:a_slot.heightAnchor];
+		[k setPriority:NSLayoutPriorityDefaultLow - 1];
+		[a_slot->placing addObject:k];
+	}
+	[NSLayoutConstraint activateConstraints:a_slot->placing];
+}
+
+/* Buttons keep their natural width (GTK: halign START); everything else fills. */
+static int sga_default_alignment(NSView *a_child) { return [a_child isKindOfClass:[NSButton class]] ? 1 : 0; }
+
 void sga_stack_extend(int a_stack, int a_child, int a_stretch)
 {
 	NSStackView *s = s_inner[a_stack];
 	NSView *v = sga_get(a_child);
 	BOOL l_vertical = [s orientation] == NSUserInterfaceLayoutOrientationVertical;
 	NSLayoutConstraintOrientation l_main = l_vertical ? NSLayoutConstraintOrientationVertical : NSLayoutConstraintOrientationHorizontal;
-	[v setContentHuggingPriority:a_stretch ? 1 : NSLayoutPriorityDefaultHigh forOrientation:l_main];
+	SGASlot *l_slot = [[SGASlot alloc] init];
+	if (!s_slots) s_slots = [NSMutableDictionary dictionary];
+	l_slot->child = v;
+	l_slot->placing = [NSMutableArray array];
+	l_slot->vertical = l_vertical;
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[l_slot addSubview:v];
 	sga_keep_natural_size(v, a_stretch);
-	[s addArrangedSubview:v];
-	/* Children fill across the stack, except buttons, which keep their natural width as
-	   GTK's do (halign START). */
-	if ([v isKindOfClass:[NSButton class]]) {}
-	else if (l_vertical) [[v.widthAnchor constraintEqualToAnchor:s.widthAnchor] setActive:YES];
-	else [[v.heightAnchor constraintEqualToAnchor:s.heightAnchor] setActive:YES];
+	[v setContentHuggingPriority:a_stretch ? 1 : NSLayoutPriorityDefaultHigh forOrientation:l_main];
+	[l_slot setContentHuggingPriority:a_stretch ? 1 : NSLayoutPriorityDefaultHigh forOrientation:l_main];
+	/* Main axis: the child fills its slot, except a button, which keeps its natural size
+	   while its slot takes the room (GTK: hexpand with halign START). */
+	if ([v isKindOfClass:[NSButton class]]) {
+		NSLayoutConstraint *l_hug = l_vertical ? [v.heightAnchor constraintEqualToAnchor:l_slot.heightAnchor]
+			: [v.widthAnchor constraintEqualToAnchor:l_slot.widthAnchor];
+		[l_hug setPriority:NSLayoutPriorityDefaultLow - 1];
+		if (l_vertical) [NSLayoutConstraint activateConstraints:@[[v.topAnchor constraintEqualToAnchor:l_slot.topAnchor],
+			[v.bottomAnchor constraintLessThanOrEqualToAnchor:l_slot.bottomAnchor], l_hug]];
+		else [NSLayoutConstraint activateConstraints:@[[v.leadingAnchor constraintEqualToAnchor:l_slot.leadingAnchor],
+			[v.trailingAnchor constraintLessThanOrEqualToAnchor:l_slot.trailingAnchor], l_hug]];
+	} else if (l_vertical) [NSLayoutConstraint activateConstraints:@[[v.topAnchor constraintEqualToAnchor:l_slot.topAnchor],
+		[v.bottomAnchor constraintEqualToAnchor:l_slot.bottomAnchor]]];
+	else [NSLayoutConstraint activateConstraints:@[[v.leadingAnchor constraintEqualToAnchor:l_slot.leadingAnchor],
+		[v.trailingAnchor constraintEqualToAnchor:l_slot.trailingAnchor]]];
+	s_slots[[NSValue valueWithNonretainedObject:v]] = l_slot;
+	[s addArrangedSubview:l_slot];
+	/* The slot fills the stack across. */
+	if (l_vertical) [[l_slot.widthAnchor constraintEqualToAnchor:s.widthAnchor] setActive:YES];
+	else [[l_slot.heightAnchor constraintEqualToAnchor:s.heightAnchor] setActive:YES];
+	sga_place(l_slot, s_stack_alignment[a_stack] > 0 ? s_stack_alignment[a_stack] - 1 : sga_default_alignment(v));
+	if (a_stretch) [sga_end_margin(a_stack) setPriority:NSLayoutPriorityRequired - 1];
+}
+
+/* Applies to the existing children and to later ones (stored as alignment + 1; 0 = defaults). */
+void sga_stack_set_alignment(int a_stack, int a_alignment)
+{
+	NSStackView *s = s_inner[a_stack];
+	s_stack_alignment[a_stack] = a_alignment + 1;
+	for (NSView *l_slot in [s arrangedSubviews]) if ([l_slot isKindOfClass:[SGASlot class]]) sga_place((SGASlot *)l_slot, a_alignment);
+}
+
+void sga_stack_align_child(int a_stack, int a_child, int a_alignment)
+{
+	(void)a_stack;
+	SGASlot *l_slot = sga_slot_of(sga_get(a_child));
+	if (l_slot) sga_place(l_slot, a_alignment);
 }
 
 void sga_stack_set_spacing(int a_stack, int a_spacing) { [(NSStackView *)s_inner[a_stack] setSpacing:a_spacing]; }
@@ -411,6 +533,8 @@ int sga_grid(void)
 	[g setColumnSpacing:12];
 	return sga_wrap(g, 12);
 }
+
+static void sga_grid_columns(int a_grid);
 
 void sga_grid_put(int a_grid, int a_child, int a_row, int a_column, int a_rows, int a_columns)
 {
@@ -435,6 +559,50 @@ void sga_grid_put(int a_grid, int a_child, int a_row, int a_column, int a_rows, 
 		[g mergeCellsInHorizontalRange:NSMakeRange((NSUInteger)(a_column - 1), (NSUInteger)a_columns)
 			verticalRange:NSMakeRange((NSUInteger)(a_row - 1), (NSUInteger)a_rows)];
 	}
+	sga_grid_columns(a_grid);
+}
+
+static int s_grid_homogeneous[SGA_MAX];
+static int s_grid_stretching[SGA_MAX];
+
+/* Column widths: homogeneous columns all get the widest column's natural width; with a
+   stretching column, the others are fixed at their natural width and it alone stays
+   sized by the grid, so the spare width goes to it. Recomputed whenever a cell is put. */
+static void sga_grid_columns(int a_grid)
+{
+	NSGridView *g = s_inner[a_grid];
+	NSInteger n = [g numberOfColumns];
+	CGFloat l_widest = 0;
+	CGFloat l_natural[256] = {0};
+	if (n > 256) n = 256;
+	if (!s_grid_homogeneous[a_grid] && !s_grid_stretching[a_grid]) return;
+	for (NSInteger c = 0; c < n; c++) {
+		for (NSInteger r = 0; r < [g numberOfRows]; r++) {
+			NSView *v = [[g cellAtColumnIndex:c rowIndex:r] contentView];
+			if (v && v != [NSGridCell emptyContentView]) l_natural[c] = MAX(l_natural[c], [v fittingSize].width);
+		}
+		l_widest = MAX(l_widest, l_natural[c]);
+	}
+	for (NSInteger c = 0; c < n; c++) {
+		NSGridColumn *k = [g columnAtIndex:c];
+		if (s_grid_homogeneous[a_grid]) { [k setWidth:ceil(l_widest)]; [k setXPlacement:NSGridCellPlacementFill]; }
+		else if (c + 1 == s_grid_stretching[a_grid]) { [k setWidth:NSGridViewSizeForContent]; [k setXPlacement:NSGridCellPlacementFill]; }
+		else [k setWidth:ceil(l_natural[c])];
+	}
+}
+
+void sga_grid_set_homogeneous_columns(int a_grid, int a_on)
+{
+	s_grid_homogeneous[a_grid] = a_on != 0;
+	if (!a_on) for (NSInteger c = 0; c < [(NSGridView *)s_inner[a_grid] numberOfColumns]; c++)
+		[[(NSGridView *)s_inner[a_grid] columnAtIndex:c] setWidth:NSGridViewSizeForContent];
+	sga_grid_columns(a_grid);
+}
+
+void sga_grid_set_stretching_column(int a_grid, int a_column)
+{
+	s_grid_stretching[a_grid] = a_column;
+	sga_grid_columns(a_grid);
 }
 
 void sga_grid_set_spacing(int a_grid, int a_row_gap, int a_column_gap)
@@ -585,7 +753,11 @@ void sga_set_visible(int a_id, int a_on)
 {
 	id o = sga_get(a_id);
 	if ([o isKindOfClass:[NSWindow class]]) { if (a_on) [(NSWindow *)o orderFront:nil]; else [(NSWindow *)o orderOut:nil]; }
-	else [(NSView *)o setHidden:a_on == 0];
+	else {
+		[(NSView *)o setHidden:a_on == 0];
+		/* In a stack the slot goes too, so no gap is left. */
+		if ([o isKindOfClass:[NSView class]] && sga_slot_of(o)) [sga_slot_of(o) setHidden:a_on == 0];
+	}
 }
 
 int sga_is_visible(int a_id)
