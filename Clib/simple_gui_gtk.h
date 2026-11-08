@@ -809,11 +809,25 @@ static void sg_test_menu(int item_id) {
     char name[32]; snprintf(name, sizeof name, "item%d", item_id);
     g_action_group_activate_action(G_ACTION_GROUP(sg_actions), name, NULL);
 }
+/* A snapshot shows the window as its user sees it while using it. A window the desktop has
+   not focused (WSLg gives a new window the focus or not, depending on what else is happening)
+   wears GTK's "backdrop" style: grey title, every control greyed as if disabled. So the
+   snapshot lifts the backdrop state, lets one frame restyle, draws, and puts it back. */
 static int sg_snapshot(int id, const char *path) {
     GtkWidget *w = sg_w[id];
     int W = gtk_widget_get_width(w), H = gtk_widget_get_height(w), ok;
+    gboolean backdrop = (gtk_widget_get_state_flags(w) & GTK_STATE_FLAG_BACKDROP) != 0;
     GdkPaintable *p; GtkSnapshot *s; GskRenderNode *n; GdkTexture *t;
     if (W <= 0 || H <= 0) return 0;
+    if (backdrop) {
+        gint64 until = g_get_monotonic_time() + 100 * 1000;
+        gtk_widget_unset_state_flags(w, GTK_STATE_FLAG_BACKDROP);
+        gtk_widget_queue_draw(w);
+        while (g_get_monotonic_time() < until) {
+            while (g_main_context_iteration(NULL, FALSE)) { }
+            g_usleep(5000);
+        }
+    }
     p = gtk_widget_paintable_new(w);
     s = gtk_snapshot_new();
     gdk_paintable_snapshot(p, GDK_SNAPSHOT(s), W, H);
@@ -822,6 +836,7 @@ static int sg_snapshot(int id, const char *path) {
     t = gsk_renderer_render_texture(gtk_native_get_renderer(GTK_NATIVE(w)), n, NULL);
     ok = gdk_texture_save_to_png(t, path) ? 1 : 0;
     g_object_unref(t); gsk_render_node_unref(n); g_object_unref(p);
+    if (backdrop && (!GTK_IS_WINDOW(w) || !gtk_window_is_active(GTK_WINDOW(w)))) gtk_widget_set_state_flags(w, GTK_STATE_FLAG_BACKDROP, FALSE);
     return ok;
 }
 static const char *sg_role(int id) { return sg_role_nick(sg_w[id]); }
