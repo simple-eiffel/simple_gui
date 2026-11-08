@@ -265,6 +265,43 @@ feature -- Tests
 			assert ("closed", l_window.is_closed)
 		end
 
+	test_edit_items_follow_the_focus
+			-- 1e: the Edit menu's items are enabled for what the focused widget can do now: with a
+			-- field's text selected, Copy and Cut; with a list focused, neither.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_field: GUI_TEXT_FIELD
+			l_list: GUI_LIST
+			l_menu: GUI_MENU
+			l_select_all: INTEGER
+		do
+			l_menu := app.menu.add_menu ("Edit")
+			l_menu.add_standard_edit_items
+			l_select_all := l_menu.last_item_id
+			create l_window.make ("Edit items", 360, 160)
+			create l_stack.make_vertical
+			create l_field.make
+			l_field.set_text ("words")
+			create l_list.make
+			l_list.extend ("one")
+			l_list.extend ("two")
+			l_stack.extend (l_field)
+			l_stack.extend (l_list)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			driver.focus (l_field)
+			assert ("a field with text: Select All", driver.edit_enabled (l_menu.Role_select_all))
+			driver.invoke_menu (l_select_all)
+			assert ("its text selected: Copy", driver.edit_enabled (l_menu.Role_copy))
+			assert ("and Cut", driver.edit_enabled (l_menu.Role_cut))
+			driver.focus (l_list)
+			assert ("a list: no Copy", not driver.edit_enabled (l_menu.Role_copy))
+			assert ("nor Cut", not driver.edit_enabled (l_menu.Role_cut))
+			l_window.close
+		end
+
 	test_splitter_near_an_edge
 			-- A position close to an edge holds, down to a small minimum pane (Windows
 			-- stopped at 15% of the width before; GTK and AppKit allow it).

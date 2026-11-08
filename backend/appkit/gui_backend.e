@@ -613,6 +613,16 @@ feature -- Test driver
 		alias "sga_test_request_close($a_window);"
 		end
 
+	test_focus (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_focus($an_id);"
+		end
+
+	test_edit_enabled (a_role: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_edit_enabled($a_role) ? EIF_TRUE : EIF_FALSE;"
+		end
+
 	test_context_menu (an_id, an_item_id: INTEGER): BOOLEAN
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_test_context_menu($an_id, $an_item_id) ? EIF_TRUE : EIF_FALSE;"

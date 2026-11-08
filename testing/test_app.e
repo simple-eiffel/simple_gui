@@ -62,6 +62,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_refresh_rows_asks_again, "refresh_rows_asks_again")
 				run_test (agent t.test_a_row_source_selects_by_number, "a_row_source_selects_by_number")
 				run_test (agent t.test_set_row_count_resizes, "set_row_count_resizes")
+				run_test (agent t.test_edit_items_follow_the_focus, "edit_items_follow_the_focus")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
