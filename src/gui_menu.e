@@ -136,7 +136,8 @@ feature -- Element change
 			l_c := backend.to_c (a_text)
 			backend.menu_set_item_text (an_item_id, l_c.item)
 		ensure
-			shown: item_text (an_item_id).same_string_general (a_text)
+			shown: item_text (an_item_id).has_substring (a_text)
+				-- Contains, not equals: a Mac shows About and Quit as "About <app>", "Quit <app>".
 		end
 
 	item_text (an_item_id: INTEGER): STRING_32

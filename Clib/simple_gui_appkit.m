@@ -59,7 +59,7 @@ static int sga_id_of(id a_object)
 static NSString *sga_string(const char *a_text) { return [NSString stringWithUTF8String:a_text ? a_text : ""] ?: @""; }
 
 /* Returned strings stay valid until the next call of the same kind. */
-enum { Kind_label, Kind_button, Kind_field, Kind_role, Kind_path, Kind_tree, Kind_count };
+enum { Kind_label, Kind_button, Kind_field, Kind_role, Kind_path, Kind_tree, Kind_check, Kind_menu, Kind_count };
 static NSString *s_returned[Kind_count];
 static const char *sga_return(int a_kind, NSString *a_text)
 {
@@ -195,6 +195,7 @@ static int s_setting_dark;
 - (void)clicked:(id)a_sender { sga_push(1, sga_id_of(a_sender), 0, 0, 0); }
 - (void)activated:(id)a_sender { sga_push(3, sga_id_of(a_sender), 0, 0, 0); }
 - (void)menuItem:(NSMenuItem *)a_item { sga_push(5, 0, (int)[a_item tag], 0, 0); }
+- (void)toggled:(NSButton *)a_box { sga_push(12, sga_id_of(a_box), [a_box state] == NSControlStateValueOn ? 1 : 0, 0, 0); }
 - (void)controlTextDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
 - (NSMutableArray<NSString *> *)rowsOf:(NSTableView *)t { return rows[[NSValue valueWithNonretainedObject:t]]; }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)t { return (NSInteger)[[self rowsOf:t] count]; }
@@ -666,6 +667,17 @@ int sga_button(const char *a_text)
 void sga_button_set(int a_id, const char *a_text) { [(NSButton *)sga_get(a_id) setTitle:sga_string(a_text)]; }
 const char *sga_button_get(int a_id) { return sga_return(Kind_button, [(NSButton *)sga_get(a_id) title]); }
 
+/* A check box: a switch button. Setting its state from code sends no action (silent); a
+   click, by a user or the test driver, toggles it and sends toggled (12). */
+int sga_check_box(const char *a_text)
+{
+	return sga_keep([NSButton checkboxWithTitle:sga_string(a_text) target:s_target action:@selector(toggled:)]);
+}
+void sga_check_box_set(int a_id, int a_on) { [(NSButton *)sga_get(a_id) setState:a_on ? NSControlStateValueOn : NSControlStateValueOff]; }
+int sga_check_box_is_checked(int a_id) { return [(NSButton *)sga_get(a_id) state] == NSControlStateValueOn; }
+void sga_check_box_set_text(int a_id, const char *a_text) { [(NSButton *)sga_get(a_id) setTitle:sga_string(a_text)]; }
+const char *sga_check_box_text(int a_id) { return sga_return(Kind_check, [(NSButton *)sga_get(a_id) title]); }
+
 int sga_field(void)
 {
 	NSTextField *f = [NSTextField textFieldWithString:@""];
@@ -921,46 +933,86 @@ void *sga_menu_new(const char *a_title)
 	return (__bridge void *)m;   /* the main menu keeps it alive */
 }
 
+/* About and Quit read "About <app>" and "Quit <app>" on a Mac, in any language: the app
+   name follows the text it is given ("About" -> "About Calc", "אודות" -> "אודות Calc"). */
+static NSString *sga_role_title(int a_role, NSString *a_text)
+{
+	return (a_role == 1 || a_role == 3) ? [NSString stringWithFormat:@"%@ %@", a_text, s_app_name] : a_text;
+}
+
 /* Roles go where a Mac user looks: About, Settings and Quit move to the application
    menu (and still come back as menu events, so the application decides); the edit
-   roles go through the responder chain, so text fields get them with no Eiffel code. */
+   roles go through the responder chain, so text fields get them with no Eiffel code.
+   Every item carries its id as its tag (edit items raise no event; the tag finds them
+   for relabelling) and its role as its represented object. */
 void sga_menu_add_item(void *a_menu, const char *a_text, const char *a_shortcut, int a_item_id, int a_role)
 {
 	NSMenu *m = (__bridge NSMenu *)a_menu;
 	NSMenu *l_app = [[[NSApp mainMenu] itemAtIndex:0] submenu];
-	NSString *l_text = sga_string(a_text), *l_shortcut = sga_string(a_shortcut);
+	NSString *l_text = sga_role_title(a_role, sga_string(a_text)), *l_shortcut = sga_string(a_shortcut);
 	NSMenuItem *i;
 	switch (a_role) {
 		case 1:
-			i = sga_item([NSString stringWithFormat:@"About %@", s_app_name], @selector(menuItem:), s_target, l_shortcut);
-			[i setTag:a_item_id];
+			i = sga_item(l_text, @selector(menuItem:), s_target, l_shortcut);
 			[l_app insertItem:i atIndex:0];
 			break;
 		case 2:
-			i = sga_item(@"Settings…", @selector(menuItem:), s_target, [l_shortcut length] ? l_shortcut : @"primary+comma");
-			[i setTag:a_item_id];
+			i = sga_item(l_text, @selector(menuItem:), s_target, [l_shortcut length] ? l_shortcut : @"primary+comma");
 			[l_app addItem:i];
 			break;
 		case 3:
 			if ([l_app numberOfItems] > 0) [l_app addItem:[NSMenuItem separatorItem]];
-			i = sga_item([NSString stringWithFormat:@"Quit %@", s_app_name], @selector(menuItem:), s_target, @"primary+q");
-			[i setTag:a_item_id];
+			i = sga_item(l_text, @selector(menuItem:), s_target, @"primary+q");
 			[l_app addItem:i];
 			break;
-		case 10: [m addItem:sga_item(l_text, @selector(undo:), nil, l_shortcut)]; break;
-		case 11: [m addItem:sga_item(l_text, @selector(redo:), nil, l_shortcut)]; break;
-		case 12: [m addItem:sga_item(l_text, @selector(cut:), nil, l_shortcut)]; break;
-		case 13: [m addItem:sga_item(l_text, @selector(copy:), nil, l_shortcut)]; break;
-		case 14: [m addItem:sga_item(l_text, @selector(paste:), nil, l_shortcut)]; break;
-		case 15: [m addItem:sga_item(l_text, @selector(selectAll:), nil, l_shortcut)]; break;
+		case 10: i = sga_item(l_text, @selector(undo:), nil, l_shortcut); [m addItem:i]; break;
+		case 11: i = sga_item(l_text, @selector(redo:), nil, l_shortcut); [m addItem:i]; break;
+		case 12: i = sga_item(l_text, @selector(cut:), nil, l_shortcut); [m addItem:i]; break;
+		case 13: i = sga_item(l_text, @selector(copy:), nil, l_shortcut); [m addItem:i]; break;
+		case 14: i = sga_item(l_text, @selector(paste:), nil, l_shortcut); [m addItem:i]; break;
+		case 15: i = sga_item(l_text, @selector(selectAll:), nil, l_shortcut); [m addItem:i]; break;
 		default:
 			i = sga_item(l_text, @selector(menuItem:), s_target, l_shortcut);
-			[i setTag:a_item_id];
 			[m addItem:i];
 	}
+	[i setTag:a_item_id];
+	[i setRepresentedObject:@(a_role)];
 }
 
 void sga_menu_add_separator(void *a_menu) { [(__bridge NSMenu *)a_menu addItem:[NSMenuItem separatorItem]]; }
+
+/* Any item with this id, whatever its action. */
+static NSMenuItem *sga_find_numbered(NSMenu *a_menu, int a_id)
+{
+	for (NSMenuItem *i in [a_menu itemArray]) {
+		if ([i submenu]) { NSMenuItem *f = sga_find_numbered([i submenu], a_id); if (f) return f; }
+		else if ([i tag] == a_id && [i representedObject]) return i;
+	}
+	return nil;
+}
+
+/* The menu bar shows the menu's own title; its item in the bar is kept the same. */
+void sga_menu_set_title(void *a_menu, const char *a_title)
+{
+	NSMenu *m = (__bridge NSMenu *)a_menu;
+	NSString *l_title = sga_string(a_title);
+	[m setTitle:l_title];
+	for (NSMenuItem *i in [[NSApp mainMenu] itemArray]) if ([i submenu] == m) [i setTitle:l_title];
+}
+
+const char *sga_menu_title(void *a_menu) { return sga_return(Kind_menu, [(__bridge NSMenu *)a_menu title]); }
+
+void sga_menu_set_item_text(int a_item_id, const char *a_text)
+{
+	NSMenuItem *i = sga_find_numbered([NSApp mainMenu], a_item_id);
+	if (i) [i setTitle:sga_role_title([[i representedObject] intValue], sga_string(a_text))];
+}
+
+const char *sga_menu_item_text(int a_item_id)
+{
+	NSMenuItem *i = sga_find_numbered([NSApp mainMenu], a_item_id);
+	return sga_return(Kind_menu, i ? [i title] : @"");
+}
 
 /* ---------------------------------------------------------------- dialogs */
 

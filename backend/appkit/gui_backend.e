@@ -168,6 +168,31 @@ feature -- Controls
 		alias "return (EIF_POINTER) sga_button_get($an_id);"
 		end
 
+	check_box (a_text: POINTER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_check_box((const char *) $a_text);"
+		end
+
+	check_box_set (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_check_box_set($an_id, $a_on ? 1 : 0);"
+		end
+
+	check_box_is_checked (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_check_box_is_checked($an_id) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	check_box_set_text (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_check_box_set_text($an_id, (const char *) $a_text);"
+		end
+
+	check_box_text (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_check_box_text($an_id);"
+		end
+
 	field: INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_field();"
@@ -294,6 +319,27 @@ feature -- Menus
 			-- edit roles go through the responder chain to the focused text field.
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_menu_add_item((void *) $a_menu, (const char *) $a_text, (const char *) $a_shortcut, $an_item_id, $a_role);"
+		end
+
+	menu_set_title (a_menu: POINTER; a_title: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_menu_set_title((void *) $a_menu, (const char *) $a_title);"
+		end
+
+	menu_title (a_menu: POINTER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_menu_title((void *) $a_menu);"
+		end
+
+	menu_set_item_text (an_item_id: INTEGER; a_text: POINTER)
+			-- About and Quit keep the application name: "About <app>" in any language.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_menu_set_item_text($an_item_id, (const char *) $a_text);"
+		end
+
+	menu_item_text (an_item_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_menu_item_text($an_item_id);"
 		end
 
 	menu_add_separator (a_menu: POINTER)
