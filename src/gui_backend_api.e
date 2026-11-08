@@ -142,6 +142,13 @@ feature -- Controls
 		deferred
 		end
 
+	label_set_wrap_width (an_id, a_characters: INTEGER)
+			-- `a_characters' > 0: wrap at about that many characters wide; 0: one line, ending in an ellipsis.
+		require
+			non_negative: a_characters >= 0
+		deferred
+		end
+
 	button (a_text: POINTER): INTEGER
 		deferred
 		ensure

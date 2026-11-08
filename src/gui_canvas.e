@@ -34,18 +34,6 @@ feature {NONE} -- Initialization
 
 feature -- Access
 
-	width: INTEGER
-			-- Current width, logical pixels.
-		do
-			Result := backend.width (id)
-		end
-
-	height: INTEGER
-			-- Current height, logical pixels.
-		do
-			Result := backend.height (id)
-		end
-
 	scale_factor: INTEGER
 			-- Device pixels per logical pixel.
 		do

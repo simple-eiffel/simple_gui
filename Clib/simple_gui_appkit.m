@@ -461,6 +461,33 @@ int sga_label(const char *a_text)
 	[l setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
 	return sga_keep(l);
 }
+/* Wrapping at about `a_characters' wide: an explicit width, from the font's average
+   character width, so Auto Layout cannot collapse the label to one character per line
+   (what an automatic preferredMaxLayoutWidth did in a grid). 0 goes back to one line
+   ending in "\u2026". */
+void sga_label_set_wrap_width(int a_id, int a_characters)
+{
+	NSTextField *l = sga_get(a_id);
+	if (a_characters > 0) {
+		NSString *l_sample = @"abcdefghijklmnopqrstuvwxyz0123456789";
+		CGFloat l_average = [l_sample sizeWithAttributes:@{NSFontAttributeName: [l font]}].width / [l_sample length];
+		[l setLineBreakMode:NSLineBreakByWordWrapping];
+		[[l cell] setWraps:YES];
+		[l setUsesSingleLineMode:NO];
+		[l setMaximumNumberOfLines:0];
+		[l setPreferredMaxLayoutWidth:ceil(l_average * a_characters)];
+		[l setContentCompressionResistancePriority:NSLayoutPriorityRequired - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	} else {
+		[l setLineBreakMode:NSLineBreakByTruncatingTail];
+		[[l cell] setWraps:NO];
+		[l setUsesSingleLineMode:YES];
+		[l setMaximumNumberOfLines:1];
+		[l setPreferredMaxLayoutWidth:0];
+		[l setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	}
+	[l invalidateIntrinsicContentSize];
+}
+
 void sga_label_set(int a_id, const char *a_text) { [(NSTextField *)sga_get(a_id) setStringValue:sga_string(a_text)]; }
 const char *sga_label_get(int a_id) { return sga_return(Kind_label, [(NSTextField *)sga_get(a_id) stringValue]); }
 

@@ -32,6 +32,18 @@ feature -- Status
 			Result := backend.is_visible (id)
 		end
 
+	width: INTEGER
+			-- Current width in logical pixels (0 before the window is shown).
+		do
+			Result := backend.width (id)
+		end
+
+	height: INTEGER
+			-- Current height in logical pixels (0 before the window is shown).
+		do
+			Result := backend.height (id)
+		end
+
 feature -- Status setting
 
 	enable

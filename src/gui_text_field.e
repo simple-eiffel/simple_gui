@@ -70,6 +70,16 @@ feature -- Element change
 			no_event: change_count = old change_count
 		end
 
+	set_numeric
+			-- This field holds numbers or expressions: always left to right.
+		require
+			gui_thread: is_gui_thread
+		do
+			set_base_direction (Direction_left_to_right)
+		ensure
+			left_to_right: base_direction = Direction_left_to_right and has_own_direction
+		end
+
 	set_placeholder (a_text: READABLE_STRING_GENERAL)
 		require
 			gui_thread: is_gui_thread

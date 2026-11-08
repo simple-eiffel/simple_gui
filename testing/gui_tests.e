@@ -263,6 +263,51 @@ feature -- Tests
 			assert ("closed", l_window.is_closed)
 		end
 
+	test_wrapping_label_grows_taller
+			-- A long label wraps when given a width in characters; otherwise it stays one line.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_one, l_wrapped: GUI_LABEL
+			l_text: STRING
+		do
+			l_text := "-9.424778, -6.283185, -3.141593, 0, 3.141593, 6.283185, 9.424778"
+			create l_window.make ("Wrapping", 360, 240)
+			create l_stack.make_vertical
+			create l_one.make (l_text)
+			create l_wrapped.make (l_text)
+			l_wrapped.set_wrap_width (20)
+			l_stack.extend (l_one)
+			l_stack.extend (l_wrapped)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("one line has height", l_one.height > 0)
+			assert ("wrapped is taller: " + l_wrapped.height.out + " vs " + l_one.height.out, l_wrapped.height >= 2 * l_one.height)
+			assert ("width recorded", l_wrapped.wrap_width = 20)
+			l_window.close
+		end
+
+	test_number_label_stays_left_to_right
+		local
+			l_stack: GUI_STACK
+			l_number, l_word: GUI_LABEL
+			l_field: GUI_TEXT_FIELD
+		do
+			create l_stack.make_vertical
+			create l_number.make_number ("-3.69933")
+			create l_word.make ("ordinary")
+			create l_field.make
+			l_field.set_numeric
+			l_stack.extend (l_number)
+			l_stack.extend (l_word)
+			l_stack.extend (l_field)
+			l_stack.set_base_direction (Direction_right_to_left)
+			assert ("number stays left to right", l_number.base_direction = Direction_left_to_right)
+			assert ("numeric field stays left to right", l_field.base_direction = Direction_left_to_right)
+			assert ("words follow the container", l_word.base_direction = Direction_right_to_left)
+		end
+
 feature {NONE} -- Fixtures
 
 	app: GUI_APPLICATION

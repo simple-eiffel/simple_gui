@@ -128,6 +128,11 @@ feature -- Controls
 		alias "return (EIF_POINTER) sg_label_get($an_id);"
 		end
 
+	label_set_wrap_width (an_id, a_characters: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_label_set_wrap_width($an_id, $a_characters);"
+		end
+
 	button (a_text: POINTER): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_button((const char *) $a_text);"
