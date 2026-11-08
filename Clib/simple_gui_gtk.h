@@ -227,7 +227,10 @@ static int sg_label(const char *text) {
     gtk_label_set_ellipsize(GTK_LABEL(l), PANGO_ELLIPSIZE_END);
     return sg_reg(l, 4);
 }
-/* chars > 0: wrap at about `chars' characters wide; 0: one line, ellipsized. */
+/* chars > 0: wrap at about `chars' characters wide; 0: one line, ellipsized.
+   `chars' is the label's natural width (max_width_chars), not its minimum: a minimum of
+   `chars' made a grid squeeze its neighbours (the calculator's captions turned to "...")
+   rather than wrap the label sooner. The minimum is the longest word, as GTK's default. */
 static void sg_label_set_wrap_width(int id, int chars) {
     GtkLabel *l = GTK_LABEL(sg_w[id]);
     if (chars > 0) {
@@ -235,7 +238,7 @@ static void sg_label_set_wrap_width(int id, int chars) {
         gtk_label_set_wrap(l, TRUE);
         gtk_label_set_wrap_mode(l, PANGO_WRAP_WORD_CHAR);
         gtk_label_set_max_width_chars(l, chars);
-        gtk_label_set_width_chars(l, chars);
+        gtk_label_set_width_chars(l, -1);
     } else {
         gtk_label_set_wrap(l, FALSE);
         gtk_label_set_max_width_chars(l, -1);
