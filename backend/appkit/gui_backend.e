@@ -387,6 +387,18 @@ feature -- Menus
 		alias "sga_menu_add_separator((void *) $a_menu);"
 		end
 
+	context_menu_new: POINTER
+			-- An NSMenu outside the menu bar.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_context_menu_new();"
+		end
+
+	widget_set_context_menu (an_id: INTEGER; a_menu: POINTER)
+			-- The view's `menu': right-click, Control-click and a two-finger click show it.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_widget_set_context_menu($an_id, (void *) $a_menu);"
+		end
+
 feature -- Dialogs
 
 	open_file (a_window: INTEGER; a_title: POINTER; a_save: BOOLEAN; an_extensions: POINTER): POINTER
@@ -443,6 +455,11 @@ feature -- Test driver
 	test_request_close (a_window: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_request_close($a_window);"
+		end
+
+	test_context_menu (an_id, an_item_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_context_menu($an_id, $an_item_id) ? EIF_TRUE : EIF_FALSE;"
 		end
 
 	snapshot (an_id: INTEGER; a_path: POINTER): BOOLEAN

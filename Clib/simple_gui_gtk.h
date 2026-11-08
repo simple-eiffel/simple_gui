@@ -809,6 +809,50 @@ static void sg_test_menu(int item_id) {
     char name[32]; snprintf(name, sizeof name, "item%d", item_id);
     g_action_group_activate_action(G_ACTION_GROUP(sg_actions), name, NULL);
 }
+/* ---------- context menus: a GMenu outside the bar, shown by a GtkPopoverMenu where a
+   secondary click lands. Its items are app.itemN actions like the bar's (event 5).
+   (First pass by MACMINI, untested on GTK.) ---------- */
+static void *sg_context_menu_new(void) { return g_menu_new(); }
+static void sg_on_secondary(GtkGestureClick *g, int n, double x, double y, gpointer pop) {
+    GdkRectangle r = { (int) x, (int) y, 1, 1 };
+    (void) n;
+    gtk_popover_set_pointing_to(GTK_POPOVER(pop), &r);
+    gtk_popover_popup(GTK_POPOVER(pop));
+    gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_CLAIMED);
+}
+static void sg_on_context_owner_destroy(GtkWidget *w, gpointer pop) { (void) w; gtk_widget_unparent(GTK_WIDGET(pop)); }
+static void sg_widget_set_context_menu(int id, void *menu) {
+    GtkWidget *w = sg_w[id];
+    GtkWidget *pop = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    GtkGesture *g = gtk_gesture_click_new();
+    gtk_widget_set_parent(pop, w);
+    gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(g), GDK_BUTTON_SECONDARY);
+    g_signal_connect(g, "pressed", G_CALLBACK(sg_on_secondary), pop);
+    gtk_widget_add_controller(w, GTK_EVENT_CONTROLLER(g));
+    g_signal_connect(w, "destroy", G_CALLBACK(sg_on_context_owner_destroy), pop);
+    g_object_set_data(G_OBJECT(w), "sg-context", menu);
+}
+/* Choose item `item_id' from widget `id''s context menu as a user would: 0 when that menu
+   has no such item (or the widget has none). */
+static int sg_test_context_menu(int id, int item_id) {
+    GMenuModel *m = g_object_get_data(G_OBJECT(sg_w[id]), "sg-context");
+    char want[32];
+    int i, n;
+    if (!m) return 0;
+    snprintf(want, sizeof want, "app.item%d", item_id);
+    n = g_menu_model_get_n_items(m);
+    for (i = 0; i < n; i++) {
+        gchar *a = NULL;
+        if (g_menu_model_get_item_attribute(m, i, G_MENU_ATTRIBUTE_ACTION, "s", &a) && a && !strcmp(a, want)) {
+            g_free(a);
+            sg_test_menu(item_id);
+            return 1;
+        }
+        g_free(a);
+    }
+    return 0;
+}
 /* A snapshot shows the window as its user sees it while using it. A window the desktop has
    not focused (WSLg gives a new window the focus or not, depending on what else is happening)
    wears GTK's "backdrop" style: gray title, every control grayed as if disabled. So the

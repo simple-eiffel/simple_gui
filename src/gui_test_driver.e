@@ -91,6 +91,22 @@ feature -- User actions
 			settle
 		end
 
+	invoke_context_item (a_widget: GUI_WIDGET; an_item_id: INTEGER)
+			-- Open `a_widget's context menu and choose item `an_item_id', as a user would.
+		require
+			has_application: has_application
+			has_menu: a_widget.context_menu /= Void
+		local
+			l_found: BOOLEAN
+		do
+			l_found := backend.test_context_menu (a_widget.id, an_item_id)
+			settle
+			last_context_item_found := l_found
+		end
+
+	last_context_item_found: BOOLEAN
+			-- Did the last `invoke_context_item' find the item in that widget's context menu?
+
 	set_dark (a_on: BOOLEAN)
 			-- Switch the appearance (fires appearance_changed_actions).
 		require

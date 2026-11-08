@@ -45,6 +45,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_grid_columns, "grid_columns")
 				run_test (agent t.test_homogeneous_columns_fill, "homogeneous_columns_fill")
 				run_test (agent t.test_menus_relabel, "menus_relabel")
+				run_test (agent t.test_context_menu, "context_menu")
 				run_test (agent t.test_check_box_events, "check_box_events")
 				run_test (agent t.test_text_area, "text_area")
 				run_test (agent t.test_system_colors_follow_the_appearance, "system_colors_follow_the_appearance")
