@@ -119,6 +119,7 @@ feature -- Windows and containers
 				if attached open_window as al_other and then al_other.is_window_open then
 					not_yet ("a second window open at the same time")
 				end
+				hidden_windows.remove (a_window)
 				compose (a_window, al_w)
 				al_w.set_close_requests_are_events (True)
 				al_w.shell_open_window (al_w.title, al_w.win_x, al_w.win_y, al_w.win_w, al_w.win_h)
@@ -129,6 +130,7 @@ feature -- Windows and containers
 
 	window_close (a_window: INTEGER)
 		do
+			hidden_windows.remove (a_window)
 			if attached windows.item (a_window) as al_w and then al_w.is_window_open then
 				al_w.close
 				al_w.shell_turn_pending
