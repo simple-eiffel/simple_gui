@@ -117,21 +117,14 @@ feature -- Windows and containers
 		end
 
 	window_show (a_window: INTEGER)
-			-- Open the native window (one at a time in stage 1).
+			-- Open the window: the first as simple_shell's main window, one shown while that is
+			-- open as a floating document window of it (W3).
 		do
-			if attached windows.item (a_window) as al_w and then not al_w.is_window_open then
-				if attached open_window as al_other and then al_other.is_window_open then
-					not_yet ("a second window open at the same time")
-				end
-				hidden_windows.remove (a_window)
-				compose (a_window, al_w)
-				al_w.set_close_requests_are_events (True)
-				al_w.shell_open_window (al_w.title, al_w.win_x, al_w.win_y, al_w.win_w, al_w.win_h)
-				open_window := al_w
-				al_w.request_render
-				apply_pending_positions
-				if last_positions_moved then
-					al_w.request_render
+			if attached windows.item (a_window) as al_w and then not al_w.is_window_open and then not floats.has (a_window) then
+				if attached open_window as al_owner and then al_owner.is_window_open then
+					float_window (a_window, al_w, al_owner)
+				else
+					open_native (a_window, al_w)
 				end
 			end
 		end
@@ -139,7 +132,19 @@ feature -- Windows and containers
 	window_close (a_window: INTEGER)
 		do
 			hidden_windows.remove (a_window)
-			if attached windows.item (a_window) as al_w and then al_w.is_window_open then
+			if attached floats.item (a_window) as al_f then
+				floats.remove (a_window)
+				if attached open_window as al_owner and then al_owner.floating_windows.has (al_f) then
+					al_owner.unfloat (al_f)
+				end
+				changed
+			elseif attached windows.item (a_window) as al_w and then al_w.is_window_open then
+				across floats as ic loop
+					if al_w.floating_windows.has (ic) then
+						al_w.unfloat (ic)
+					end
+				end
+				floats.wipe_out
 				al_w.close
 				al_w.shell_turn_pending
 			end
@@ -184,6 +189,8 @@ feature -- Windows and containers
 			else
 				create l_row.make
 				l_row.set_gap (a_spacing.max (0).to_double)
+					-- children fill the row's height, as in a GTK box and an NSStackView
+				l_row.set_cross_axis ({SW_ROW}.Cross_stretch)
 				Result := register (l_row)
 			end
 		end
@@ -749,6 +756,8 @@ feature -- Every widget
 		do
 			if attached widget (an_id) as al_w then
 				Result := al_w.is_visible
+			elseif attached floats.item (an_id) as al_f then
+				Result := al_f.is_open
 			elseif attached windows.item (an_id) as al_win then
 				Result := al_win.is_window_open and not hidden_windows.has (an_id)
 			end
@@ -1082,8 +1091,12 @@ feature -- Test doors (act on the widget as a user would)
 		end
 
 	test_request_close (a_window: INTEGER)
+			-- As the title bar's close button: the main window through simple_shell (event 66,
+			-- then 6); a floating window reports 6 as its panel's close button does.
 		do
-			if attached windows.item (a_window) as al_w and then al_w.is_window_open then
+			if floats.has (a_window) then
+				push (6, a_window, 0, 0, 0)
+			elseif attached windows.item (a_window) as al_w and then al_w.is_window_open then
 				al_w.request_close
 			end
 		end
@@ -1224,6 +1237,12 @@ feature {NONE} -- State
 	quiet: INTEGER
 			-- Above 0 while the program changes a control: its reports are not queued.
 
+	floats: HASH_TABLE [SW_FLOATING_WINDOW, INTEGER]
+			-- Windows open while the main one was: floating document windows of it (W3).
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
 	open_window: detachable GUI_SW_WINDOW
 			-- The native window open now.
 
@@ -1323,6 +1342,46 @@ feature {NONE} -- Implementation
 		do
 			if an_id >= 1 and an_id <= items.count then
 				Result := items.i_th (an_id)
+			end
+		end
+
+	open_native (a_window: INTEGER; a_w: GUI_SW_WINDOW)
+			-- The first window: simple_shell's main window, opened step by step (W1).
+		do
+			hidden_windows.remove (a_window)
+			compose (a_window, a_w)
+			a_w.set_close_requests_are_events (True)
+			a_w.shell_open_window (a_w.title, a_w.win_x, a_w.win_y, a_w.win_w, a_w.win_h)
+			open_window := a_w
+			a_w.request_render
+			apply_pending_positions
+			if last_positions_moved then
+				a_w.request_render
+			end
+		end
+
+	float_window (a_window: INTEGER; a_w: GUI_SW_WINDOW; a_owner: GUI_SW_WINDOW)
+			-- Window `a_window' as a floating document window of `a_owner': its content only (a
+			-- floating window shows no popups yet, so no menu bar); its close button reports 6.
+		local
+			l_root: SW_COLUMN
+			l_f: SW_FLOATING_WINDOW
+		do
+			create l_root.make
+			l_root.set_padding (0.0)
+			l_root.set_gap (0.0)
+			if window_content.has (a_window) and then attached widget (window_content.item (a_window)) as al_content then
+				al_content.set_grow (1.0)
+				l_root.put (al_content)
+			end
+			if window_direction.has (a_window) then
+				l_root.set_layout_direction (window_direction.item (a_window))
+			end
+			l_f := a_owner.float_document (l_root, a_w.title, a_owner.win_x + 40, a_owner.win_y + 40, a_w.win_w, a_w.win_h)
+			if l_f.is_open then
+				floats.force (l_f, a_window)
+				l_f.set_on_close_request (agent push (6, a_window, 0, 0, 0))
+				changed
 			end
 		end
 
