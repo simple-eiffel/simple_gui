@@ -146,7 +146,15 @@ static int sga_gdk_key(NSEvent *e)
 		CGContextSaveGState(l_cg);
 		CGContextTranslateCTM(l_cg, 0, b.size.height);
 		CGContextScaleCTM(l_cg, 1, -1);
-		CGContextDrawImage(l_cg, CGRectMake(0, 0, b.size.width, b.size.height), image);
+		if ([self inLiveResize]) {
+			/* While the user drags a window edge AppKit runs its own loop and the program cannot
+			   draw (it hears the final size when the drag ends): show the last picture at its own
+			   size, anchored at the top left, rather than stretched out of shape. */
+			CGFloat l_scale = [[self window] backingScaleFactor] > 0 ? [[self window] backingScaleFactor] : 1;
+			CGFloat w = (CGFloat)CGImageGetWidth(image) / l_scale, h = (CGFloat)CGImageGetHeight(image) / l_scale;
+			CGContextDrawImage(l_cg, CGRectMake(0, b.size.height - h, w, h), image);
+		}
+		else CGContextDrawImage(l_cg, CGRectMake(0, 0, b.size.width, b.size.height), image);
 		CGContextRestoreGState(l_cg);
 	}
 }
@@ -175,7 +183,16 @@ static int sga_gdk_key(NSEvent *e)
 {
 	NSSize l_old = [self frame].size;
 	[super setFrameSize:a_size];
-	if (!NSEqualSizes(l_old, a_size)) sga_push(9, sga_id_of(self), (int)a_size.width, (int)a_size.height, 0);
+	if (!NSEqualSizes(l_old, a_size) && ![self inLiveResize]) sga_push(9, sga_id_of(self), (int)a_size.width, (int)a_size.height, 0);
+}
+/* One resize event for a whole live resize: the final size, when the drag ends (the program
+   could not draw during it, and would otherwise redraw once per frame afterwards). */
+- (void)viewDidEndLiveResize
+{
+	[super viewDidEndLiveResize];
+	NSSize s = [self bounds].size;
+	sga_push(9, sga_id_of(self), (int)s.width, (int)s.height, 0);
+	[self setNeedsDisplay:YES];
 }
 @end
 
@@ -707,6 +724,77 @@ void sga_grid_set_spacing(int a_grid, int a_row_gap, int a_column_gap)
 	[g setColumnSpacing:a_column_gap];
 }
 
+/* Splitter: an NSSplitView with two holder panes made up front, so pane 1 is always the
+   leading (or top) one whichever is filled first; each widget is pinned inside its holder.
+   The first pane holds its size when the splitter grows. A position set before the view
+   has a size is kept and applied at the first layout (NSSplitView clamps it to nothing
+   otherwise). Positions count from the leading edge, which NSSplitView itself puts on the right
+   under right-to-left layout. */
+static void sga_split_apply(NSSplitView *s, NSInteger a_position);
+
+@interface SGASplit : NSSplitView
+{
+@public
+	NSInteger pending;   /* -1: none */
+}
+@end
+@implementation SGASplit
+- (void)layout
+{
+	[super layout];
+	if (pending >= 0 && NSWidth([self bounds]) > 0 && NSHeight([self bounds]) > 0) {
+		NSInteger p = pending;
+		pending = -1;
+		sga_split_apply(self, p);
+	}
+}
+@end
+
+static void sga_split_apply(NSSplitView *s, NSInteger a_position)
+{
+	[s setPosition:(CGFloat)a_position ofDividerAtIndex:0];   /* NSSplitView counts from the leading edge itself under right to left */
+}
+
+int sga_splitter(int a_vertical)
+{
+	SGASplit *s = [[SGASplit alloc] init];
+	s->pending = -1;
+	[s setVertical:a_vertical == 0];   /* NSSplitView's "vertical" means vertical dividers: side by side */
+	[s setDividerStyle:NSSplitViewDividerStyleThin];
+	[s addArrangedSubview:[[NSView alloc] init]];
+	[s addArrangedSubview:[[NSView alloc] init]];
+	[s setHoldingPriority:NSLayoutPriorityDefaultLow + 1 forSubviewAtIndex:0];
+	[s setHoldingPriority:NSLayoutPriorityDefaultLow forSubviewAtIndex:1];
+	return sga_keep(s);
+}
+
+void sga_splitter_set_pane(int a_splitter, int a_pane, int a_child)
+{
+	NSSplitView *s = sga_get(a_splitter);
+	NSView *l_holder = [s arrangedSubviews][(NSUInteger)(a_pane - 1)];
+	NSView *v = sga_get(a_child);
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[l_holder addSubview:v];
+	[NSLayoutConstraint activateConstraints:@[
+		[v.leadingAnchor constraintEqualToAnchor:l_holder.leadingAnchor], [v.trailingAnchor constraintEqualToAnchor:l_holder.trailingAnchor],
+		[v.topAnchor constraintEqualToAnchor:l_holder.topAnchor], [v.bottomAnchor constraintEqualToAnchor:l_holder.bottomAnchor]]];
+}
+
+int sga_splitter_position(int a_splitter)
+{
+	NSSplitView *s = sga_get(a_splitter);
+	NSView *l_first = [s arrangedSubviews][0];
+	[[[s window] contentView] layoutSubtreeIfNeeded];
+	return (int)lround([s isVertical] ? NSWidth([l_first frame]) : NSHeight([l_first frame]));
+}
+
+void sga_splitter_set_position(int a_splitter, int a_position)
+{
+	SGASplit *s = sga_get(a_splitter);
+	if (NSWidth([s bounds]) > 0 && NSHeight([s bounds]) > 0) sga_split_apply(s, a_position);
+	else { s->pending = a_position; [s setNeedsLayout:YES]; }
+}
+
 /* --------------------------------------------------------------- controls */
 
 /* A label is one line in 0.1 (wrapping comes in 0.2) and gives way before anything
@@ -1067,6 +1155,164 @@ void sga_test_click_header(int a_id, int a_column)
 	[t tableView:t didClickTableColumn:[t tableColumns][(NSUInteger)(a_column - 1)]];
 }
 
+/* Trees: an NSOutlineView subclass that is its own data source and delegate, over node
+   objects (identity is what an outline view tracks items by). Nodes are numbered by the
+   caller, 1, 2, 3... A user's selection sends selection (4, a = node); a user's expanding or
+   collapsing sends expansion (15, a = node, b = 1 expanded). Programmatic changes send nothing. */
+@interface SGANode : NSObject
+{
+@public
+	int number;
+	NSString *text;
+	NSMutableArray<SGANode *> *children;
+	SGANode *parent;
+}
+@end
+@implementation SGANode
+@end
+
+@interface SGATree : NSOutlineView <NSOutlineViewDataSource, NSOutlineViewDelegate>
+{
+@public
+	NSMutableArray<SGANode *> *roots;
+	NSMutableArray<SGANode *> *nodes;   /* node n at index n - 1 */
+}
+@end
+@implementation SGATree
+- (NSInteger)outlineView:(NSOutlineView *)o numberOfChildrenOfItem:(id)an_item
+{
+	return (NSInteger)[(an_item ? ((SGANode *)an_item)->children : roots) count];
+}
+- (id)outlineView:(NSOutlineView *)o child:(NSInteger)i ofItem:(id)an_item
+{
+	return (an_item ? ((SGANode *)an_item)->children : roots)[(NSUInteger)i];
+}
+- (BOOL)outlineView:(NSOutlineView *)o isItemExpandable:(id)an_item { return [((SGANode *)an_item)->children count] > 0; }
+- (NSView *)outlineView:(NSOutlineView *)o viewForTableColumn:(NSTableColumn *)c item:(id)an_item
+{
+	NSTextField *f = [o makeViewWithIdentifier:@"sga_tree_cell" owner:self];
+	if (!f) {
+		f = [NSTextField labelWithString:@""];
+		[f setIdentifier:@"sga_tree_cell"];
+		[f setLineBreakMode:NSLineBreakByTruncatingTail];
+	}
+	[f setStringValue:((SGANode *)an_item)->text];
+	return f;
+}
+- (void)outlineViewSelectionDidChange:(NSNotification *)n
+{
+	if (s_suppress) return;
+	SGANode *l_node = [self selectedRow] >= 0 ? [self itemAtRow:[self selectedRow]] : nil;
+	sga_push(4, sga_id_of(self), l_node ? l_node->number : 0, 0, 0);
+}
+- (void)outlineViewItemDidExpand:(NSNotification *)n
+{
+	if (!s_suppress) sga_push(15, sga_id_of(self), ((SGANode *)n.userInfo[@"NSObject"])->number, 1, 0);
+}
+- (void)outlineViewItemDidCollapse:(NSNotification *)n
+{
+	if (!s_suppress) sga_push(15, sga_id_of(self), ((SGANode *)n.userInfo[@"NSObject"])->number, 0, 0);
+}
+@end
+
+int sga_tree(void)
+{
+	NSScrollView *l_scroll = [[NSScrollView alloc] init];
+	SGATree *t = [[SGATree alloc] init];
+	NSTableColumn *k = [[NSTableColumn alloc] initWithIdentifier:@"sga_tree_column"];
+	t->roots = [NSMutableArray array];
+	t->nodes = [NSMutableArray array];
+	[k setResizingMask:NSTableColumnAutoresizingMask];
+	[t addTableColumn:k];
+	[t setOutlineTableColumn:k];
+	[t setColumnAutoresizingStyle:NSTableViewUniformColumnAutoresizingStyle];
+	[t setHeaderView:nil];
+	[t setStyle:NSTableViewStyleInset];
+	[t setDataSource:t];
+	[t setDelegate:t];
+	[l_scroll setDocumentView:t];
+	[l_scroll setHasVerticalScroller:YES];
+	[l_scroll setBorderType:NSBezelBorder];
+	int l_id = sga_keep(l_scroll);
+	s_inner[l_id] = t;
+	return l_id;
+}
+
+static SGANode *sga_tree_node(SGATree *t, int a_node)
+{
+	return (a_node >= 1 && a_node <= (int)[t->nodes count]) ? t->nodes[(NSUInteger)(a_node - 1)] : nil;
+}
+
+void sga_tree_add(int a_id, int a_node, int a_parent, const char *a_text)
+{
+	SGATree *t = s_inner[a_id];
+	SGANode *n = [[SGANode alloc] init];
+	SGANode *p = sga_tree_node(t, a_parent);
+	n->number = a_node;
+	n->text = sga_string(a_text);
+	n->children = [NSMutableArray array];
+	n->parent = p;
+	[t->nodes addObject:n];
+	[(p ? p->children : t->roots) addObject:n];
+	s_suppress++;
+	[t reloadItem:p reloadChildren:YES];
+	s_suppress--;
+}
+
+void sga_tree_set_expanded(int a_id, int a_node, int a_on)
+{
+	SGATree *t = s_inner[a_id];
+	s_suppress++;
+	if (a_on) [t expandItem:sga_tree_node(t, a_node)]; else [t collapseItem:sga_tree_node(t, a_node)];
+	s_suppress--;
+}
+
+int sga_tree_is_expanded(int a_id, int a_node)
+{
+	SGATree *t = s_inner[a_id];
+	return [t isItemExpanded:sga_tree_node(t, a_node)] ? 1 : 0;
+}
+
+/* Expand every ancestor of `a_node', root first, so its row exists (silently). */
+static void sga_tree_reveal(SGATree *t, SGANode *a_node)
+{
+	NSMutableArray<SGANode *> *l_chain = [NSMutableArray array];
+	for (SGANode *p = a_node->parent; p; p = p->parent) [l_chain insertObject:p atIndex:0];
+	s_suppress++;
+	for (SGANode *p in l_chain) [t expandItem:p];
+	s_suppress--;
+}
+
+void sga_tree_select(int a_id, int a_node)
+{
+	SGATree *t = s_inner[a_id];
+	SGANode *n = sga_tree_node(t, a_node);
+	s_suppress++;
+	if (!n) [t deselectAll:nil];
+	else {
+		sga_tree_reveal(t, n);
+		[t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)[t rowForItem:n]] byExtendingSelection:NO];
+	}
+	s_suppress--;
+}
+
+int sga_tree_selected(int a_id)
+{
+	SGATree *t = s_inner[a_id];
+	SGANode *n = [t selectedRow] >= 0 ? [t itemAtRow:[t selectedRow]] : nil;
+	return n ? n->number : 0;
+}
+
+/* As a user: a click on the node's disclosure triangle. */
+void sga_test_expand(int a_id, int a_node, int a_on)
+{
+	SGATree *t = s_inner[a_id];
+	SGANode *n = sga_tree_node(t, a_node);
+	if (!n) return;
+	sga_tree_reveal(t, n);
+	if (a_on) [t expandItem:n]; else [t collapseItem:n];
+}
+
 /* ----------------------------------------------------------------- common */
 
 void sga_set_enabled(int a_id, int a_on)
@@ -1228,6 +1474,7 @@ static NSString *sga_role_name(NSString *a_role)
 const char *sga_accessible_role(int a_id)
 {
 	if ([sga_core(a_id) isKindOfClass:[SGAGridTable class]]) return sga_return(Kind_role, @"tree-grid");
+	if ([sga_core(a_id) isKindOfClass:[SGATree class]]) return sga_return(Kind_role, @"tree");
 	return sga_return(Kind_role, sga_role_name([sga_accessible(a_id) accessibilityRole]));
 }
 
@@ -1619,6 +1866,15 @@ void sga_test_type(int a_id, const char *a_text)
 
 void sga_test_choose(int a_id, int a_row)
 {
+	if ([s_inner[a_id] isKindOfClass:[SGATree class]]) {   /* a node, by its number: shown, then clicked */
+		SGATree *l_tree = s_inner[a_id];
+		SGANode *n = sga_tree_node(l_tree, a_row);
+		if (n) {
+			sga_tree_reveal(l_tree, n);
+			[l_tree selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)[l_tree rowForItem:n]] byExtendingSelection:NO];
+		}
+		return;
+	}
 	if ([sga_get(a_id) isKindOfClass:[NSTabView class]]) {
 		{ NSTabView *l_tabs = sga_get(a_id); [l_tabs selectTabViewItemAtIndex:sga_tab_item(l_tabs, a_row)]; }   /* as a click: page changed */
 		return;
@@ -1694,17 +1950,23 @@ static id sga_ax(id a_element, SEL a_modern, NSString *a_attribute)
 	return nil;
 }
 
-/* `a_grid': the element is inside a GUI_TABLE, whose parts read as GTK's column view does
-   (probed on GTK 4.14): the table "tree-grid", its rows "row", cells "grid-cell", and the
-   header's sort buttons "column-header". */
-static void sga_describe(id a_element, int a_depth, BOOL a_grid, NSMutableString *a_out)
+/* `a_within': 1 inside a GUI_TABLE, whose parts read as GTK's column view does (probed on
+   GTK 4.14): the table "tree-grid", its rows "row", cells "grid-cell", and the header's sort
+   buttons "column-header"; 2 inside a GUI_TREE: the tree "tree", its rows "tree-item" (their
+   cell left out, so each item's label sits under it); 0 elsewhere. */
+static void sga_describe(id a_element, int a_depth, int a_within, NSMutableString *a_out)
 {
 	id l_role_value = sga_ax(a_element, @selector(accessibilityRole), NSAccessibilityRoleAttribute);
 	NSString *l_role = [l_role_value isKindOfClass:[NSString class]] ? l_role_value : nil;
 	NSString *l_name = sga_role_name(l_role);
-	BOOL l_grid = a_grid || [a_element isKindOfClass:[SGAGridTable class]];
+	int l_within = [a_element isKindOfClass:[SGAGridTable class]] ? 1 : [a_element isKindOfClass:[SGATree class]] ? 2 : a_within;
 	if ([a_element isKindOfClass:[SGAGridTable class]]) l_name = @"tree-grid";
-	else if (a_grid) {
+	else if ([a_element isKindOfClass:[SGATree class]]) l_name = @"tree";
+	else if (a_within == 2) {
+		if ([l_role isEqualToString:NSAccessibilityRowRole]) l_name = @"tree-item";
+		else if ([l_role isEqualToString:NSAccessibilityCellRole]) l_name = @"generic";
+	}
+	else if (a_within == 1) {
 		id l_sub = sga_ax(a_element, @selector(accessibilitySubrole), NSAccessibilitySubroleAttribute);
 		if ([l_role isEqualToString:NSAccessibilityRowRole]) l_name = @"row";
 		else if ([l_role isEqualToString:NSAccessibilityCellRole]) l_name = @"grid-cell";
@@ -1728,7 +1990,7 @@ static void sga_describe(id a_element, int a_depth, BOOL a_grid, NSMutableString
 		l_next = a_depth + 1;
 	}
 	id l_children = sga_ax(a_element, @selector(accessibilityChildren), NSAccessibilityChildrenAttribute);
-	if (a_depth < 16 && [l_children isKindOfClass:[NSArray class]]) for (id c in l_children) sga_describe(c, l_next, l_grid, a_out);
+	if (a_depth < 16 && [l_children isKindOfClass:[NSArray class]]) for (id c in l_children) sga_describe(c, l_next, l_within, a_out);
 }
 
 const char *sga_describe_accessibility(int a_window)
@@ -1736,6 +1998,6 @@ const char *sga_describe_accessibility(int a_window)
 	NSMutableString *l_text = [NSMutableString stringWithString:@"application: "];
 	NSWindow *w = sga_get(a_window);
 	[l_text appendFormat:@"%@\n", [w title]];
-	for (id c in [[w contentView] accessibilityChildren]) sga_describe(c, 1, NO, l_text);
+	for (id c in [[w contentView] accessibilityChildren]) sga_describe(c, 1, 0, l_text);
 	return sga_return(Kind_tree, l_text);
 }

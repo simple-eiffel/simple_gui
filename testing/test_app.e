@@ -39,6 +39,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_snapshots_light_and_dark, "snapshots_light_and_dark")
 				run_test (agent t.test_worker_message_arrives_through_mailbox_and_wake, "worker_message_arrives_through_mailbox_and_wake")
 				run_test (agent t.test_close_request_without_agents_closes, "close_request_without_agents_closes")
+				run_test (agent t.test_splitter, "splitter")
 				run_test (agent t.test_wrapping_label_grows_taller, "wrapping_label_grows_taller")
 				run_test (agent t.test_number_label_stays_left_to_right, "number_label_stays_left_to_right")
 				run_test (agent t.test_stack_alignment, "stack_alignment")
@@ -52,6 +53,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_table, "table")
 				run_test (agent t.test_system_colors_follow_the_appearance, "system_colors_follow_the_appearance")
 				run_test (agent t.test_right_to_left_keeps_numbering, "right_to_left_keeps_numbering")
+				run_test (agent t.test_tree, "tree")
 				run_test (agent t.test_positions_mirror, "positions_mirror")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
