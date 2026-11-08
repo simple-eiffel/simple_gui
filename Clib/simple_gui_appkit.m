@@ -208,13 +208,22 @@ static int s_setting_dark;
 }
 @end
 
+static int sga_tab_page(NSTabView *t, NSInteger an_item);
+
+/* A cell's text starts at the leading edge: the right one under right to left, as GTK mirrors
+   a label's alignment. */
+static NSTextAlignment sga_start_alignment(NSView *a_view)
+{
+	return [a_view userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft ? NSTextAlignmentRight : NSTextAlignmentNatural;
+}
+
 @implementation SGATarget
 - (instancetype)init { if ((self = [super init])) rows = [NSMutableDictionary dictionary]; return self; }
 - (void)clicked:(id)a_sender { sga_push(1, sga_id_of(a_sender), 0, 0, 0); }
 - (void)activated:(id)a_sender { sga_push(3, sga_id_of(a_sender), 0, 0, 0); }
 - (void)menuItem:(NSMenuItem *)a_item { sga_push(5, 0, (int)[a_item tag], 0, 0); }
 - (void)toggled:(NSButton *)a_box { sga_push(12, sga_id_of(a_box), [a_box state] == NSControlStateValueOn ? 1 : 0, 0, 0); }
-- (void)tabView:(NSTabView *)a_tabs didSelectTabViewItem:(NSTabViewItem *)an_item { if (!s_suppress) sga_push(13, sga_id_of(a_tabs), (int)[a_tabs indexOfTabViewItem:an_item] + 1, 0, 0); }
+- (void)tabView:(NSTabView *)a_tabs didSelectTabViewItem:(NSTabViewItem *)an_item { if (!s_suppress) sga_push(13, sga_id_of(a_tabs), sga_tab_page(a_tabs, [a_tabs indexOfTabViewItem:an_item]), 0, 0); }
 - (void)controlTextDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
 - (void)textDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
 - (NSMutableArray<NSString *> *)rowsOf:(NSTableView *)t { return rows[[NSValue valueWithNonretainedObject:t]]; }
@@ -225,6 +234,7 @@ static int s_setting_dark;
 	(void)c;
 	if (!l_cell) { l_cell = [NSTextField labelWithString:@""]; l_cell.identifier = @"sga_cell"; }
 	l_cell.stringValue = [self rowsOf:t][(NSUInteger)r];
+	l_cell.alignment = sga_start_alignment(t);
 	return l_cell;
 }
 - (void)tableViewSelectionDidChange:(NSNotification *)n
@@ -854,6 +864,13 @@ const char *sga_check_box_text(int a_id) { return sga_return(Kind_check, [(NSBut
    inside it, and the tab view is held at least as large as the page needs (its own inset
    around the tallest and widest page), so a stack can lay it out like any other widget.
    Choosing a tab sends page changed (13); selecting from code sends nothing. */
+/* NSTabView lays its tabs out left to right whatever its own direction (it follows the
+   application's language only), so under right to left the backend keeps the items in
+   reverse order itself: page p (1-based, the program's numbering) is item count - p. */
+static BOOL sga_tabs_reversed(NSTabView *t) { return [t userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft; }
+static NSInteger sga_tab_item(NSTabView *t, int a_page) { return sga_tabs_reversed(t) ? (NSInteger)[t numberOfTabViewItems] - a_page : a_page - 1; }
+static int sga_tab_page(NSTabView *t, NSInteger an_item) { return sga_tabs_reversed(t) ? (int)([t numberOfTabViewItems] - an_item) : (int)an_item + 1; }
+
 int sga_tabs(void)
 {
 	NSTabView *t = [[NSTabView alloc] init];
@@ -874,7 +891,7 @@ void sga_tabs_extend(int a_tabs, int a_page, const char *a_title)
 	[i setLabel:sga_string(a_title)];
 	[i setView:l_holder];
 	s_suppress++;
-	[t addTabViewItem:i];
+	if (sga_tabs_reversed(t)) [t insertTabViewItem:i atIndex:0]; else [t addTabViewItem:i];
 	s_suppress--;
 	/* The tab view keeps room for this page: its content rect is inset from its bounds by the
 	   tab row and border, so the page's fitting size plus that inset is a minimum. */
@@ -889,7 +906,8 @@ void sga_tabs_extend(int a_tabs, int a_page, const char *a_title)
 void sga_tabs_select(int a_tabs, int a_page)
 {
 	s_suppress++;
-	[(NSTabView *)sga_get(a_tabs) selectTabViewItemAtIndex:a_page - 1];
+	NSTabView *t = sga_get(a_tabs);
+	[t selectTabViewItemAtIndex:sga_tab_item(t, a_page)];
 	s_suppress--;
 }
 int sga_tabs_selected(int a_tabs)
@@ -897,11 +915,11 @@ int sga_tabs_selected(int a_tabs)
 	NSTabView *t = sga_get(a_tabs);
 	NSTabViewItem *i = [t selectedTabViewItem];
 	NSInteger n = i ? [t indexOfTabViewItem:i] : NSNotFound;
-	return n == NSNotFound ? 0 : (int)n + 1;
+	return n == NSNotFound ? 0 : sga_tab_page(t, n);
 }
 void sga_tabs_set_title(int a_tabs, int a_page, const char *a_title)
 {
-	[[(NSTabView *)sga_get(a_tabs) tabViewItemAtIndex:a_page - 1] setLabel:sga_string(a_title)];
+	{ NSTabView *t = sga_get(a_tabs); [[t tabViewItemAtIndex:sga_tab_item(t, a_page)] setLabel:sga_string(a_title)]; }
 }
 
 int sga_field(void)
@@ -1031,6 +1049,7 @@ int sga_list_selected(int a_id) { return (int)[(NSTableView *)s_inner[a_id] sele
 	NSUInteger k = [[a_table tableColumns] indexOfObject:a_column];
 	NSArray<NSString *> *l_row = data[(NSUInteger)a_row];
 	[f setStringValue:k < [l_row count] ? l_row[k] : @""];
+	[f setAlignment:sga_start_alignment(a_table)];
 	return f;
 }
 - (void)tableViewSelectionDidChange:(NSNotification *)n
@@ -1326,6 +1345,46 @@ int sga_is_visible(int a_id)
 	return [(NSView *)o isHidden] ? 0 : 1;
 }
 
+/* A tab view whose direction changed: its items in the opposite order (see
+   sga_tabs_reversed), the shown page kept. */
+static void sga_tabs_flip(NSTabView *t)
+{
+	NSArray<NSTabViewItem *> *l_items = [[t tabViewItems] copy];
+	NSTabViewItem *l_shown = [t selectedTabViewItem];
+	s_suppress++;
+	for (NSTabViewItem *i in l_items) [t removeTabViewItem:i];
+	for (NSTabViewItem *i in [l_items reverseObjectEnumerator]) [t addTabViewItem:i];
+	if (l_shown) [t selectTabViewItem:l_shown];
+	s_suppress--;
+}
+
+/* A table (or list, or outline) whose direction changed: NSTableView places its columns by
+   direction only when they are added, so they are added again (probed: setting the
+   direction later, or re-adding the view, changes nothing). The sort indicators, the
+   highlighted column and an outline's disclosure column are kept (the selection is kept by
+   sga_set_direction). */
+static void sga_table_relayout(NSTableView *t)
+{
+	NSArray<NSTableColumn *> *l_columns = [[t tableColumns] copy];
+	NSMutableArray *l_indicators = [NSMutableArray array];
+	NSTableColumn *l_highlighted = [t highlightedTableColumn];
+	NSTableColumn *l_outline = [t isKindOfClass:[NSOutlineView class]] ? [(NSOutlineView *)t outlineTableColumn] : nil;
+	for (NSTableColumn *c in l_columns) [l_indicators addObject:[t indicatorImageInTableColumn:c] ?: [NSNull null]];
+	s_suppress++;
+	for (NSTableColumn *c in l_columns) [t removeTableColumn:c];
+	for (NSTableColumn *c in l_columns) [t addTableColumn:c];
+	if (l_outline) [(NSOutlineView *)t setOutlineTableColumn:l_outline];
+	[l_columns enumerateObjectsUsingBlock:^(NSTableColumn *c, NSUInteger k, BOOL *a_stop) {
+		id l_image = l_indicators[k];
+		if (l_image != [NSNull null]) [t setIndicatorImage:l_image inTableColumn:c];
+	}];
+	[t setHighlightedTableColumn:l_highlighted];
+	for (NSTableColumn *c in l_columns) [[c headerCell] setAlignment:sga_start_alignment(t)];
+	[[t headerView] setNeedsDisplay:YES];
+	[t reloadData];   /* the cells take their new alignment (rows and expansion stay) */
+	s_suppress--;
+}
+
 void sga_set_direction(int a_id, int a_direction)
 {
 	id l_object = sga_get(a_id);
@@ -1335,6 +1394,9 @@ void sga_set_direction(int a_id, int a_direction)
 	NSUserInterfaceLayoutDirection l_layout = a_direction == 2 ? NSUserInterfaceLayoutDirectionRightToLeft
 		: a_direction == 1 ? NSUserInterfaceLayoutDirectionLeftToRight : [NSApp userInterfaceLayoutDirection];
 	BOOL l_changed = [v userInterfaceLayoutDirection] != l_layout || [(NSView *)l_core userInterfaceLayoutDirection] != l_layout;
+	/* A table's selection, before anything changes: setting a list's direction clears it (seen
+	   on GUI_LIST), and re-adding the columns would too. */
+	NSIndexSet *l_selected = [l_core isKindOfClass:[NSTableView class]] ? [[(NSTableView *)l_core selectedRowIndexes] copy] : nil;
 	[v setUserInterfaceLayoutDirection:l_layout];
 	if (l_core != v) [(NSView *)l_core setUserInterfaceLayoutDirection:l_layout];
 	if (l_changed) {
@@ -1343,17 +1405,28 @@ void sga_set_direction(int a_id, int a_direction)
 		SGASlot *l_slot = sga_slot_of(v);
 		if (l_slot) { [l_slot setUserInterfaceLayoutDirection:l_layout]; sga_place(l_slot, l_slot->alignment); }
 	}
+	if (l_changed && [l_core isKindOfClass:[NSTabView class]]) sga_tabs_flip((NSTabView *)l_core);
+	if (l_changed && [l_core isKindOfClass:[NSTableView class]]) sga_table_relayout((NSTableView *)l_core);
+	if (l_selected && ![[(NSTableView *)l_core selectedRowIndexes] isEqualToIndexSet:l_selected]) {
+		s_suppress++;
+		[(NSTableView *)l_core selectRowIndexes:l_selected byExtendingSelection:NO];
+		s_suppress--;
+	}
+	/* Text: the direction places it (right-aligned under right to left, as GTK mirrors a
+	   label's alignment), but the text's own letters decide its writing direction, so an
+	   English sentence in a Hebrew window keeps its full stop at the end. A widget set left
+	   to right on purpose (numbers, expressions) reads left to right whatever it holds. */
+	NSTextAlignment l_align = a_direction == 2 ? NSTextAlignmentRight : a_direction == 1 ? NSTextAlignmentLeft : NSTextAlignmentNatural;
+	NSWritingDirection l_writing = a_direction == 1 ? NSWritingDirectionLeftToRight : NSWritingDirectionNatural;
 	if ([l_core isKindOfClass:[NSTextView class]]) {
 		NSTextView *t = (NSTextView *)l_core;
-		[t setBaseWritingDirection:a_direction == 2 ? NSWritingDirectionRightToLeft
-			: a_direction == 1 ? NSWritingDirectionLeftToRight : NSWritingDirectionNatural];
-		[t setAlignment:NSTextAlignmentNatural];
+		[t setBaseWritingDirection:l_writing];
+		[t setAlignment:l_align];
 	}
 	if ([l_core isKindOfClass:[NSTextField class]]) {
 		NSTextField *f = (NSTextField *)l_core;
-		[f setBaseWritingDirection:a_direction == 2 ? NSWritingDirectionRightToLeft
-			: a_direction == 1 ? NSWritingDirectionLeftToRight : NSWritingDirectionNatural];
-		[f setAlignment:NSTextAlignmentNatural];
+		[f setBaseWritingDirection:l_writing];
+		[f setAlignment:l_align];
 	}
 }
 
@@ -1803,7 +1876,7 @@ void sga_test_choose(int a_id, int a_row)
 		return;
 	}
 	if ([sga_get(a_id) isKindOfClass:[NSTabView class]]) {
-		[(NSTabView *)sga_get(a_id) selectTabViewItemAtIndex:a_row - 1];   /* as a click: page changed */
+		{ NSTabView *l_tabs = sga_get(a_id); [l_tabs selectTabViewItemAtIndex:sga_tab_item(l_tabs, a_row)]; }   /* as a click: page changed */
 		return;
 	}
 	NSTableView *t = s_inner[a_id];

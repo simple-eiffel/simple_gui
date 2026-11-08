@@ -612,6 +612,59 @@ feature -- Tests
 			l_window.close
 		end
 
+	test_right_to_left_keeps_numbering
+			-- After the window turns right to left, page, row and column numbers mean what they did:
+			-- the shown page stays shown, selecting from code and a user's click report the same
+			-- numbers (AppKit keeps reversed tabs and re-adds a table's columns underneath).
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_tabs: GUI_TABS
+			l_table: GUI_TABLE
+			l_list: GUI_LIST
+		do
+			create l_window.make ("Numbering", 420, 300)
+			create l_stack.make_vertical
+			create l_tabs.make
+			create l_table.make (<<"Book", "Chapters">>)
+			l_table.extend_row (<<"Genesis", "50">>)
+			l_table.extend_row (<<"Exodus", "40">>)
+			l_tabs.extend (l_table, "Books")
+			create l_list.make
+			l_list.extend ("one")
+			l_list.extend ("two")
+			l_tabs.extend (l_list, "Second")
+			l_tabs.extend (create {GUI_LABEL}.make ("third"), "Third")
+			l_tabs.page_changed_actions.extend (agent (p: INTEGER) do chosen_row := p end)
+			l_table.header_actions.extend (agent (c: INTEGER; up: BOOLEAN) do received_tag := c end)
+			l_stack.extend_stretching (l_tabs)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_table.set_sort_indicator (2, True)
+			l_list.select_row (2)
+			l_table.select_row (2)
+			l_window.set_base_direction (Direction_right_to_left)
+			settle_window
+			assert ("the shown page stays: " + l_tabs.selected_index.out, l_tabs.selected_index = 1)
+			assert ("the selection stays: " + l_table.selected_row.out, l_table.selected_row = 2)
+			assert ("a list's selection stays: " + l_list.selected_index.out, l_list.selected_index = 2)
+			assert ("titles keep their pages", l_tabs.page_title (2).same_string ("Second"))
+			l_tabs.select_page (3)
+			assert ("select_page counts the same: " + l_tabs.selected_index.out, l_tabs.selected_index = 3)
+			chosen_row := 0
+			driver.choose_page (l_tabs, 1)
+			assert ("a click reports the same number: " + chosen_row.out, chosen_row = 1 and l_tabs.selected_index = 1)
+			l_table.select_row (2)
+			assert ("rows count the same", l_table.selected_row = 2 and l_table.cell (2, 1).same_string ("Exodus"))
+			driver.click_header (l_table, 1)
+			assert ("columns count the same: " + received_tag.out, received_tag = 1 and l_table.sort_column = 1)
+			l_window.set_base_direction (Direction_left_to_right)
+			settle_window
+			assert ("and back: " + l_tabs.selected_index.out, l_tabs.selected_index = 1)
+			l_window.close
+		end
+
 	test_tree
 			-- Nodes keep their parents; expanding and selecting from code are silent, and selecting
 			-- a hidden node shows it; a user's choice and a user's collapse are reported; a screen
