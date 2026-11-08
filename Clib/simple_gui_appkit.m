@@ -184,7 +184,7 @@ static int sga_gdk_key(NSEvent *e)
 static int s_suppress;
 static int s_setting_dark;
 
-@interface SGATarget : NSObject <NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate>
+@interface SGATarget : NSObject <NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate, NSTabViewDelegate>
 {
 @public
 	NSMutableDictionary<NSValue *, NSMutableArray<NSString *> *> *rows;
@@ -197,6 +197,7 @@ static int s_setting_dark;
 - (void)activated:(id)a_sender { sga_push(3, sga_id_of(a_sender), 0, 0, 0); }
 - (void)menuItem:(NSMenuItem *)a_item { sga_push(5, 0, (int)[a_item tag], 0, 0); }
 - (void)toggled:(NSButton *)a_box { sga_push(12, sga_id_of(a_box), [a_box state] == NSControlStateValueOn ? 1 : 0, 0, 0); }
+- (void)tabView:(NSTabView *)a_tabs didSelectTabViewItem:(NSTabViewItem *)an_item { if (!s_suppress) sga_push(13, sga_id_of(a_tabs), (int)[a_tabs indexOfTabViewItem:an_item] + 1, 0, 0); }
 - (void)controlTextDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
 - (void)textDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
 - (NSMutableArray<NSString *> *)rowsOf:(NSTableView *)t { return rows[[NSValue valueWithNonretainedObject:t]]; }
@@ -761,6 +762,60 @@ int sga_check_box_is_checked(int a_id) { return [(NSButton *)sga_get(a_id) state
 void sga_check_box_set_text(int a_id, const char *a_text) { [(NSButton *)sga_get(a_id) setTitle:sga_string(a_text)]; }
 const char *sga_check_box_text(int a_id) { return sga_return(Kind_check, [(NSButton *)sga_get(a_id) title]); }
 
+/* Tabs: an NSTabView. Each page sits in a holder view the tab view sizes; the page is pinned
+   inside it, and the tab view is held at least as large as the page needs (its own inset
+   around the tallest and widest page), so a stack can lay it out like any other widget.
+   Choosing a tab sends page changed (13); selecting from code sends nothing. */
+int sga_tabs(void)
+{
+	NSTabView *t = [[NSTabView alloc] init];
+	[t setDelegate:(id<NSTabViewDelegate>)s_target];
+	return sga_keep(t);
+}
+void sga_tabs_extend(int a_tabs, int a_page, const char *a_title)
+{
+	NSTabView *t = sga_get(a_tabs);
+	NSView *v = sga_get(a_page);
+	NSView *l_holder = [[NSView alloc] init];
+	NSTabViewItem *i = [[NSTabViewItem alloc] initWithIdentifier:nil];
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[l_holder addSubview:v];
+	[NSLayoutConstraint activateConstraints:@[
+		[v.leadingAnchor constraintEqualToAnchor:l_holder.leadingAnchor], [v.trailingAnchor constraintEqualToAnchor:l_holder.trailingAnchor],
+		[v.topAnchor constraintEqualToAnchor:l_holder.topAnchor], [v.bottomAnchor constraintEqualToAnchor:l_holder.bottomAnchor]]];
+	[i setLabel:sga_string(a_title)];
+	[i setView:l_holder];
+	s_suppress++;
+	[t addTabViewItem:i];
+	s_suppress--;
+	/* The tab view keeps room for this page: its content rect is inset from its bounds by the
+	   tab row and border, so the page's fitting size plus that inset is a minimum. */
+	NSSize l_fit = [v fittingSize];
+	NSRect l_content = [t contentRect], l_bounds = [t bounds];
+	CGFloat l_dw = NSWidth(l_bounds) - NSWidth(l_content), l_dh = NSHeight(l_bounds) - NSHeight(l_content);
+	if (l_dw <= 0) l_dw = 14;
+	if (l_dh <= 0) l_dh = 36;
+	[[t.widthAnchor constraintGreaterThanOrEqualToConstant:l_fit.width + l_dw] setActive:YES];
+	[[t.heightAnchor constraintGreaterThanOrEqualToConstant:l_fit.height + l_dh] setActive:YES];
+}
+void sga_tabs_select(int a_tabs, int a_page)
+{
+	s_suppress++;
+	[(NSTabView *)sga_get(a_tabs) selectTabViewItemAtIndex:a_page - 1];
+	s_suppress--;
+}
+int sga_tabs_selected(int a_tabs)
+{
+	NSTabView *t = sga_get(a_tabs);
+	NSTabViewItem *i = [t selectedTabViewItem];
+	NSInteger n = i ? [t indexOfTabViewItem:i] : NSNotFound;
+	return n == NSNotFound ? 0 : (int)n + 1;
+}
+void sga_tabs_set_title(int a_tabs, int a_page, const char *a_title)
+{
+	[[(NSTabView *)sga_get(a_tabs) tabViewItemAtIndex:a_page - 1] setLabel:sga_string(a_title)];
+}
+
 int sga_field(void)
 {
 	NSTextField *f = [NSTextField textFieldWithString:@""];
@@ -963,7 +1018,8 @@ static NSString *sga_role_name(NSString *a_role)
 		NSAccessibilityMenuRole: @"menu", NSAccessibilityWindowRole: @"application",
 		NSAccessibilityImageRole: @"img", NSAccessibilityScrollAreaRole: @"generic",
 		NSAccessibilityGroupRole: @"generic", NSAccessibilityCheckBoxRole: @"checkbox",
-		NSAccessibilitySliderRole: @"slider", NSAccessibilityTextAreaRole: @"text-box"};
+		NSAccessibilitySliderRole: @"slider", NSAccessibilityTextAreaRole: @"text-box",
+		NSAccessibilityTabGroupRole: @"tab-list"};
 	return l_names[a_role] ?: @"generic";
 }
 
@@ -1357,6 +1413,10 @@ void sga_test_type(int a_id, const char *a_text)
 
 void sga_test_choose(int a_id, int a_row)
 {
+	if ([sga_get(a_id) isKindOfClass:[NSTabView class]]) {
+		[(NSTabView *)sga_get(a_id) selectTabViewItemAtIndex:a_row - 1];   /* as a click: page changed */
+		return;
+	}
 	NSTableView *t = s_inner[a_id];
 	[t deselectAll:nil];
 	[t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)(a_row - 1)] byExtendingSelection:NO];
@@ -1432,6 +1492,11 @@ static void sga_describe(id a_element, int a_depth, NSMutableString *a_out)
 	id l_role_value = sga_ax(a_element, @selector(accessibilityRole), NSAccessibilityRoleAttribute);
 	NSString *l_role = [l_role_value isKindOfClass:[NSString class]] ? l_role_value : nil;
 	NSString *l_name = sga_role_name(l_role);
+	/* A tab is a radio button with the tab-button subrole on AppKit. */
+	if ([l_role isEqualToString:NSAccessibilityRadioButtonRole]) {
+		id l_sub = sga_ax(a_element, @selector(accessibilitySubrole), NSAccessibilitySubroleAttribute);
+		if ([l_sub isKindOfClass:[NSString class]] && [l_sub isEqualToString:@"AXTabButton"]) l_name = @"tab";
+	}
 	int l_next = a_depth;
 	if ([l_role length] && ![l_name isEqualToString:@"generic"]) {
 		id l_label = sga_ax(a_element, @selector(accessibilityLabel), NSAccessibilityDescriptionAttribute);

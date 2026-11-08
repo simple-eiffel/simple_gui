@@ -71,6 +71,18 @@ feature -- User actions
 			selected: a_list.selected_index = a_row
 		end
 
+	choose_page (a_tabs: GUI_TABS; a_page: INTEGER)
+			-- Click tab `a_page' as a user would (fires page changed).
+		require
+			has_application: has_application
+			valid: 1 <= a_page and a_page <= a_tabs.count
+		do
+			backend.test_choose (a_tabs.id, a_page)
+			settle
+		ensure
+			shown: a_tabs.selected_index = a_page
+		end
+
 	invoke_menu (an_item_id: INTEGER)
 			-- Choose menu item `an_item_id' as a user would.
 		require

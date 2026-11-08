@@ -9,7 +9,8 @@ note
 		| 4 selection (a = row, 1-based) | 5 menu (a = item id) | 6 close requested
 		| 7 pointer (a = x, b = y, c = kind + buttons << 4 + modifiers << 8)
 		| 8 key (a = key code, b = character, c = modifiers << 8) | 9 resize (a, b)
-		| 10 appearance (a = 1 dark) | 11 wake | 12 toggled (a = 1 checked).
+		| 10 appearance (a = 1 dark) | 11 wake | 12 toggled (a = 1 checked)
+		| 13 page changed (a = page, 1-based).
 		Text areas report text changed (2) like fields.
 
 		Menu roles: 0 none | 1 about | 2 settings | 3 quit | 10 undo | 11 redo | 12 cut
@@ -252,6 +253,32 @@ feature -- Controls
 		deferred
 		end
 
+	tabs: INTEGER
+			-- Pages under a row of tabs.
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	tabs_extend (a_tabs, a_page: INTEGER; a_title: POINTER)
+			-- Add `a_page' as the last page; the first page added is shown.
+		deferred
+		end
+
+	tabs_select (a_tabs, a_page: INTEGER)
+			-- Show page `a_page' (1-based) WITHOUT a page-changed event.
+		deferred
+		end
+
+	tabs_selected (a_tabs: INTEGER): INTEGER
+			-- The page shown (1-based), or 0.
+		deferred
+		end
+
+	tabs_set_title (a_tabs, a_page: INTEGER; a_title: POINTER)
+		deferred
+		end
+
 	list: INTEGER
 		deferred
 		ensure
@@ -471,7 +498,8 @@ feature -- Test driver
 		end
 
 	test_choose (an_id, a_row: INTEGER)
-			-- Select a row AS A USER WOULD (emits selection).
+			-- Select row `a_row' of a list, or show page `a_row' of tabs, AS A USER WOULD
+			-- (emits selection, or page changed).
 		deferred
 		end
 

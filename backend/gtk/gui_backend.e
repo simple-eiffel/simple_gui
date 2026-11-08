@@ -236,6 +236,32 @@ feature -- Controls
 		alias "sg_text_area_set_read_only($an_id, $a_on ? 1 : 0);"
 		end
 
+	tabs: INTEGER
+			-- A GtkNotebook (first pass by MACMINI; PROD to verify on GTK).
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_tabs();"
+		end
+
+	tabs_extend (a_tabs, a_page: INTEGER; a_title: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_tabs_extend($a_tabs, $a_page, (const char *) $a_title);"
+		end
+
+	tabs_select (a_tabs, a_page: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_tabs_select($a_tabs, $a_page);"
+		end
+
+	tabs_selected (a_tabs: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_tabs_selected($a_tabs);"
+		end
+
+	tabs_set_title (a_tabs, a_page: INTEGER; a_title: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_tabs_set_title($a_tabs, $a_page, (const char *) $a_title);"
+		end
+
 	list: INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_list();"
