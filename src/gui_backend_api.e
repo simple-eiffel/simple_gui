@@ -9,7 +9,7 @@ note
 		| 4 selection (a = row, 1-based) | 5 menu (a = item id) | 6 close requested
 		| 7 pointer (a = x, b = y, c = kind + buttons << 4 + modifiers << 8)
 		| 8 key (a = key code, b = character, c = modifiers << 8) | 9 resize (a, b)
-		| 10 appearance (a = 1 dark) | 11 wake.
+		| 10 appearance (a = 1 dark) | 11 wake | 12 toggled (a = 1 checked).
 
 		Menu roles: 0 none | 1 about | 2 settings | 3 quit | 10 undo | 11 redo | 12 cut
 		| 13 copy | 14 paste | 15 select all. A backend places role items where its
@@ -209,6 +209,29 @@ feature -- Controls
 		deferred
 		end
 
+	check_box (a_text: POINTER): INTEGER
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	check_box_set (an_id: INTEGER; a_on: BOOLEAN)
+			-- Check or clear WITHOUT a toggled event.
+		deferred
+		end
+
+	check_box_is_checked (an_id: INTEGER): BOOLEAN
+		deferred
+		end
+
+	check_box_set_text (an_id: INTEGER; a_text: POINTER)
+		deferred
+		end
+
+	check_box_text (an_id: INTEGER): POINTER
+		deferred
+		end
+
 	list: INTEGER
 		deferred
 		ensure
@@ -314,10 +337,34 @@ feature -- Menus
 
 	menu_add_item (a_menu: POINTER; a_text, a_shortcut: POINTER; an_item_id, a_role: INTEGER)
 			-- Item `an_item_id' (event 5) with platform role `a_role'. Edit roles (10 to 15) use the
-			-- toolkit's own text actions and pass `an_item_id' = 0.
+			-- toolkit's own text actions and raise no event; their id serves `menu_set_item_text'.
 		require
 			role_known: (a_role >= 0 and a_role <= 3) or (a_role >= 10 and a_role <= 15)
-			edit_roles_native: a_role >= 10 implies an_item_id = 0
+			numbered: an_item_id > 0
+		deferred
+		end
+
+	menu_set_title (a_menu: POINTER; a_title: POINTER)
+			-- Relabel top-level menu `a_menu'.
+		deferred
+		end
+
+	menu_title (a_menu: POINTER): POINTER
+			-- The label the toolkit shows now for `a_menu'.
+		deferred
+		end
+
+	menu_set_item_text (an_item_id: INTEGER; a_text: POINTER)
+			-- Relabel item `an_item_id', keeping its action and shortcut.
+		require
+			numbered: an_item_id > 0
+		deferred
+		end
+
+	menu_item_text (an_item_id: INTEGER): POINTER
+			-- The label the toolkit shows now for item `an_item_id'.
+		require
+			numbered: an_item_id > 0
 		deferred
 		end
 

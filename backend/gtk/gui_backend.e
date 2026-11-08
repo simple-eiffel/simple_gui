@@ -188,6 +188,31 @@ feature -- Controls
 		alias "sg_field_set_placeholder($an_id, (const char *) $a_text);"
 		end
 
+	check_box (a_text: POINTER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_check_box((const char *) $a_text);"
+		end
+
+	check_box_set (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_check_box_set($an_id, $a_on ? 1 : 0);"
+		end
+
+	check_box_is_checked (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_check_box_is_checked($an_id) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	check_box_set_text (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_check_box_set_text($an_id, (const char *) $a_text);"
+		end
+
+	check_box_text (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_check_box_text($an_id);"
+		end
+
 	list: INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_list();"
@@ -294,7 +319,7 @@ feature -- Menus
 			-- the program put them; edit roles act on the focused text widget.
 		do
 			if a_role >= 10 then
-				c_menu_add_edit_role (a_menu, a_text, a_role)
+				c_menu_add_edit_role (a_menu, a_text, a_role, an_item_id)
 			else
 				c_menu_add_item (a_menu, a_text, a_shortcut, an_item_id)
 			end
@@ -303,6 +328,26 @@ feature -- Menus
 	menu_add_separator (a_menu: POINTER)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_menu_add_separator((void *) $a_menu);"
+		end
+
+	menu_set_title (a_menu: POINTER; a_title: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_menu_set_title((void *) $a_menu, (const char *) $a_title);"
+		end
+
+	menu_title (a_menu: POINTER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_menu_title((void *) $a_menu);"
+		end
+
+	menu_set_item_text (an_item_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_menu_set_item_text($an_item_id, (const char *) $a_text);"
+		end
+
+	menu_item_text (an_item_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_menu_item_text($an_item_id);"
 		end
 
 feature -- Dialogs
@@ -373,9 +418,9 @@ feature {NONE} -- C
 		alias "sg_menu_add_item((void *) $a_menu, (const char *) $a_text, (const char *) $a_shortcut, $an_item_id);"
 		end
 
-	c_menu_add_edit_role (a_menu: POINTER; a_text: POINTER; a_role: INTEGER)
+	c_menu_add_edit_role (a_menu: POINTER; a_text: POINTER; a_role, an_item_id: INTEGER)
 		external "C inline use %"simple_gui_gtk.h%""
-		alias "sg_menu_add_edit_role((void *) $a_menu, (const char *) $a_text, $a_role);"
+		alias "sg_menu_add_edit_role((void *) $a_menu, (const char *) $a_text, $a_role, $an_item_id);"
 		end
 
 end

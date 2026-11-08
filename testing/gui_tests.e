@@ -366,6 +366,55 @@ feature -- Tests
 			l_window.close
 		end
 
+	test_menus_relabel
+			-- A menu title and its items (agent and edit items alike) change language in place.
+		local
+			l_menu: GUI_MENU
+			l_open, l_copy: INTEGER
+		do
+			l_menu := app.menu.add_menu ("Tools")
+			menu_runs := 0
+			l_menu.add_item ("Open", "primary+O", agent do menu_runs := menu_runs + 1 end)
+			l_open := l_menu.last_item_id
+			l_menu.add_edit_item (l_menu.Role_copy, "Copy")
+			l_copy := l_menu.last_item_id
+			l_menu.set_title ({STRING_32} "%/1499/%/1500/%/1497/%/1501/")
+			l_menu.set_item_text (l_open, {STRING_32} "%/1508/%/1514/%/1495/")
+			l_menu.set_item_text (l_copy, {STRING_32} "%/1492/%/1506/%/1514/%/1511/")
+			assert ("title shown", l_menu.shown_title.item (1).code = 1499)
+			assert ("item shown", l_menu.item_text (l_open).item (1).code = 1508)
+			assert ("edit item shown", l_menu.item_text (l_copy).item (1).code = 1492)
+			driver.invoke_menu (l_open)
+			assert ("still runs its agent", menu_runs = 1)
+		end
+
+	test_check_box_events
+			-- set_checked is silent; a user's click toggles and reports the new state.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_box: GUI_CHECK_BOX
+			l_last: BOOLEAN
+		do
+			create l_window.make ("Check box", 300, 120)
+			create l_stack.make_vertical
+			create l_box.make ("Degrees")
+			l_box.toggle_actions.extend (agent (c: BOOLEAN) do last_checked := c end)
+			l_stack.extend (l_box)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_box.set_checked (True)
+			driver.pump_until_idle (200)
+			assert ("silent set", l_box.is_checked and l_box.toggle_actions.fire_count = 0)
+			driver.toggle (l_box)
+			assert ("user click reported", l_box.toggle_actions.fire_count = 1 and not last_checked and not l_box.is_checked)
+			print (indented (driver.describe_accessibility (l_window)))
+			l_last := driver.describe_accessibility (l_window).has_substring ("checkbox: Degrees")
+			assert ("assistive tree", l_last)
+			l_window.close
+		end
+
 feature {NONE} -- Fixtures
 
 	app: GUI_APPLICATION
@@ -379,7 +428,7 @@ feature {NONE} -- Fixtures
 
 	clicks, chosen_row, menu_runs, received_tag: INTEGER
 
-	last_dark: BOOLEAN
+	last_dark, last_checked: BOOLEAN
 
 	received_text: STRING_32
 
