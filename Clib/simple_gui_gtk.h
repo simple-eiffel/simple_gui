@@ -353,6 +353,8 @@ static void sg_text_area_set_read_only(int id, int on) {
 
 /* ---------- system colours (0xRRGGBB) ---------- */
 
+static int sg_is_dark(void);
+
 /* role: 1 window background, 2 text, 3 secondary text, 4 accent, 5 selection, 6 separator.
    Read from the theme's named colours (Adwaita defines them); a fallback if a theme lacks one. */
 static int sg_system_color(int role) {
@@ -531,8 +533,22 @@ static void sg_remember_item(int item_id, GMenu *m, int pos, const char *action,
     g_free(sg_item_accel[item_id]); sg_item_accel[item_id] = (accel && *accel) ? g_strdup(accel) : NULL;
 }
 
+/* An item relabel rebuilds a submenu's rows with direction NONE (MACMINI, #12 review):
+   after the popover has rebuilt them, give every window's bar its direction again. */
+static void sg_submenu_items(GMenuModel *m, int pos, int removed, int added, gpointer d) {
+    int i;
+    (void) m; (void) pos; (void) removed; (void) added; (void) d;
+    for (i = 1; i < sg_n; i++) {
+        if (sg_kind[i] == 1 && sg_w[i]) {
+            GtkWidget *bar = g_object_get_data(G_OBJECT(sg_w[i]), "sg-bar");
+            int dir = bar ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(bar), "sg-dir")) : 0;
+            if (dir) sg_direction_tree(bar, (GtkTextDirection) dir);
+        }
+    }
+}
 static void *sg_menu_new(const char *title) {   /* menus live at application level, as the spec says */
     GMenu *m = g_menu_new();
+    g_signal_connect_after(m, "items-changed", G_CALLBACK(sg_submenu_items), NULL);
     g_object_set_data(G_OBJECT(m), "sg-index", GINT_TO_POINTER(g_menu_model_get_n_items(G_MENU_MODEL(sg_menubar))));
     g_menu_append_submenu(sg_menubar, title, G_MENU_MODEL(m));
     return m;
