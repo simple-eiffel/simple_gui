@@ -306,6 +306,8 @@ feature -- Tests
 			assert ("number stays left to right", l_number.base_direction = Direction_left_to_right)
 			assert ("numeric field stays left to right", l_field.base_direction = Direction_left_to_right)
 			assert ("words follow the container", l_word.base_direction = Direction_right_to_left)
+		end
+
 	test_stack_alignment
 			-- A centred child is narrower than a filling one; set_alignment reaches later children.
 		local
