@@ -354,12 +354,21 @@ static void sg_cell_setup(GtkSignalListItemFactory *fa, GtkListItem *it, gpointe
     gtk_label_set_ellipsize(GTK_LABEL(l), PANGO_ELLIPSIZE_END);
     gtk_list_item_set_child(it, l);
 }
+/* 1f, lazy tables: a row not yet answered holds this one-character placeholder. */
+#define SG_UNANSWERED "\x1e"
+static void sg_want_row(int id, int row);   /* below, with the tables */
 static void sg_cell_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
     GtkStringObject *o = GTK_STRING_OBJECT(gtk_list_item_get_item(it));
-    char *v = sg_row_field(gtk_string_object_get_string(o), GPOINTER_TO_INT(d));
-    (void) fa;
-    gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(it)), v);
-    g_free(v);
+    const char *joined = gtk_string_object_get_string(o);
+    if (strcmp(joined, SG_UNANSWERED) == 0) {
+        /* in sight and not answered: show it empty and ask for it */
+        gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(it)), "");
+        sg_want_row(GPOINTER_TO_INT(g_object_get_data(G_OBJECT(fa), "sg-table")), (int) gtk_list_item_get_position(it) + 1);
+    } else {
+        char *v = sg_row_field(joined, GPOINTER_TO_INT(d));
+        gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(it)), v);
+        g_free(v);
+    }
     sg_follow_view_direction(gtk_list_item_get_child(it));
 }
 static GtkColumnView *sg_table_view(int id) { return GTK_COLUMN_VIEW(g_object_get_data(G_OBJECT(sg_w[id]), "sg-view")); }
@@ -429,6 +438,15 @@ static int sg_table(const char *titles) {
     id = sg_reg(scroll, 13);
     g_object_set_data_full(G_OBJECT(scroll), "sg-rows", rows, g_object_unref);
     g_object_set_data(G_OBJECT(scroll), "sg-view", v);
+    {   /* each cell's bind needs the table's id, to ask for unanswered rows (1f) */
+        GListModel *cols = gtk_column_view_get_columns(GTK_COLUMN_VIEW(v));
+        guint k, nc = g_list_model_get_n_items(cols);
+        for (k = 0; k < nc; k++) {
+            GtkColumnViewColumn *c = g_list_model_get_item(cols, k);
+            g_object_set_data(G_OBJECT(gtk_column_view_column_get_factory(c)), "sg-table", GINT_TO_POINTER(id));
+            g_object_unref(c);
+        }
+    }
     sg_table_use_selection(id, 0);
     g_signal_connect(gtk_column_view_get_sorter(GTK_COLUMN_VIEW(v)), "changed", G_CALLBACK(sg_on_table_sorter), GINT_TO_POINTER(id));
     return id;
@@ -440,11 +458,151 @@ static void sg_table_extend(int id, const char *cells) {
 }
 static void sg_table_wipe_out(int id) {
     GtkStringList *rows = GTK_STRING_LIST(g_object_get_data(G_OBJECT(sg_w[id]), "sg-rows"));
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-source", NULL);   /* leaves source mode (1f) */
     sg_quiet++;
     gtk_selection_model_unselect_all(sg_table_model(id));
     gtk_string_list_splice(rows, 0, g_list_model_get_n_items(G_LIST_MODEL(rows)), NULL);
     sg_quiet--;
 }
+/* ---------- 1f, lazy tables (GTK half). Source mode fills the table's GtkStringList with
+   SG_UNANSWERED, one per row. A cell bound to it shows empty and asks for its row; the asks
+   since the last idle go to Eiffel as ONE rows wanted event (16, a = first, b = last), and a
+   row asked for is not asked for again until answered or forgotten (a GtkBitset). An answer
+   is spliced in (GTK rebinds it), keeping that row's selection. The answered rows are kept
+   oldest first; past SG_ROW_CACHE the oldest go back to SG_UNANSWERED. ---------- */
+#define SG_ROW_CACHE 2000
+typedef struct { int count; GtkBitset *pending; int lo, hi; guint idle; GQueue answered; } SgSource;
+static void sg_source_free(gpointer p) {
+    SgSource *s = p;
+    if (s->idle) g_source_remove(s->idle);
+    gtk_bitset_unref(s->pending);
+    g_queue_clear(&s->answered);
+    g_free(s);
+}
+static SgSource *sg_source(int id) { return sg_w[id] ? g_object_get_data(G_OBJECT(sg_w[id]), "sg-source") : NULL; }
+static gboolean sg_want_flush(gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    SgSource *s = sg_source(id);
+    if (!s) return G_SOURCE_REMOVE;
+    s->idle = 0;
+    if (s->lo > 0) sg_push(16, id, s->lo, s->hi);
+    s->lo = s->hi = 0;
+    return G_SOURCE_REMOVE;
+}
+static void sg_want_row(int id, int row) {
+    SgSource *s = sg_source(id);
+    if (!s || row < 1 || row > s->count || gtk_bitset_contains(s->pending, (guint) row)) return;
+    gtk_bitset_add(s->pending, (guint) row);
+    if (s->lo == 0 || row < s->lo) s->lo = row;
+    if (row > s->hi) s->hi = row;
+    if (!s->idle) s->idle = g_idle_add(sg_want_flush, GINT_TO_POINTER(id));
+}
+/* Replace rows pos .. pos + n - 1 of table `id' by `texts' (NULL: the placeholder), quietly,
+   keeping the selection by row number. */
+static void sg_table_put(int id, guint pos, guint n, const char *const *texts) {
+    GtkStringList *rows = GTK_STRING_LIST(g_object_get_data(G_OBJECT(sg_w[id]), "sg-rows"));
+    GtkSelectionModel *m = sg_table_model(id);
+    GtkBitset *kept = gtk_selection_model_get_selection(m);
+    const char **fill = NULL;
+    guint i;
+    if (!texts) {
+        fill = g_new(const char *, n + 1);
+        for (i = 0; i < n; i++) fill[i] = SG_UNANSWERED;
+        fill[n] = NULL;
+        texts = fill;
+    }
+    sg_quiet++;
+    gtk_string_list_splice(rows, pos, n, texts);
+    if (!gtk_bitset_is_empty(kept)) {
+        GtkBitset *all = gtk_bitset_new_range(0, g_list_model_get_n_items(G_LIST_MODEL(rows)));
+        gtk_selection_model_set_selection(m, kept, all);
+        gtk_bitset_unref(all);
+    }
+    sg_quiet--;
+    gtk_bitset_unref(kept);
+    g_free(fill);
+}
+static void sg_table_set_source(int id, int count) {
+    GtkStringList *rows = GTK_STRING_LIST(g_object_get_data(G_OBJECT(sg_w[id]), "sg-rows"));
+    SgSource *s = g_new0(SgSource, 1);
+    guint n = g_list_model_get_n_items(G_LIST_MODEL(rows));
+    s->count = count;
+    s->pending = gtk_bitset_new_empty();
+    g_queue_init(&s->answered);
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-source", s, sg_source_free);
+    sg_quiet++;
+    gtk_selection_model_unselect_all(sg_table_model(id));
+    gtk_string_list_splice(rows, 0, n, NULL);
+    sg_quiet--;
+    if (count > 0) {
+        const char **fill = g_new(const char *, (gsize) count + 1);
+        int i;
+        for (i = 0; i < count; i++) fill[i] = SG_UNANSWERED;
+        fill[count] = NULL;
+        sg_quiet++;
+        gtk_string_list_splice(rows, 0, 0, fill);
+        sg_quiet--;
+        g_free(fill);
+    }
+}
+static void sg_table_set_row(int id, int row, const char *cells) {
+    SgSource *s = sg_source(id);
+    GtkStringList *rows = GTK_STRING_LIST(g_object_get_data(G_OBJECT(sg_w[id]), "sg-rows"));
+    const char *one[2];
+    if (!s || row < 1 || row > s->count || (guint) row > g_list_model_get_n_items(G_LIST_MODEL(rows))) return;
+    one[0] = cells; one[1] = NULL;
+    sg_table_put(id, (guint) row - 1, 1, one);
+    gtk_bitset_remove(s->pending, (guint) row);
+    g_queue_push_tail(&s->answered, GINT_TO_POINTER(row));
+    while (g_queue_get_length(&s->answered) > SG_ROW_CACHE) {
+        int old = GPOINTER_TO_INT(g_queue_pop_head(&s->answered));
+        if ((guint) old <= g_list_model_get_n_items(G_LIST_MODEL(rows))
+            && strcmp(gtk_string_list_get_string(rows, (guint) old - 1), SG_UNANSWERED) != 0)
+            sg_table_put(id, (guint) old - 1, 1, NULL);
+    }
+}
+static void sg_table_set_row_count(int id, int count) {
+    SgSource *s = sg_source(id);
+    GtkStringList *rows = GTK_STRING_LIST(g_object_get_data(G_OBJECT(sg_w[id]), "sg-rows"));
+    guint n = g_list_model_get_n_items(G_LIST_MODEL(rows));
+    if (!s || count < 0) return;
+    s->count = count;
+    if (count < (int) n) {
+        sg_quiet++;
+        gtk_string_list_splice(rows, (guint) count, n - (guint) count, NULL);   /* selected rows past it go */
+        sg_quiet--;
+        gtk_bitset_remove_range_closed(s->pending, (guint) count + 1, G_MAXUINT - 1);
+    } else if (count > (int) n) {
+        guint add = (guint) count - n, i;
+        const char **fill = g_new(const char *, add + 1);
+        for (i = 0; i < add; i++) fill[i] = SG_UNANSWERED;
+        fill[add] = NULL;
+        sg_quiet++;
+        gtk_string_list_splice(rows, n, 0, fill);
+        sg_quiet--;
+        g_free(fill);
+    }
+}
+static void sg_table_forget_rows(int id) {
+    SgSource *s = sg_source(id);
+    GtkStringList *rows = GTK_STRING_LIST(g_object_get_data(G_OBJECT(sg_w[id]), "sg-rows"));
+    guint n = g_list_model_get_n_items(G_LIST_MODEL(rows));
+    if (!s) return;
+    gtk_bitset_remove_all(s->pending);
+    g_queue_clear(&s->answered);
+    if (n > 0) sg_table_put(id, 0, n, NULL);   /* in sight, they rebind and ask again */
+}
+static void sg_table_forget_row(int id, int row) {
+    SgSource *s = sg_source(id);
+    GtkStringList *rows = GTK_STRING_LIST(g_object_get_data(G_OBJECT(sg_w[id]), "sg-rows"));
+    if (!s || row < 1 || (guint) row > g_list_model_get_n_items(G_LIST_MODEL(rows))) return;
+    gtk_bitset_remove(s->pending, (guint) row);
+    sg_table_put(id, (guint) row - 1, 1, NULL);
+}
+static void sg_table_scroll_to(int id, int row) {
+    if (row >= 1) gtk_column_view_scroll_to(sg_table_view(id), (guint) row - 1, NULL, GTK_LIST_SCROLL_NONE, NULL);
+}
+
 static void sg_table_set_multiple(int id, int on) { sg_quiet++; sg_table_use_selection(id, on); sg_quiet--; }
 static void sg_table_select(int id, int row, int extend) {
     sg_quiet++;

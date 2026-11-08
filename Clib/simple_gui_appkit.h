@@ -84,6 +84,13 @@ void sga_table_select(int a_id, int a_row, int a_extend);   /* 0 clears; no even
 int sga_table_selected_count(int a_id);
 int sga_table_selected_at(int a_id, int i);   /* the i-th selected row, ascending */
 void sga_table_set_sort_indicator(int a_id, int a_column, int a_ascending);   /* 0: none */
+/* Lazy rows (1f): rows come from the program, asked for with event 16 (a = first, b = last). */
+void sga_table_set_source(int a_id, int a_count);
+void sga_table_set_row(int a_id, int a_row, const char *a_cells);
+void sga_table_set_row_count(int a_id, int a_count);
+void sga_table_forget_rows(int a_id);
+void sga_table_forget_row(int a_id, int a_row);
+void sga_table_scroll_to(int a_id, int a_row);
 int sga_tree(void);   /* selection 4 (a = node), expansion 15 (a = node, b = 1 expanded) */
 void sga_tree_add(int a_id, int a_node, int a_parent, const char *a_text);   /* nodes numbered 1, 2, 3... by the caller; parent 0: a root */
 void sga_tree_set_expanded(int a_id, int a_node, int a_on);   /* no event */

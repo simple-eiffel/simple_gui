@@ -1091,10 +1091,43 @@ int sga_list_selected(int a_id) { return (int)[(NSTableView *)s_inner[a_id] sele
 {
 @public
 	NSMutableArray<NSArray<NSString *> *> *data;
+	/* Lazy rows (1f): the count, the rows held (a bounded cache by row index from 0), and
+	   the rows asked for but not yet answered. */
+	BOOL source_on;
+	NSInteger source_count;
+	NSMutableDictionary<NSNumber *, NSArray<NSString *> *> *cache;
+	NSMutableIndexSet *pending;
 }
+- (void)wantRowsNear:(NSInteger)a_row;
 @end
 @implementation SGAGridTable
-- (NSInteger)numberOfRowsInTableView:(NSTableView *)a_table { return (NSInteger)[data count]; }
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)a_table { return source_on ? source_count : (NSInteger)[data count]; }
+
+/* Rows wanted (16) for the rows in view plus a viewful either side, those neither held nor
+   already asked for; once per range, never for a count of 0. Rows far from the view are
+   dropped from the cache. */
+- (void)wantRowsNear:(NSInteger)a_row
+{
+	if (!source_on || source_count <= 0) return;
+	NSRange v = [self rowsInRect:[self visibleRect]];
+	if (v.length == 0) v = NSMakeRange((NSUInteger)a_row, 40);
+	NSInteger l_margin = (NSInteger)MAX(v.length, (NSUInteger)20);
+	NSInteger l_first = MAX((NSInteger)0, (NSInteger)v.location - l_margin);
+	NSInteger l_last = MIN(source_count - 1, (NSInteger)NSMaxRange(v) + l_margin - 1);
+	NSInteger lo = -1, hi = -1;
+	for (NSInteger r = l_first; r <= l_last; r++) {
+		if (cache[@(r)] || [pending containsIndex:(NSUInteger)r]) continue;
+		if (lo < 0) lo = r;
+		hi = r;
+	}
+	if (lo < 0) return;
+	[pending addIndexesInRange:NSMakeRange((NSUInteger)lo, (NSUInteger)(hi - lo + 1))];
+	sga_push(16, sga_id_of(self), (int)lo + 1, (int)hi + 1, 0);
+	if ([cache count] > 4000) {
+		NSInteger l_keep_lo = l_first - 4 * l_margin, l_keep_hi = l_last + 4 * l_margin;
+		for (NSNumber *k in [cache allKeys]) if ([k integerValue] < l_keep_lo || [k integerValue] > l_keep_hi) [cache removeObjectForKey:k];
+	}
+}
 - (NSView *)tableView:(NSTableView *)a_table viewForTableColumn:(NSTableColumn *)a_column row:(NSInteger)a_row
 {
 	NSTextField *f = [a_table makeViewWithIdentifier:@"sga_grid_cell" owner:self];
@@ -1104,7 +1137,8 @@ int sga_list_selected(int a_id) { return (int)[(NSTableView *)s_inner[a_id] sele
 		[f setLineBreakMode:NSLineBreakByTruncatingTail];
 	}
 	NSUInteger k = [[a_table tableColumns] indexOfObject:a_column];
-	NSArray<NSString *> *l_row = data[(NSUInteger)a_row];
+	NSArray<NSString *> *l_row = source_on ? cache[@(a_row)] : data[(NSUInteger)a_row];
+	if (source_on && !l_row) [self wantRowsNear:a_row];
 	[f setStringValue:k < [l_row count] ? l_row[k] : @""];
 	[f setAlignment:sga_start_alignment(a_table)];
 	return f;
@@ -1165,10 +1199,90 @@ void sga_table_wipe_out(int a_id)
 {
 	SGAGridTable *t = s_inner[a_id];
 	[t->data removeAllObjects];
+	t->source_on = NO;
+	t->source_count = 0;
+	[t->cache removeAllObjects];
+	[t->pending removeAllIndexes];
 	s_suppress++;
 	[t deselectAll:nil];
 	[t reloadData];
 	s_suppress--;
+}
+
+/* ---- lazy rows (1f) */
+
+void sga_table_set_source(int a_id, int a_count)
+{
+	SGAGridTable *t = s_inner[a_id];
+	[t->data removeAllObjects];
+	t->source_on = YES;
+	t->source_count = MAX(a_count, 0);
+	if (!t->cache) t->cache = [NSMutableDictionary dictionary];
+	if (!t->pending) t->pending = [NSMutableIndexSet indexSet];
+	[t->cache removeAllObjects];
+	[t->pending removeAllIndexes];
+	s_suppress++;
+	[t deselectAll:nil];
+	[t reloadData];
+	s_suppress--;
+}
+
+void sga_table_set_row(int a_id, int a_row, const char *a_cells)
+{
+	SGAGridTable *t = s_inner[a_id];
+	NSInteger r = a_row - 1;
+	if (!t->source_on || r < 0 || r >= t->source_count) return;
+	t->cache[@(r)] = sga_fields(a_cells);
+	[t->pending removeIndex:(NSUInteger)r];
+	s_suppress++;
+	[t reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)r] columnIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, [[t tableColumns] count])]];
+	s_suppress--;
+}
+
+void sga_table_set_row_count(int a_id, int a_count)
+{
+	SGAGridTable *t = s_inner[a_id];
+	if (!t->source_on) return;
+	t->source_count = MAX(a_count, 0);
+	for (NSNumber *k in [t->cache allKeys]) if ([k integerValue] >= t->source_count) [t->cache removeObjectForKey:k];
+	[t->pending removeIndexesInRange:NSMakeRange((NSUInteger)t->source_count, NSUIntegerMax - (NSUInteger)t->source_count)];
+	NSMutableIndexSet *l_keep = [[t selectedRowIndexes] mutableCopy];
+	[l_keep removeIndexesInRange:NSMakeRange((NSUInteger)t->source_count, NSUIntegerMax - (NSUInteger)t->source_count)];
+	s_suppress++;
+	[t reloadData];
+	[t selectRowIndexes:l_keep byExtendingSelection:NO];
+	s_suppress--;
+}
+
+void sga_table_forget_rows(int a_id)
+{
+	SGAGridTable *t = s_inner[a_id];
+	if (!t->source_on) return;
+	[t->cache removeAllObjects];
+	[t->pending removeAllIndexes];
+	NSIndexSet *l_selected = [[t selectedRowIndexes] copy];
+	s_suppress++;
+	[t reloadData];
+	[t selectRowIndexes:l_selected byExtendingSelection:NO];
+	s_suppress--;
+}
+
+void sga_table_forget_row(int a_id, int a_row)
+{
+	SGAGridTable *t = s_inner[a_id];
+	NSInteger r = a_row - 1;
+	if (!t->source_on || r < 0 || r >= t->source_count) return;
+	[t->cache removeObjectForKey:@(r)];
+	[t->pending removeIndex:(NSUInteger)r];
+	s_suppress++;
+	[t reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)r] columnIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, [[t tableColumns] count])]];
+	s_suppress--;
+}
+
+void sga_table_scroll_to(int a_id, int a_row)
+{
+	NSTableView *t = s_inner[a_id];
+	if (a_row >= 1 && a_row <= [t numberOfRows]) [t scrollRowToVisible:a_row - 1];
 }
 
 void sga_table_set_multiple(int a_id, int a_on) { [(NSTableView *)s_inner[a_id] setAllowsMultipleSelection:a_on != 0]; }

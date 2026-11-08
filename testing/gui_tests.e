@@ -924,7 +924,162 @@ feature -- Tests
 			l_window.close
 		end
 
+feature -- Lazy tables (1f)
+
+	test_a_row_source_asks_only_for_rows_in_view
+			-- 100,000 rows from a source: only the rows in view (and a margin) are asked for,
+			-- before and after scrolling to the middle; a count of 0 asks for nothing.
+		local
+			l_window: GUI_WINDOW
+			l_table: GUI_TABLE
+			l_before: INTEGER
+		do
+			reset_source ("Row ")
+			create l_window.make ("Lazy", 400, 300)
+			create l_table.make (<<"Name", "Double">>)
+			l_window.set_content (l_table)
+			l_table.set_row_source (100_000, agent counted_row)
+			l_window.show
+			settle_rows
+			assert ("some rows asked for: " + source_calls.out, source_calls > 0)
+			assert ("only rows near the view: " + source_calls.out, source_calls <= 300)
+			assert ("row count", l_table.row_count = 100_000)
+			assert ("a cell from the source", l_table.cell (7, 2).same_string ("14"))
+			l_before := source_calls
+			l_table.scroll_to_row (50_000)
+			settle_rows
+			assert ("row 50,000 asked for after scrolling", asked_50000)
+			assert ("still far below every row: " + source_calls.out, source_calls < 1_000)
+			assert ("more were asked for: " + l_before.out + " then " + source_calls.out, source_calls > l_before)
+			reset_source ("Row ")
+			l_table.set_row_source (0, agent counted_row)
+			settle_rows
+			assert ("an empty source is never asked: " + source_calls.out, source_calls = 0 and l_table.row_count = 0)
+			l_window.close
+		end
+
+	test_refresh_rows_asks_again
+			-- After the data changes, refresh_rows asks again for the rows in view.
+		local
+			l_window: GUI_WINDOW
+			l_table: GUI_TABLE
+			l_before: INTEGER
+		do
+			reset_source ("Old ")
+			create l_window.make ("Refresh", 400, 300)
+			create l_table.make (<<"Name", "Double">>)
+			l_window.set_content (l_table)
+			l_table.set_row_source (1_000, agent counted_row)
+			l_window.show
+			settle_rows
+			l_before := source_calls
+			source_tag := "New "
+			l_table.refresh_rows
+			settle_rows
+			assert ("asked again: " + l_before.out + " then " + source_calls.out, source_calls > l_before)
+			assert ("the new text", l_table.cell (1, 1).same_string ("New 1"))
+			l_window.close
+		end
+
+	test_a_row_source_selects_by_number
+			-- Selection is by row number, far past anything asked for.
+		local
+			l_window: GUI_WINDOW
+			l_table: GUI_TABLE
+			l_fired: INTEGER
+		do
+			reset_source ("Row ")
+			create l_window.make ("Select", 400, 300)
+			create l_table.make (<<"Name", "Double">>)
+			l_window.set_content (l_table)
+			l_table.set_row_source (100_000, agent counted_row)
+			l_table.selection_actions.extend (agent (r: INTEGER) do chosen_row := r end)
+			l_window.show
+			settle_rows
+			l_fired := l_table.selection_actions.fire_count
+			l_table.select_row (70_000)
+			assert ("selected by number: " + l_table.selected_row.out, l_table.selected_row = 70_000)
+			assert ("no event", l_table.selection_actions.fire_count = l_fired)
+			chosen_row := 0
+			driver.choose_table_row (l_table, 69_999)
+			assert ("a user's choice reports its number: " + chosen_row.out, chosen_row = 69_999)
+			l_window.close
+		end
+
+	test_set_row_count_resizes
+			-- The count changes; a selected row still in range stays, one past it goes.
+		local
+			l_window: GUI_WINDOW
+			l_table: GUI_TABLE
+		do
+			reset_source ("Row ")
+			create l_window.make ("Count", 400, 300)
+			create l_table.make (<<"Name", "Double">>)
+			l_window.set_content (l_table)
+			l_table.set_row_source (100_000, agent counted_row)
+			l_window.show
+			settle_rows
+			l_table.select_row (50)
+			l_table.set_row_count (60)
+			assert ("count 60", l_table.row_count = 60)
+			assert ("row 50 still selected: " + l_table.selected_row.out, l_table.selected_row = 50)
+			l_table.set_row_count (10)
+			settle_rows
+			assert ("count 10", l_table.row_count = 10)
+			assert ("row 50 gone: " + l_table.selected_row.out, l_table.selected_row = 0)
+			l_table.select_row (5)
+			l_table.set_row_count (8)
+			assert ("row 5 kept: " + l_table.selected_row.out, l_table.selected_row = 5)
+			l_window.close
+		end
+
 feature {NONE} -- Fixtures
+
+	source_calls: INTEGER
+			-- How many rows `counted_row' was asked for.
+
+	asked_50000: BOOLEAN
+			-- Was row 50,000 asked for?
+
+	source_tag: STRING
+			-- What `counted_row' puts before each row number.
+		attribute
+			Result := "Row "
+		end
+
+	reset_source (a_tag: STRING)
+		do
+			source_calls := 0
+			asked_50000 := False
+			source_tag := a_tag
+		end
+
+	counted_row (r: INTEGER): ARRAY [READABLE_STRING_GENERAL]
+			-- Row `r' of a lazy table: its name and its double, counted.
+		do
+			source_calls := source_calls + 1
+			if r = 50_000 then
+				asked_50000 := True
+			end
+			Result := <<source_tag + r.out, (2 * r).out>>
+		end
+
+	settle_rows
+			-- Let the window settle, and keep going while tables are still answering rows wanted.
+		local
+			l_before, i: INTEGER
+		do
+			settle_window
+			from
+				l_before := -1
+			until
+				l_before = rows_wanted_answered.item or i = 20
+			loop
+				l_before := rows_wanted_answered.item
+				settle_window
+				i := i + 1
+			end
+		end
 
 	app: GUI_APPLICATION
 

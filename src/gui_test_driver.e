@@ -227,8 +227,20 @@ feature -- Evidence
 feature {NONE} -- Implementation
 
 	settle
+			-- Pump until idle, and again while tables are still answering rows wanted (16), so
+			-- lazy rows are in place (at most 20 rounds).
+		local
+			l_before, l_round: INTEGER
 		do
-			pump_until_idle (300)
+			from
+				l_before := -1
+			until
+				l_before = rows_wanted_answered.item or l_round = 20
+			loop
+				l_before := rows_wanted_answered.item
+				pump_until_idle (300)
+				l_round := l_round + 1
+			end
 		end
 
 end
