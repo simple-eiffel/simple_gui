@@ -237,6 +237,32 @@ feature -- Controls
 		alias "sga_text_area_set_read_only($an_id, $a_on ? 1 : 0);"
 		end
 
+	tabs: INTEGER
+			-- An NSTabView; the shared target is its delegate (page changed, 13).
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_tabs();"
+		end
+
+	tabs_extend (a_tabs, a_page: INTEGER; a_title: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_tabs_extend($a_tabs, $a_page, (const char *) $a_title);"
+		end
+
+	tabs_select (a_tabs, a_page: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_tabs_select($a_tabs, $a_page);"
+		end
+
+	tabs_selected (a_tabs: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_tabs_selected($a_tabs);"
+		end
+
+	tabs_set_title (a_tabs, a_page: INTEGER; a_title: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_tabs_set_title($a_tabs, $a_page, (const char *) $a_title);"
+		end
+
 	list: INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_list();"
