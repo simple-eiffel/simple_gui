@@ -1871,7 +1871,7 @@ feature -- The remaining controls (1j)
 			create l_text.make_from_string ("simple_gui clipboard ")
 			l_text.append_code (0x1F600)
 			app.clipboard.set_text (l_text)
-			assert ("round trip: " + app.clipboard.text.to_string_8, app.clipboard.text.same_string (l_text))
+			assert ("round trip: " + {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (app.clipboard.text), app.clipboard.text.same_string (l_text))
 		end
 
 	test_window_shortcut_fires

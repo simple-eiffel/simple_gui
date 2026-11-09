@@ -945,6 +945,61 @@ feature -- Common widget state
 		alias "sga_drawn_set_description($an_id, (const char *) $a_text);"
 		end
 
+	timer_start (a_timer_id, a_ms: INTEGER; a_repeat: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_timer_start($a_timer_id, $a_ms, $a_repeat ? 1 : 0);"
+		end
+
+	timer_stop (a_timer_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_timer_stop($a_timer_id);"
+		end
+
+	clipboard_text: POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_clipboard_text();"
+		end
+
+	clipboard_set_text (a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_clipboard_set_text((const char *) $a_text);"
+		end
+
+	window_add_shortcut (a_window: INTEGER; a_shortcut: POINTER; a_shortcut_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_window_add_shortcut($a_window, (const char *) $a_shortcut, $a_shortcut_id);"
+		end
+
+	window_set_fullscreen (a_window: INTEGER; a_on: BOOLEAN)
+		external "C blocking inline use %"simple_gui_appkit.h%""
+		alias "sga_window_set_fullscreen($a_window, $a_on ? 1 : 0);"
+		end
+
+	window_is_fullscreen (a_window: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_window_is_fullscreen($a_window) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	follow_system_appearance
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_follow_system_appearance();"
+		end
+
+	list_scroll_to_row (an_id, a_row: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_list_scroll_to_row($an_id, $a_row);"
+		end
+
+	table_scroll_to_row (an_id, a_row: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_table_scroll_to_row($an_id, $a_row);"
+		end
+
+	test_press_shortcut (a_window: INTEGER; a_shortcut: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_press_shortcut($a_window, (const char *) $a_shortcut);"
+		end
+
 	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_pill_set($an_id, (const char *) $a_code, (const char *) $a_tip, $a_corner);"

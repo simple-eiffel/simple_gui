@@ -264,6 +264,19 @@ void sga_pill_clear(int a_id);
 void sga_pills_show(int a_on);
 const char *sga_pill_tip_shown(int a_id);   /* for tests: "" unless a user could read it now */
 
+/* 1m: the small basics */
+void sga_timer_start(int a_timer_id, int a_ms, int a_repeat);   /* event 24 (id 0, a = timer) */
+void sga_timer_stop(int a_timer_id);
+const char *sga_clipboard_text(void);
+void sga_clipboard_set_text(const char *a_text);
+void sga_window_add_shortcut(int a_window, const char *a_shortcut, int a_shortcut_id);   /* event 25 (id = window, a = shortcut) */
+void sga_window_set_fullscreen(int a_window, int a_on);
+int sga_window_is_fullscreen(int a_window);
+void sga_follow_system_appearance(void);
+void sga_list_scroll_to_row(int a_id, int a_row);
+void sga_table_scroll_to_row(int a_id, int a_row);
+void sga_test_press_shortcut(int a_window, const char *a_shortcut);
+
 /* Appearance */
 int sga_is_dark(void);
 void sga_set_dark(int a_on);
