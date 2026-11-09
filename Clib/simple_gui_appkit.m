@@ -826,15 +826,15 @@ static void sga_split_apply(NSSplitView *s, NSInteger a_position);
 @interface SGASplit : NSSplitView
 {
 @public
-	NSInteger pending;   /* -1: none */
+	NSInteger pending;   /* -1: none; -2: halfway, at the first layout (until set_position) */
 }
 @end
 @implementation SGASplit
 - (void)layout
 {
 	[super layout];
-	if (pending >= 0 && NSWidth([self bounds]) > 0 && NSHeight([self bounds]) > 0) {
-		NSInteger p = pending;
+	if (pending != -1 && NSWidth([self bounds]) > 0 && NSHeight([self bounds]) > 0) {
+		NSInteger p = pending >= 0 ? pending : (NSInteger)(([self isVertical] ? NSWidth([self bounds]) : NSHeight([self bounds])) / 2);
 		pending = -1;
 		sga_split_apply(self, p);
 	}
@@ -849,7 +849,7 @@ static void sga_split_apply(NSSplitView *s, NSInteger a_position)
 int sga_splitter(int a_vertical)
 {
 	SGASplit *s = [[SGASplit alloc] init];
-	s->pending = -1;
+	s->pending = -2;   /* the divider starts halfway, as GUI_SPLITTER's note says */
 	[s setVertical:a_vertical == 0];   /* NSSplitView's "vertical" means vertical dividers: side by side */
 	[s setDividerStyle:NSSplitViewDividerStyleThin];
 	[s addArrangedSubview:[[NSView alloc] init]];
@@ -882,7 +882,7 @@ int sga_splitter_position(int a_splitter)
 void sga_splitter_set_position(int a_splitter, int a_position)
 {
 	SGASplit *s = sga_get(a_splitter);
-	if (NSWidth([s bounds]) > 0 && NSHeight([s bounds]) > 0) sga_split_apply(s, a_position);
+	if (NSWidth([s bounds]) > 0 && NSHeight([s bounds]) > 0) { s->pending = -1; sga_split_apply(s, a_position); }
 	else { s->pending = a_position; [s setNeedsLayout:YES]; }
 }
 
@@ -2554,6 +2554,22 @@ void sga_level_bar_set_critical(int a_id, int a_value) { [(NSLevelIndicator *)sg
 }
 @end
 
+/* The widest natural width in a view's tree (labels may shrink in a window, so a popover's
+   fitted size alone would cut them short). */
+static CGFloat sga_natural_width(NSView *v)
+{
+	CGFloat w = [v intrinsicContentSize].width > 0 ? [v intrinsicContentSize].width : 0;
+	for (NSView *c in [v subviews]) w = MAX(w, sga_natural_width(c));
+	return w;
+}
+
+/* The popover's size: its content at natural width (plus the holder's and a stack's margins). */
+static NSSize sga_popover_size(SGAPopover *h)
+{
+	NSSize l_fit = [h fittingSize];
+	return NSMakeSize(MAX(l_fit.width, sga_natural_width(h) + 48), l_fit.height);
+}
+
 int sga_popover(void)
 {
 	SGAPopover *h = [[SGAPopover alloc] initWithFrame:NSMakeRect(0, 0, 200, 100)];
@@ -2579,14 +2595,14 @@ void sga_popover_set_content(int a_id, int a_child)
 		[v.trailingAnchor constraintEqualToAnchor:h.trailingAnchor constant:-12],
 		[v.topAnchor constraintEqualToAnchor:h.topAnchor constant:12],
 		[v.bottomAnchor constraintEqualToAnchor:h.bottomAnchor constant:-12]]];
-	[h->popover setContentSize:[h fittingSize]];
+	[h->popover setContentSize:sga_popover_size(h)];
 }
 
 void sga_popover_show_at(int a_id, int an_anchor)
 {
 	SGAPopover *h = sga_get(a_id);
 	NSView *a = sga_get(an_anchor);
-	[h->popover setContentSize:[h fittingSize]];
+	[h->popover setContentSize:sga_popover_size(h)];
 	[h->popover showRelativeToRect:[a bounds] ofView:a preferredEdge:NSRectEdgeMaxY];
 }
 
