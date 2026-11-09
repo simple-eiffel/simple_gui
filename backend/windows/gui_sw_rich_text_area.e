@@ -1,9 +1,10 @@
 note
 	description: "[
 		GUI_RICH_TEXT_AREA on Windows: simple_widgets' text box with a style per character
-		(bold, italic, underline, color, size), drawn as marks: bold, italic, underline and
-		exact-color ink show in the text. Point size is kept and read back but not yet drawn
-		(simple_widgets' text box lays out one size). The user's edits keep the styles in step:
+		(bold, italic, underline, color, size). Weight, slant and size are real glyphs: the
+		box's text styles, set at the largest size used, each smaller run scaled down from it
+		(down to the shaper's least scale). Color and underline are marks, drawn over
+		those same glyphs in exactly the color asked. The user's edits keep the styles in step:
 		the old text and the new are compared, and the changed middle takes the style of the
 		character before it. Positions are 1-based characters, ranges inclusive.
 	]"
@@ -22,16 +23,24 @@ create
 
 feature {NONE} -- Initialization
 
-	make_rich
+	make_rich (a_body_size: REAL_64)
+			-- An empty box whose unsized text is `a_body_size' (the theme's body size).
+		require
+			positive: a_body_size > 0.0
 		do
+			body_points := a_body_size
 			make ("")
 			create styles.make (0)
 			create known_text.make_empty
 		ensure
 			empty: styles.is_empty
+			body_set: body_points = a_body_size
 		end
 
 feature -- Access
+
+	body_points: REAL_64
+			-- The size of text with no size of its own.
 
 	styles: ARRAYED_LIST [TUPLE [bold, italic, underline: BOOLEAN; color: INTEGER; size: REAL_64]]
 			-- One per character: color -1 is the theme's ink, size 0 the box's own.
@@ -70,7 +79,7 @@ feature -- Element change
 				end
 				i := i + 1
 			end
-			redraw_marks
+			restyle
 		end
 
 	set_color (a_start, an_end, a_rgb: INTEGER)
@@ -84,7 +93,7 @@ feature -- Element change
 				styles.i_th (i).color := a_rgb
 				i := i + 1
 			end
-			redraw_marks
+			restyle
 		end
 
 	set_size (a_start, an_end: INTEGER; a_points: REAL_64)
@@ -98,6 +107,7 @@ feature -- Element change
 				styles.i_th (i).size := a_points
 				i := i + 1
 			end
+			restyle
 		end
 
 feature -- Selection (1-based, inclusive; end = start - 1 when nothing is selected)
@@ -129,7 +139,7 @@ feature {NONE} -- Implementation
 			-- An edit: keep the styles in step, then report.
 		do
 			sync
-			redraw_marks
+			restyle
 			Precursor
 		end
 
@@ -144,6 +154,8 @@ feature {NONE} -- Implementation
 			end
 			known_text := text.twin
 			marks.clear
+			set_text_styles (Void)
+			set_text_size (0.0)
 		ensure
 			matched: styles.count = text.count
 		end
@@ -187,30 +199,45 @@ feature {NONE} -- Implementation
 			matched: styles.count = text.count
 		end
 
-	redraw_marks
-			-- One mark per run of equal visible style.
+	restyle
+			-- Per run of equal style: weight, slant and size as text styles (real glyphs, at
+			-- the largest size used, smaller runs scaled down from it); color and underline as
+			-- a mark over them.
 		local
-			i, j: INTEGER
+			i, j, l_weight: INTEGER
 			l_mark: SW_MARK
-			a, b: TUPLE [bold, italic, underline: BOOLEAN; color: INTEGER; size: REAL_64]
+			a: TUPLE [bold, italic, underline: BOOLEAN; color: INTEGER; size: REAL_64]
+			l_base, l_size: REAL_64
+			l_styles: like new_text_styles
 		do
 			marks.clear
 			marks.clamp_to (text.count)
+			l_base := body_points
+			across styles as c loop
+				l_base := l_base.max (c.size)
+			end
+			l_styles := new_text_styles
 			from i := 1 until i > styles.count loop
 				a := styles.i_th (i)
 				from j := i until j + 1 > styles.count or else not same_look (a, styles.i_th (j + 1)) loop
 					j := j + 1
 				end
-				if a.bold or a.italic or a.underline or a.color >= 0 then
+				l_size := a.size
+				if l_size <= 0.0 then
+					l_size := body_points
+				end
+				if a.bold or a.italic or l_size < l_base then
+					l_weight := 0
+					if a.bold then
+						l_weight := l_styles.Weight_bold
+					end
+					l_styles.add_setting (i, j - i + 1, (l_size / l_base).max (l_styles.Min_scale).min (1.0),
+						0.0, False, l_weight, a.italic, 0)
+				end
+				if a.underline or a.color >= 0 then
 					create l_mark.make ({SW_MARK}.Hue_blue)
 					if a.color >= 0 then
 						l_mark := l_mark.with_ink (a.color.to_natural_32)
-					end
-					if a.bold then
-						l_mark := l_mark.bold
-					end
-					if a.italic then
-						l_mark := l_mark.italic
 					end
 					if a.underline then
 						l_mark := l_mark.underlined
@@ -219,14 +246,26 @@ feature {NONE} -- Implementation
 				end
 				i := j + 1
 			end
+			if l_base > body_points then
+				set_text_size (l_base)
+			else
+				set_text_size (0.0)
+			end
+			if l_styles.is_empty then
+				set_text_styles (Void)
+			else
+				set_text_styles (l_styles)
+			end
 		end
 
 	same_look (a, b: TUPLE [bold, italic, underline: BOOLEAN; color: INTEGER; size: REAL_64]): BOOLEAN
 		do
-			Result := a.bold = b.bold and a.italic = b.italic and a.underline = b.underline and a.color = b.color
+			Result := a.bold = b.bold and a.italic = b.italic and a.underline = b.underline
+				and a.color = b.color and a.size = b.size
 		end
 
 invariant
 	styles_exist: styles /= Void
+	body_positive: body_points > 0.0
 
 end
