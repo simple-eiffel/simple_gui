@@ -1559,6 +1559,16 @@ static int sg_direction_of(int id) {
 __attribute__((weak)) int sg_dialog_done = 0;
 __attribute__((weak)) char *sg_dialog_path = NULL;
 __attribute__((weak)) int sg_dialog_choice = -1;
+__attribute__((weak)) int sg_auto_cancel_ms = 0;   /* tests: cancel each dialog this long after it opens */
+
+static gboolean sg_cancel_now(gpointer c) { g_cancellable_cancel(G_CANCELLABLE(c)); return G_SOURCE_REMOVE; }
+/* A cancellable for one dialog; with auto-cancel on, a timer cancels it (the timer holds a reference). */
+static GCancellable *sg_dialog_cancellable(void) {
+    GCancellable *c = g_cancellable_new();
+    if (sg_auto_cancel_ms > 0) g_timeout_add_full(G_PRIORITY_DEFAULT, (guint) sg_auto_cancel_ms, sg_cancel_now, g_object_ref(c), g_object_unref);
+    return c;
+}
+static void sg_test_auto_cancel_dialogs(int ms) { sg_auto_cancel_ms = ms > 0 ? ms : 0; }
 
 static void sg_open_done(GObject *src, GAsyncResult *res, gpointer d) {
     GFile *f = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(src), res, NULL);
@@ -1593,9 +1603,13 @@ static const char *sg_open_file(int win, const char *title, int save, const char
     }
     gtk_file_dialog_set_modal(dlg, TRUE);
     sg_dialog_done = 0;
-    if (save) gtk_file_dialog_save(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, NULL, sg_save_done, NULL);
-    else gtk_file_dialog_open(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, NULL, sg_open_done, NULL);
-    sg_wait_dialog();
+    {
+        GCancellable *c = sg_dialog_cancellable();
+        if (save) gtk_file_dialog_save(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_save_done, NULL);
+        else gtk_file_dialog_open(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_open_done, NULL);
+        sg_wait_dialog();
+        g_object_unref(c);
+    }
     g_object_unref(dlg);
     return sg_dialog_path;
 }
@@ -1613,8 +1627,12 @@ static int sg_message(int win, const char *title, const char *text, int confirm)
     gtk_alert_dialog_set_cancel_button(dlg, 0);
     gtk_alert_dialog_set_default_button(dlg, confirm ? 1 : 0);
     sg_dialog_done = 0; sg_dialog_choice = -1;
-    gtk_alert_dialog_choose(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, NULL, sg_alert_done, NULL);
-    sg_wait_dialog();
+    {
+        GCancellable *c = sg_dialog_cancellable();
+        gtk_alert_dialog_choose(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_alert_done, NULL);
+        sg_wait_dialog();
+        g_object_unref(c);
+    }
     g_object_unref(dlg);
     return confirm ? (sg_dialog_choice == 1 ? 1 : 0) : 1;
 }
@@ -1667,7 +1685,8 @@ static void sg_choices_extend(int id, const char *t) {
         if (first) gtk_toggle_button_set_group(GTK_TOGGLE_BUTTON(b), GTK_TOGGLE_BUTTON(first));
         g_signal_connect(b, "toggled", G_CALLBACK(sg_on_choice), NULL);
     } else {
-        b = gtk_check_button_new_with_label(t);
+        /* a radio from the start: the first button has no group yet and would read as a check box */
+        b = g_object_new(GTK_TYPE_CHECK_BUTTON, "label", t, "accessible-role", GTK_ACCESSIBLE_ROLE_RADIO, NULL);
         if (first) gtk_check_button_set_group(GTK_CHECK_BUTTON(b), GTK_CHECK_BUTTON(first));
         g_signal_connect(b, "toggled", G_CALLBACK(sg_on_choice), NULL);
     }
@@ -1853,7 +1872,17 @@ static int sg_scroll_area(void) {
     gtk_widget_set_vexpand(s, TRUE); gtk_widget_set_hexpand(s, TRUE);
     return sg_reg(s, 27);
 }
-static int sg_group_box(const char *title) { return sg_reg(gtk_frame_new(title), 30); }
+/* A group box reads as a group named by its title (a GtkFrame's title is a child label, so
+   the frame itself would have no name). */
+static void sg_group_box_name(GtkWidget *f, const char *title) {
+    g_object_set_data_full(G_OBJECT(f), "sg-a11y", g_strdup(title), g_free);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(f), GTK_ACCESSIBLE_PROPERTY_LABEL, title, -1);
+}
+static int sg_group_box(const char *title) {
+    GtkWidget *f = g_object_new(GTK_TYPE_FRAME, "label", title, "accessible-role", GTK_ACCESSIBLE_ROLE_GROUP, NULL);
+    sg_group_box_name(f, title);
+    return sg_reg(f, 30);
+}
 static void sg_on_expander(GObject *o, GParamSpec *p, gpointer d) {
     (void) p; (void) d;
     if (!sg_quiet) sg_push(12, sg_id_of(o), gtk_expander_get_expanded(GTK_EXPANDER(o)) ? 1 : 0, 0);
@@ -1861,6 +1890,7 @@ static void sg_on_expander(GObject *o, GParamSpec *p, gpointer d) {
 static int sg_expander(const char *title) {
     GtkWidget *e = gtk_expander_new(title);
     int id = sg_reg(e, 31);
+    sg_group_box_name(e, title);   /* read as a button named by its title, as on macOS */
     g_signal_connect(e, "notify::expanded", G_CALLBACK(sg_on_expander), NULL);
     return id;
 }
@@ -1989,7 +2019,9 @@ static void sg_tt_cell_setup(GtkSignalListItemFactory *fa, GtkListItem *it, gpoi
 }
 static const char *sg_tt_cell(GObject *o, int col) {
     GPtrArray *cells = g_object_get_data(o, "sg-cells");
-    return (cells && (guint) col <= cells->len) ? g_ptr_array_index(cells, col - 1) : "";
+    const char *s = (cells && (guint) col <= cells->len) ? g_ptr_array_index(cells, col - 1) : NULL;
+    if (s && *s) return s;
+    return col == 1 ? gtk_string_object_get_string(GTK_STRING_OBJECT(o)) : "";
 }
 static void sg_tt_label_key(char *key, size_t n, int col) { snprintf(key, n, "sg-label-%d", col); }
 static void sg_tt_cell_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
@@ -2088,6 +2120,10 @@ static void sg_tree_table_set_cell(int id, int node, int col, const char *text) 
     if (node < 1 || (guint) node > nodes->len || col < 1) return;
     o = G_OBJECT(g_ptr_array_index(nodes, node - 1));
     cells = g_object_get_data(o, "sg-cells");
+    if (!cells) {
+        cells = g_ptr_array_new_with_free_func(g_free);
+        g_object_set_data_full(o, "sg-cells", cells, (GDestroyNotify) g_ptr_array_unref);
+    }
     while (cells->len < (guint) col) g_ptr_array_add(cells, g_strdup(""));
     g_free(g_ptr_array_index(cells, col - 1));
     g_ptr_array_index(cells, col - 1) = g_strdup(text);
@@ -2110,17 +2146,11 @@ static void sg_test_set_value(int id, int v) {
     switch (sg_kind[id]) {
     case 16: gtk_spin_button_set_value(GTK_SPIN_BUTTON(sg_w[id]), v); break;
     case 22: gtk_range_set_value(GTK_RANGE(sg_w[id]), v); break;
-    case 24: {
-        GDateTime *dt = g_date_time_new_local(v / 10000, (v / 100) % 100, v % 100, 0, 0, 0);
-        if (dt) { gtk_calendar_select_day(GTK_CALENDAR(g_object_get_data(G_OBJECT(sg_w[id]), "sg-calendar")), dt); g_date_time_unref(dt); }
-        break; }
-    case 25: {
-        GtkSpinButton *h = GTK_SPIN_BUTTON(gtk_widget_get_first_child(sg_w[id]));
-        GtkSpinButton *m = GTK_SPIN_BUTTON(gtk_widget_get_last_child(sg_w[id]));
-        if (gtk_spin_button_get_value_as_int(h) != v / 60) gtk_spin_button_set_value(h, v / 60);
-        if (gtk_spin_button_get_value_as_int(m) != v % 60) gtk_spin_button_set_value(m, v % 60);
-        break; }
-    case 26: if (sg_color_value(id) != v) sg_color_put(id, v); break;
+    /* A date, a time or a color is one user change: set quietly, then report once. (A time
+       is two spin buttons; setting both would report twice.) */
+    case 24: if (sg_date_value(id) != v) { sg_date_set(id, v / 10000, (v / 100) % 100, v % 100); sg_push(2, id, v, 0); } break;
+    case 25: if (sg_time_value(id) != v) { sg_time_set(id, v / 60, v % 60); sg_push(2, id, v, 0); } break;
+    case 26: if (sg_color_value(id) != v) { sg_quiet++; sg_color_put(id, v); sg_quiet--; sg_push(2, id, v, 0); } break;
     default: break;
     }
 }
@@ -2138,8 +2168,12 @@ static const char *sg_choose_folder(int win, const char *title) {
     gtk_file_dialog_set_title(dlg, title);
     gtk_file_dialog_set_modal(dlg, TRUE);
     sg_dialog_done = 0;
-    gtk_file_dialog_select_folder(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, NULL, sg_folder_done, NULL);
-    sg_wait_dialog();
+    {
+        GCancellable *c = sg_dialog_cancellable();
+        gtk_file_dialog_select_folder(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_folder_done, NULL);
+        sg_wait_dialog();
+        g_object_unref(c);
+    }
     g_object_unref(dlg);
     return sg_dialog_path;
 }
@@ -2161,8 +2195,12 @@ static const char *sg_save_file_named(int win, const char *title, const char *ex
     }
     gtk_file_dialog_set_modal(dlg, TRUE);
     sg_dialog_done = 0;
-    gtk_file_dialog_save(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, NULL, sg_save_done, NULL);
-    sg_wait_dialog();
+    {
+        GCancellable *c = sg_dialog_cancellable();
+        gtk_file_dialog_save(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_save_done, NULL);
+        sg_wait_dialog();
+        g_object_unref(c);
+    }
     g_object_unref(dlg);
     return sg_dialog_path;
 }
@@ -2175,11 +2213,36 @@ static int sg_ask(int win, const char *title, const char *text) {
     gtk_alert_dialog_set_cancel_button(dlg, 0);
     gtk_alert_dialog_set_default_button(dlg, 2);
     sg_dialog_done = 0; sg_dialog_choice = -1;
-    gtk_alert_dialog_choose(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, NULL, sg_alert_done, NULL);
-    sg_wait_dialog();
+    {
+        GCancellable *c = sg_dialog_cancellable();
+        gtk_alert_dialog_choose(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_alert_done, NULL);
+        sg_wait_dialog();
+        g_object_unref(c);
+    }
     g_object_unref(dlg);
     return sg_dialog_choice == 2 ? 1 : sg_dialog_choice == 1 ? 2 : 0;
 }
+
+
+/* ---------- 1h, the API's remaining calls ---------- */
+
+static void sg_group_box_set_title(int id, const char *t) { gtk_frame_set_label(GTK_FRAME(sg_w[id]), t); sg_group_box_name(sg_w[id], t); }
+static void sg_expander_set_title(int id, const char *t) { gtk_expander_set_label(GTK_EXPANDER(sg_w[id]), t); sg_group_box_name(sg_w[id], t); }
+static void sg_combo_wipe_out(int id) {
+    GtkListBox *l = GTK_LIST_BOX(g_object_get_data(G_OBJECT(sg_w[id]), "sg-options"));
+    gtk_list_box_remove_all(l);
+}
+static void sg_scroll_area_scroll_to(int id, int x, int y) {
+    GtkScrolledWindow *s = GTK_SCROLLED_WINDOW(sg_w[id]);
+    gtk_adjustment_set_value(gtk_scrolled_window_get_hadjustment(s), x);
+    gtk_adjustment_set_value(gtk_scrolled_window_get_vadjustment(s), y);
+}
+/* A date picker's value is y*10000 + m*100 + d; a time picker's h*60 + m. */
+static void sg_date_or_time_set(int id, int v) {
+    if (sg_kind[id] == 25) sg_time_set(id, v / 60, v % 60);
+    else sg_date_set(id, v / 10000, (v / 100) % 100, v % 100);
+}
+static int sg_date_or_time_value(int id) { return sg_kind[id] == 25 ? sg_time_value(id) : sg_date_value(id); }
 
 /* ---------- appearance ---------- */
 
@@ -2316,7 +2379,8 @@ static int sg_snapshot(int id, const char *path) {
     if (backdrop && (!GTK_IS_WINDOW(w) || !gtk_window_is_active(GTK_WINDOW(w)))) gtk_widget_set_state_flags(w, GTK_STATE_FLAG_BACKDROP, FALSE);
     return ok;
 }
-static const char *sg_role(int id) { return sg_role_nick(sg_w[id]); }
+/* The tree table answers with its column view (a tree-grid), not the scroll window around it. */
+static const char *sg_role(int id) { return sg_role_nick(sg_kind[id] == 33 ? sg_a11y_target(id) : sg_w[id]); }
 
 /* Drive the loop until the queue stays empty for one turn, or `ms' pass (tests). */
 static void sg_pump_until_idle(int ms) {

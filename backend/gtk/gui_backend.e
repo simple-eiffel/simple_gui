@@ -316,6 +316,276 @@ feature -- Controls
 		alias "sg_test_set_number($an_id, $a_value);"
 		end
 
+	radio_group (a_vertical: BOOLEAN): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_radio_group($a_vertical ? 0 : 1);"
+		end
+
+	radio_group_extend (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_choices_extend($an_id, (const char *) $a_text);"
+		end
+
+	radio_group_select (an_id, i: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_choices_select($an_id, $i);"
+		end
+
+	radio_group_selected (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_choices_selected($an_id);"
+		end
+
+	segmented: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_segmented();"
+		end
+
+	segmented_extend (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_choices_extend($an_id, (const char *) $a_text);"
+		end
+
+	segmented_select (an_id, i: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_choices_select($an_id, $i);"
+		end
+
+	segmented_selected (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_choices_selected($an_id);"
+		end
+
+	slider (a_min, a_max: INTEGER; a_vertical: BOOLEAN): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "int id = sg_slider($a_min, $a_max); if ($a_vertical) { gtk_orientable_set_orientation(GTK_ORIENTABLE(sg_w[id]), GTK_ORIENTATION_VERTICAL); gtk_widget_set_vexpand(sg_w[id], TRUE); gtk_widget_set_hexpand(sg_w[id], FALSE); } return id;"
+		end
+
+	slider_set_value (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_slider_set_value($an_id, $a_value);"
+		end
+
+	slider_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_slider_value($an_id);"
+		end
+
+	slider_set_step (an_id, a_step: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_slider_set_step($an_id, $a_step);"
+		end
+
+	switch: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_switch();"
+		end
+
+	switch_set (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_switch_set($an_id, $a_on ? 1 : 0);"
+		end
+
+	switch_is_on (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_switch_is_on($an_id) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	date_picker: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "GDateTime *now = g_date_time_new_now_local(); int id = sg_date_picker(g_date_time_get_year(now), g_date_time_get_month(now), g_date_time_get_day_of_month(now)); g_date_time_unref(now); return id;"
+		end
+
+	time_picker: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_time_picker(0, 0);"
+		end
+
+	date_picker_set (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_date_or_time_set($an_id, $a_value);"
+		end
+
+	date_picker_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_date_or_time_value($an_id);"
+		end
+
+	color_chooser: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_color_chooser(0);"
+		end
+
+	color_chooser_set (an_id, a_rgb: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_color_set($an_id, $a_rgb);"
+		end
+
+	color_chooser_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_color_value($an_id);"
+		end
+
+	scroll_area: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_scroll_area();"
+		end
+
+	scroll_area_set_content (an_id, a_child: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_single_set_content($an_id, $a_child);"
+		end
+
+	scroll_area_scroll_to (an_id, a_x, a_y: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_scroll_area_scroll_to($an_id, $a_x, $a_y);"
+		end
+
+	image: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_image();"
+		end
+
+	image_set_file (an_id: INTEGER; a_path: POINTER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_image_set_file($an_id, (const char *) $a_path) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	image_set_bytes (an_id: INTEGER; a_bytes: POINTER; a_count: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_image_set_bytes($an_id, (const unsigned char *) $a_bytes, $a_count) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	separator (a_vertical: BOOLEAN): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_separator($a_vertical ? 1 : 0);"
+		end
+
+	group_box (a_title: POINTER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_group_box((const char *) $a_title);"
+		end
+
+	group_box_set_title (an_id: INTEGER; a_title: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_group_box_set_title($an_id, (const char *) $a_title);"
+		end
+
+	group_box_set_content (an_id, a_child: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_single_set_content($an_id, $a_child);"
+		end
+
+	expander (a_title: POINTER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_expander((const char *) $a_title);"
+		end
+
+	expander_set_title (an_id: INTEGER; a_title: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_expander_set_title($an_id, (const char *) $a_title);"
+		end
+
+	expander_set_content (an_id, a_child: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_single_set_content($an_id, $a_child);"
+		end
+
+	expander_set_expanded (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_expander_set_expanded($an_id, $a_on ? 1 : 0);"
+		end
+
+	expander_is_expanded (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_expander_is_expanded($an_id) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	combo_box: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_combo_box();"
+		end
+
+	combo_box_extend (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_combo_extend($an_id, (const char *) $a_text);"
+		end
+
+	combo_box_wipe_out (an_id: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_combo_wipe_out($an_id);"
+		end
+
+	combo_box_set_text (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_combo_set_text($an_id, (const char *) $a_text);"
+		end
+
+	combo_box_text (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_combo_text($an_id);"
+		end
+
+	tree_table (a_titles: POINTER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_tree_table((const char *) $a_titles);"
+		end
+
+	tree_table_set_cell (an_id, a_node, a_column: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_tree_table_set_cell($an_id, $a_node, $a_column, (const char *) $a_text);"
+		end
+
+	set_tooltip (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_set_tooltip($an_id, (const char *) $a_text);"
+		end
+
+	save_file_named (a_window: INTEGER; a_title, an_extensions, a_name: POINTER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_save_file_named($a_window, (const char *) $a_title, (const char *) $an_extensions, (const char *) $a_name);"
+		end
+
+	choose_folder (a_window: INTEGER; a_title: POINTER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_choose_folder($a_window, (const char *) $a_title);"
+		end
+
+	ask (a_window: INTEGER; a_title, a_text: POINTER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_ask($a_window, (const char *) $a_title, (const char *) $a_text);"
+		end
+
+	test_slide (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_set_value($an_id, $a_value);"
+		end
+
+	test_set_date (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_set_value($an_id, $a_value);"
+		end
+
+	test_set_color (an_id, a_rgb: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_set_value($an_id, $a_rgb);"
+		end
+
+	test_type_combo (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_type_combo($an_id, (const char *) $a_text);"
+		end
+
+	test_toggle_expander (an_id: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "gtk_expander_set_expanded(GTK_EXPANDER(sg_w[$an_id]), !gtk_expander_get_expanded(GTK_EXPANDER(sg_w[$an_id])));"
+		end
+
+	test_auto_cancel_dialogs (a_ms: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_auto_cancel_dialogs($a_ms);"
+		end
+
 	check_box (a_text: POINTER): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_check_box((const char *) $a_text);"
