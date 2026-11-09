@@ -409,6 +409,105 @@ int sga_next(int *a_type, int *a_id, int *a, int *b, int *c)
 	return 1;
 }
 
+/* ------------------------------------------------------ 1l: reference pills */
+
+/* A reference pill: a small burnt-orange label centered on a corner of its widget (half
+   outside it, as simple_bible's are), over everything in the window's content view, held
+   there by constraints so it follows layout, resizing and right to left (the leading and
+   trailing anchors mirror by themselves). Its toolTip is the tip Eiffel wrote. Pills stay
+   out of the accessibility tree: the tip is help, not content. */
+@interface SGAPill : NSTextField
+{
+@public
+	int target;   /* the widget's id */
+	int corner;   /* 1 top-left, 2 top-right, 3 bottom-left, 4 bottom-right (left and right: leading and trailing) */
+	NSArray<NSLayoutConstraint *> *placing;
+}
+@end
+@implementation SGAPill
+- (BOOL)isAccessibilityElement { return NO; }
+@end
+
+static NSMutableDictionary<NSNumber *, SGAPill *> *s_pills;   /* widget id -> its pill */
+static BOOL s_pills_shown;
+
+/* Put `p' over its widget's window content, at its corner, when the widget is in a window. */
+static void sga_pill_place(SGAPill *p)
+{
+	/* A container's pill sits on the stack or grid inside its margins, as its size and place do. */
+	NSView *t = s_margins[p->target][0] ? s_inner[p->target] : sga_get(p->target);
+	NSView *c = [[t window] contentView];
+	if (![t isKindOfClass:[NSView class]] || !c || ![t isDescendantOf:c]) return;
+	if ([p superview] != c) {
+		[p removeFromSuperview];
+		[c addSubview:p positioned:NSWindowAbove relativeTo:nil];
+	}
+	if (p->placing) [NSLayoutConstraint deactivateConstraints:p->placing];
+	BOOL l_leading = p->corner == 1 || p->corner == 3, l_top = p->corner == 1 || p->corner == 2;
+	p->placing = @[
+		[p.centerXAnchor constraintEqualToAnchor:l_leading ? t.leadingAnchor : t.trailingAnchor],
+		[p.centerYAnchor constraintEqualToAnchor:l_top ? t.topAnchor : t.bottomAnchor]];
+	[NSLayoutConstraint activateConstraints:p->placing];
+	[p setHidden:!s_pills_shown];
+}
+
+/* Pills whose widget joined a window since: placed now (window shown, content set). */
+static void sga_pills_sync(void)
+{
+	for (SGAPill *p in [s_pills allValues]) if (![p superview]) sga_pill_place(p);
+}
+
+void sga_pill_set(int a_id, const char *a_code, const char *a_tip, int a_corner)
+{
+	if (!s_pills) s_pills = [NSMutableDictionary dictionary];
+	SGAPill *p = s_pills[@(a_id)];
+	if (!p) {
+		p = [SGAPill labelWithString:@""];
+		[p setTranslatesAutoresizingMaskIntoConstraints:NO];
+		[p setFont:[NSFont boldSystemFontOfSize:[NSFont smallSystemFontSize] - 1]];
+		[p setTextColor:[NSColor whiteColor]];
+		[p setAlignment:NSTextAlignmentCenter];
+		[p setDrawsBackground:YES];
+		[p setBackgroundColor:[NSColor colorWithSRGBRed:0xCC / 255.0 green:0x55 / 255.0 blue:0x00 / 255.0 alpha:1]];
+		[p setWantsLayer:YES];
+		[[p layer] setCornerRadius:7];
+		[[p layer] setMasksToBounds:YES];
+		[p setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
+		[NSLayoutConstraint activateConstraints:@[[p.heightAnchor constraintEqualToConstant:15]]];
+		p->target = a_id;
+		s_pills[@(a_id)] = p;
+	}
+	[p setStringValue:[NSString stringWithFormat:@" %@ ", sga_string(a_code)]];
+	[p setToolTip:sga_string(a_tip)];
+	p->corner = a_corner;
+	sga_pill_place(p);
+}
+
+void sga_pill_clear(int a_id)
+{
+	SGAPill *p = s_pills[@(a_id)];
+	if (p) {
+		if (p->placing) [NSLayoutConstraint deactivateConstraints:p->placing];
+		[p removeFromSuperview];
+		[s_pills removeObjectForKey:@(a_id)];
+	}
+}
+
+void sga_pills_show(int a_on)
+{
+	s_pills_shown = a_on != 0;
+	sga_pills_sync();
+	for (SGAPill *p in [s_pills allValues]) [p setHidden:!s_pills_shown];
+}
+
+/* For tests: the tip a user would read now (shown, placed, in a visible window), else "". */
+const char *sga_pill_tip_shown(int a_id)
+{
+	SGAPill *p = s_pills[@(a_id)];
+	BOOL l_up = p && s_pills_shown && [p superview] && ![p isHidden] && [[p window] isVisible];
+	return sga_return(Kind_label, l_up ? ([p toolTip] ?: @"") : @"");
+}
+
 /* ------------------------------------------------------- windows, layout */
 
 int sga_window(const char *a_title, int a_width, int a_height)
@@ -453,9 +552,10 @@ void sga_window_set_content(int a_window, int a_child)
 		l_bottom]];
 	if (!s_content_bottom) s_content_bottom = [NSMutableDictionary dictionary];
 	s_content_bottom[@(a_window)] = l_bottom;
+	sga_pills_sync();
 }
 
-void sga_window_show(int a_window) { [(NSWindow *)sga_get(a_window) orderFront:nil]; }
+void sga_window_show(int a_window) { [(NSWindow *)sga_get(a_window) orderFront:nil]; sga_pills_sync(); }
 void sga_window_close(int a_window) { [(NSWindow *)sga_get(a_window) orderOut:nil]; }
 void sga_window_set_title(int a_window, const char *a_title) { [(NSWindow *)sga_get(a_window) setTitle:sga_string(a_title)]; }
 

@@ -945,6 +945,26 @@ feature -- Common widget state
 		alias "sga_drawn_set_description($an_id, (const char *) $a_text);"
 		end
 
+	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_pill_set($an_id, (const char *) $a_code, (const char *) $a_tip, $a_corner);"
+		end
+
+	pill_clear (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_pill_clear($an_id);"
+		end
+
+	pills_show (a_shown: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_pills_show($a_shown ? 1 : 0);"
+		end
+
+	pill_tip_shown (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_pill_tip_shown($an_id);"
+		end
+
 	set_tooltip (an_id: INTEGER; a_text: POINTER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_set_tooltip($an_id, (const char *) $a_text);"

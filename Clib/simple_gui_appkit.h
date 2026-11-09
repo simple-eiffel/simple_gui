@@ -258,6 +258,12 @@ void sga_drawn_arm_dwell(int a_id, int a_ms, int a_serial);
 void sga_drawn_set_description(int a_id, const char *a_text);
 void sga_test_drawn_event(int a_id, int a_type, int a, int b, int c);
 
+/* 1l: reference pills, keyed by widget */
+void sga_pill_set(int a_id, const char *a_code, const char *a_tip, int a_corner);   /* 1 top-left .. 4 bottom-right; left and right mirror */
+void sga_pill_clear(int a_id);
+void sga_pills_show(int a_on);
+const char *sga_pill_tip_shown(int a_id);   /* for tests: "" unless a user could read it now */
+
 /* Appearance */
 int sga_is_dark(void);
 void sga_set_dark(int a_on);
