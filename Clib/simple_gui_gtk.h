@@ -1726,7 +1726,7 @@ static int sg_snapshot(int id, const char *path) {
     GdkPaintable *p; GtkSnapshot *s; GskRenderNode *n; GdkTexture *t;
     double k = sg_scale(id);   /* device pixels, as the screen shows it (2x at 200%) */
     graphene_rect_t vp;
-    if (W <= 0 || H <= 0) return 0;
+    if (W <= 0 || H <= 0) { g_warning("simple_gui snapshot: widget %d has no size yet (%d x %d)", id, W, H); return 0; }
     if (backdrop) {
         gint64 until = g_get_monotonic_time() + 100 * 1000;
         gtk_widget_unset_state_flags(w, GTK_STATE_FLAG_BACKDROP);
@@ -1741,10 +1741,11 @@ static int sg_snapshot(int id, const char *path) {
     gtk_snapshot_scale(s, (float) k, (float) k);   /* GSK redraws text and lines at that scale */
     gdk_paintable_snapshot(p, GDK_SNAPSHOT(s), W, H);
     n = gtk_snapshot_free_to_node(s);
-    if (!n) { g_object_unref(p); return 0; }
+    if (!n) { g_warning("simple_gui snapshot: widget %d drew nothing", id); g_object_unref(p); return 0; }
     graphene_rect_init(&vp, 0, 0, (float) (W * k), (float) (H * k));
     t = gsk_renderer_render_texture(gtk_native_get_renderer(GTK_NATIVE(w)), n, &vp);
     ok = gdk_texture_save_to_png(t, path) ? 1 : 0;
+    if (!ok) g_warning("simple_gui snapshot: could not write %s", path);
     g_object_unref(t); gsk_render_node_unref(n); g_object_unref(p);
     if (backdrop && (!GTK_IS_WINDOW(w) || !gtk_window_is_active(GTK_WINDOW(w)))) gtk_widget_set_state_flags(w, GTK_STATE_FLAG_BACKDROP, FALSE);
     return ok;
