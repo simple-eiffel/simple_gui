@@ -88,4 +88,4 @@ The rest are the [common features](widget.md).
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![rating on macOS](images/macos/rating.png) | <!-- PROD: Windows picture --> |
+| ![rating on Linux](images/linux/rating.png) | ![rating on macOS](images/macos/rating.png) | ![rating on Windows](images/windows/rating.png) |

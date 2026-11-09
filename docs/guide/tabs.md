@@ -81,4 +81,4 @@ Inherited: `set_base_direction`, `set_tooltip` and the rest of the [common featu
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![tabs on macOS](images/macos/tabs.png) | <!-- PROD: Windows picture --> |
+| ![tabs on Linux](images/linux/tabs.png) | ![tabs on macOS](images/macos/tabs.png) | ![tabs on Windows](images/windows/tabs.png) |

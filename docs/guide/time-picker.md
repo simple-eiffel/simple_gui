@@ -77,4 +77,4 @@ Inherited: `set_accessible_label`, `set_tooltip`, `enable`, `disable` and the re
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![time-picker on macOS](images/macos/time-picker.png) | <!-- PROD: Windows picture --> |
+| ![time-picker on Linux](images/linux/time-picker.png) | ![time-picker on macOS](images/macos/time-picker.png) | ![time-picker on Windows](images/windows/time-picker.png) |

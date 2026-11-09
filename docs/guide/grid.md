@@ -98,4 +98,4 @@ Inherited: `set_base_direction`, `show`, `hide` and the rest of the [common feat
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![grid on macOS](images/macos/grid.png) | <!-- PROD: Windows picture --> |
+| ![grid on Linux](images/linux/grid.png) | ![grid on macOS](images/macos/grid.png) | ![grid on Windows](images/windows/grid.png) |

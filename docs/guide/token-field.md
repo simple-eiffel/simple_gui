@@ -92,4 +92,4 @@ The rest are the [common features](widget.md).
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![token-field on macOS](images/macos/token-field.png) | <!-- PROD: Windows picture --> |
+| ![token-field on Linux](images/linux/token-field.png) | ![token-field on macOS](images/macos/token-field.png) | ![token-field on Windows](images/windows/token-field.png) |

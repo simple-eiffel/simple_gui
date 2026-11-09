@@ -131,4 +131,4 @@ The rest are the [common features](widget.md).
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![canvas on macOS](images/macos/canvas.png) | <!-- PROD: Windows picture --> |
+| ![canvas on Linux](images/linux/canvas.png) | ![canvas on macOS](images/macos/canvas.png) | ![canvas on Windows](images/windows/canvas.png) |

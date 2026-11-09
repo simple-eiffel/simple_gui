@@ -78,4 +78,4 @@ Inherited: `set_accessible_label`, `set_tooltip`, `show`, `hide` and the rest of
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![progress-bar on macOS](images/macos/progress-bar.png) | <!-- PROD: Windows picture --> |
+| ![progress-bar on Linux](images/linux/progress-bar.png) | ![progress-bar on macOS](images/macos/progress-bar.png) | ![progress-bar on Windows](images/windows/progress-bar.png) |

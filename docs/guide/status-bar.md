@@ -85,4 +85,4 @@ Inherited: `set_accessible_label`, `show`, `hide` and the rest of the [common fe
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![status-bar on macOS](images/macos/status-bar.png) | <!-- PROD: Windows picture --> |
+| ![status-bar on Linux](images/linux/status-bar.png) | ![status-bar on macOS](images/macos/status-bar.png) | ![status-bar on Windows](images/windows/status-bar.png) |

@@ -78,4 +78,4 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![text-area on macOS](images/macos/text-area.png) | <!-- PROD: Windows picture --> |
+| ![text-area on Linux](images/linux/text-area.png) | ![text-area on macOS](images/macos/text-area.png) | ![text-area on Windows](images/windows/text-area.png) |

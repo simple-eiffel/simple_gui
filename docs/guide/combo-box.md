@@ -83,4 +83,4 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![combo-box on macOS](images/macos/combo-box.png) | <!-- PROD: Windows picture --> |
+| ![combo-box on Linux](images/linux/combo-box.png) | ![combo-box on macOS](images/macos/combo-box.png) | ![combo-box on Windows](images/windows/combo-box.png) |

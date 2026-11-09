@@ -83,4 +83,4 @@ Inherited: `set_base_direction`, `show`, `hide` and the rest of the [common feat
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![scroll-area on macOS](images/macos/scroll-area.png) | <!-- PROD: Windows picture --> |
+| ![scroll-area on Linux](images/linux/scroll-area.png) | ![scroll-area on macOS](images/macos/scroll-area.png) | ![scroll-area on Windows](images/windows/scroll-area.png) |

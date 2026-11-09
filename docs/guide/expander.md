@@ -83,4 +83,4 @@ Inherited: `set_accessible_label`, `set_tooltip` and the rest of the [common fea
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![expander on macOS](images/macos/expander.png) | <!-- PROD: Windows picture --> |
+| ![expander on Linux](images/linux/expander.png) | ![expander on macOS](images/macos/expander.png) | ![expander on Windows](images/windows/expander.png) |

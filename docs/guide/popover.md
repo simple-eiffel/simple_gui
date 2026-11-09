@@ -96,4 +96,4 @@ Use `show_at`, not the inherited `show`, to open it. The rest are the [common fe
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | <!-- MACMINI: picture taken by hand: a popover is a window of its own, outside a window snapshot --> | <!-- PROD: Windows picture --> |
+| A popover is a window of its own, outside a window's picture. | <!-- MACMINI: picture taken by hand: a popover is a window of its own, outside a window snapshot --> | A popover is a window of its own, outside a window's picture. |

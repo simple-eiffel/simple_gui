@@ -81,4 +81,4 @@ Inherited: `set_accessible_label`, `set_base_direction` and the rest of the [com
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![group-box on macOS](images/macos/group-box.png) | <!-- PROD: Windows picture --> |
+| ![group-box on Linux](images/linux/group-box.png) | ![group-box on macOS](images/macos/group-box.png) | ![group-box on Windows](images/windows/group-box.png) |

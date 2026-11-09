@@ -90,4 +90,4 @@ The rest are the [common features](widget.md).
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![path-control on macOS](images/macos/path-control.png) | <!-- PROD: Windows picture --> |
+| ![path-control on Linux](images/linux/path-control.png) | ![path-control on macOS](images/macos/path-control.png) | ![path-control on Windows](images/windows/path-control.png) |

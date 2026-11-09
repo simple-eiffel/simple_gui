@@ -102,4 +102,4 @@ Inherited: `set_base_direction`, `show`, `hide` and the rest of the [common feat
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![stack on macOS](images/macos/stack.png) | <!-- PROD: Windows picture --> |
+| ![stack on Linux](images/linux/stack.png) | ![stack on macOS](images/macos/stack.png) | ![stack on Windows](images/windows/stack.png) |

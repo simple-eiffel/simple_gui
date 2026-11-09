@@ -110,4 +110,4 @@ Positions are 1-based characters, counted as `STRING_32` counts them, and a rang
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![rich-text-area on macOS](images/macos/rich-text-area.png) | <!-- PROD: Windows picture --> |
+| ![rich-text-area on Linux](images/linux/rich-text-area.png) | ![rich-text-area on macOS](images/macos/rich-text-area.png) | ![rich-text-area on Windows](images/windows/rich-text-area.png) |

@@ -90,4 +90,4 @@ Inherited: `set_base_direction`, `show`, `hide` and the rest of the [common feat
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![splitter on macOS](images/macos/splitter.png) | <!-- PROD: Windows picture --> |
+| ![splitter on Linux](images/linux/splitter.png) | ![splitter on macOS](images/macos/splitter.png) | ![splitter on Windows](images/windows/splitter.png) |

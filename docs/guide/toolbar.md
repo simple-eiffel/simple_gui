@@ -104,4 +104,4 @@ The buttons are ordinary [buttons](button.md): `enable`, `disable`, `set_text` a
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![toolbar on macOS](images/macos/toolbar.png) | <!-- PROD: Windows picture --> |
+| ![toolbar on Linux](images/linux/toolbar.png) | ![toolbar on macOS](images/macos/toolbar.png) | ![toolbar on Windows](images/windows/toolbar.png) |

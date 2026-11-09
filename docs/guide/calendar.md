@@ -79,4 +79,4 @@ Inherited: `set_accessible_label`, `set_tooltip`, `enable`, `disable` and the re
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![calendar on macOS](images/macos/calendar.png) | <!-- PROD: Windows picture --> |
+| ![calendar on Linux](images/linux/calendar.png) | ![calendar on macOS](images/macos/calendar.png) | ![calendar on Windows](images/windows/calendar.png) |

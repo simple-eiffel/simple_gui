@@ -114,4 +114,4 @@ A window titled "Notes" opens with a **Clear** button in its toolbar, a text are
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![window on macOS](images/macos/window.png) | <!-- PROD: Windows picture --> |
+| ![window on Linux](images/linux/window.png) | ![window on macOS](images/macos/window.png) | ![window on Windows](images/windows/window.png) |

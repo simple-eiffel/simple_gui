@@ -88,4 +88,4 @@ Inherited: `set_accessible_label`, `set_context_menu` and the rest of the [commo
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![tree-table on macOS](images/macos/tree-table.png) | <!-- PROD: Windows picture --> |
+| ![tree-table on Linux](images/linux/tree-table.png) | ![tree-table on macOS](images/macos/tree-table.png) | ![tree-table on Windows](images/windows/tree-table.png) |

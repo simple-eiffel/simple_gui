@@ -81,4 +81,4 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![check-box on macOS](images/macos/check-box.png) | <!-- PROD: Windows picture --> |
+| ![check-box on Linux](images/linux/check-box.png) | ![check-box on macOS](images/macos/check-box.png) | ![check-box on Windows](images/windows/check-box.png) |

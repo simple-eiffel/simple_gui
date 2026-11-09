@@ -85,4 +85,4 @@ Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the res
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![list on macOS](images/macos/list.png) | <!-- PROD: Windows picture --> |
+| ![list on Linux](images/linux/list.png) | ![list on macOS](images/macos/list.png) | ![list on Windows](images/windows/list.png) |

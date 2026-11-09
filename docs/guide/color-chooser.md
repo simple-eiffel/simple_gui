@@ -78,4 +78,4 @@ Colors are 0xRRGGBB in sRGB, with no alpha: red is `0xFF0000`, white `0xFFFFFF`.
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![color-chooser on macOS](images/macos/color-chooser.png) | <!-- PROD: Windows picture --> |
+| ![color-chooser on Linux](images/linux/color-chooser.png) | ![color-chooser on macOS](images/macos/color-chooser.png) | ![color-chooser on Windows](images/windows/color-chooser.png) |

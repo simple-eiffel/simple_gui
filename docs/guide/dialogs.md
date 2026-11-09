@@ -211,4 +211,4 @@ Every feature must be called on the GUI processor (`is_gui_thread`).
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![dialogs on macOS](images/macos/dialogs.png) | <!-- PROD: Windows picture --> |
+| ![dialogs on Linux](images/linux/dialogs.png) | ![dialogs on macOS](images/macos/dialogs.png) | ![dialogs on Windows](images/windows/dialogs.png) |

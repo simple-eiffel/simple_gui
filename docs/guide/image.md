@@ -88,4 +88,4 @@ The picture is scaled down to fit the space it is given, keeping its proportions
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![image on macOS](images/macos/image.png) | <!-- PROD: Windows picture --> |
+| ![image on Linux](images/linux/image.png) | ![image on macOS](images/macos/image.png) | ![image on Windows](images/windows/image.png) |

@@ -88,4 +88,4 @@ Inherited: `set_accessible_label`, `set_tooltip`, `show`, `hide` and the rest of
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![level-bar on macOS](images/macos/level-bar.png) | <!-- PROD: Windows picture --> |
+| ![level-bar on Linux](images/linux/level-bar.png) | ![level-bar on macOS](images/macos/level-bar.png) | ![level-bar on Windows](images/windows/level-bar.png) |

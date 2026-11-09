@@ -182,4 +182,4 @@ l_cache.attach (l_table, 100_000)            -- calls l_table.set_row_source for
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![table on macOS](images/macos/table.png) | <!-- PROD: Windows picture --> |
+| ![table on Linux](images/linux/table.png) | ![table on macOS](images/macos/table.png) | ![table on Windows](images/windows/table.png) |

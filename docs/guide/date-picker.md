@@ -80,4 +80,4 @@ Inherited: `set_accessible_label`, `set_tooltip`, `enable`, `disable` and the re
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![date-picker on macOS](images/macos/date-picker.png) | <!-- PROD: Windows picture --> |
+| ![date-picker on Linux](images/linux/date-picker.png) | ![date-picker on macOS](images/macos/date-picker.png) | ![date-picker on Windows](images/windows/date-picker.png) |

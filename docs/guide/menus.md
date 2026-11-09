@@ -131,4 +131,4 @@ On macOS, About and Quit are not in Help and File: they are at the top and botto
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![menus on macOS](images/macos/menus.png) | <!-- PROD: Windows picture --> |
+| ![menus on Linux](images/linux/menus.png) | ![menus on macOS](images/macos/menus.png) | ![menus on Windows](images/windows/menus.png) |

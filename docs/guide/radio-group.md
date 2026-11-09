@@ -84,4 +84,4 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![radio-group on macOS](images/macos/radio-group.png) | <!-- PROD: Windows picture --> |
+| ![radio-group on Linux](images/linux/radio-group.png) | ![radio-group on macOS](images/macos/radio-group.png) | ![radio-group on Windows](images/windows/radio-group.png) |

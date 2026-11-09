@@ -94,4 +94,4 @@ The rest are the [common features](widget.md). Make the menu with `app.menu.new_
 
 | Linux | macOS | Windows |
 |---|---|---|
-| <!-- PROD: Linux picture --> | ![menu-button on macOS](images/macos/menu-button.png) | <!-- PROD: Windows picture --> |
+| ![menu-button on Linux](images/linux/menu-button.png) | ![menu-button on macOS](images/macos/menu-button.png) | ![menu-button on Windows](images/windows/menu-button.png) |
