@@ -2074,8 +2074,10 @@ feature -- The remaining controls (1j)
 			driver.perform_click (l_busy)
 			assert ("busy takes no press", l_hits.item = 0 and l_busy.is_busy and not l_busy.is_enabled)
 			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_1n_styles.png")))
+			l_busy.set_icon ("download")
 			l_busy.set_busy (False)
-			assert ("enabled again", l_busy.is_enabled and driver.button_icon (l_busy).same_string ("upload"))
+			assert ("enabled again, with the icon set while busy: " + driver.button_icon (l_busy).to_string_8,
+				l_busy.is_enabled and driver.button_icon (l_busy).same_string ("download"))
 			driver.perform_click (l_busy)
 			assert ("pressable again", l_hits.item = 1)
 			l_pill.clear_badge

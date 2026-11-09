@@ -82,10 +82,10 @@ feature -- Element change
 			l_c: C_STRING
 		do
 			icon := a_name.to_string_32
-			if not is_busy then
-				l_c := backend.to_c (a_name)
-				backend.button_set_icon (id, l_c.item)
-			end
+				-- Sent even while busy: the backend keeps the icon apart from the spinner and
+				-- shows it when the button is no longer busy.
+			l_c := backend.to_c (a_name)
+			backend.button_set_icon (id, l_c.item)
 		ensure
 			set: attached icon as al_icon and then al_icon.same_string_general (a_name)
 		end
@@ -97,10 +97,8 @@ feature -- Element change
 			l_c: C_STRING
 		do
 			icon := Void
-			if not is_busy then
-				l_c := backend.to_c ("")
-				backend.button_set_icon (id, l_c.item)
-			end
+			l_c := backend.to_c ("")
+			backend.button_set_icon (id, l_c.item)
 		ensure
 			none: icon = Void
 		end
