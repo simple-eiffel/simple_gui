@@ -3,6 +3,7 @@ note
 		Two panes with a divider the user can drag (NSSplitView, GtkPaned, SW's splitter).
 		Horizontal puts the panes side by side (GTK's naming), vertical stacks them. When
 		the splitter grows, the first pane keeps its size and the second takes the change.
+		Until `set_position', the divider starts halfway.
 		`position' is where the divider sits, in logical pixels from the leading edge (the
 		right one, right to left) or the top; `set_position' fires nothing, and 0.2 has no
 		event for the user's drag: read `position' when it is needed.

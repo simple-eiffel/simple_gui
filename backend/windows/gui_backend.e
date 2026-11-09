@@ -831,9 +831,14 @@ feature -- Controls
 		end
 
 	image: INTEGER
-			-- An empty picture until a file or PNG bytes are given.
+			-- An empty picture until a file or an image file's bytes are given.
+		local
+			l_image: SW_IMAGE
 		do
-			Result := register (create {SW_IMAGE}.make_from_surface (create {CAIRO_SURFACE}.make (1, 1)))
+			create l_image.make_from_surface (create {CAIRO_SURFACE}.make (1, 1))
+				-- scaled down to fit, never enlarged (GUI_IMAGE's promise)
+			l_image.set_enlarges (False)
+			Result := register (l_image)
 		end
 
 	image_set_file (an_id: INTEGER; a_path: POINTER): BOOLEAN
