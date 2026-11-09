@@ -1550,6 +1550,319 @@ feature -- Standard controls (1h)
 			end
 		end
 
+feature -- The remaining controls (1j)
+
+	test_calendar_round_trips_and_emits
+		local
+			l_window: GUI_WINDOW
+			l_calendar: GUI_CALENDAR
+		do
+			create l_window.make ("Calendar", 320, 260)
+			create l_calendar.make
+			l_window.set_content (l_calendar)
+			l_window.show
+			settle_window
+			l_calendar.set_date (2026, 11, 9)
+			assert ("set", l_calendar.year = 2026 and l_calendar.month = 11 and l_calendar.day = 9)
+			assert ("silent", l_calendar.change_actions.fire_count = 0)
+			driver.set_date (l_calendar, 2026, 12, 24)
+			assert ("emitted", l_calendar.change_actions.fire_count = 1)
+			assert ("grid", l_calendar.accessible_role.same_string ("grid"))
+			l_window.close
+		end
+
+	test_menu_button_items_and_split_click
+			-- A menu button takes a menu; a split button's main part reports a click.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_plain, l_split: GUI_MENU_BUTTON
+			l_menu: GUI_MENU
+		do
+			create l_window.make ("Menu button", 320, 140)
+			create l_stack.make_horizontal
+			create l_plain.make ("Export")
+			create l_split.make_split ("Save")
+			l_menu := export_menu
+			l_plain.set_menu (l_menu)
+			l_split.set_menu (l_menu)
+			l_stack.extend (l_plain)
+			l_stack.extend (l_split)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("menus", l_plain.menu = l_menu and l_split.menu = l_menu)
+			assert ("kinds", not l_plain.is_split and l_split.is_split)
+			driver.click_split (l_split)
+			assert ("clicked", l_split.click_actions.fire_count = 1)
+			assert ("button role", l_plain.accessible_role.same_string ("button"))
+			l_window.close
+		end
+
+	test_level_bar_thresholds
+		local
+			l_window: GUI_WINDOW
+			l_level: GUI_LEVEL_BAR
+		do
+			create l_window.make ("Level", 320, 100)
+			create l_level.make (0, 100)
+			l_level.set_warning (70)
+			l_level.set_critical (90)
+			l_level.set_value (80)
+			l_window.set_content (l_level)
+			l_window.show
+			settle_window
+			assert ("value", l_level.value = 80)
+			assert ("thresholds", l_level.warning = 70 and l_level.critical = 90)
+			assert ("meter", l_level.accessible_role.same_string ("meter"))
+			l_window.close
+		end
+
+	test_popover_shows_hides_and_reports_dismissal
+			-- hide is silent; the user's dismissal fires closed.
+		local
+			l_window: GUI_WINDOW
+			l_anchor: GUI_BUTTON
+			l_popover: GUI_POPOVER
+		do
+			create l_window.make ("Popover", 320, 160)
+			create l_anchor.make ("Details")
+			l_window.set_content (l_anchor)
+			l_window.show
+			settle_window
+			create l_popover.make
+			l_popover.set_content (create {GUI_LABEL}.make ("More about this"))
+			l_popover.show_at (l_anchor)
+			settle_window
+			assert ("shown", l_popover.is_shown)
+			l_popover.hide
+			assert ("hidden silently", not l_popover.is_shown and l_popover.closed_actions.fire_count = 0)
+			l_popover.show_at (l_anchor)
+			settle_window
+			driver.dismiss_popover (l_popover)
+			assert ("dismissed", l_popover.closed_actions.fire_count = 1)
+			assert ("dialog", l_popover.accessible_role.same_string ("dialog"))
+			l_window.close
+		end
+
+	test_search_field_types_and_activates
+		local
+			l_window: GUI_WINDOW
+			l_search: GUI_SEARCH_FIELD
+		do
+			create l_window.make ("Search", 320, 100)
+			create l_search.make
+			l_window.set_content (l_search)
+			l_window.show
+			settle_window
+			l_search.set_text ("whisper")
+			assert ("set silently", l_search.text.same_string ("whisper") and l_search.change_actions.fire_count = 0)
+			driver.type_text (l_search, "sherpa")
+			assert ("typed", l_search.change_actions.fire_count >= 1 and l_search.text.same_string ("sherpa"))
+			assert ("search box", l_search.accessible_role.same_string ("search-box"))
+			l_window.close
+		end
+
+	test_token_field_makes_and_removes_tokens
+		local
+			l_window: GUI_WINDOW
+			l_tokens: GUI_TOKEN_FIELD
+		do
+			create l_window.make ("Tokens", 360, 100)
+			create l_tokens.make
+			l_window.set_content (l_tokens)
+			l_window.show
+			settle_window
+			l_tokens.extend_token ("ada@example.org")
+			assert ("one, silently", l_tokens.count = 1 and l_tokens.change_actions.fire_count = 0)
+			driver.type_tokens (l_tokens, "bob@example.org, cy@example.org")
+			assert ("typed", l_tokens.count = 3 and l_tokens.change_actions.fire_count = 1)
+			assert ("last", l_tokens.i_th (3).same_string ("cy@example.org"))
+			l_tokens.remove_token (1)
+			assert ("removed", l_tokens.count = 2 and l_tokens.tokens.first.same_string ("bob@example.org"))
+			l_tokens.wipe_out
+			assert ("empty", l_tokens.count = 0)
+			l_window.close
+		end
+
+	test_path_control_parts
+		local
+			l_window: GUI_WINDOW
+			l_crumbs: GUI_PATH_CONTROL
+		do
+			create l_window.make ("Path", 420, 100)
+			create l_crumbs.make
+			l_crumbs.set_path (create {PATH}.make_from_string ("/tmp"))
+			l_window.set_content (l_crumbs)
+			l_window.show
+			settle_window
+				-- compared in this platform's form (a backslash on Windows)
+			assert ("path", attached l_crumbs.path as al_path and then al_path.name.same_string ((create {PATH}.make_from_string ("/tmp")).name))
+			assert ("parts", l_crumbs.part_count >= 1)
+			assert ("navigation", l_crumbs.accessible_role.same_string ("navigation"))
+			l_window.close
+		end
+
+	test_rating_set_silently_and_user_emits
+		local
+			l_window: GUI_WINDOW
+			l_rating: GUI_RATING
+		do
+			create l_window.make ("Rating", 240, 80)
+			create l_rating.make (5)
+			l_window.set_content (l_rating)
+			l_window.show
+			settle_window
+			assert ("none", l_rating.value = 0)
+			l_rating.set_value (3)
+			assert ("set silently", l_rating.value = 3 and l_rating.change_actions.fire_count = 0)
+			driver.rate (l_rating, 4)
+			assert ("rated", l_rating.change_actions.fire_count = 1)
+			assert ("slider", l_rating.accessible_role.same_string ("slider"))
+			l_window.close
+		end
+
+	test_dialogs_1j_cancel_unattended
+		local
+			l_window: GUI_WINDOW
+			l_dialogs: GUI_DIALOGS
+		do
+			create l_window.make ("Dialogs", 300, 120)
+			l_window.show
+			settle_window
+			create l_dialogs
+			driver.cancel_dialogs_after (300)
+			assert ("text cancelled", l_dialogs.ask_text ("Rename", "New name:", "notes") = Void)
+			assert ("check cancelled", not l_dialogs.confirm_with_check ("Delete?", "It cannot be undone.", "Don't ask again").ok)
+			assert ("font cancelled", l_dialogs.choose_font ("Font", create {GUI_FONT_CHOICE}.make ("Helvetica", 13, False, False)) = Void)
+			driver.cancel_dialogs_after (0)
+			l_window.close
+		end
+
+	test_window_of_1j_controls_describes_roles
+		local
+			l_window: GUI_WINDOW
+			l_tree: STRING_32
+		do
+			l_window := controls_1j_window
+			settle_window
+			l_tree := driver.describe_accessibility (l_window)
+			print (indented (l_tree))
+			assert ("calendar", l_tree.has_substring ("grid:"))
+			assert ("menu button", l_tree.has_substring ("button: Export"))
+			assert ("meter", l_tree.has_substring ("meter:"))
+			assert ("search", l_tree.has_substring ("search-box:"))
+			assert ("tokens", l_tree.has_substring ("button: ada@example.org"))
+			assert ("path", l_tree.has_substring ("navigation:"))
+			assert ("rating", l_tree.has_substring ("slider:"))
+			l_window.close
+		end
+
+	test_window_of_1j_controls_snapshot
+		local
+			l_window: GUI_WINDOW
+		do
+			l_window := controls_1j_window
+			settle_window
+			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_1j_controls.png")))
+			l_window.close
+		end
+
+	export_menu: GUI_MENU
+			-- A context menu with two items, from a menu model of its own.
+		local
+			l_model: GUI_MENU_MODEL
+		do
+			create l_model.make
+			Result := l_model.new_context_menu
+			Result.add_item ("As PDF", "", agent do end)
+			Result.add_item ("As HTML", "", agent do end)
+		end
+
+	test_rich_text_ranges_round_trip
+			-- Formatting from code is silent and reads back; positions count characters, so an
+			-- emoji (two UTF-16 units on macOS and Windows) is one.
+		local
+			l_window: GUI_WINDOW
+			l_rich: GUI_RICH_TEXT_AREA
+			l_text: STRING_32
+		do
+			create l_window.make ("Rich text", 420, 200)
+			create l_rich.make
+			l_window.set_content (l_rich)
+			l_window.show
+			settle_window
+			create l_text.make_from_string ("Hello ")
+			l_text.append_code (0x1F600)
+			l_text.append (" world")
+			l_rich.set_text (l_text)
+			assert ("count", l_rich.count = 13)
+			l_rich.set_bold (1, 5, True)
+			l_rich.set_italic (9, 13, True)
+			l_rich.set_underline (9, 13, True)
+			l_rich.set_text_color (7, 7, 0xCC3300)
+			l_rich.set_font_size (9, 13, 20.0)
+			assert ("bold", l_rich.is_bold_at (1) and l_rich.is_bold_at (5) and not l_rich.is_bold_at (6))
+			assert ("italic after the emoji", l_rich.is_italic_at (9) and not l_rich.is_italic_at (8))
+			assert ("underline", l_rich.is_underlined_at (13) and not l_rich.is_underlined_at (1))
+			assert ("emoji color", l_rich.has_text_color_at (7) and l_rich.text_color_at (7) = 0xCC3300 and not l_rich.has_text_color_at (8))
+			assert ("size", l_rich.font_size_at (10) = 20.0)
+			l_rich.select_range (9, 13)
+			assert ("selection", l_rich.selection_start = 9 and l_rich.selection_end = 13)
+			assert ("silent", l_rich.change_actions.fire_count = 0)
+			l_rich.set_bold (1, 5, False)
+			assert ("unbold", not l_rich.is_bold_at (3))
+			assert ("text box", l_rich.accessible_role.same_string ("text-box"))
+			l_window.close
+		end
+
+	controls_1j_window: GUI_WINDOW
+			-- A window with the 1j controls, shown.
+		local
+			l_stack: GUI_STACK
+			l_calendar: GUI_CALENDAR
+			l_export: GUI_MENU_BUTTON
+			l_level: GUI_LEVEL_BAR
+			l_search: GUI_SEARCH_FIELD
+			l_tokens: GUI_TOKEN_FIELD
+			l_crumbs: GUI_PATH_CONTROL
+			l_rating: GUI_RATING
+			l_menu: GUI_MENU
+		do
+			create Result.make ("More controls", 520, 560)
+			create l_stack.make_vertical
+			create l_calendar.make
+			l_calendar.set_date (2026, 11, 9)
+			create l_export.make ("Export")
+			l_menu := export_menu
+			l_export.set_menu (l_menu)
+			create l_level.make (0, 100)
+			l_level.set_warning (70)
+			l_level.set_critical (90)
+			l_level.set_value (45)
+			l_level.set_accessible_label ("Disk")
+			create l_search.make
+			l_search.set_accessible_label ("Search")
+			create l_tokens.make
+			l_tokens.extend_token ("ada@example.org")
+			l_tokens.extend_token ("bob@example.org")
+			l_tokens.set_accessible_label ("To")
+			create l_crumbs.make
+			l_crumbs.set_path (create {PATH}.make_from_string ("/tmp"))
+			create l_rating.make (5)
+			l_rating.set_value (4)
+			l_rating.set_accessible_label ("Rating")
+			l_stack.extend (l_calendar)
+			l_stack.extend (l_export)
+			l_stack.extend (l_level)
+			l_stack.extend (l_search)
+			l_stack.extend (l_tokens)
+			l_stack.extend (l_crumbs)
+			l_stack.extend (l_rating)
+			Result.set_content (l_stack)
+			Result.show
+		end
+
 feature -- Lazy tables (1f)
 
 	test_a_row_source_asks_only_for_rows_in_view

@@ -438,6 +438,11 @@ void sga_window_set_content(int a_window, int a_child)
 	NSView *v = sga_get(a_child);
 	for (NSView *l_old in [[l_content subviews] copy]) if (![l_old isKindOfClass:[SGAStatus class]]) [l_old removeFromSuperview];
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	/* The window keeps the size the program asked for: a lone control (a button, a label) must
+	   not pull it down to its own natural size. */
+	for (NSInteger o = 0; o < 2; o++)
+		if ([v contentHuggingPriorityForOrientation:o] >= NSLayoutPriorityWindowSizeStayPut)
+			[v setContentHuggingPriority:NSLayoutPriorityWindowSizeStayPut - 1 forOrientation:o];
 	[l_content addSubview:v];
 	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:l_content.bottomAnchor constant:-l_content->bottom_bar];
 	[NSLayoutConstraint activateConstraints:@[
@@ -633,12 +638,12 @@ static void sga_place(SGASlot *a_slot, int a_alignment)
 	[NSLayoutConstraint activateConstraints:a_slot->placing];
 }
 
-/* Buttons (a dropdown too), spin boxes and segmented controls keep their natural width
+/* Buttons (a dropdown and a split button too), spin boxes and segmented controls keep their natural width
    (GTK: halign START); everything else fills. */
 static int sga_default_alignment(NSView *a_child)
 {
 	return [a_child isKindOfClass:[NSButton class]] || [a_child isKindOfClass:NSClassFromString(@"SGASpin")]
-		|| [a_child isKindOfClass:[NSSegmentedControl class]] ? 1 : 0;
+		|| [a_child isKindOfClass:[NSSegmentedControl class]] || [a_child isKindOfClass:[NSComboButton class]] ? 1 : 0;
 }
 
 void sga_stack_extend(int a_stack, int a_child, int a_stretch)
@@ -1713,7 +1718,7 @@ int sga_spin_box(int a_min, int a_max)
 		[s.heightAnchor constraintEqualToConstant:MAX([s->field fittingSize].height, [s->stepper fittingSize].height)]]];
 	/* Wide enough for the range; a filling alignment may widen the field. */
 	NSLayoutConstraint *l_wide = [s->field.widthAnchor constraintEqualToConstant:MAX(l_width, 48)];
-	[l_wide setPriority:NSLayoutPriorityDefaultHigh];
+	[l_wide setPriority:NSLayoutPriorityDefaultLow];   /* below the window's own size: alone in a window, the field widens instead */
 	[[s->field.widthAnchor constraintGreaterThanOrEqualToConstant:MAX(l_width, 48)] setActive:YES];
 	[l_wide setActive:YES];
 	[s show];
@@ -2439,6 +2444,444 @@ void sga_test_type_combo(int a_id, const char *a_text)
 	[c commit];
 }
 
+/* ---------------------------------------------- 1j: the remaining controls */
+
+/* A calendar: an NSDatePicker in its month-grid style, dates only. Its value and events are
+   a date picker's (2, a = year * 10000 + month * 100 + day). */
+int sga_calendar(void)
+{
+	int l_id = sga_date_picker();
+	SGADatePicker *p = sga_get(l_id);
+	[p setDatePickerStyle:NSDatePickerStyleClockAndCalendar];
+	[p setDatePickerElements:NSDatePickerElementFlagYearMonthDay];
+	[p setBezeled:NO];
+	[p setDrawsBackground:NO];
+	return l_id;
+}
+
+/* A menu button: a pull-down NSPopUpButton whose first item is the title; its menu is the
+   program's (items send menu, 5). Split: an NSComboButton, whose main part sends click (1). */
+@interface SGAMenuButton : NSPopUpButton
+@end
+@implementation SGAMenuButton
+@end
+
+int sga_menu_button(const char *a_text, int a_split)
+{
+	if (a_split) {
+		NSComboButton *b = [NSComboButton comboButtonWithTitle:sga_string(a_text) menu:[[NSMenu alloc] init] target:s_target action:@selector(clicked:)];
+		[b setStyle:NSComboButtonStyleSplit];
+		return sga_keep(b);
+	}
+	SGAMenuButton *b = [[SGAMenuButton alloc] initWithFrame:NSZeroRect pullsDown:YES];
+	[[b menu] addItemWithTitle:sga_string(a_text) action:NULL keyEquivalent:@""];
+	return sga_keep(b);
+}
+
+/* The program's menu (a GUI_MENU's NSMenu) behind the button. A pull-down keeps its title item first. */
+void sga_menu_button_set_menu(int a_id, void *a_menu)
+{
+	NSMenu *m = (__bridge NSMenu *)a_menu;
+	id b = sga_get(a_id);
+	if ([b isKindOfClass:[NSComboButton class]]) [(NSComboButton *)b setMenu:[m copy]];
+	else {
+		NSPopUpButton *p = b;
+		NSString *l_title = [[p itemAtIndex:0] title] ?: @"";
+		NSMenu *l_copy = [m copy];
+		[l_copy insertItemWithTitle:l_title action:NULL keyEquivalent:@"" atIndex:0];
+		[p setMenu:l_copy];
+	}
+}
+
+/* A level bar: an NSLevelIndicator in its continuous capacity style, with warning and
+   critical values (yellow and red, as AppKit draws them). */
+int sga_level_bar(int a_min, int a_max)
+{
+	NSLevelIndicator *l = [[NSLevelIndicator alloc] init];
+	[l setLevelIndicatorStyle:NSLevelIndicatorStyleContinuousCapacity];
+	[l setMinValue:a_min];
+	[l setMaxValue:a_max];
+	[l setIntegerValue:a_min];
+	[l setEditable:NO];
+	[l setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[[l.widthAnchor constraintGreaterThanOrEqualToConstant:100] setActive:YES];
+	return sga_keep(l);
+}
+
+void sga_level_bar_set(int a_id, int a_value) { [(NSLevelIndicator *)sga_get(a_id) setIntegerValue:a_value]; }
+int sga_level_bar_value(int a_id) { return (int)[(NSLevelIndicator *)sga_get(a_id) integerValue]; }
+void sga_level_bar_set_warning(int a_id, int a_value) { [(NSLevelIndicator *)sga_get(a_id) setWarningValue:a_value]; }
+void sga_level_bar_set_critical(int a_id, int a_value) { [(NSLevelIndicator *)sga_get(a_id) setCriticalValue:a_value]; }
+
+/* A popover: an NSPopover, transient (a click outside or Escape closes it). The widget is a
+   holder view that is the popover's content. The user's dismissal sends closed (17); `hide'
+   from code sends nothing. */
+@interface SGAPopover : SGAWrapper <NSPopoverDelegate>
+{
+@public
+	NSPopover *popover;
+	BOOL hiding;
+}
+@end
+@implementation SGAPopover
+- (void)popoverDidClose:(NSNotification *)n
+{
+	(void)n;
+	if (!hiding && !s_suppress) sga_push(17, sga_id_of(self), 0, 0, 0);
+	hiding = NO;
+}
+@end
+
+int sga_popover(void)
+{
+	SGAPopover *h = [[SGAPopover alloc] initWithFrame:NSMakeRect(0, 0, 200, 100)];
+	NSViewController *c = [[NSViewController alloc] init];
+	[c setView:h];
+	h->popover = [[NSPopover alloc] init];
+	[h->popover setContentViewController:c];
+	[h->popover setBehavior:NSPopoverBehaviorTransient];
+	[h->popover setAnimates:NO];   /* shown and closed at once: an inactive program's animation can stall */
+	[h->popover setDelegate:h];
+	return sga_keep(h);
+}
+
+void sga_popover_set_content(int a_id, int a_child)
+{
+	SGAPopover *h = sga_get(a_id);
+	NSView *v = sga_get(a_child);
+	for (NSView *l_old in [[h subviews] copy]) [l_old removeFromSuperview];
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[h addSubview:v];
+	[NSLayoutConstraint activateConstraints:@[
+		[v.leadingAnchor constraintEqualToAnchor:h.leadingAnchor constant:12],
+		[v.trailingAnchor constraintEqualToAnchor:h.trailingAnchor constant:-12],
+		[v.topAnchor constraintEqualToAnchor:h.topAnchor constant:12],
+		[v.bottomAnchor constraintEqualToAnchor:h.bottomAnchor constant:-12]]];
+	[h->popover setContentSize:[h fittingSize]];
+}
+
+void sga_popover_show_at(int a_id, int an_anchor)
+{
+	SGAPopover *h = sga_get(a_id);
+	NSView *a = sga_get(an_anchor);
+	[h->popover setContentSize:[h fittingSize]];
+	[h->popover showRelativeToRect:[a bounds] ofView:a preferredEdge:NSRectEdgeMaxY];
+}
+
+void sga_popover_hide(int a_id)
+{
+	SGAPopover *h = sga_get(a_id);
+	if ([h->popover isShown]) { h->hiding = YES; [h->popover performClose:nil]; [h->popover close]; }
+}
+
+int sga_popover_is_shown(int a_id) { return [((SGAPopover *)sga_get(a_id))->popover isShown] ? 1 : 0; }
+
+/* As a user: Escape, or a click outside. */
+void sga_test_dismiss_popover(int a_id)
+{
+	SGAPopover *h = sga_get(a_id);
+	if ([h->popover isShown]) [h->popover performClose:nil];
+}
+
+/* A search field: an NSSearchField. Typing (and its clear button) sends text changed (2),
+   as a field does; Return sends activate (3). */
+@interface SGASearchField : NSSearchField <NSSearchFieldDelegate>
+@end
+@implementation SGASearchField
+- (void)controlTextDidChange:(NSNotification *)n { (void)n; if (!s_suppress) sga_push(2, sga_id_of(self), 0, 0, 0); }
+- (void)searched:(id)a_sender
+{
+	(void)a_sender;
+	/* The action comes on Return and when the clear button empties the field. */
+	if ([[self stringValue] length] == 0) { if (!s_suppress) sga_push(2, sga_id_of(self), 0, 0, 0); }
+	else if (!s_suppress) sga_push(3, sga_id_of(self), 0, 0, 0);
+}
+@end
+
+int sga_search_field(void)
+{
+	SGASearchField *f = [[SGASearchField alloc] init];
+	[f setSendsSearchStringImmediately:NO];
+	[f setSendsWholeSearchString:YES];
+	[f setDelegate:f];
+	[f setTarget:f];
+	[f setAction:@selector(searched:)];
+	return sga_keep(f);
+}
+
+/* A token field: an NSTokenField; a comma or Return makes a token. The tokens are its
+   object value, an array of strings. A change in the tokens sends text changed (2). */
+@interface SGATokenField : NSTokenField <NSTokenFieldDelegate>
+{
+@public
+	NSArray *last;
+}
+@end
+@implementation SGATokenField
+- (NSArray<NSString *> *)tokens
+{
+	NSMutableArray *a = [NSMutableArray array];
+	id v = [self objectValue];
+	if ([v isKindOfClass:[NSArray class]]) for (id t in v) if ([t isKindOfClass:[NSString class]] && [t length]) [a addObject:t];
+	return a;
+}
+- (void)check
+{
+	NSArray *t = [self tokens];
+	if (![t isEqualToArray:last ?: @[]]) {
+		last = [t copy];
+		if (!s_suppress) sga_push(2, sga_id_of(self), (int)[t count], 0, 0);
+	}
+}
+- (void)controlTextDidEndEditing:(NSNotification *)n { (void)n; [self check]; }
+- (void)controlTextDidChange:(NSNotification *)n { (void)n; [self check]; }
+- (void)entered:(id)a_sender { (void)a_sender; [self check]; }
+@end
+
+int sga_token_field(void)
+{
+	SGATokenField *f = [[SGATokenField alloc] init];
+	[f setTokenizingCharacterSet:[NSCharacterSet characterSetWithCharactersInString:@",\n"]];
+	[f setTokenStyle:NSTokenStyleRounded];
+	[f setDelegate:f];
+	[f setTarget:f];
+	[f setAction:@selector(entered:)];
+	f->last = @[];
+	return sga_keep(f);
+}
+
+static void sga_token_field_put(SGATokenField *f, NSArray *a_tokens)
+{
+	[f setObjectValue:a_tokens];
+	f->last = [[f tokens] copy];
+}
+
+void sga_token_field_extend(int a_id, const char *a_text) { SGATokenField *f = sga_get(a_id); sga_token_field_put(f, [[f tokens] arrayByAddingObject:sga_string(a_text)]); }
+void sga_token_field_remove(int a_id, int i) { SGATokenField *f = sga_get(a_id); NSMutableArray *a = [[f tokens] mutableCopy]; if (i >= 1 && i <= (int)[a count]) [a removeObjectAtIndex:(NSUInteger)(i - 1)]; sga_token_field_put(f, a); }
+void sga_token_field_wipe_out(int a_id) { sga_token_field_put(sga_get(a_id), @[]); }
+int sga_token_field_count(int a_id) { return (int)[[(SGATokenField *)sga_get(a_id) tokens] count]; }
+const char *sga_token_field_item(int a_id, int i) { return sga_return(Kind_label, [(SGATokenField *)sga_get(a_id) tokens][(NSUInteger)(i - 1)]); }
+
+/* As a user: `a_text' typed, then Return. */
+void sga_test_type_tokens(int a_id, const char *a_text)
+{
+	SGATokenField *f = sga_get(a_id);
+	NSMutableArray *a = [[f tokens] mutableCopy];
+	for (NSString *t in [sga_string(a_text) componentsSeparatedByCharactersInSet:[f tokenizingCharacterSet]]) {
+		NSString *l_trim = [t stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+		if ([l_trim length]) [a addObject:l_trim];
+	}
+	[f setObjectValue:a];
+	[f check];
+}
+
+/* A path control: an NSPathControl, standard style. A click on a part sends selection (4,
+   a = the part, 1 = the root). The control does not navigate; the program does. */
+@interface SGAPathControl : NSPathControl
+@end
+@implementation SGAPathControl
+- (void)picked:(id)a_sender
+{
+	(void)a_sender;
+	NSPathControlItem *i = [self clickedPathItem];
+	NSUInteger k = i ? [[self pathItems] indexOfObject:i] : NSNotFound;
+	if (k != NSNotFound && !s_suppress) sga_push(4, sga_id_of(self), (int)k + 1, 0, 0);
+}
+@end
+
+int sga_path_control(void)
+{
+	SGAPathControl *p = [[SGAPathControl alloc] init];
+	[p setPathStyle:NSPathStyleStandard];
+	[p setTarget:p];
+	[p setAction:@selector(picked:)];
+	[p setEditable:NO];
+	return sga_keep(p);
+}
+
+void sga_path_control_set(int a_id, const char *a_path) { [(NSPathControl *)sga_get(a_id) setURL:[NSURL fileURLWithPath:sga_string(a_path)]]; }
+int sga_path_control_count(int a_id) { return (int)[[(NSPathControl *)sga_get(a_id) pathItems] count]; }
+const char *sga_path_control_part(int a_id, int i) { return sga_return(Kind_label, [[(NSPathControl *)sga_get(a_id) pathItems][(NSUInteger)(i - 1)] title]); }
+
+/* A rating: an NSLevelIndicator in its rating style, editable; a user's click sends text
+   changed (2, a = the stars). */
+@interface SGARating : NSLevelIndicator
+{
+@public
+	NSInteger last;
+}
+@end
+@implementation SGARating
+- (void)rated:(id)a_sender
+{
+	NSInteger v = [self integerValue];
+	(void)a_sender;
+	if (v != last) { last = v; if (!s_suppress) sga_push(2, sga_id_of(self), (int)v, 0, 0); }
+}
+@end
+
+int sga_rating(int a_maximum)
+{
+	SGARating *r = [[SGARating alloc] init];
+	[r setLevelIndicatorStyle:NSLevelIndicatorStyleRating];
+	[r setMinValue:0];
+	[r setMaxValue:a_maximum];
+	[r setIntegerValue:0];
+	[r setEditable:YES];
+	[r setTarget:r];
+	[r setAction:@selector(rated:)];
+	return sga_keep(r);
+}
+
+void sga_rating_set(int a_id, int a_value) { SGARating *r = sga_get(a_id); [r setIntegerValue:a_value]; r->last = a_value; }
+int sga_rating_value(int a_id) { return (int)[(NSLevelIndicator *)sga_get(a_id) integerValue]; }
+
+/* As a user: a click on star `a_value'. */
+void sga_test_rate(int a_id, int a_value) { SGARating *r = sga_get(a_id); [r setIntegerValue:a_value]; [r sendAction:[r action] to:[r target]]; }
+
+/* A rich text area (1j): a text area whose NSTextView keeps attributes. Positions are
+   1-based characters (code points, as an Eiffel STRING_32 counts them); a range is
+   `a_start' .. `an_end', inclusive. Formatting from code is silent: AppKit sends
+   textDidChange only for the user's edits. */
+int sga_rich_text_area(void)
+{
+	int l_id = sga_text_area();
+	NSTextView *t = s_inner[l_id];
+	[t setRichText:YES];
+	[t setImportsGraphics:NO];
+	[t setUsesFontPanel:YES];
+	return l_id;
+}
+
+/* The UTF-16 offset of code point `a_index' (0-based) in `s'. */
+static NSUInteger sga_utf16_offset(NSString *s, NSInteger a_index)
+{
+	NSUInteger k = 0, n = [s length];
+	for (NSInteger i = 0; i < a_index && k < n; i++) {
+		unichar c = [s characterAtIndex:k];
+		k += (CFStringIsSurrogateHighCharacter(c) && k + 1 < n) ? 2 : 1;
+	}
+	return k;
+}
+
+/* The code-point index (0-based) of UTF-16 offset `an_offset' in `s'. */
+static NSInteger sga_code_point_index(NSString *s, NSUInteger an_offset)
+{
+	NSInteger i = 0;
+	for (NSUInteger k = 0; k < an_offset && k < [s length]; i++) {
+		unichar c = [s characterAtIndex:k];
+		k += (CFStringIsSurrogateHighCharacter(c) && k + 1 < [s length]) ? 2 : 1;
+	}
+	return i;
+}
+
+static NSRange sga_rich_range(NSTextView *t, int a_start, int an_end)
+{
+	NSString *s = [[t textStorage] string];
+	NSUInteger l_from = sga_utf16_offset(s, a_start - 1), l_to = sga_utf16_offset(s, an_end);
+	return NSMakeRange(l_from, l_to > l_from ? l_to - l_from : 0);
+}
+
+/* Bold (1), italic (2) or underline (3), on or off, over a range. */
+void sga_rich_text_set_trait(int a_id, int a_start, int an_end, int a_trait, int a_on)
+{
+	NSTextView *t = s_inner[a_id];
+	NSTextStorage *m = [t textStorage];
+	NSRange r = sga_rich_range(t, a_start, an_end);
+	if (r.length == 0) return;
+	[m beginEditing];
+	if (a_trait == 3) {
+		if (a_on) [m addAttribute:NSUnderlineStyleAttributeName value:@(NSUnderlineStyleSingle) range:r];
+		else [m removeAttribute:NSUnderlineStyleAttributeName range:r];
+	} else {
+		NSFontManager *f = [NSFontManager sharedFontManager];
+		NSFontTraitMask l_trait = a_trait == 1 ? NSBoldFontMask : NSItalicFontMask;
+		[m enumerateAttribute:NSFontAttributeName inRange:r options:0 usingBlock:^(id a_font, NSRange a_run, BOOL *a_stop) {
+			(void)a_stop;
+			NSFont *l_font = a_font ?: [t font] ?: [NSFont systemFontOfSize:0];
+			l_font = a_on ? [f convertFont:l_font toHaveTrait:l_trait] : [f convertFont:l_font toNotHaveTrait:l_trait];
+			[m addAttribute:NSFontAttributeName value:l_font range:a_run];
+		}];
+	}
+	[m endEditing];
+}
+
+void sga_rich_text_set_color(int a_id, int a_start, int an_end, int a_rgb)
+{
+	NSTextView *t = s_inner[a_id];
+	NSRange r = sga_rich_range(t, a_start, an_end);
+	if (r.length) [[t textStorage] addAttribute:NSForegroundColorAttributeName value:sga_rgb_color(a_rgb) range:r];
+}
+
+void sga_rich_text_set_size(int a_id, int a_start, int an_end, double a_points)
+{
+	NSTextView *t = s_inner[a_id];
+	NSTextStorage *m = [t textStorage];
+	NSRange r = sga_rich_range(t, a_start, an_end);
+	if (r.length == 0 || a_points <= 0) return;
+	[m beginEditing];
+	[m enumerateAttribute:NSFontAttributeName inRange:r options:0 usingBlock:^(id a_font, NSRange a_run, BOOL *a_stop) {
+		(void)a_stop;
+		NSFont *l_font = a_font ?: [t font] ?: [NSFont systemFontOfSize:0];
+		[m addAttribute:NSFontAttributeName value:[[NSFontManager sharedFontManager] convertFont:l_font toSize:a_points] range:a_run];
+	}];
+	[m endEditing];
+}
+
+static NSDictionary *sga_rich_attributes_at(int a_id, int i)
+{
+	NSTextView *t = s_inner[a_id];
+	NSString *s = [[t textStorage] string];
+	NSUInteger k = sga_utf16_offset(s, i - 1);
+	return k < [s length] ? [[t textStorage] attributesAtIndex:k effectiveRange:NULL] : @{};
+}
+
+/* 1 when character `i' has the trait (1 bold, 2 italic, 3 underline). */
+int sga_rich_text_trait_at(int a_id, int i, int a_trait)
+{
+	NSDictionary *d = sga_rich_attributes_at(a_id, i);
+	if (a_trait == 3) return [d[NSUnderlineStyleAttributeName] integerValue] != 0 ? 1 : 0;
+	NSFont *f = d[NSFontAttributeName];
+	NSFontDescriptorSymbolicTraits l_traits = f ? [[f fontDescriptor] symbolicTraits] : 0;
+	return (l_traits & (a_trait == 1 ? NSFontDescriptorTraitBold : NSFontDescriptorTraitItalic)) ? 1 : 0;
+}
+
+/* Character `i''s color as 0xRRGGBB; -1 when it has the default (the theme's text color). */
+int sga_rich_text_color_at(int a_id, int i)
+{
+	NSColor *c = sga_rich_attributes_at(a_id, i)[NSForegroundColorAttributeName];
+	NSTextView *t = s_inner[a_id];
+	/* A rich text view gives new text its own text color as an attribute: that is the default. */
+	BOOL l_default = !c || [c isEqual:[t textColor]] || [c isEqual:[NSColor textColor]] || [c isEqual:[NSColor labelColor]];
+	return l_default ? -1 : sga_color_rgb(c);
+}
+
+double sga_rich_text_size_at(int a_id, int i)
+{
+	NSFont *f = sga_rich_attributes_at(a_id, i)[NSFontAttributeName] ?: [(NSTextView *)s_inner[a_id] font];
+	return f ? (double)[f pointSize] : 0;
+}
+
+/* The selection, 1-based: start, and end (start - 1 when nothing is selected, at the caret). */
+int sga_rich_text_selection_start(int a_id)
+{
+	NSTextView *t = s_inner[a_id];
+	return (int)sga_code_point_index([[t textStorage] string], [t selectedRange].location) + 1;
+}
+
+int sga_rich_text_selection_end(int a_id)
+{
+	NSTextView *t = s_inner[a_id];
+	NSRange r = [t selectedRange];
+	return (int)sga_code_point_index([[t textStorage] string], NSMaxRange(r));
+}
+
+void sga_rich_text_select(int a_id, int a_start, int an_end)
+{
+	NSTextView *t = s_inner[a_id];
+	[t setSelectedRange:sga_rich_range(t, a_start, an_end)];
+}
+
 /* ----------------------------------------------------------------- common */
 
 void sga_set_enabled(int a_id, int a_on)
@@ -2620,7 +3063,8 @@ static NSString *sga_role_name(NSString *a_role)
 		NSAccessibilityProgressIndicatorRole: @"progress-bar", NSAccessibilityToolbarRole: @"toolbar",
 		NSAccessibilityIncrementorRole: @"spin-button", NSAccessibilityRadioButtonRole: @"radio",
 		NSAccessibilityComboBoxRole: @"combo-box", NSAccessibilityColorWellRole: @"button",
-		NSAccessibilityDisclosureTriangleRole: @"button"};
+		NSAccessibilityDisclosureTriangleRole: @"button", NSAccessibilityLevelIndicatorRole: @"meter",
+		@"AXMenuButton": @"button"};
 	return l_names[a_role] ?: @"generic";
 }
 
@@ -2633,7 +3077,13 @@ const char *sga_accessible_role(int a_id)
 	if ([sga_core(a_id) isKindOfClass:[SGAToolbar class]]) return sga_return(Kind_role, @"toolbar");
 	if ([sga_core(a_id) isKindOfClass:[SGASwitch class]]) return sga_return(Kind_role, @"switch");
 	if ([sga_core(a_id) isKindOfClass:[SGARadioGroup class]] || [sga_core(a_id) isKindOfClass:[SGASegmented class]]) return sga_return(Kind_role, @"radio-group");
-	if ([sga_core(a_id) isKindOfClass:[SGADatePicker class]]) return sga_return(Kind_role, @"spin-button");
+	if ([sga_core(a_id) isKindOfClass:[SGADatePicker class]])
+		return sga_return(Kind_role, [(NSDatePicker *)sga_core(a_id) datePickerStyle] == NSDatePickerStyleClockAndCalendar ? @"grid" : @"spin-button");
+	if ([sga_core(a_id) isKindOfClass:[SGAMenuButton class]] || [sga_core(a_id) isKindOfClass:[NSComboButton class]]) return sga_return(Kind_role, @"button");
+	if ([sga_core(a_id) isKindOfClass:[SGAPopover class]]) return sga_return(Kind_role, @"dialog");
+	if ([sga_core(a_id) isKindOfClass:[SGASearchField class]]) return sga_return(Kind_role, @"search-box");
+	if ([sga_core(a_id) isKindOfClass:[SGAPathControl class]]) return sga_return(Kind_role, @"navigation");
+	if ([sga_core(a_id) isKindOfClass:[SGARating class]]) return sga_return(Kind_role, @"slider");
 	if ([sga_core(a_id) isKindOfClass:[SGAExpander class]]) return sga_return(Kind_role, @"button");
 	if ([sga_core(a_id) isKindOfClass:[NSBox class]]) return sga_return(Kind_role, [(NSBox *)sga_core(a_id) boxType] == NSBoxSeparator ? @"separator" : @"group");
 	return sga_return(Kind_role, sga_role_name([sga_accessible(a_id) accessibilityRole]));
@@ -3017,6 +3467,101 @@ int sga_ask(int a_window, const char *a_title, const char *a_text)
 	return r == NSAlertFirstButtonReturn ? 1 : r == NSAlertSecondButtonReturn ? 2 : 0;
 }
 
+/* Dialogs (1j). */
+
+/* One line of text, or NULL when cancelled: NSAlert with a text field as its accessory. */
+const char *sga_ask_text(int a_window, const char *a_title, const char *a_prompt, const char *an_initial)
+{
+	NSAlert *l_alert = [[NSAlert alloc] init];
+	NSTextField *f = [NSTextField textFieldWithString:sga_string(an_initial)];
+	(void)a_window;
+	[l_alert setMessageText:sga_string(a_title)];
+	[l_alert setInformativeText:sga_string(a_prompt)];
+	[l_alert addButtonWithTitle:@"OK"];
+	[l_alert addButtonWithTitle:@"Cancel"];
+	[f setFrame:NSMakeRect(0, 0, 260, 24)];
+	[l_alert setAccessoryView:f];
+	[[l_alert window] setInitialFirstResponder:f];
+	sga_maybe_auto_cancel();
+	return [l_alert runModal] == NSAlertFirstButtonReturn ? sga_return(Kind_field, [f stringValue]) : NULL;
+}
+
+/* OK or Cancel, with a check box ("Don't ask again"): bit 0 is OK, bit 1 is the box. */
+int sga_confirm_with_check(int a_window, const char *a_title, const char *a_text, const char *a_check)
+{
+	NSAlert *l_alert = [[NSAlert alloc] init];
+	(void)a_window;
+	[l_alert setMessageText:sga_string(a_title)];
+	[l_alert setInformativeText:sga_string(a_text)];
+	[l_alert addButtonWithTitle:@"OK"];
+	[l_alert addButtonWithTitle:@"Cancel"];
+	[l_alert setShowsSuppressionButton:YES];
+	[[l_alert suppressionButton] setTitle:sga_string(a_check)];
+	sga_maybe_auto_cancel();
+	BOOL l_ok = [l_alert runModal] == NSAlertFirstButtonReturn;
+	BOOL l_checked = [[l_alert suppressionButton] state] == NSControlStateValueOn;
+	return (l_ok ? 1 : 0) | (l_checked ? 2 : 0);
+}
+
+/* A font: NSFontPanel, which is not modal of its own, run as a modal window with OK and
+   Cancel beside it. The answer is "family\x1fpoints\x1fbold\x1fitalic", or NULL. */
+@interface SGAFontChooser : NSObject
+{
+@public
+	NSFont *font;
+}
+@end
+@implementation SGAFontChooser
+- (void)changeFont:(id)a_sender { font = [a_sender convertFont:font]; }
+- (NSFontPanelModeMask)validModesForFontPanel:(NSFontPanel *)p { (void)p; return NSFontPanelModeMaskFace | NSFontPanelModeMaskSize | NSFontPanelModeMaskCollection; }
+- (void)ok:(id)a_sender { (void)a_sender; [NSApp stopModalWithCode:NSModalResponseOK]; }
+- (void)cancel:(id)a_sender { (void)a_sender; [NSApp stopModalWithCode:NSModalResponseCancel]; }
+@end
+
+const char *sga_choose_font(int a_window, const char *a_title, const char *a_family, double a_points, int a_bold, int a_italic)
+{
+	SGAFontChooser *c = [[SGAFontChooser alloc] init];
+	NSFontManager *m = [NSFontManager sharedFontManager];
+	NSFont *f = [NSFont fontWithName:sga_string(a_family) size:a_points > 0 ? a_points : 13] ?: [NSFont systemFontOfSize:a_points > 0 ? a_points : 13];
+	(void)a_window;
+	if (a_bold) f = [m convertFont:f toHaveTrait:NSBoldFontMask];
+	if (a_italic) f = [m convertFont:f toHaveTrait:NSItalicFontMask];
+	c->font = f;
+	NSFontPanel *p = [m fontPanel:YES];
+	[m setTarget:c];
+	[m setSelectedFont:f isMultiple:NO];
+	[p setTitle:sga_string(a_title)];
+	/* OK and Cancel, under the panel's own controls. */
+	NSButton *l_ok = [NSButton buttonWithTitle:@"OK" target:c action:@selector(ok:)];
+	NSButton *l_cancel = [NSButton buttonWithTitle:@"Cancel" target:c action:@selector(cancel:)];
+	[l_ok setKeyEquivalent:@"\r"];
+	[l_cancel setKeyEquivalent:@"\033"];
+	NSStackView *l_buttons = [NSStackView stackViewWithViews:@[l_cancel, l_ok]];
+	[l_buttons setEdgeInsets:NSEdgeInsetsMake(8, 8, 8, 8)];
+	[p setAccessoryView:l_buttons];
+	sga_maybe_auto_cancel();
+	NSModalResponse r = [NSApp runModalForWindow:p];
+	[p setAccessoryView:nil];
+	[p orderOut:nil];
+	[m setTarget:nil];
+	if (r != NSModalResponseOK) return NULL;
+	NSFontTraitMask t = [m traitsOfFont:c->font];
+	return sga_return(Kind_path, [NSString stringWithFormat:@"%@\x1f%g\x1f%d\x1f%d", [c->font familyName] ?: @"", (double)[c->font pointSize],
+		(t & NSBoldFontMask) ? 1 : 0, (t & NSItalicFontMask) ? 1 : 0]);
+}
+
+/* The standard About panel, with the program's name, version, copyright and comments. */
+void sga_show_about(const char *a_name, const char *a_version, const char *a_copyright, const char *a_comments)
+{
+	NSMutableDictionary *o = [NSMutableDictionary dictionary];
+	o[NSAboutPanelOptionApplicationName] = sga_string(a_name);
+	o[NSAboutPanelOptionApplicationVersion] = sga_string(a_version);
+	o[NSAboutPanelOptionVersion] = @"";
+	o[@"Copyright"] = sga_string(a_copyright);
+	if ([sga_string(a_comments) length]) o[NSAboutPanelOptionCredits] = [[NSAttributedString alloc] initWithString:sga_string(a_comments)];
+	[NSApp orderFrontStandardAboutPanelWithOptions:o];
+}
+
 /* ------------------------------------------------------------- appearance */
 
 int sga_is_dark(void)
@@ -3304,12 +3849,21 @@ static void sga_describe(id a_element, int a_depth, int a_within, NSMutableStrin
 	/* A control may answer through its cell: the view says what it is. */
 	id l_view = [a_element isKindOfClass:[NSCell class]] ? [(NSCell *)a_element controlView] : a_element;
 	BOOL l_tree_table = [a_element isKindOfClass:[SGATree class]] && ((SGATree *)a_element)->is_table;
-	int l_within = [a_element isKindOfClass:[SGAGridTable class]] || l_tree_table ? 1 : [a_element isKindOfClass:[SGATree class]] ? 2 : a_within;
+	int l_within = [a_element isKindOfClass:[SGAGridTable class]] || l_tree_table ? 1 : [a_element isKindOfClass:[SGATree class]] ? 2
+		: [l_view isKindOfClass:[SGAPathControl class]] ? 3   /* 3: a path control's parts are links */
+		: [l_view isKindOfClass:[SGATokenField class]] ? 4 : a_within;   /* 4: a token field's tokens are buttons */
 	if ([a_element isKindOfClass:[SGAGridTable class]] || l_tree_table) l_name = @"tree-grid";
 	else if ([a_element isKindOfClass:[SGATree class]]) l_name = @"tree";
 	else if ([a_element isKindOfClass:[SGASpin class]]) l_name = @"spin-button";
 	else if ([l_view isKindOfClass:[SGAStatus class]]) l_name = @"status";
-	else if ([l_view isKindOfClass:[SGADatePicker class]]) l_name = @"spin-button";
+	else if ([l_view isKindOfClass:[SGADatePicker class]])
+		l_name = [(NSDatePicker *)l_view datePickerStyle] == NSDatePickerStyleClockAndCalendar ? @"grid" : @"spin-button";
+	else if ([l_view isKindOfClass:[SGASearchField class]]) l_name = @"search-box";
+	else if ([l_view isKindOfClass:[SGAPathControl class]]) l_name = @"navigation";
+	else if ([l_view isKindOfClass:[NSComboButton class]]) l_name = @"button";
+	else if (a_within == 3 && [l_role isEqualToString:NSAccessibilityStaticTextRole]) l_name = @"link";
+	else if (a_within == 4 && ![l_view isKindOfClass:[SGATokenField class]]) l_name = @"button";
+	else if (a_within == 1 && [l_role isEqualToString:@"AXMenuButton"]) l_name = @"generic";
 	else if ([l_view isKindOfClass:[NSBox class]] && [(NSBox *)l_view boxType] != NSBoxSeparator) l_name = @"group";
 	else if ([l_role isEqualToString:NSAccessibilityScrollBarRole]) return;   /* scroll bars are the scroll area's own */
 	else if (sga_is_switch(a_element)) l_name = @"switch";
@@ -3340,6 +3894,7 @@ static void sga_describe(id a_element, int a_depth, int a_within, NSMutableStrin
 				: [NSString stringWithFormat:@"%04ld-%02ld-%02ld", (long)(v / 10000), (long)(v / 100 % 100), (long)(v % 100)];
 		}
 		if ([l_view isKindOfClass:[NSBox class]]) l_title = [(NSBox *)l_view title];
+		if ([l_view isKindOfClass:[SGATokenField class]]) l_value = [[(SGATokenField *)l_view tokens] componentsJoinedByString:@", "];
 		NSString *l_text = ([l_label isKindOfClass:[NSString class]] && [l_label length]) ? l_label
 			: ([l_title isKindOfClass:[NSString class]] && [l_title length]) ? l_title
 			: ([l_value isKindOfClass:[NSString class]] ? l_value : @"");
@@ -3347,7 +3902,8 @@ static void sga_describe(id a_element, int a_depth, int a_within, NSMutableStrin
 		[a_out appendFormat:@"%@: %@\n", l_name, l_text];
 		l_next = a_depth + 1;
 	}
-	id l_children = [a_element isKindOfClass:[SGASpin class]] || [l_view isKindOfClass:[SGADatePicker class]] ? nil   /* one spin button */
+	id l_children = [a_element isKindOfClass:[SGASpin class]] || [l_view isKindOfClass:[SGADatePicker class]]   /* one spin button or grid */
+		|| [l_view isKindOfClass:[NSComboButton class]] ? nil   /* one split button */
 		: sga_ax(a_element, @selector(accessibilityChildren), NSAccessibilityChildrenAttribute);
 	id l_box_title = [l_view isKindOfClass:[NSBox class]] ? [(NSBox *)l_view titleCell] : nil;   /* already the group's name */
 	if (a_depth < 16 && [l_children isKindOfClass:[NSArray class]]) for (id c in l_children) if (c != l_box_title) sga_describe(c, l_next, l_within, a_out);

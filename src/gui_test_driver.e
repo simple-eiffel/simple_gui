@@ -225,6 +225,52 @@ feature -- User actions
 			flipped: an_expander.is_expanded /= old an_expander.is_expanded
 		end
 
+	click_split (a_button: GUI_MENU_BUTTON)
+			-- Click a split button's main part as a user would (fires click).
+		require
+			has_application: has_application
+			split: a_button.is_split
+		do
+			backend.test_click (a_button.id)
+			settle
+		end
+
+	dismiss_popover (a_popover: GUI_POPOVER)
+			-- Press Escape over a shown popover, as a user would (fires closed).
+		require
+			has_application: has_application
+			shown: a_popover.is_shown
+		do
+			backend.test_dismiss_popover (a_popover.id)
+			settle
+		ensure
+			hidden: not a_popover.is_shown
+		end
+
+	type_tokens (a_field: GUI_TOKEN_FIELD; a_text: READABLE_STRING_GENERAL)
+			-- Type `a_text' (tokens separated by commas) and press Return, as a user would.
+		require
+			has_application: has_application
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_text)
+			backend.test_type_tokens (a_field.id, l_c.item)
+			settle
+		end
+
+	rate (a_rating: GUI_RATING; a_value: INTEGER)
+			-- Click star `a_value' as a user would (fires change on a change).
+		require
+			has_application: has_application
+			in_range: 0 <= a_value and a_value <= a_rating.maximum
+		do
+			backend.test_rate (a_rating.id, a_value)
+			settle
+		ensure
+			set: a_rating.value = a_value
+		end
+
 	cancel_dialogs_after (a_ms: INTEGER)
 			-- Cancel each dialog `a_ms' milliseconds after it opens (0: never), so tests of
 			-- GUI_DIALOGS run unattended.

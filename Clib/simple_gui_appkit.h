@@ -206,6 +206,49 @@ void sga_set_tooltip(int a_id, const char *a_text);   /* empty removes it */
 int sga_tree_table(const char *a_titles);   /* titles joined by 0x1F; a tree's nodes, with columns */
 void sga_tree_table_set_cell(int a_id, int a_node, int a_column, const char *a_text);   /* column 1 is the node's text */
 
+/* 1j: the remaining controls */
+int sga_calendar(void);   /* a date picker's value and events, as a month grid */
+int sga_menu_button(const char *a_text, int a_split);
+void sga_menu_button_set_menu(int a_id, void *a_menu);   /* a GUI_MENU's NSMenu */
+int sga_level_bar(int a_min, int a_max);
+void sga_level_bar_set(int a_id, int a_value);
+int sga_level_bar_value(int a_id);
+void sga_level_bar_set_warning(int a_id, int a_value);
+void sga_level_bar_set_critical(int a_id, int a_value);
+int sga_popover(void);
+void sga_popover_set_content(int a_id, int a_child);
+void sga_popover_show_at(int a_id, int an_anchor);
+void sga_popover_hide(int a_id);   /* silent */
+int sga_popover_is_shown(int a_id);
+int sga_search_field(void);   /* a field's set and get; Return sends activate (3) */
+int sga_token_field(void);
+void sga_token_field_extend(int a_id, const char *a_text);   /* silent */
+void sga_token_field_remove(int a_id, int i);   /* silent */
+void sga_token_field_wipe_out(int a_id);   /* silent */
+int sga_token_field_count(int a_id);
+const char *sga_token_field_item(int a_id, int i);
+int sga_path_control(void);
+void sga_path_control_set(int a_id, const char *a_path);
+int sga_path_control_count(int a_id);
+const char *sga_path_control_part(int a_id, int i);
+int sga_rich_text_area(void);   /* a text area's set and get, plus: */
+void sga_rich_text_set_trait(int a_id, int a_start, int an_end, int a_trait, int a_on);   /* 1 bold, 2 italic, 3 underline */
+void sga_rich_text_set_color(int a_id, int a_start, int an_end, int a_rgb);
+void sga_rich_text_set_size(int a_id, int a_start, int an_end, double a_points);
+int sga_rich_text_trait_at(int a_id, int i, int a_trait);
+int sga_rich_text_color_at(int a_id, int i);   /* -1: the default color */
+double sga_rich_text_size_at(int a_id, int i);
+int sga_rich_text_selection_start(int a_id);
+int sga_rich_text_selection_end(int a_id);   /* start - 1 when empty */
+void sga_rich_text_select(int a_id, int a_start, int an_end);
+int sga_rating(int a_maximum);
+void sga_rating_set(int a_id, int a_value);   /* silent */
+int sga_rating_value(int a_id);
+const char *sga_ask_text(int a_window, const char *a_title, const char *a_prompt, const char *an_initial);
+int sga_confirm_with_check(int a_window, const char *a_title, const char *a_text, const char *a_check);   /* bit 0 OK, bit 1 checked */
+const char *sga_choose_font(int a_window, const char *a_title, const char *a_family, double a_points, int a_bold, int a_italic);   /* "family\x1fpoints\x1fbold\x1fitalic" */
+void sga_show_about(const char *a_name, const char *a_version, const char *a_copyright, const char *a_comments);
+
 /* Appearance */
 int sga_is_dark(void);
 void sga_set_dark(int a_on);
@@ -223,6 +266,9 @@ void sga_test_set_date(int a_id, int a_value);   /* a date or a time entered, as
 void sga_test_set_color(int a_id, int a_rgb);   /* chosen in the color panel, as a user */
 void sga_test_type_combo(int a_id, const char *a_text);   /* typed, then Return, as a user */
 void sga_test_toggle_expander(int a_id);   /* a click on the triangle */
+void sga_test_dismiss_popover(int a_id);   /* Escape, as a user */
+void sga_test_type_tokens(int a_id, const char *a_text);   /* typed, then Return */
+void sga_test_rate(int a_id, int a_value);   /* a click on that star */
 void sga_test_menu(int a_item_id);
 void sga_test_request_close(int a_window);
 void sga_test_focus(int a_id);   /* as a click: key window, first responder */

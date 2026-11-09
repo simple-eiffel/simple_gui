@@ -103,6 +103,77 @@ feature -- Messages
 			known: Result = Answer_yes or Result = Answer_no or Result = Answer_cancel
 		end
 
+	ask_text (a_title, a_prompt, an_initial: READABLE_STRING_GENERAL): detachable STRING_32
+			-- One line of text the user entered, starting from `an_initial', or Void when cancelled.
+		require
+			gui_thread: is_gui_thread
+		local
+			l_t, l_p, l_i: C_STRING
+			l_text: POINTER
+		do
+			l_t := backend.to_c (a_title)
+			l_p := backend.to_c (a_prompt)
+			l_i := backend.to_c (an_initial)
+			l_text := backend.ask_text (parent_window, l_t.item, l_p.item, l_i.item)
+			if l_text /= default_pointer then
+				Result := backend.from_c (l_text)
+			end
+		end
+
+	confirm_with_check (a_title, a_text, a_check_text: READABLE_STRING_GENERAL): TUPLE [ok, checked: BOOLEAN]
+			-- OK or Cancel, with a check box such as "Don't ask again" (the program keeps the choice).
+		require
+			gui_thread: is_gui_thread
+		local
+			l_t, l_x, l_c: C_STRING
+			l_answer: INTEGER
+		do
+			l_t := backend.to_c (a_title)
+			l_x := backend.to_c (a_text)
+			l_c := backend.to_c (a_check_text)
+			l_answer := backend.confirm_with_check (parent_window, l_t.item, l_x.item, l_c.item)
+			Result := [l_answer \\ 2 = 1, l_answer // 2 \\ 2 = 1]
+		end
+
+	choose_font (a_title: READABLE_STRING_GENERAL; an_initial: detachable GUI_FONT_CHOICE): detachable GUI_FONT_CHOICE
+			-- A font the user chose, starting from `an_initial', or Void when cancelled.
+		require
+			gui_thread: is_gui_thread
+		local
+			l_t, l_f: C_STRING
+			l_answer: POINTER
+			l_parts: LIST [STRING_32]
+		do
+			l_t := backend.to_c (a_title)
+			if attached an_initial as al_font then
+				l_f := backend.to_c (al_font.family)
+				l_answer := backend.choose_font (parent_window, l_t.item, l_f.item, al_font.size, al_font.is_bold, al_font.is_italic)
+			else
+				l_f := backend.to_c ("")
+				l_answer := backend.choose_font (parent_window, l_t.item, l_f.item, 0.0, False, False)
+			end
+			if l_answer /= default_pointer then
+				l_parts := backend.from_c (l_answer).split ((0x1F).to_character_32)
+				if l_parts.count = 4 and then l_parts [2].is_real_64 and then l_parts [2].to_real_64 > 0 then
+					create Result.make (l_parts [1], l_parts [2].to_real_64, l_parts [3].same_string ("1"), l_parts [4].same_string ("1"))
+				end
+			end
+		end
+
+	show_about (a_name, a_version, a_copyright, a_comments: READABLE_STRING_GENERAL)
+			-- The platform's About window for this program.
+		require
+			gui_thread: is_gui_thread
+		local
+			l_n, l_v, l_c, l_x: C_STRING
+		do
+			l_n := backend.to_c (a_name)
+			l_v := backend.to_c (a_version)
+			l_c := backend.to_c (a_copyright)
+			l_x := backend.to_c (a_comments)
+			backend.show_about (l_n.item, l_v.item, l_c.item, l_x.item)
+		end
+
 	Answer_cancel: INTEGER = 0
 
 	Answer_yes: INTEGER = 1

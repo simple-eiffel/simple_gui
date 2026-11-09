@@ -83,6 +83,18 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_dialogs_cancel_unattended, "dialogs_cancel_unattended")
 				run_test (agent t.test_window_of_1h_controls_describes_roles, "window_of_1h_controls_describes_roles")
 				run_test (agent t.test_window_of_1h_controls_snapshot, "window_of_1h_controls_snapshot")
+				run_test (agent t.test_calendar_round_trips_and_emits, "calendar_round_trips_and_emits")
+				run_test (agent t.test_menu_button_items_and_split_click, "menu_button_items_and_split_click")
+				run_test (agent t.test_level_bar_thresholds, "level_bar_thresholds")
+				run_test (agent t.test_popover_shows_hides_and_reports_dismissal, "popover_shows_hides_and_reports_dismissal")
+				run_test (agent t.test_search_field_types_and_activates, "search_field_types_and_activates")
+				run_test (agent t.test_token_field_makes_and_removes_tokens, "token_field_makes_and_removes_tokens")
+				run_test (agent t.test_path_control_parts, "path_control_parts")
+				run_test (agent t.test_rating_set_silently_and_user_emits, "rating_set_silently_and_user_emits")
+				run_test (agent t.test_rich_text_ranges_round_trip, "rich_text_ranges_round_trip")
+				run_test (agent t.test_dialogs_1j_cancel_unattended, "dialogs_1j_cancel_unattended")
+				run_test (agent t.test_window_of_1j_controls_describes_roles, "window_of_1j_controls_describes_roles")
+				run_test (agent t.test_window_of_1j_controls_snapshot, "window_of_1j_controls_snapshot")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
@@ -108,6 +120,10 @@ feature {NONE} -- Initialization
 				end
 				if attached al_e.description as al_why then
 					print ("        why: " + al_why.to_string_8 + "%N")
+				end
+				if attached (create {EXECUTION_ENVIRONMENT}).item ("GUI_TRACE") and then attached al_e.trace as al_trace then
+						-- GUI_TRACE=1: where it failed
+					print (al_trace.to_string_8 + "%N")
 				end
 			end
 			failed := failed + 1

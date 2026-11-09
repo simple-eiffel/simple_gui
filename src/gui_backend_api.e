@@ -10,7 +10,8 @@ note
 		| 7 pointer (a = x, b = y, c = kind + buttons << 4 + modifiers << 8)
 		| 8 key (a = key code, b = character, c = modifiers << 8) | 9 resize (a, b)
 		| 10 appearance (a = 1 dark) | 11 wake | 12 toggled (a = 1 checked)
-		| 13 page changed (a = page, 1-based).
+		| 13 page changed (a = page, 1-based) | 14 header clicked (a = column) | 15 expansion
+		(a = node, b = 1 open) | 16 rows wanted (a = first, b = last) | 17 closed (a popover the user dismissed).
 		Text areas report text changed (2) like fields; spin boxes report it with a = the
 		new value; dropdowns report selection (4).
 
@@ -758,6 +759,172 @@ feature -- Common widget state
 		deferred
 		end
 
+	calendar: INTEGER
+			-- A month grid showing today; a date picker's value and events.
+		deferred
+		end
+
+	menu_button (a_text: POINTER; a_split: BOOLEAN): INTEGER
+			-- A button that opens a menu; split: its main part sends click (1).
+		deferred
+		end
+
+	menu_button_set_menu (an_id: INTEGER; a_menu: POINTER)
+			-- The menu (a GUI_MENU's handle) the button opens.
+		deferred
+		end
+
+	level_bar (a_min, a_max: INTEGER): INTEGER
+			-- A level bar at `a_min'.
+		deferred
+		end
+
+	level_bar_set (an_id, a_value: INTEGER)
+		deferred
+		end
+
+	level_bar_value (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	level_bar_set_warning (an_id, a_value: INTEGER)
+		deferred
+		end
+
+	level_bar_set_critical (an_id, a_value: INTEGER)
+		deferred
+		end
+
+	popover: INTEGER
+			-- An empty popover, hidden; a user's dismissal sends closed (17).
+		deferred
+		end
+
+	popover_set_content (an_id, a_child: INTEGER)
+		deferred
+		end
+
+	popover_show_at (an_id, an_anchor: INTEGER)
+		deferred
+		end
+
+	popover_hide (an_id: INTEGER)
+			-- Without an event.
+		deferred
+		end
+
+	popover_is_shown (an_id: INTEGER): BOOLEAN
+		deferred
+		end
+
+	search_field: INTEGER
+			-- A search field: a field's text features; Return sends activate (3).
+		deferred
+		end
+
+	token_field: INTEGER
+			-- An empty token field; a user's change sends text changed (2).
+		deferred
+		end
+
+	token_field_extend (an_id: INTEGER; a_text: POINTER)
+			-- Without an event.
+		deferred
+		end
+
+	token_field_remove (an_id, i: INTEGER)
+			-- Without an event.
+		deferred
+		end
+
+	token_field_wipe_out (an_id: INTEGER)
+			-- Without an event.
+		deferred
+		end
+
+	token_field_count (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	token_field_item (an_id, i: INTEGER): POINTER
+		deferred
+		end
+
+	path_control: INTEGER
+			-- An empty path control; a click on a part sends selection (4, a = part).
+		deferred
+		end
+
+	path_control_set (an_id: INTEGER; a_path: POINTER)
+		deferred
+		end
+
+	path_control_count (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	path_control_part (an_id, i: INTEGER): POINTER
+		deferred
+		end
+
+	rating (a_maximum: INTEGER): INTEGER
+			-- No stars of `a_maximum'; a user's click sends text changed (2, a = stars).
+		deferred
+		end
+
+	rating_set (an_id, a_value: INTEGER)
+			-- Without an event.
+		deferred
+		end
+
+	rating_value (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	rich_text_area: INTEGER
+			-- An empty rich text area: a text area's features, plus formatting.
+		deferred
+		end
+
+	rich_text_set_trait (an_id, a_start, an_end, a_trait: INTEGER; a_on: BOOLEAN)
+			-- Bold (1), italic (2) or underline (3) over `a_start' .. `an_end' (1-based characters, inclusive).
+		deferred
+		end
+
+	rich_text_set_color (an_id, a_start, an_end, a_rgb: INTEGER)
+		deferred
+		end
+
+	rich_text_set_size (an_id, a_start, an_end: INTEGER; a_points: REAL_64)
+		deferred
+		end
+
+	rich_text_trait_at (an_id, i, a_trait: INTEGER): BOOLEAN
+		deferred
+		end
+
+	rich_text_color_at (an_id, i: INTEGER): INTEGER
+			-- 0xRRGGBB, or -1 for the theme's text color.
+		deferred
+		end
+
+	rich_text_size_at (an_id, i: INTEGER): REAL_64
+		deferred
+		end
+
+	rich_text_selection_start (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	rich_text_selection_end (an_id: INTEGER): INTEGER
+			-- `rich_text_selection_start' - 1 when nothing is selected.
+		deferred
+		end
+
+	rich_text_select (an_id, a_start, an_end: INTEGER)
+		deferred
+		end
+
 	set_tooltip (an_id: INTEGER; a_text: POINTER)
 			-- Short help on hover; empty removes it.
 		deferred
@@ -934,6 +1101,26 @@ feature -- Dialogs
 		deferred
 		end
 
+	ask_text (a_window: INTEGER; a_title, a_prompt, an_initial: POINTER): POINTER
+			-- One line of text (UTF-8), or default_pointer when cancelled.
+		deferred
+		end
+
+	confirm_with_check (a_window: INTEGER; a_title, a_text, a_check: POINTER): INTEGER
+			-- Bit 0: OK; bit 1: the box was checked.
+		deferred
+		end
+
+	choose_font (a_window: INTEGER; a_title, a_family: POINTER; a_points: REAL_64; a_bold, an_italic: BOOLEAN): POINTER
+			-- "family<0x1F>points<0x1F>bold<0x1F>italic" (bold and italic 0 or 1), or default_pointer when cancelled.
+		deferred
+		end
+
+	show_about (a_name, a_version, a_copyright, a_comments: POINTER)
+			-- The platform's About window.
+		deferred
+		end
+
 feature -- Appearance
 
 	is_dark: BOOLEAN
@@ -1015,6 +1202,21 @@ feature -- Test driver
 
 	test_auto_cancel_dialogs (a_ms: INTEGER)
 			-- Cancel each dialog `a_ms' after it opens (0: never), so tests run unattended.
+		deferred
+		end
+
+	test_dismiss_popover (an_id: INTEGER)
+			-- Dismiss a popover as a user would, with Escape (emits closed).
+		deferred
+		end
+
+	test_type_tokens (an_id: INTEGER; a_text: POINTER)
+			-- Type tokens separated by commas and press Return, as a user would (emits text changed).
+		deferred
+		end
+
+	test_rate (an_id, a_value: INTEGER)
+			-- Click star `a_value' as a user would (emits text changed on a change).
 		deferred
 		end
 
