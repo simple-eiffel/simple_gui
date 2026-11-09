@@ -247,8 +247,8 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 - (void)toggled:(NSButton *)a_box { sga_push(12, sga_id_of(a_box), [a_box state] == NSControlStateValueOn ? 1 : 0, 0, 0); }
 - (void)tabView:(NSTabView *)a_tabs didSelectTabViewItem:(NSTabViewItem *)an_item { if (!s_suppress) sga_push(13, sga_id_of(a_tabs), sga_tab_page(a_tabs, [a_tabs indexOfTabViewItem:an_item]), 0, 0); }
 - (void)controlTextDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
-/* 1p: leaving a field ends its editing (26), when validation on commit checks it. */
-- (void)controlTextDidEndEditing:(NSNotification *)n { sga_suggest_end(sga_id_of([n object])); if (!s_suppress) sga_push(26, sga_id_of([n object]), 0, 0, 0); }
+/* 1p: leaving a field ends its editing (29), when validation on commit checks it. */
+- (void)controlTextDidEndEditing:(NSNotification *)n { sga_suggest_end(sga_id_of([n object])); if (!s_suppress) sga_push(29, sga_id_of([n object]), 0, 0, 0); }
 /* 1p: Up, Down, Return and Escape go to the field's suggestion list while it shows. */
 - (BOOL)control:(NSControl *)c textView:(NSTextView *)tv doCommandBySelector:(SEL)a_command
 {
@@ -3435,7 +3435,7 @@ void sga_table_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id
 }
 - (void)eyed:(id)a_sender { (void)a_sender; [self reveal:!revealed]; if (!s_suppress) sga_push(12, sga_id_of(self), revealed ? 1 : 0, 0, 0); }
 - (void)controlTextDidChange:(NSNotification *)n { (void)n; if (!s_suppress) sga_push(2, sga_id_of(self), 0, 0, 0); }
-- (void)controlTextDidEndEditing:(NSNotification *)n { (void)n; if (!s_suppress) sga_push(26, sga_id_of(self), 0, 0, 0); }
+- (void)controlTextDidEndEditing:(NSNotification *)n { (void)n; if (!s_suppress) sga_push(29, sga_id_of(self), 0, 0, 0); }
 - (void)entered:(id)a_sender { (void)a_sender; if (!s_suppress) sga_push(3, sga_id_of(self), 0, 0, 0); }
 - (BOOL)isAccessibilityElement { return NO; }
 @end

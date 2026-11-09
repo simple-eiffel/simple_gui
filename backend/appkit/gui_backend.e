@@ -1420,7 +1420,7 @@ feature -- Test driver
 
 	test_end_editing (an_id: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
-		alias "sga_test_drawn_event($an_id, 26, 0, 0, 0);"
+		alias "sga_test_drawn_event($an_id, 29, 0, 0, 0);"
 		end
 
 	test_set_date_time (an_id, a_date, a_time: INTEGER)

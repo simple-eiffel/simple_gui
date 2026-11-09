@@ -11,7 +11,7 @@ note
 		| 8 key (a = key code, b = character, c = modifiers << 8) | 9 resize (a, b)
 		| 10 appearance (a = 1 dark) | 11 wake | 12 toggled (a = 1 checked)
 		| 13 page changed (a = page, 1-based) | 14 header clicked (a = column) | 15 expansion
-		(a = node, b = 1 open) | 16 rows wanted (a = first, b = last) | 17 closed (a popover the user dismissed) | 26 editing ended (a field the user left, 1p).
+		(a = node, b = 1 open) | 16 rows wanted (a = first, b = last) | 17 closed (a popover the user dismissed) | 29 editing ended (a field the user left, 1p).
 		A drawn view (1i): 18 pointer (a = x, b = y, c = kind + button * 16 + modifiers * 256;
 		kind 1 press, 2 release, 3 move, 4 leave, 5 double, 6 triple; button 1 primary,
 		2 secondary, 3 middle) | 19 wheel (a, b, c = delta, 120 a notch, positive away from the
@@ -1436,7 +1436,7 @@ feature -- Test driver
 		end
 
 	test_end_editing (an_id: INTEGER)
-			-- Leave a field, as a user tabbing away (emits 26).
+			-- Leave a field, as a user tabbing away (emits 29).
 		deferred
 		end
 

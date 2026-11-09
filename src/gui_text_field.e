@@ -226,7 +226,7 @@ feature {GUI_APPLICATION} -- Events
 			elseif a_type = 3 then
 				activate_actions.call (Void)
 				validate
-			elseif a_type = 26 then
+			elseif a_type = 29 then
 				validate
 			end
 		end
