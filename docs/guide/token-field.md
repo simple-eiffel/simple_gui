@@ -53,7 +53,7 @@ end
 
 ## Try it
 
-The field shows one token, "draft", and the label reads "1 tag". Type `work, urgent` and press Return: each comma and the Return make a token, `change_actions` fire, and the label reads "3 tags". Select a token and delete it: `change_actions` fire again and the count goes down.
+The field shows one token, "draft", and the label reads "1 tag". Type `work, urgent` and press Return: each comma and the Return make a token, `change_actions` fire, and the label reads "3 tags". Remove a token: on macOS select it and press Delete; on Linux press Backspace in the empty entry, which removes the last token; on Windows click the chip's remove button. `change_actions` fire again and the count goes down.
 
 ## API
 

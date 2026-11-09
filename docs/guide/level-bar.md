@@ -67,14 +67,14 @@ Inherited: `set_accessible_label`, `set_tooltip`, `show`, `hide` and the rest of
 
 **Accessibility:** the role is `meter`, and its value is the level. Give it `set_accessible_label` with what it measures ("Disk used", "Battery"); the bar has no text of its own.
 
-**Thresholds.** A threshold of 0 is unset, so a new bar shows no warning or critical color. The colors show for values past a threshold, so they suit a meter where more is worse, such as disk use.
+**Thresholds.** A threshold of 0 is unset, so a new bar shows no warning or critical color. Either threshold may be set alone: with only a critical value, the bar turns to the critical color past it. On every platform the colors start past a threshold, not at it, so they suit a meter where more is worse, such as disk use.
 
 ## On each platform
 
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkLevelBar` with offsets for the thresholds, amber and red | `NSLevelIndicator`, continuous capacity style, with warning and critical values | `GUI_SW_LEVEL_BAR`, drawn: the theme's accent, then amber and red |
-| Looks or behaves differently | — <!-- PROD: confirm --> | The warning color is yellow and the critical color red, as AppKit draws them. At least 100 pixels wide. | The colors start at the threshold value itself, not past it. <!-- PROD: confirm --> |
+| Looks or behaves differently | — | The warning color is yellow and the critical color red, as AppKit draws them. At least 100 pixels wide. | — |
 
 ## Design guidance
 

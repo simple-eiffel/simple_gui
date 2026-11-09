@@ -56,7 +56,7 @@ Inherited: `set_accessible_label`, `set_tooltip`, `enable`, `disable` and the re
 
 **Events:** `change_actions` fires with the hour and minute when the user commits a different time. `set_time` never fires it: its postcondition is `change_actions.fire_count = old change_actions.fire_count`.
 
-**Accessibility:** the role is `spin-button`, and a screen reader reads the value as ISO 8601 (17:05). Nothing on the picker names it, so give it `set_accessible_label` ("Alarm time", "Start"). <!-- PROD: confirm the role on GTK, where the picker is a group of two spin buttons named "Hour" and "Minute" -->
+**Accessibility:** the role is `spin-button`, and a screen reader reads the value as ISO 8601 (17:05). The role is the same on every platform. Nothing on the picker names it, so give it `set_accessible_label` ("Alarm time", "Start").
 
 ## On each platform
 

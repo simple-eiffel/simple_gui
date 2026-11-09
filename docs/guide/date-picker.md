@@ -59,7 +59,7 @@ Inherited: `set_accessible_label`, `set_tooltip`, `enable`, `disable` and the re
 
 **Events:** `change_actions` fires with the year, month and day when the user commits a different date. `set_date` never fires it: its postcondition is `change_actions.fire_count = old change_actions.fire_count`.
 
-**Accessibility:** the role is `spin-button`, and a screen reader reads the value as ISO 8601 (2026-12-25). <!-- PROD: confirm the role on GTK, where the picker is a GtkMenuButton --> The picker shows no text of its own that could name it, so give it `set_accessible_label` ("Due date", "Birthday").
+**Accessibility:** on Linux and Windows the role is `combo-box`, since the picker drops down a calendar. On macOS it is `spin-button`, since the picker is text with a stepper. A screen reader reads the value as ISO 8601 (2026-12-25). The picker shows no text of its own that could name it, so give it `set_accessible_label` ("Due date", "Birthday").
 
 ## On each platform
 
