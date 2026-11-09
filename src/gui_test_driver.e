@@ -402,6 +402,9 @@ feature -- Evidence
 			has_application: has_application
 			open: not a_window.is_closed
 		do
+			across application.widgets as ic loop
+				ic.refresh_description
+			end
 			Result := backend.from_c (backend.describe_accessibility (a_window.id))
 		end
 

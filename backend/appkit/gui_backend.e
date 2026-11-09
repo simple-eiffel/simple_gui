@@ -915,6 +915,36 @@ feature -- Common widget state
 		alias "sga_rich_text_select($an_id, $a_start, $an_end);"
 		end
 
+	drawn (a_width, a_height: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_drawn($a_width, $a_height);"
+		end
+
+	drawn_present (an_id: INTEGER; a_surface: POINTER; a_width, a_height: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_drawn_present($an_id, (void *) $a_surface, $a_width, $a_height);"
+		end
+
+	drawn_set_cursor (an_id, a_kind: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_drawn_set_cursor($an_id, $a_kind);"
+		end
+
+	drawn_set_ticks (an_id, a_tick_ms, a_fast_ms: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_drawn_set_ticks($an_id, $a_tick_ms, $a_fast_ms);"
+		end
+
+	drawn_arm_dwell (an_id, a_ms, a_serial: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_drawn_arm_dwell($an_id, $a_ms, $a_serial);"
+		end
+
+	drawn_set_description (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_drawn_set_description($an_id, (const char *) $a_text);"
+		end
+
 	set_tooltip (an_id: INTEGER; a_text: POINTER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_set_tooltip($an_id, (const char *) $a_text);"
@@ -1196,6 +1226,11 @@ feature -- Test driver
 	test_rate (an_id, a_value: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_rate($an_id, $a_value);"
+		end
+
+	test_drawn_event (an_id, a_type, a_a, a_b, a_c: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_drawn_event($an_id, $a_type, $a_a, $a_b, $a_c);"
 		end
 
 	test_menu (an_item_id: INTEGER)

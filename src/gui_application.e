@@ -193,10 +193,12 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 			end
 		end
 
-feature {NONE} -- Implementation
+feature {GUI_TEST_DRIVER} -- Registry
 
 	widgets: HASH_TABLE [GUI_WIDGET, INTEGER]
 			-- Every widget, by id.
+
+feature {NONE} -- Implementation
 
 	take_messages (a_mailbox: separate GUI_MAILBOX)
 			-- Copy out every message, release the mailbox, then fire `message_actions'.

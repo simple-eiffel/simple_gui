@@ -2920,6 +2920,197 @@ void sga_rich_text_select(int a_id, int a_start, int an_end)
 	[t setSelectedRange:sga_rich_range(t, a_start, an_end)];
 }
 
+/* ------------------------------------------------- 1i: the drawn-widget view */
+
+/* The view a GUI_DRAWN hosts a simple_widgets window in: a canvas with the whole input SW
+   needs (spec 1i). Positions are logical pixels; GUI_DRAWN converts to device pixels.
+   18 pointer (c = kind + button * 16 + modifiers * 256; kind 1 press, 2 release, 3 move,
+   4 leave, 5 double press, 6 triple press; button 1 primary, 2 secondary, 3 middle),
+   19 wheel (c = delta, 120 a notch, positive away from the user), 20 key (a = GDK keyval,
+   b = 1 down or 0 up), 21 character (a = code point), 22 focus (a = 1 in), 23 timers
+   (a = 0 the tick, 1 the fast tick, 2 the dwell shot with b = its serial). */
+@interface SGADrawn : SGACanvas <NSTextInputClient>
+{
+@public
+	int cursor_kind;
+	NSString *description;   /* the hosted window's accessibility tree, as GUI_DRAWN last gave it */
+	NSTimer *tick, *fast;
+	BOOL inserted;   /* insertText: ran for the key being handled */
+}
+@end
+
+@implementation SGADrawn
+- (void)updateTrackingAreas
+{
+	for (NSTrackingArea *t in [[self trackingAreas] copy]) [self removeTrackingArea:t];
+	[self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+		options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+		owner:self userInfo:nil]];
+	[super updateTrackingAreas];
+}
+- (void)push:(NSEvent *)e kind:(int)a_kind button:(int)a_button
+{
+	NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
+	sga_push(18, sga_id_of(self), (int)lround(p.x), (int)lround(p.y), a_kind + a_button * 16 + sga_modifiers([e modifierFlags]) * 256);
+}
+- (int)pressKind:(NSEvent *)e { return [e clickCount] == 2 ? 5 : [e clickCount] >= 3 ? 6 : 1; }
+- (void)mouseDown:(NSEvent *)e { [[self window] makeFirstResponder:self]; [self push:e kind:[self pressKind:e] button:1]; }
+- (void)mouseUp:(NSEvent *)e { [self push:e kind:2 button:1]; }
+- (void)mouseDragged:(NSEvent *)e { [self push:e kind:3 button:1]; }
+- (void)mouseMoved:(NSEvent *)e { [self push:e kind:3 button:0]; }
+- (void)mouseExited:(NSEvent *)e { [self push:e kind:4 button:0]; }
+- (void)rightMouseDown:(NSEvent *)e { [[self window] makeFirstResponder:self]; [self push:e kind:1 button:2]; }
+- (void)rightMouseUp:(NSEvent *)e { [self push:e kind:2 button:2]; }
+- (void)rightMouseDragged:(NSEvent *)e { [self push:e kind:3 button:2]; }
+- (void)otherMouseDown:(NSEvent *)e { [self push:e kind:1 button:3]; }
+- (void)otherMouseUp:(NSEvent *)e { [self push:e kind:2 button:3]; }
+- (void)otherMouseDragged:(NSEvent *)e { [self push:e kind:3 button:3]; }
+/* A trackpad gives points, a mouse wheel lines: both become SW's 120 a notch (one line, about 10 points). */
+- (void)scrollWheel:(NSEvent *)e
+{
+	CGFloat d = [e hasPreciseScrollingDeltas] ? [e scrollingDeltaY] * 12 : [e scrollingDeltaY] * 120;
+	NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
+	if (lround(d) != 0) sga_push(19, sga_id_of(self), (int)lround(p.x), (int)lround(p.y), (int)lround(d));
+}
+- (void)keyDown:(NSEvent *)e
+{
+	sga_push(20, sga_id_of(self), sga_gdk_key(e), 1, sga_modifiers([e modifierFlags]) * 256);
+	inserted = NO;
+	/* Command keys are shortcuts, not text. */
+	if (!([e modifierFlags] & NSEventModifierFlagCommand)) [self interpretKeyEvents:@[e]];
+}
+- (void)keyUp:(NSEvent *)e { sga_push(20, sga_id_of(self), sga_gdk_key(e), 0, sga_modifiers([e modifierFlags]) * 256); }
+/* Text, as Windows' WM_CHAR gives it: each character, and the control characters Return,
+   Tab, Backspace and Escape, which SW also hears as characters. */
+- (void)insertText:(id)a_text replacementRange:(NSRange)r
+{
+	(void)r;
+	NSString *s = [a_text isKindOfClass:[NSAttributedString class]] ? [a_text string] : a_text;
+	inserted = YES;
+	[s enumerateSubstringsInRange:NSMakeRange(0, [s length]) options:NSStringEnumerationByComposedCharacterSequences
+		usingBlock:^(NSString *a_char, NSRange a, NSRange b, BOOL *a_stop) {
+			(void)a; (void)b; (void)a_stop;
+			UTF32Char c = 0;
+			if ([a_char getBytes:&c maxLength:4 usedLength:NULL encoding:NSUTF32LittleEndianStringEncoding options:0
+				range:NSMakeRange(0, [a_char length]) remainingRange:NULL]) sga_push(21, sga_id_of(self), (int)c, 0, 0);
+		}];
+}
+- (void)doCommandBySelector:(SEL)a_selector
+{
+	int c = a_selector == @selector(insertNewline:) ? 13 : a_selector == @selector(insertTab:) ? 9
+		: a_selector == @selector(deleteBackward:) ? 8 : a_selector == @selector(cancelOperation:) ? 27 : 0;
+	if (c) sga_push(21, sga_id_of(self), c, 0, 0);
+}
+/* NSTextInputClient: committed text only (no marked text, as SW has it). */
+- (void)setMarkedText:(id)s selectedRange:(NSRange)a replacementRange:(NSRange)b { (void)s; (void)a; (void)b; }
+- (void)unmarkText {}
+- (NSRange)selectedRange { return NSMakeRange(NSNotFound, 0); }
+- (NSRange)markedRange { return NSMakeRange(NSNotFound, 0); }
+- (BOOL)hasMarkedText { return NO; }
+- (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)r actualRange:(NSRangePointer)a { (void)r; (void)a; return nil; }
+- (NSArray<NSAttributedStringKey> *)validAttributesForMarkedText { return @[]; }
+- (NSRect)firstRectForCharacterRange:(NSRange)r actualRange:(NSRangePointer)a
+{
+	(void)r; (void)a;
+	return [[self window] convertRectToScreen:[self convertRect:[self bounds] toView:nil]];
+}
+- (NSUInteger)characterIndexForPoint:(NSPoint)p { (void)p; return NSNotFound; }
+- (BOOL)becomeFirstResponder { sga_push(22, sga_id_of(self), 1, 0, 0); return YES; }
+- (BOOL)resignFirstResponder { sga_push(22, sga_id_of(self), 0, 0, 0); return YES; }
+- (void)resetCursorRects
+{
+	NSCursor *c;
+	switch (cursor_kind) {
+		case 1: c = [NSCursor IBeamCursor]; break;
+		case 2: c = [NSCursor pointingHandCursor]; break;
+		case 3: c = [NSCursor resizeLeftRightCursor]; break;
+		case 4: c = [NSCursor resizeUpDownCursor]; break;
+		case 5: c = [NSCursor crosshairCursor]; break;
+		default: c = [NSCursor arrowCursor];   /* 0, and 6 (AppKit has no public wait cursor) */
+	}
+	[self addCursorRect:[self visibleRect] cursor:c];
+}
+- (BOOL)isAccessibilityElement { return YES; }
+- (NSAccessibilityRole)accessibilityRole { return NSAccessibilityGroupRole; }
+- (void)ticked:(NSTimer *)t { sga_push(23, sga_id_of(self), t == fast ? 1 : 0, 0, 0); }
+- (void)removeFromSuperview { [tick invalidate]; [fast invalidate]; tick = nil; fast = nil; [super removeFromSuperview]; }
+@end
+
+int sga_drawn(int a_width, int a_height)
+{
+	SGADrawn *d = [[SGADrawn alloc] initWithFrame:NSMakeRect(0, 0, a_width, a_height)];
+	d->wanted = NSMakeSize(a_width, a_height);
+	[d setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[d setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationVertical];
+	return sga_keep(d);
+}
+
+/* The top-left `a_width' by `a_height' device pixels of a Cairo image surface (the hosted
+   frame may be larger: it grows in steps), copied, tagged sRGB, shown at the view's size. */
+void sga_drawn_present(int a_id, void *a_cairo_surface, int a_width, int a_height)
+{
+	SGACanvas *c = sga_get(a_id);
+	cairo_surface_t *s = (cairo_surface_t *)a_cairo_surface;
+	if (!c || !s || cairo_surface_get_type(s) != CAIRO_SURFACE_TYPE_IMAGE) return;
+	cairo_surface_flush(s);
+	int w = MIN(a_width, cairo_image_surface_get_width(s)), h = MIN(a_height, cairo_image_surface_get_height(s));
+	int l_stride = cairo_image_surface_get_stride(s);
+	if (w <= 0 || h <= 0) return;
+	CGColorSpaceRef l_srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+	CFDataRef l_data = CFDataCreate(NULL, cairo_image_surface_get_data(s), (CFIndex)l_stride * h);
+	CGDataProviderRef l_provider = CGDataProviderCreateWithCFData(l_data);
+	CGImageRef l_image = CGImageCreate((size_t)w, (size_t)h, 8, 32, (size_t)l_stride, l_srgb,
+		kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little, l_provider, NULL, false, kCGRenderingIntentDefault);
+	CGDataProviderRelease(l_provider);
+	CFRelease(l_data);
+	CGColorSpaceRelease(l_srgb);
+	if (c->image) CGImageRelease(c->image);
+	c->image = l_image;
+	[c setNeedsDisplay:YES];
+}
+
+void sga_drawn_set_cursor(int a_id, int a_kind)
+{
+	SGADrawn *d = sga_get(a_id);
+	if (d->cursor_kind != a_kind) { d->cursor_kind = a_kind; [[d window] invalidateCursorRectsForView:d]; }
+}
+
+/* The tick every `a_tick_ms' and the fast tick every `a_fast_ms' (0: off), as events 23. */
+void sga_drawn_set_ticks(int a_id, int a_tick_ms, int a_fast_ms)
+{
+	SGADrawn *d = sga_get(a_id);
+	[d->tick invalidate]; d->tick = nil;
+	[d->fast invalidate]; d->fast = nil;
+	if (a_tick_ms > 0) {
+		d->tick = [NSTimer timerWithTimeInterval:a_tick_ms / 1000.0 target:d selector:@selector(ticked:) userInfo:nil repeats:YES];
+		[[NSRunLoop currentRunLoop] addTimer:d->tick forMode:NSRunLoopCommonModes];
+	}
+	if (a_fast_ms > 0) {
+		d->fast = [NSTimer timerWithTimeInterval:a_fast_ms / 1000.0 target:d selector:@selector(ticked:) userInfo:nil repeats:YES];
+		[[NSRunLoop currentRunLoop] addTimer:d->fast forMode:NSRunLoopCommonModes];
+	}
+}
+
+/* The dwell shot: event 23 with a = 2 and b = `a_serial', once, `a_ms' from now. */
+void sga_drawn_arm_dwell(int a_id, int a_ms, int a_serial)
+{
+	int l_id = a_id;
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)a_ms * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+		sga_push(23, l_id, 2, a_serial, 0);
+		sga_wake();
+	});
+}
+
+/* The hosted window's accessibility tree ("role: name" lines), which describe_accessibility
+   shows under the view's group. */
+void sga_drawn_set_description(int a_id, const char *a_text)
+{
+	((SGADrawn *)sga_get(a_id))->description = sga_string(a_text);
+}
+
+/* As the view would: an event put on the queue for the drawn view `a_id'. */
+void sga_test_drawn_event(int a_id, int a_type, int a, int b, int c) { sga_push(a_type, a_id, a, b, c); }
+
 /* ----------------------------------------------------------------- common */
 
 void sga_set_enabled(int a_id, int a_on)
@@ -3114,6 +3305,7 @@ const char *sga_accessible_role(int a_id)
 	if ([sga_core(a_id) isKindOfClass:[SGAStatus class]]) return sga_return(Kind_role, @"status");
 	if ([sga_core(a_id) isKindOfClass:[SGAToolbar class]]) return sga_return(Kind_role, @"toolbar");
 	if ([sga_core(a_id) isKindOfClass:[SGASwitch class]]) return sga_return(Kind_role, @"switch");
+	if ([sga_core(a_id) isKindOfClass:[SGADrawn class]]) return sga_return(Kind_role, @"group");
 	if ([sga_core(a_id) isKindOfClass:[SGARadioGroup class]] || [sga_core(a_id) isKindOfClass:[SGASegmented class]]) return sga_return(Kind_role, @"radio-group");
 	if ([sga_core(a_id) isKindOfClass:[SGADatePicker class]])
 		return sga_return(Kind_role, [(NSDatePicker *)sga_core(a_id) datePickerStyle] == NSDatePickerStyleClockAndCalendar ? @"grid" : @"spin-button");
@@ -3884,6 +4076,20 @@ static BOOL sga_is_switch(id a_element)
 
 static void sga_describe(id a_element, int a_depth, int a_within, NSMutableString *a_out)
 {
+	/* A drawn view (1i): a group named by its label, with the hosted window's own tree under it
+	   (its first line, the hosted window itself, left out). */
+	if ([a_element isKindOfClass:[SGADrawn class]]) {
+		SGADrawn *d = a_element;
+		for (int i = 0; i < a_depth; i++) [a_out appendString:@"  "];
+		[a_out appendFormat:@"group: %@\n", [d accessibilityLabel] ?: @""];
+		NSArray<NSString *> *l_lines = [d->description ?: @"" componentsSeparatedByString:@"\n"];
+		for (NSUInteger k = 1; k < [l_lines count]; k++) {
+			if (![l_lines[k] length]) continue;
+			for (int i = 0; i <= a_depth; i++) [a_out appendString:@"  "];
+			[a_out appendFormat:@"%@\n", [l_lines[k] stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@" "]] ];
+		}
+		return;
+	}
 	id l_role_value = sga_ax(a_element, @selector(accessibilityRole), NSAccessibilityRoleAttribute);
 	NSString *l_role = [l_role_value isKindOfClass:[NSString class]] ? l_role_value : nil;
 	NSString *l_name = sga_role_name(l_role);

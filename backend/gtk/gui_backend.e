@@ -1066,6 +1066,42 @@ feature -- Canvas
 		alias "sg_canvas_present($an_id, (void *) $a_cairo_surface);"
 		end
 
+	drawn (a_width, a_height: INTEGER): INTEGER
+			-- 1i: a drawn view (sg_drawn), and the six features after it.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_drawn($a_width, $a_height);"
+		end
+
+	drawn_present (an_id: INTEGER; a_surface: POINTER; a_width, a_height: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_drawn_present($an_id, (void *) $a_surface, $a_width, $a_height);"
+		end
+
+	drawn_set_cursor (an_id, a_kind: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_drawn_set_cursor($an_id, $a_kind);"
+		end
+
+	drawn_set_ticks (an_id, a_tick_ms, a_fast_ms: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_drawn_set_ticks($an_id, $a_tick_ms, $a_fast_ms);"
+		end
+
+	drawn_arm_dwell (an_id, a_ms, a_serial: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_drawn_arm_dwell($an_id, $a_ms, $a_serial);"
+		end
+
+	drawn_set_description (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_drawn_set_description($an_id, (const char *) $a_text);"
+		end
+
+	test_drawn_event (an_id, a_type, a_a, a_b, a_c: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_push5($a_type, $an_id, $a_a, $a_b, $a_c);"
+		end
+
 	scale_factor (an_id: INTEGER): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "{ int s = sg_scale_factor($an_id); return s < 1 ? 1 : s; }"

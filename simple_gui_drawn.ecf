@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration-1-23-0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.eiffel.com/developers/xml/configuration-1-23-0 http://www.eiffel.com/developers/xml/configuration-1-23-0.xsd" name="simple_gui_drawn" uuid="8C4E1F27-3A5D-4B69-9E7F-2D1C3B4A5E6F" library_target="simple_gui_drawn">
+	<description>GUI_DRAWN: any simple_widgets widget inside a native simple_gui window (spec 1i). A library of its own, so programs with native controls only never link simple_widgets.</description>
+
+	<target name="simple_gui_drawn">
+		<root all_classes="true"/>
+		<file_rule>
+			<exclude>/EIFGENs$</exclude>
+			<exclude>/\..*$</exclude>
+		</file_rule>
+		<option warning="warning">
+			<assertions precondition="true" postcondition="true" check="true" invariant="true" loop="true" supplier_precondition="true"/>
+		</option>
+		<setting name="dead_code_removal" value="feature"/>
+		<capability>
+			<concurrency support="scoop" use="scoop"/>
+			<void_safety support="all"/>
+		</capability>
+		<library name="base" location="$ISE_LIBRARY\library\base\base.ecf"/>
+		<library name="simple_gui" location="$SIMPLE_EIFFEL\simple_gui\simple_gui.ecf"/>
+		<library name="simple_widgets" location="$SIMPLE_EIFFEL\simple_widgets\simple_widgets.ecf"/>
+		<library name="simple_shell" location="$SIMPLE_EIFFEL\simple_shell\simple_shell.ecf"/>
+		<library name="simple_cairo" location="$SIMPLE_EIFFEL\simple_cairo\simple_cairo.ecf"/>
+		<cluster name="drawn" location=".\drawn\"/>
+	</target>
+
+	<target name="simple_gui_drawn_tests" extends="simple_gui_drawn">
+		<root class="DRAWN_TEST_APP" feature="make"/>
+		<setting name="console_application" value="true"/>
+		<cluster name="drawn_testing" location=".\drawn_testing\"/>
+	</target>
+</system>

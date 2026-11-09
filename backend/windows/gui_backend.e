@@ -108,6 +108,9 @@ feature -- Windows and containers
 		do
 			Result := register (Void)
 			create l_w.make (Current, Result, from_c (a_title), device (a_width.max (1)), device (a_height.max (1)))
+				-- the window's heartbeat and fast tick time the drawn views (1i)
+			l_w.set_on_tick (agent on_window_tick)
+			l_w.set_on_shell_event (agent on_window_shell_event)
 			if forced_dark_set then
 				l_w.set_theme (themed (forced_dark))
 			end
@@ -2097,6 +2100,98 @@ feature -- Canvas
 			end
 		end
 
+	drawn (a_width, a_height: INTEGER): INTEGER
+			-- 1i: a GUI_SW_DRAWN_VIEW whose input becomes events 18 to 22, in logical pixels.
+		local
+			l_v: GUI_SW_DRAWN_VIEW
+		do
+			create l_v.make_view (device (a_width.max (1)).to_double, device (a_height.max (1)).to_double)
+			Result := register (l_v)
+			l_v.set_on_pointer (agent report_drawn_pointer (Result, ?, ?, ?, ?, ?))
+			l_v.set_on_resize (agent report_resize (Result, ?, ?))
+			l_v.set_on_key (agent report_drawn_key (Result, ?, ?))
+			l_v.set_on_char (agent report_drawn_char (Result, ?))
+			l_v.set_on_wheel (agent report_drawn_wheel (Result, ?))
+			l_v.set_on_multi_press (agent report_drawn_multi (Result, ?, ?, ?))
+			l_v.set_on_leave (agent report_drawn_leave (Result))
+			l_v.on_hover_change.extend (agent (a_id: INTEGER; a_on: BOOLEAN)
+				do
+					if not a_on then
+						report_drawn_leave (a_id)
+					end
+				end (Result, ?))
+			l_v.on_focus_change.extend (agent (a_id: INTEGER; a_on: BOOLEAN)
+				do
+					push (22, a_id, a_on.to_integer, 0, 0)
+				end (Result, ?))
+			drawn_timers.force ([0, 0, {INTEGER_64} 0, {INTEGER_64} 0, {INTEGER_64} 0, 0], Result)
+		end
+
+	drawn_present (an_id: INTEGER; a_surface: POINTER; a_width, a_height: INTEGER)
+			-- Keep a copy of the frame's top-left `a_width' by `a_height' device pixels, shown 1:1.
+		local
+			l_copy: POINTER
+		do
+			if attached {GUI_SW_DRAWN_VIEW} widget (an_id) as al_v and then a_surface /= default_pointer
+				and then a_width > 0 and then a_height > 0
+			then
+				l_copy := c_copy_region (a_surface, a_width, a_height)
+				if l_copy /= default_pointer then
+					if presented.has (an_id) then
+						c_surface_destroy (presented.item (an_id))
+					end
+					presented.force (l_copy, an_id)
+					al_v.present_image (create {CAIRO_SURFACE}.make_from_handle (l_copy), 1.0)
+					changed
+				end
+			end
+		end
+
+	drawn_set_cursor (an_id, a_kind: INTEGER)
+		do
+			if attached {GUI_SW_DRAWN_VIEW} widget (an_id) as al_v and then a_kind >= 0 and then a_kind <= 6 then
+				al_v.set_hosted_cursor (a_kind)
+			end
+		end
+
+	drawn_set_ticks (an_id, a_tick_ms, a_fast_ms: INTEGER)
+			-- On the host windows' heartbeat and fast tick: see `check_drawn_timers'.
+		local
+			l_now: INTEGER_64
+		do
+			if attached drawn_timers.item (an_id) as al_t then
+				l_now := clock.milliseconds
+				al_t.tick_ms := a_tick_ms.max (0)
+				al_t.fast_ms := a_fast_ms.max (0)
+				al_t.next_tick := l_now + al_t.tick_ms
+				al_t.next_fast := l_now + al_t.fast_ms
+				pace_fast_timer
+			end
+		end
+
+	drawn_arm_dwell (an_id, a_ms, a_serial: INTEGER)
+		do
+			if attached drawn_timers.item (an_id) as al_t then
+				al_t.serial := a_serial
+				if a_ms > 0 then
+					al_t.dwell_due := clock.milliseconds + a_ms
+				else
+					al_t.dwell_due := 0
+				end
+				pace_fast_timer
+			end
+		end
+
+	drawn_set_description (an_id: INTEGER; a_text: POINTER)
+		do
+			drawn_trees.force (from_c (a_text), an_id)
+		end
+
+	test_drawn_event (an_id, a_type, a_a, a_b, a_c: INTEGER)
+		do
+			push (a_type, an_id, a_a, a_b, a_c)
+		end
+
 	scale_factor (an_id: INTEGER): INTEGER
 		do
 			Result := scale (an_id).ceiling.max (1)
@@ -2504,8 +2599,251 @@ feature -- Test doors (act on the widget as a user would)
 	describe_accessibility (a_window: INTEGER): POINTER
 		do
 			if attached windows.item (a_window) as al_w then
-				Result := c_text (al_w.describe_accessibility)
+				Result := c_text (with_drawn_trees (al_w.describe_accessibility))
 			end
+		end
+
+feature {NONE} -- Drawn views (1i)
+
+	drawn_timers: HASH_TABLE [TUPLE [tick_ms, fast_ms: INTEGER; next_tick, next_fast, dwell_due: INTEGER_64; serial: INTEGER], INTEGER]
+			-- Each drawn view's ticks (0: off) and their next times, and its pending dwell shot
+			-- (`dwell_due' 0: none), on `clock'.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	drawn_trees: HASH_TABLE [STRING_32, INTEGER]
+			-- Each drawn view's hosted accessibility tree, as GUI_DRAWN last gave it.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	clock: SIMPLE_MONOTONIC_CLOCK
+		once ("OBJECT")
+			create Result
+		end
+
+	fast_timer_ms: INTEGER
+			-- The host windows' fast timer as last set (0: off).
+
+	Dwell_pace_ms: INTEGER = 50
+			-- How finely a pending dwell shot is timed.
+
+	pace_fast_timer
+			-- Run the host windows' fast timer at the finest pace any drawn view needs (its fast
+			-- tick, or `Dwell_pace_ms' while a dwell shot is pending); off when none needs it.
+		local
+			l_ms: INTEGER
+		do
+			across drawn_timers as ic loop
+				if ic.fast_ms > 0 and then (l_ms = 0 or else ic.fast_ms < l_ms) then
+					l_ms := ic.fast_ms
+				end
+				if ic.dwell_due > 0 and then (l_ms = 0 or else Dwell_pace_ms < l_ms) then
+					l_ms := Dwell_pace_ms
+				end
+			end
+			if l_ms /= fast_timer_ms then
+				fast_timer_ms := l_ms
+				across windows as ic loop
+					if attached ic as al_w and then al_w.is_window_open then
+						if l_ms > 0 then
+							al_w.set_fast_timer (l_ms)
+						else
+							al_w.kill_fast_timer
+						end
+					end
+				end
+			end
+		end
+
+	on_window_tick
+			-- A host window's heartbeat.
+		do
+			check_drawn_timers
+		end
+
+	on_window_shell_event (a_type, a_x, a_y: INTEGER)
+			-- A host window's fast tick (25) times the drawn views too.
+		do
+			if a_type = 25 then
+				check_drawn_timers
+			end
+		end
+
+	check_drawn_timers
+			-- Each drawn view's ticks and dwell shot that are due (event 23), once each.
+		local
+			l_now: INTEGER_64
+			l_dwell_fired: BOOLEAN
+		do
+			l_now := clock.milliseconds
+			across drawn_timers as ic loop
+				if ic.tick_ms > 0 and then l_now >= ic.next_tick then
+					ic.next_tick := l_now + ic.tick_ms
+					push (23, @ic.key, 0, 0, 0)
+				end
+				if ic.fast_ms > 0 and then l_now >= ic.next_fast then
+					ic.next_fast := l_now + ic.fast_ms
+					push (23, @ic.key, 1, 0, 0)
+				end
+				if ic.dwell_due > 0 and then l_now >= ic.dwell_due then
+					ic.dwell_due := 0
+					l_dwell_fired := True
+					push (23, @ic.key, 2, ic.serial, 0)
+				end
+			end
+			if l_dwell_fired then
+				pace_fast_timer
+			end
+		end
+
+	report_drawn_pointer (an_id, a_kind: INTEGER; a_x, a_y: REAL_64; a_button, a_modifiers: INTEGER)
+		do
+			if attached widget (an_id) as al_w then
+				push (18, an_id, logical (al_w, a_x), logical (al_w, a_y), a_kind + a_button * 16 + a_modifiers * 256)
+			end
+		end
+
+	report_drawn_multi (an_id, a_count: INTEGER; a_x, a_y: REAL_64)
+			-- A double (5) or triple (6) press of the primary button.
+		do
+			if attached {GUI_SW_DRAWN_VIEW} widget (an_id) as al_v then
+				push (18, an_id, logical (al_v, a_x), logical (al_v, a_y),
+					(if a_count >= 3 then 6 else 5 end) + 16 + al_v.modifiers * 256)
+			end
+		end
+
+	report_drawn_leave (an_id: INTEGER)
+		do
+			if attached {GUI_SW_DRAWN_VIEW} widget (an_id) as al_v then
+				push (18, an_id, logical (al_v, al_v.last_x), logical (al_v, al_v.last_y), 4 + al_v.modifiers * 256)
+			end
+		end
+
+	report_drawn_wheel (an_id, a_delta: INTEGER)
+		do
+			if attached {GUI_SW_DRAWN_VIEW} widget (an_id) as al_v then
+				push (19, an_id, logical (al_v, al_v.last_x), logical (al_v, al_v.last_y), a_delta)
+			end
+		end
+
+	report_drawn_key (an_id, a_vk: INTEGER; a_shift: BOOLEAN)
+			-- A key down, as a GDK keyval (the shared vocabulary GUI_DRAWN maps back); keys it
+			-- has no word for are left out.
+		do
+			if gdk_keyval (a_vk) > 0 and then attached {GUI_SW_DRAWN_VIEW} widget (an_id) as al_v then
+				push (20, an_id, gdk_keyval (a_vk), 1, al_v.modifiers * 256)
+			end
+		end
+
+	report_drawn_char (an_id, a_code: INTEGER)
+			-- A character: text, and Return, Tab, Backspace and Escape as WM_CHAR gives them;
+			-- the other control characters (Ctrl+C is 3) are shortcuts, not text.
+		do
+			if a_code >= 32 or else a_code = 8 or else a_code = 9 or else a_code = 13 or else a_code = 27 then
+				push (21, an_id, a_code, 0, 0)
+			end
+		end
+
+	gdk_keyval (a_vk: INTEGER): INTEGER
+			-- The GDK keyval for Windows virtual key `a_vk' (GUI_DRAWN.virtual_key's inverse); 0 for none.
+		do
+			inspect a_vk
+			when 65 .. 90 then Result := a_vk + 0x20
+			when 48 .. 57 then Result := a_vk
+			when 32 then Result := 0x20
+			when 13 then Result := 0xFF0D
+			when 27 then Result := 0xFF1B
+			when 9 then Result := 0xFF09
+			when 8 then Result := 0xFF08
+			when 46 then Result := 0xFFFF
+			when 45 then Result := 0xFF63
+			when 36 then Result := 0xFF50
+			when 35 then Result := 0xFF57
+			when 33 then Result := 0xFF55
+			when 34 then Result := 0xFF56
+			when 37 then Result := 0xFF51
+			when 38 then Result := 0xFF52
+			when 39 then Result := 0xFF53
+			when 40 then Result := 0xFF54
+			when 112 .. 123 then Result := 0xFFBE + a_vk - 112
+			when 16 then Result := 0xFFE1
+			when 17 then Result := 0xFFE3
+			when 18 then Result := 0xFFE9
+			when 188 then Result := 0x2C
+			when 190 then Result := 0x2E
+			when 189 then Result := 0x2D
+			when 187 then Result := 0x3D
+			else
+			end
+		ensure
+			non_negative: Result >= 0
+		end
+
+	with_drawn_trees (a_text: STRING_32): STRING_32
+			-- `a_text' with each drawn view's hosted tree under its "group:" line (the tree's
+			-- first line, the hosted window itself, left out), as on GTK and macOS.
+		local
+			l_lines: LIST [STRING_32]
+			l_indent: INTEGER
+			l_line: STRING_32
+		do
+			create Result.make (a_text.count + 256)
+			l_lines := a_text.split ('%N')
+			across l_lines as ic loop
+				Result.append (ic)
+				Result.append_character ('%N')
+				across drawn_trees as al_tree loop
+					if attached widget (@al_tree.key) as al_v and then not al_v.is_hidden then
+						l_line := ic.twin
+						l_indent := l_line.count
+						l_line.left_adjust
+						l_indent := l_indent - l_line.count
+						if l_line.same_string ({STRING_32} "group: " + al_v.accessible_name) then
+							across al_tree.split ('%N') as al_sub loop
+								if @al_sub.cursor_index > 1 then
+									l_line := al_sub.twin
+									l_line.left_adjust
+									if not l_line.is_empty then
+										Result.append (create {STRING_32}.make_filled (' ', l_indent + 2))
+										Result.append (l_line)
+										Result.append_character ('%N')
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+			if not a_text.is_empty and then a_text [a_text.count] /= '%N' and then Result.count > 0 then
+				Result.remove_tail (1)
+			end
+		end
+
+	c_copy_region (a_surface: POINTER; a_width, a_height: INTEGER): POINTER
+			-- A new image surface: the top-left `a_width' by `a_height' of `a_surface' (an image
+			-- surface, possibly larger), or null.
+		external
+			"C inline use <cairo.h>"
+		alias
+			"[
+				cairo_surface_t *s = (cairo_surface_t *) $a_surface, *c;
+				cairo_t *cr;
+				int w = $a_width, h = $a_height;
+				if (cairo_surface_get_type(s) != CAIRO_SURFACE_TYPE_IMAGE) return NULL;
+				cairo_surface_flush(s);
+				if (w > cairo_image_surface_get_width(s)) w = cairo_image_surface_get_width(s);
+				if (h > cairo_image_surface_get_height(s)) h = cairo_image_surface_get_height(s);
+				if (w <= 0 || h <= 0) return NULL;
+				c = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+				cr = cairo_create(c);
+				cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+				cairo_set_source_surface(cr, s, 0, 0);
+				cairo_paint(cr);
+				cairo_destroy(cr);
+				return c;
+			]"
 		end
 
 feature {NONE} -- State
