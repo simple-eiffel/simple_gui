@@ -730,6 +730,141 @@ feature -- Common widget state
 		alias "sga_tree_table_set_cell($an_id, $a_node, $a_column, (const char *) $a_text);"
 		end
 
+	calendar: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_calendar();"
+		end
+
+	menu_button (a_text: POINTER; a_split: BOOLEAN): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_menu_button((const char *) $a_text, $a_split ? 1 : 0);"
+		end
+
+	menu_button_set_menu (an_id: INTEGER; a_menu: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_menu_button_set_menu($an_id, (void *) $a_menu);"
+		end
+
+	level_bar (a_min, a_max: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_level_bar($a_min, $a_max);"
+		end
+
+	level_bar_set (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_level_bar_set($an_id, $a_value);"
+		end
+
+	level_bar_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_level_bar_value($an_id);"
+		end
+
+	level_bar_set_warning (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_level_bar_set_warning($an_id, $a_value);"
+		end
+
+	level_bar_set_critical (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_level_bar_set_critical($an_id, $a_value);"
+		end
+
+	popover: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_popover();"
+		end
+
+	popover_set_content (an_id, a_child: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_popover_set_content($an_id, $a_child);"
+		end
+
+	popover_show_at (an_id, an_anchor: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_popover_show_at($an_id, $an_anchor);"
+		end
+
+	popover_hide (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_popover_hide($an_id);"
+		end
+
+	popover_is_shown (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_popover_is_shown($an_id) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	search_field: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_search_field();"
+		end
+
+	token_field: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_token_field();"
+		end
+
+	token_field_extend (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_token_field_extend($an_id, (const char *) $a_text);"
+		end
+
+	token_field_remove (an_id, i: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_token_field_remove($an_id, $i);"
+		end
+
+	token_field_wipe_out (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_token_field_wipe_out($an_id);"
+		end
+
+	token_field_count (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_token_field_count($an_id);"
+		end
+
+	token_field_item (an_id, i: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_token_field_item($an_id, $i);"
+		end
+
+	path_control: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_path_control();"
+		end
+
+	path_control_set (an_id: INTEGER; a_path: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_path_control_set($an_id, (const char *) $a_path);"
+		end
+
+	path_control_count (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_path_control_count($an_id);"
+		end
+
+	path_control_part (an_id, i: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_path_control_part($an_id, $i);"
+		end
+
+	rating (a_maximum: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_rating($a_maximum);"
+		end
+
+	rating_set (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_rating_set($an_id, $a_value);"
+		end
+
+	rating_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_rating_value($an_id);"
+		end
+
 	set_tooltip (an_id: INTEGER; a_text: POINTER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_set_tooltip($an_id, (const char *) $a_text);"
@@ -897,6 +1032,26 @@ feature -- Dialogs
 		alias "return sga_ask($a_window, (const char *) $a_title, (const char *) $a_text);"
 		end
 
+	ask_text (a_window: INTEGER; a_title, a_prompt, an_initial: POINTER): POINTER
+		external "C blocking inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_ask_text($a_window, (const char *) $a_title, (const char *) $a_prompt, (const char *) $an_initial);"
+		end
+
+	confirm_with_check (a_window: INTEGER; a_title, a_text, a_check: POINTER): INTEGER
+		external "C blocking inline use %"simple_gui_appkit.h%""
+		alias "return sga_confirm_with_check($a_window, (const char *) $a_title, (const char *) $a_text, (const char *) $a_check);"
+		end
+
+	choose_font (a_window: INTEGER; a_title, a_family: POINTER; a_points: REAL_64; a_bold, an_italic: BOOLEAN): POINTER
+		external "C blocking inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_choose_font($a_window, (const char *) $a_title, (const char *) $a_family, $a_points, $a_bold ? 1 : 0, $an_italic ? 1 : 0);"
+		end
+
+	show_about (a_name, a_version, a_copyright, a_comments: POINTER)
+		external "C blocking inline use %"simple_gui_appkit.h%""
+		alias "sga_show_about((const char *) $a_name, (const char *) $a_version, (const char *) $a_copyright, (const char *) $a_comments);"
+		end
+
 feature -- Appearance
 
 	is_dark: BOOLEAN
@@ -976,6 +1131,21 @@ feature -- Test driver
 	test_auto_cancel_dialogs (a_ms: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_auto_cancel_dialogs($a_ms);"
+		end
+
+	test_dismiss_popover (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_dismiss_popover($an_id);"
+		end
+
+	test_type_tokens (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_type_tokens($an_id, (const char *) $a_text);"
+		end
+
+	test_rate (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_rate($an_id, $a_value);"
 		end
 
 	test_menu (an_item_id: INTEGER)
