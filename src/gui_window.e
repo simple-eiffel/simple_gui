@@ -32,6 +32,7 @@ feature {NONE} -- Initialization
 			l_c: C_STRING
 		do
 			create close_requested_actions.make
+			create shortcut_actions.make (4)
 			title := a_title.to_string_32
 			l_c := backend.to_c (a_title)
 			register (backend.window (l_c.item, a_width, a_height))
@@ -54,6 +55,49 @@ feature -- Access
 			-- Run when the user asks to close the window.
 
 	is_closed: BOOLEAN
+
+	is_fullscreen: BOOLEAN
+			-- Does the window fill the screen, without its frame?
+		require
+			open: not is_closed
+		do
+			Result := backend.window_is_fullscreen (id)
+		end
+
+	shortcut_count: INTEGER
+			-- Shortcuts added with `add_shortcut'.
+		do
+			Result := shortcut_actions.count
+		end
+
+feature -- Shortcuts and full screen (1m)
+
+	add_shortcut (a_shortcut: READABLE_STRING_GENERAL; an_action: PROCEDURE)
+			-- Run `an_action' when the keys `a_shortcut' names are pressed while this window is
+			-- active, wherever the focus is; neutral as in menus ("primary+K", "primary+shift+F",
+			-- "F5"), with a modifier unless it is F1 to F12. No menu item is needed.
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+			named: not a_shortcut.is_empty
+		local
+			l_c: C_STRING
+		do
+			shortcut_actions.extend (an_action)
+			l_c := backend.to_c (a_shortcut)
+			backend.window_add_shortcut (id, l_c.item, shortcut_actions.count)
+		ensure
+			one_more: shortcut_count = old shortcut_count + 1
+		end
+
+	set_fullscreen (a_on: BOOLEAN)
+			-- Fill the screen, without the window's frame, or go back.
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+		do
+			backend.window_set_fullscreen (id, a_on)
+		end
 
 feature -- Element change
 
@@ -161,10 +205,15 @@ feature {GUI_APPLICATION} -- Events
 				else
 					close_requested_actions.call (Void)
 				end
+			elseif a_type = 25 and not is_closed and then shortcut_actions.valid_index (a_a) then
+				shortcut_actions.i_th (a_a).call (Void)
 			end
 		end
 
 feature {NONE} -- Implementation
+
+	shortcut_actions: ARRAYED_LIST [PROCEDURE]
+			-- Each shortcut's action, by its number (from 1).
 
 	shortcuts_installed: BOOLEAN
 

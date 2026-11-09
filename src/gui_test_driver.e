@@ -379,6 +379,33 @@ feature -- User actions
 			application.drain_queue
 		end
 
+	press_shortcut (a_window: GUI_WINDOW; a_shortcut: READABLE_STRING_GENERAL)
+			-- Press `a_shortcut' in `a_window' as a user would.
+		require
+			has_application: has_application
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_shortcut)
+			backend.test_press_shortcut (a_window.id, l_c.item)
+			settle
+		end
+
+	wait (a_ms: INTEGER)
+			-- Turn the loop about `a_ms' milliseconds, firing events as they come (timers): in
+			-- 10 ms turns, each of which an event may end early, so it is at most `a_ms'.
+		require
+			has_application: has_application
+			non_negative: a_ms >= 0
+		local
+			i: INTEGER
+		do
+			from i := 1 until i > a_ms // 10 loop
+				application.process_events (10)
+				i := i + 1
+			end
+		end
+
 	pill_tip (a_widget: GUI_WIDGET): STRING_32
 			-- The tip `a_widget''s reference pill shows now; empty when it shows none.
 		require

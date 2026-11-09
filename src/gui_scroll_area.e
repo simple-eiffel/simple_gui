@@ -38,6 +38,17 @@ feature -- Basic operations
 			backend.scroll_area_scroll_to (id, a_x, a_y)
 		end
 
+	scroll_to_widget (a_widget: GUI_WIDGET)
+			-- Scroll so `a_widget', which is inside the content, starts at the top left (as far
+			-- as the scroll goes). Quiet.
+		require
+			gui_thread: is_gui_thread
+		do
+			if attached content as al_content then
+				scroll_to ((a_widget.x - al_content.x).max (0), (a_widget.y - al_content.y).max (0))
+			end
+		end
+
 feature {NONE} -- Implementation
 
 	backend_set_content (a_child: INTEGER)

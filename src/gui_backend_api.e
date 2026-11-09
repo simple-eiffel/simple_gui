@@ -966,6 +966,57 @@ feature -- Common widget state
 		deferred
 		end
 
+	timer_start (a_timer_id, a_ms: INTEGER; a_repeat: BOOLEAN)
+			-- 1m: event 24 (id 0, a = `a_timer_id') every `a_ms' milliseconds, or once.
+		deferred
+		end
+
+	timer_stop (a_timer_id: INTEGER)
+			-- No more events from timer `a_timer_id'.
+		deferred
+		end
+
+	clipboard_text: POINTER
+			-- The clipboard's text now; empty when it holds none.
+		deferred
+		end
+
+	clipboard_set_text (a_text: POINTER)
+		deferred
+		end
+
+	window_add_shortcut (a_window: INTEGER; a_shortcut: POINTER; a_shortcut_id: INTEGER)
+			-- Event 25 (id = `a_window', a = `a_shortcut_id') when the neutral `a_shortcut' is
+			-- pressed while `a_window' is active, wherever the focus is.
+		deferred
+		end
+
+	window_set_fullscreen (a_window: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	window_is_fullscreen (a_window: INTEGER): BOOLEAN
+		deferred
+		end
+
+	follow_system_appearance
+			-- Undo `set_dark': follow the system's light or dark again (event 10 if it changes).
+		deferred
+		end
+
+	list_scroll_to_row (an_id, a_row: INTEGER)
+		deferred
+		end
+
+	table_scroll_to_row (an_id, a_row: INTEGER)
+		deferred
+		end
+
+	test_press_shortcut (a_window: INTEGER; a_shortcut: POINTER)
+			-- As the user pressing `a_shortcut' in `a_window' (event 25 when it is one of its own).
+		deferred
+		end
+
 	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
 			-- 1l: widget `an_id' wears the reference pill `a_code' at `a_corner' (1 top-left,
 			-- 2 top-right, 3 bottom-left, 4 bottom-right; leading and trailing mirror right to

@@ -35,6 +35,8 @@ feature {NONE} -- Initialization
 			create appearance_changed_actions.make
 			create menu.make
 			create pills.make
+			create timers.make (4)
+			create clipboard
 			create dialogs
 			create mailbox.make
 			l_n := backend.to_c (a_name)
@@ -75,6 +77,16 @@ feature -- Access
 	pills: GUI_PILLS
 			-- The application's reference pills (1l), put on widgets by code.
 
+	clipboard: GUI_CLIPBOARD
+			-- The system clipboard (1m).
+
+	appearance: INTEGER
+			-- `Appearance_system' (the default), `Appearance_light' or `Appearance_dark'.
+
+	Appearance_system: INTEGER = 0
+	Appearance_light: INTEGER = 1
+	Appearance_dark: INTEGER = 2
+
 	Heartbeat_ms: INTEGER = 250
 
 feature -- Status
@@ -93,6 +105,56 @@ feature -- Status
 			available: is_available
 		do
 			Result := backend.is_dark
+		end
+
+feature -- Timers (1m)
+
+	every (a_ms: INTEGER; an_action: PROCEDURE): GUI_TIMER
+			-- Run `an_action' every `a_ms' milliseconds, on the GUI processor, until canceled.
+		require
+			gui_thread: is_gui_thread
+			positive: a_ms > 0
+		do
+			last_timer_id := last_timer_id + 1
+			create Result.make (last_timer_id, a_ms, True, an_action)
+			timers.force (Result, Result.id)
+		ensure
+			active: Result.is_active and Result.is_repeating
+		end
+
+	after (a_ms: INTEGER; an_action: PROCEDURE): GUI_TIMER
+			-- Run `an_action' once, `a_ms' milliseconds from now, on the GUI processor.
+		require
+			gui_thread: is_gui_thread
+			positive: a_ms > 0
+		do
+			last_timer_id := last_timer_id + 1
+			create Result.make (last_timer_id, a_ms, False, an_action)
+			timers.force (Result, Result.id)
+		ensure
+			active: Result.is_active and not Result.is_repeating
+		end
+
+feature -- Appearance (1m)
+
+	set_appearance (an_appearance: INTEGER)
+			-- Light or dark whatever the system says, or follow the system again; fires
+			-- `appearance_changed_actions' as a change of the system's does.
+		require
+			gui_thread: is_gui_thread
+			known: an_appearance >= Appearance_system and an_appearance <= Appearance_dark
+		do
+			appearance := an_appearance
+			inspect an_appearance
+			when Appearance_light then
+				backend.set_dark (False)
+			when Appearance_dark then
+				backend.set_dark (True)
+			else
+				backend.follow_system_appearance
+			end
+		ensure
+			set: appearance = an_appearance
 		end
 
 feature -- Reference pills
@@ -220,6 +282,13 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 					appearance_changed_actions.call ([l_a = 1])
 				when 11 then
 					take_messages (mailbox)
+				when 24 then
+					if attached timers.item (l_a) as al_timer then
+						al_timer.fire
+						if not al_timer.is_active then
+							timers.remove (l_a)
+						end
+					end
 				else
 					if attached widgets.item (l_id) as al_widget then
 						al_widget.dispatch (l_type, l_a, l_b, l_c)
@@ -234,6 +303,11 @@ feature {GUI_TEST_DRIVER} -- Registry
 			-- Every widget, by id.
 
 feature {NONE} -- Implementation
+
+	timers: HASH_TABLE [GUI_TIMER, INTEGER]
+			-- The active timers, by id.
+
+	last_timer_id: INTEGER
 
 	take_messages (a_mailbox: separate GUI_MAILBOX)
 			-- Copy out every message, release the mailbox, then fire `message_actions'.
