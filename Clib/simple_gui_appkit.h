@@ -134,6 +134,28 @@ const char *sga_menu_item_text(int a_item_id);   /* what the item shows */
 const char *sga_open_file(int a_window, const char *a_title, int a_save, const char *a_extensions);
 int sga_message(int a_window, const char *a_title, const char *a_text, int a_confirm);
 
+/* 1g: five more controls */
+int sga_dropdown(void);
+void sga_dropdown_extend(int a_id, const char *a_text);   /* the first is selected, silently */
+void sga_dropdown_wipe_out(int a_id);
+void sga_dropdown_select(int a_id, int a_row);   /* silent */
+int sga_dropdown_selected(int a_id);   /* 0: none */
+int sga_spin_box(int a_min, int a_max);
+void sga_spin_box_set_value(int a_id, int a_value);   /* silent */
+int sga_spin_box_value(int a_id);
+void sga_spin_box_set_step(int a_id, int a_step);
+int sga_progress_bar(void);
+void sga_progress_bar_set(int a_id, int a_value);   /* 0 .. 100 */
+int sga_progress_bar_value(int a_id);
+int sga_toolbar(void);
+void sga_toolbar_extend(int a_toolbar, int a_button);
+void sga_toolbar_add_separator(int a_toolbar);
+int sga_status_bar(void);
+void sga_status_bar_set_text(int a_id, const char *a_text);
+const char *sga_status_bar_text(int a_id);
+void sga_window_set_toolbar(int a_window, int a_toolbar);   /* in the title bar; the content keeps its size */
+void sga_window_set_status_bar(int a_window, int a_bar);   /* in the window's bottom bar */
+
 /* Appearance */
 int sga_is_dark(void);
 void sga_set_dark(int a_on);
@@ -144,7 +166,8 @@ void sga_test_click(int a_id);
 void sga_test_click_header(int a_id, int a_column);   /* header clicked, as a user */
 void sga_test_expand(int a_id, int a_node, int a_on);   /* expansion, as a user */
 void sga_test_type(int a_id, const char *a_text);
-void sga_test_choose(int a_id, int a_row);
+void sga_test_choose(int a_id, int a_row);   /* a list's, table's, tree's, tabs' or dropdown's row, as a user */
+void sga_test_set_number(int a_id, int a_value);   /* typed, then Return, as a user */
 void sga_test_menu(int a_item_id);
 void sga_test_request_close(int a_window);
 void sga_test_focus(int a_id);   /* as a click: key window, first responder */

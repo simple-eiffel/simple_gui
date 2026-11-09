@@ -107,12 +107,24 @@ static int sga_gdk_key(NSEvent *e)
 
 /* ------------------------------------------------------------------ views */
 
+/* With a status bar (1g) the window draws its bottom bar under the content view, so the
+   content view leaves that strip unpainted. */
 @interface SGAContent : NSView
+{
+@public
+	CGFloat bottom_bar;
+}
 @end
 @implementation SGAContent
 - (BOOL)isFlipped { return YES; }
-- (BOOL)isOpaque { return YES; }
-- (void)drawRect:(NSRect)a_rect { [[NSColor windowBackgroundColor] setFill]; NSRectFill(a_rect); }
+- (BOOL)isOpaque { return bottom_bar <= 0; }
+- (void)drawRect:(NSRect)a_rect
+{
+	NSRect l_painted = [self bounds];
+	l_painted.size.height -= bottom_bar;
+	[[NSColor windowBackgroundColor] setFill];
+	NSRectFill(NSIntersectionRect(a_rect, l_painted));
+}
 @end
 
 @interface SGAWrapper : NSView
@@ -411,19 +423,30 @@ int sga_window(const char *a_title, int a_width, int a_height)
 	return sga_keep(w);
 }
 
+@interface SGAStatus : NSTextField
+@end
+@implementation SGAStatus
+@end
+
+/* Each window's content bottom constraint, by window id: it ends above a status bar. */
+static NSMutableDictionary<NSNumber *, NSLayoutConstraint *> *s_content_bottom;
+
 void sga_window_set_content(int a_window, int a_child)
 {
 	NSWindow *w = sga_get(a_window);
-	NSView *l_content = [w contentView];
+	SGAContent *l_content = [w contentView];
 	NSView *v = sga_get(a_child);
-	for (NSView *l_old in [[l_content subviews] copy]) [l_old removeFromSuperview];
+	for (NSView *l_old in [[l_content subviews] copy]) if (![l_old isKindOfClass:[SGAStatus class]]) [l_old removeFromSuperview];
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
 	[l_content addSubview:v];
+	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:l_content.bottomAnchor constant:-l_content->bottom_bar];
 	[NSLayoutConstraint activateConstraints:@[
 		[v.leadingAnchor constraintEqualToAnchor:l_content.leadingAnchor],
 		[v.trailingAnchor constraintEqualToAnchor:l_content.trailingAnchor],
 		[v.topAnchor constraintEqualToAnchor:l_content.topAnchor],
-		[v.bottomAnchor constraintEqualToAnchor:l_content.bottomAnchor]]];
+		l_bottom]];
+	if (!s_content_bottom) s_content_bottom = [NSMutableDictionary dictionary];
+	s_content_bottom[@(a_window)] = l_bottom;
 }
 
 void sga_window_show(int a_window) { [(NSWindow *)sga_get(a_window) orderFront:nil]; }
@@ -610,8 +633,12 @@ static void sga_place(SGASlot *a_slot, int a_alignment)
 	[NSLayoutConstraint activateConstraints:a_slot->placing];
 }
 
-/* Buttons keep their natural width (GTK: halign START); everything else fills. */
-static int sga_default_alignment(NSView *a_child) { return [a_child isKindOfClass:[NSButton class]] ? 1 : 0; }
+/* Buttons (a dropdown too) and spin boxes keep their natural width (GTK: halign START);
+   everything else fills. */
+static int sga_default_alignment(NSView *a_child)
+{
+	return [a_child isKindOfClass:[NSButton class]] || [a_child isKindOfClass:NSClassFromString(@"SGASpin")] ? 1 : 0;
+}
 
 void sga_stack_extend(int a_stack, int a_child, int a_stretch)
 {
@@ -899,11 +926,19 @@ void sga_label_set_wrap_width(int a_id, int a_characters)
 void sga_label_set(int a_id, const char *a_text) { [(NSTextField *)sga_get(a_id) setStringValue:sga_string(a_text)]; }
 const char *sga_label_get(int a_id) { return sga_return(Kind_label, [(NSTextField *)sga_get(a_id) stringValue]); }
 
+/* A toolbar button's item, by button: its label (the overflow menu's text) and enabled state follow the button. */
+static NSMapTable<NSButton *, NSToolbarItem *> *s_toolbar_item;
+
 int sga_button(const char *a_text)
 {
 	return sga_keep([NSButton buttonWithTitle:sga_string(a_text) target:s_target action:@selector(clicked:)]);
 }
-void sga_button_set(int a_id, const char *a_text) { [(NSButton *)sga_get(a_id) setTitle:sga_string(a_text)]; }
+void sga_button_set(int a_id, const char *a_text)
+{
+	NSButton *b = sga_get(a_id);
+	[b setTitle:sga_string(a_text)];
+	[[s_toolbar_item objectForKey:b] setLabel:[b title]];
+}
 const char *sga_button_get(int a_id) { return sga_return(Kind_button, [(NSButton *)sga_get(a_id) title]); }
 
 /* A check box: a switch button. Setting its state from code sends no action (silent); a
@@ -1484,17 +1519,341 @@ void sga_test_expand(int a_id, int a_node, int a_on)
 	if (a_on) [t expandItem:n]; else [t collapseItem:n];
 }
 
+/* ---------------------------------------------------- 1g: five more controls */
+
+/* A dropdown: an NSPopUpButton. Items go in through its menu, which keeps duplicate texts
+   (addItemWithTitle: drops an earlier item with the same title). The first item is selected
+   without an event, as on GTK. A user's choice of another row sends selection (4, a = row);
+   choosing the shown row again, or selecting from code, sends nothing. */
+@interface SGADropdown : NSPopUpButton
+{
+@public
+	NSInteger shown;   /* the row last reported or set; 0 = none */
+}
+@end
+@implementation SGADropdown
+- (void)chosen:(id)a_sender
+{
+	NSInteger r = [self indexOfSelectedItem] + 1;
+	(void)a_sender;
+	if (r != shown) {
+		shown = r;
+		if (!s_suppress) sga_push(4, sga_id_of(self), (int)r, 0, 0);
+	}
+}
+@end
+
+int sga_dropdown(void)
+{
+	SGADropdown *d = [[SGADropdown alloc] initWithFrame:NSZeroRect pullsDown:NO];
+	[d setTarget:d];
+	[d setAction:@selector(chosen:)];
+	return sga_keep(d);
+}
+
+void sga_dropdown_extend(int a_id, const char *a_text)
+{
+	SGADropdown *d = sga_get(a_id);
+	[[d menu] addItemWithTitle:sga_string(a_text) action:NULL keyEquivalent:@""];
+	if ([d numberOfItems] == 1) [d selectItemAtIndex:0];
+	d->shown = [d indexOfSelectedItem] + 1;
+}
+
+void sga_dropdown_wipe_out(int a_id)
+{
+	SGADropdown *d = sga_get(a_id);
+	[d removeAllItems];
+	d->shown = 0;
+}
+
+void sga_dropdown_select(int a_id, int a_row)
+{
+	SGADropdown *d = sga_get(a_id);
+	[d selectItemAtIndex:a_row - 1];
+	d->shown = [d indexOfSelectedItem] + 1;
+}
+
+int sga_dropdown_selected(int a_id) { return (int)[(NSPopUpButton *)sga_get(a_id) indexOfSelectedItem] + 1; }
+
+/* As a user: the row chosen from the menu, then the button's action. */
+static void sga_test_choose_option(int a_id, int a_row)
+{
+	SGADropdown *d = sga_get(a_id);
+	[d selectItemAtIndex:a_row - 1];
+	[d sendAction:[d action] to:[d target]];
+}
+
+/* A spin box: a text field with an NSStepper beside it, in one view. `value' is the last
+   committed number. The user commits with a stepper click, Return, or by leaving the field:
+   the text is read as a whole number and clamped to the range (text that is not a number
+   goes back to `value'); a change sends text changed (2, a = the new value). Typed numbers
+   are not snapped to the step, as GtkSpinButton's are not by default. Setting the value from
+   code sends nothing. For assistive tools the view is one group, read as "spin-button". */
+@interface SGASpin : NSView <NSTextFieldDelegate>
+{
+@public
+	NSTextField *field;
+	NSStepper *stepper;
+	NSInteger value, minimum, maximum;
+}
+@end
+@implementation SGASpin
+- (BOOL)isAccessibilityElement { return YES; }
+- (NSAccessibilityRole)accessibilityRole { return NSAccessibilityGroupRole; }
+- (id)accessibilityValue { return [NSString stringWithFormat:@"%ld", (long)value]; }
+- (void)show
+{
+	[field setStringValue:[NSString stringWithFormat:@"%ld", (long)value]];
+	[stepper setIntegerValue:value];
+}
+- (void)commit:(NSInteger)a_value
+{
+	NSInteger v = MAX(minimum, MIN(maximum, a_value));
+	BOOL l_changed = v != value;
+	value = v;
+	[self show];
+	if (l_changed && !s_suppress) sga_push(2, sga_id_of(self), (int)v, 0, 0);
+}
+- (void)commitText
+{
+	NSScanner *l_scan = [NSScanner scannerWithString:[[field stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]];
+	NSInteger v;
+	if ([l_scan scanInteger:&v] && [l_scan isAtEnd]) [self commit:v];
+	else [self show];
+}
+- (void)stepped:(id)a_sender { (void)a_sender; [self commit:[stepper integerValue]]; }
+- (void)entered:(id)a_sender { (void)a_sender; [self commitText]; }
+- (void)controlTextDidEndEditing:(NSNotification *)n { (void)n; [self commitText]; }
+@end
+
+int sga_spin_box(int a_min, int a_max)
+{
+	SGASpin *s = [[SGASpin alloc] initWithFrame:NSZeroRect];
+	s->minimum = a_min;
+	s->maximum = a_max;
+	s->value = a_min;
+	s->field = [NSTextField textFieldWithString:@""];
+	s->stepper = [[NSStepper alloc] init];
+	[s->stepper setValueWraps:NO];   /* AppKit's default wraps from the maximum to the minimum */
+	[s->stepper setAutorepeat:YES];
+	[s->stepper setMinValue:a_min];
+	[s->stepper setMaxValue:a_max];
+	[s->stepper setIncrement:1];
+	[s->stepper setTarget:s];
+	[s->stepper setAction:@selector(stepped:)];
+	[s->field setDelegate:s];
+	[s->field setTarget:s];
+	[s->field setAction:@selector(entered:)];
+	[s->field setAlignment:NSTextAlignmentRight];
+	[s->field setBaseWritingDirection:NSWritingDirectionLeftToRight];   /* a number reads left to right */
+	for (NSView *v in @[s->field, s->stepper]) {
+		[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+		[s addSubview:v];
+	}
+	NSUInteger l_min_digits = [[NSString stringWithFormat:@"%d", a_min] length];
+	NSUInteger l_max_digits = [[NSString stringWithFormat:@"%d", a_max] length];
+	NSUInteger l_digits = MAX(l_min_digits, l_max_digits);
+	CGFloat l_width = ceil([@"0" sizeWithAttributes:@{NSFontAttributeName: [s->field font]}].width * l_digits) + 16;
+	[NSLayoutConstraint activateConstraints:@[
+		[s->field.leadingAnchor constraintEqualToAnchor:s.leadingAnchor],
+		[s->stepper.leadingAnchor constraintEqualToAnchor:s->field.trailingAnchor constant:4],
+		[s->stepper.trailingAnchor constraintEqualToAnchor:s.trailingAnchor],
+		[s->field.centerYAnchor constraintEqualToAnchor:s.centerYAnchor],
+		[s->stepper.centerYAnchor constraintEqualToAnchor:s.centerYAnchor],
+		[s->field.topAnchor constraintGreaterThanOrEqualToAnchor:s.topAnchor],
+		[s->stepper.topAnchor constraintGreaterThanOrEqualToAnchor:s.topAnchor],
+		[s.heightAnchor constraintEqualToConstant:MAX([s->field fittingSize].height, [s->stepper fittingSize].height)]]];
+	/* Wide enough for the range; a filling alignment may widen the field. */
+	NSLayoutConstraint *l_wide = [s->field.widthAnchor constraintEqualToConstant:MAX(l_width, 48)];
+	[l_wide setPriority:NSLayoutPriorityDefaultHigh];
+	[[s->field.widthAnchor constraintGreaterThanOrEqualToConstant:MAX(l_width, 48)] setActive:YES];
+	[l_wide setActive:YES];
+	[s show];
+	return sga_keep(s);
+}
+
+void sga_spin_box_set_value(int a_id, int a_value)
+{
+	SGASpin *s = sga_get(a_id);
+	s->value = a_value;
+	[s show];
+}
+
+int sga_spin_box_value(int a_id) { return (int)((SGASpin *)sga_get(a_id))->value; }
+void sga_spin_box_set_step(int a_id, int a_step) { [((SGASpin *)sga_get(a_id))->stepper setIncrement:a_step]; }
+
+/* As a user: the number typed into the field, then Return. */
+void sga_test_set_number(int a_id, int a_value)
+{
+	SGASpin *s = sga_get(a_id);
+	[s->field setStringValue:[NSString stringWithFormat:@"%d", a_value]];
+	[s commitText];
+}
+
+/* A progress bar: a determinate NSProgressIndicator from 0 to 100. */
+int sga_progress_bar(void)
+{
+	NSProgressIndicator *p = [[NSProgressIndicator alloc] initWithFrame:NSZeroRect];
+	[p setStyle:NSProgressIndicatorStyleBar];
+	[p setIndeterminate:NO];
+	[p setMinValue:0];
+	[p setMaxValue:100];
+	[p setDoubleValue:0];
+	[p setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[[p.widthAnchor constraintGreaterThanOrEqualToConstant:100] setActive:YES];   /* a bar has no natural width */
+	return sga_keep(p);
+}
+
+void sga_progress_bar_set(int a_id, int a_value) { [(NSProgressIndicator *)sga_get(a_id) setDoubleValue:a_value]; }
+int sga_progress_bar_value(int a_id) { return (int)lround([(NSProgressIndicator *)sga_get(a_id) doubleValue]); }
+
+/* A status bar: one line of small text in the window's bottom bar (the content border on the
+   bottom edge, which AppKit draws as on Finder's windows). The label is in the content view,
+   so snapshots and assistive tools see it, and the program's content ends above the bar.
+   Read as "status": AppKit has no such role. */
+static const CGFloat Sga_status_height = 24;
+
+int sga_status_bar(void)
+{
+	SGAStatus *l = [SGAStatus labelWithString:@""];
+	[l setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
+	[l setTextColor:[NSColor secondaryLabelColor]];
+	[l setLineBreakMode:NSLineBreakByTruncatingTail];
+	[l setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	return sga_keep(l);
+}
+
+void sga_status_bar_set_text(int a_id, const char *a_text) { [(NSTextField *)sga_get(a_id) setStringValue:sga_string(a_text)]; }
+const char *sga_status_bar_text(int a_id) { return sga_return(Kind_label, [(NSTextField *)sga_get(a_id) stringValue]); }
+
+void sga_window_set_status_bar(int a_window, int a_bar)
+{
+	NSWindow *w = sga_get(a_window);
+	SGAContent *c = [w contentView];
+	SGAStatus *l = sga_get(a_bar);
+	for (NSView *l_old in [[c subviews] copy]) if ([l_old isKindOfClass:[SGAStatus class]]) [l_old removeFromSuperview];
+	[l setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[c addSubview:l];
+	[NSLayoutConstraint activateConstraints:@[
+		[l.leadingAnchor constraintEqualToAnchor:c.leadingAnchor constant:10],
+		[l.trailingAnchor constraintLessThanOrEqualToAnchor:c.trailingAnchor constant:-10],
+		[l.centerYAnchor constraintEqualToAnchor:c.bottomAnchor constant:-Sga_status_height / 2]]];
+	[w setAutorecalculatesContentBorderThickness:NO forEdge:NSMinYEdge];
+	[w setContentBorderThickness:Sga_status_height forEdge:NSMinYEdge];
+	c->bottom_bar = Sga_status_height;
+	[s_content_bottom[@(a_window)] setConstant:-Sga_status_height];
+	[c setNeedsDisplay:YES];
+}
+
+/* A toolbar: an NSToolbar in the window's title bar, as Mac programs have. Its buttons are the
+   program's own NSButtons, each the view of an item; a separator is an item holding a thin
+   vertical line (NSToolbar has drawn no separator of its own since macOS 11). Users cannot
+   customize it, and each has its own identifier, so two windows' toolbars never share items.
+   The widget is a view outside any window, standing for the toolbar: hiding it hides the
+   toolbar. */
+@interface SGAToolbar : NSView <NSToolbarDelegate>
+{
+@public
+	NSToolbar *toolbar;
+	NSMutableArray<NSToolbarItem *> *items;
+}
+@end
+@implementation SGAToolbar
+- (NSArray<NSToolbarItemIdentifier> *)identifiers
+{
+	NSMutableArray *a = [NSMutableArray array];
+	for (NSToolbarItem *i in items) [a addObject:[i itemIdentifier]];
+	return a;
+}
+- (NSArray<NSToolbarItemIdentifier> *)toolbarDefaultItemIdentifiers:(NSToolbar *)t { (void)t; return [self identifiers]; }
+- (NSArray<NSToolbarItemIdentifier> *)toolbarAllowedItemIdentifiers:(NSToolbar *)t { (void)t; return [self identifiers]; }
+- (NSToolbarItem *)toolbar:(NSToolbar *)t itemForItemIdentifier:(NSToolbarItemIdentifier)an_id willBeInsertedIntoToolbar:(BOOL)f
+{
+	(void)t; (void)f;
+	for (NSToolbarItem *i in items) if ([[i itemIdentifier] isEqualToString:an_id]) return i;
+	return nil;
+}
+/* The toolbar loads its default items when first asked for them; an item added after that is
+   inserted at the end. */
+- (void)add:(NSToolbarItem *)an_item
+{
+	[items addObject:an_item];
+	NSUInteger l_shown = [[toolbar items] count];
+	if (l_shown < [items count]) [toolbar insertItemWithItemIdentifier:[an_item itemIdentifier] atIndex:(NSInteger)l_shown];
+}
+- (void)setHidden:(BOOL)a_hidden { [super setHidden:a_hidden]; [toolbar setVisible:!a_hidden]; }
+@end
+
+int sga_toolbar(void)
+{
+	SGAToolbar *h = [[SGAToolbar alloc] initWithFrame:NSZeroRect];
+	int l_id = sga_keep(h);
+	h->items = [NSMutableArray array];
+	h->toolbar = [[NSToolbar alloc] initWithIdentifier:[NSString stringWithFormat:@"sga_toolbar_%d", l_id]];
+	[h->toolbar setDelegate:h];
+	[h->toolbar setAllowsUserCustomization:NO];
+	[h->toolbar setAutosavesConfiguration:NO];
+	[h->toolbar setDisplayMode:NSToolbarDisplayModeIconOnly];
+	return l_id;
+}
+
+void sga_toolbar_extend(int a_toolbar, int a_button)
+{
+	SGAToolbar *h = sga_get(a_toolbar);
+	NSButton *b = sga_get(a_button);
+	NSToolbarItem *i = [[NSToolbarItem alloc] initWithItemIdentifier:[NSString stringWithFormat:@"sga_item_%d", a_button]];
+	[i setView:b];
+	[i setLabel:[b title]];
+	[i setAutovalidates:NO];
+	[i setEnabled:[b isEnabled]];
+	if (!s_toolbar_item) s_toolbar_item = [NSMapTable weakToStrongObjectsMapTable];
+	[s_toolbar_item setObject:i forKey:b];
+	[h add:i];
+}
+
+void sga_toolbar_add_separator(int a_toolbar)
+{
+	static int s_separators;
+	SGAToolbar *h = sga_get(a_toolbar);
+	NSBox *l_line = [[NSBox alloc] initWithFrame:NSMakeRect(0, 0, 1, 20)];
+	[l_line setBoxType:NSBoxSeparator];
+	[l_line setAccessibilityElement:NO];
+	[l_line setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[NSLayoutConstraint activateConstraints:@[[l_line.widthAnchor constraintEqualToConstant:1], [l_line.heightAnchor constraintEqualToConstant:20]]];
+	NSToolbarItem *i = [[NSToolbarItem alloc] initWithItemIdentifier:[NSString stringWithFormat:@"sga_separator_%d", ++s_separators]];
+	[i setView:l_line];
+	[i setLabel:@""];
+	[i setAutovalidates:NO];
+	[h add:i];
+}
+
+/* The content keeps the size the program asked for: the toolbar adds to the title bar. */
+void sga_window_set_toolbar(int a_window, int a_toolbar)
+{
+	NSWindow *w = sga_get(a_window);
+	SGAToolbar *h = sga_get(a_toolbar);
+	NSSize l_size = [[w contentView] frame].size;
+	[w setToolbar:h->toolbar];
+	[w setContentSize:l_size];
+}
+
 /* ----------------------------------------------------------------- common */
 
 void sga_set_enabled(int a_id, int a_on)
 {
 	id o = sga_core(a_id);
+	if ([o isKindOfClass:[SGASpin class]]) {
+		[((SGASpin *)o)->field setEnabled:a_on != 0];
+		[((SGASpin *)o)->stepper setEnabled:a_on != 0];
+	}
 	if ([o isKindOfClass:[NSControl class]]) [(NSControl *)o setEnabled:a_on != 0];
+	[[s_toolbar_item objectForKey:o] setEnabled:a_on != 0];
 }
 
 int sga_is_enabled(int a_id)
 {
 	id o = sga_core(a_id);
+	if ([o isKindOfClass:[SGASpin class]]) return [((SGASpin *)o)->field isEnabled] ? 1 : 0;
 	return [o isKindOfClass:[NSControl class]] ? ([(NSControl *)o isEnabled] ? 1 : 0) : 1;
 }
 
@@ -1638,7 +1997,9 @@ static NSString *sga_role_name(NSString *a_role)
 		NSAccessibilityImageRole: @"img", NSAccessibilityScrollAreaRole: @"generic",
 		NSAccessibilityGroupRole: @"generic", NSAccessibilityCheckBoxRole: @"checkbox",
 		NSAccessibilitySliderRole: @"slider", NSAccessibilityTextAreaRole: @"text-box",
-		NSAccessibilityTabGroupRole: @"tab-list"};
+		NSAccessibilityTabGroupRole: @"tab-list", NSAccessibilityPopUpButtonRole: @"combo-box",
+		NSAccessibilityProgressIndicatorRole: @"progress-bar", NSAccessibilityToolbarRole: @"toolbar",
+		NSAccessibilityIncrementorRole: @"spin-button"};
 	return l_names[a_role] ?: @"generic";
 }
 
@@ -1646,6 +2007,9 @@ const char *sga_accessible_role(int a_id)
 {
 	if ([sga_core(a_id) isKindOfClass:[SGAGridTable class]]) return sga_return(Kind_role, @"tree-grid");
 	if ([sga_core(a_id) isKindOfClass:[SGATree class]]) return sga_return(Kind_role, @"tree");
+	if ([sga_core(a_id) isKindOfClass:[SGASpin class]]) return sga_return(Kind_role, @"spin-button");
+	if ([sga_core(a_id) isKindOfClass:[SGAStatus class]]) return sga_return(Kind_role, @"status");
+	if ([sga_core(a_id) isKindOfClass:[SGAToolbar class]]) return sga_return(Kind_role, @"toolbar");
 	return sga_return(Kind_role, sga_role_name([sga_accessible(a_id) accessibilityRole]));
 }
 
@@ -2063,6 +2427,10 @@ void sga_test_type(int a_id, const char *a_text)
 
 void sga_test_choose(int a_id, int a_row)
 {
+	if ([sga_get(a_id) isKindOfClass:[SGADropdown class]]) {
+		sga_test_choose_option(a_id, a_row);
+		return;
+	}
 	if ([s_inner[a_id] isKindOfClass:[SGATree class]]) {   /* a node, by its number: shown, then clicked */
 		SGATree *l_tree = s_inner[a_id];
 		SGANode *n = sga_tree_node(l_tree, a_row);
@@ -2238,9 +2606,13 @@ static void sga_describe(id a_element, int a_depth, int a_within, NSMutableStrin
 	id l_role_value = sga_ax(a_element, @selector(accessibilityRole), NSAccessibilityRoleAttribute);
 	NSString *l_role = [l_role_value isKindOfClass:[NSString class]] ? l_role_value : nil;
 	NSString *l_name = sga_role_name(l_role);
+	/* A control may answer through its cell: the view says what it is. */
+	id l_view = [a_element isKindOfClass:[NSCell class]] ? [(NSCell *)a_element controlView] : a_element;
 	int l_within = [a_element isKindOfClass:[SGAGridTable class]] ? 1 : [a_element isKindOfClass:[SGATree class]] ? 2 : a_within;
 	if ([a_element isKindOfClass:[SGAGridTable class]]) l_name = @"tree-grid";
 	else if ([a_element isKindOfClass:[SGATree class]]) l_name = @"tree";
+	else if ([a_element isKindOfClass:[SGASpin class]]) l_name = @"spin-button";
+	else if ([l_view isKindOfClass:[SGAStatus class]]) l_name = @"status";
 	else if (a_within == 2) {
 		if ([l_role isEqualToString:NSAccessibilityRowRole]) l_name = @"tree-item";
 		else if ([l_role isEqualToString:NSAccessibilityCellRole]) l_name = @"generic";
@@ -2268,7 +2640,8 @@ static void sga_describe(id a_element, int a_depth, int a_within, NSMutableStrin
 		[a_out appendFormat:@"%@: %@\n", l_name, l_text];
 		l_next = a_depth + 1;
 	}
-	id l_children = sga_ax(a_element, @selector(accessibilityChildren), NSAccessibilityChildrenAttribute);
+	id l_children = [a_element isKindOfClass:[SGASpin class]] ? nil   /* its field and stepper are the one spin button */
+		: sga_ax(a_element, @selector(accessibilityChildren), NSAccessibilityChildrenAttribute);
 	if (a_depth < 16 && [l_children isKindOfClass:[NSArray class]]) for (id c in l_children) sga_describe(c, l_next, l_within, a_out);
 }
 
@@ -2277,6 +2650,11 @@ const char *sga_describe_accessibility(int a_window)
 	NSMutableString *l_text = [NSMutableString stringWithString:@"application: "];
 	NSWindow *w = sga_get(a_window);
 	[l_text appendFormat:@"%@\n", [w title]];
+	/* The toolbar (1g) is in the title bar, beside the content view rather than in it. */
+	if ([[w toolbar] isVisible]) for (id c in [w accessibilityChildren]) {
+		id l_role = sga_ax(c, @selector(accessibilityRole), NSAccessibilityRoleAttribute);
+		if ([l_role isKindOfClass:[NSString class]] && [l_role isEqualToString:NSAccessibilityToolbarRole]) sga_describe(c, 1, 0, l_text);
+	}
 	for (id c in [[w contentView] accessibilityChildren]) sga_describe(c, 1, 0, l_text);
 	return sga_return(Kind_tree, l_text);
 }
