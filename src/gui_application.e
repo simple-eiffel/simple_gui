@@ -135,6 +135,16 @@ feature -- Timers (1m)
 			active: Result.is_active and not Result.is_repeating
 		end
 
+feature -- Pick and drop (1q)
+
+	pebble_in_flight: detachable ANY
+			-- What the user has picked and not yet dropped.
+
+	is_picking: BOOLEAN
+		do
+			Result := pebble_in_flight /= Void
+		end
+
 feature -- Appearance (1m)
 
 	set_appearance (an_appearance: INTEGER)
@@ -282,6 +292,12 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 					appearance_changed_actions.call ([l_a = 1])
 				when 11 then
 					take_messages (mailbox)
+				when 30 then
+					begin_pick (l_id, l_a)
+				when 31 then
+					finish_pick (l_id, l_a)
+				when 32 then
+					pebble_in_flight := Void
 				when 24 then
 					if attached timers.item (l_a) as al_timer then
 						al_timer.fire
@@ -303,6 +319,58 @@ feature {GUI_TEST_DRIVER} -- Registry
 			-- Every widget, by id.
 
 feature {NONE} -- Implementation
+
+	begin_pick (a_source, a_row: INTEGER)
+			-- Event 30: lift the source's pebble and tell the backend which widgets take it
+			-- (with their labels, for `Pick_menu'); or cancel when there is none.
+		local
+			l_ids: ARRAYED_LIST [INTEGER]
+			l_labels: STRING_32
+			l_buffer: MANAGED_POINTER
+			l_c: C_STRING
+			i: INTEGER
+		do
+			pebble_in_flight := Void
+			if attached widgets.item (a_source) as al_source and then attached al_source.pebble_at_row (a_row) as al_pebble then
+				pebble_in_flight := al_pebble
+				create l_ids.make (4)
+				create l_labels.make_empty
+				across widgets as ic loop
+					if ic.has_drop_actions and then ic.is_enabled and then ic.drop_actions.accepts (al_pebble) then
+						l_ids.extend (ic.id)
+						if not l_labels.is_empty then
+							l_labels.append_character ('%N')
+						end
+						l_labels.append (ic.accessible_label)
+					end
+				end
+				create l_buffer.make ((l_ids.count * 4).max (4))
+				from i := 1 until i > l_ids.count loop
+					l_buffer.put_integer_32 (l_ids [i], (i - 1) * 4)
+					i := i + 1
+				end
+				l_c := backend.to_c (l_labels)
+				backend.pick_targets (a_source, l_buffer.item, l_ids.count, l_c.item)
+			else
+				backend.pick_cancel
+			end
+		end
+
+	finish_pick (a_target, a_row: INTEGER)
+			-- Event 31: the pebble lands on `a_target' (row `a_row'); its accepting actions run.
+		do
+			if attached pebble_in_flight as al_pebble then
+				pebble_in_flight := Void
+				if attached widgets.item (a_target) as al_target and then al_target.has_drop_actions
+					and then al_target.drop_actions.accepts (al_pebble)
+				then
+					al_target.set_last_drop_row (a_row)
+					al_target.drop_actions.drop (al_pebble)
+				end
+			end
+		ensure
+			landed: not is_picking
+		end
 
 	timers: HASH_TABLE [GUI_TIMER, INTEGER]
 			-- The active timers, by id.

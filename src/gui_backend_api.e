@@ -1013,6 +1013,48 @@ feature -- Common widget state
 		deferred
 		end
 
+	widget_set_pick (an_id, a_mode: INTEGER; a_is_source, a_by_row: BOOLEAN)
+			-- 1q: whether a pick starts on `an_id' and how (1 drag, 2 click, 3 menu). A start pushes
+			-- event 30 (id = source, a = the row or node under the pointer when `a_by_row', else 0).
+		deferred
+		end
+
+	widget_set_drop_target (an_id: INTEGER; an_internal, a_files, a_text: BOOLEAN)
+			-- Whether `an_id' takes pebbles, files from other programs, text from other programs.
+		deferred
+		end
+
+	pick_targets (a_source: INTEGER; a_ids: POINTER; a_count: INTEGER; a_labels: POINTER)
+			-- The answer to event 30: the `a_count' widgets (INTEGER_32s at `a_ids') that take the
+			-- pebble, and their labels (newline-separated, for the menu mode). Only these light
+			-- as accepting; a drop on one pushes 31 (id = target, a = row, 0 for none), a cancel 32.
+		deferred
+		end
+
+	pick_cancel
+			-- The answer to event 30 when the source has no pebble: end the gesture, no event.
+		deferred
+		end
+
+	test_pick (a_source, a_row: INTEGER)
+			-- As the user starting a pick on `a_source' (row `a_row', 0 for the widget).
+		deferred
+		end
+
+	test_drop (a_target, a_row: INTEGER)
+			-- As the user dropping on `a_target' (row `a_row'), or choosing it in the menu mode.
+		deferred
+		end
+
+	test_cancel_pick
+		deferred
+		end
+
+	test_is_accepting (a_target: INTEGER): BOOLEAN
+			-- Does `a_target' light as taking the pebble in flight now?
+		deferred
+		end
+
 	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
 			-- 1l: widget `an_id' wears the reference pill `a_code' at `a_corner' (1 top-left,
 			-- 2 top-right, 3 bottom-left, 4 bottom-right; leading and trailing mirror right to

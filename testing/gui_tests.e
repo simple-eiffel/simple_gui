@@ -1994,6 +1994,74 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_pick_and_drop_typed
+			-- 1q-a: a pick lights only the targets whose actions take the pebble; a drop runs
+			-- them with it; a cancel runs nothing; a row's pebble lands on a row; every mode.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_source: GUI_LABEL
+			l_takes_cell, l_takes_text: GUI_LABEL
+			l_rows, l_landing: GUI_LIST
+			l_cell_got, l_text_runs, l_row_got: CELL [INTEGER]
+			l_text_got: CELL [STRING_32]
+			l_mode: INTEGER
+		do
+			create l_cell_got.put (0)
+			create l_text_runs.put (0)
+			create l_row_got.put (0)
+			create l_text_got.put ({STRING_32} "")
+			create l_window.make ("Pick and drop", 420, 360)
+			create l_stack.make_vertical
+			create l_source.make ("A note")
+			l_source.set_pebble (create {CELL [INTEGER]}.put (42))
+			create l_takes_cell.make ("Takes notes")
+			l_takes_cell.drop_actions.extend (agent (a_note: CELL [INTEGER]; a_got: CELL [INTEGER]) do a_got.put (a_note.item) end (?, l_cell_got))
+			create l_takes_text.make ("Takes text")
+			l_takes_text.drop_actions.extend (agent (a_text: STRING_32; a_runs: CELL [INTEGER]) do a_runs.put (a_runs.item + 1) end (?, l_text_runs))
+			create l_rows.make
+			l_rows.extend ("one")
+			l_rows.extend ("two")
+			l_rows.set_row_pebble_function (agent (a_row: INTEGER): detachable ANY do Result := {STRING_32} "row " + a_row.out end)
+			create l_landing.make
+			l_landing.extend ("first")
+			l_landing.extend ("second")
+			l_landing.extend ("third")
+			l_landing.drop_actions.extend (agent (a_text: STRING_32; a_got: CELL [STRING_32]; a_list: GUI_LIST; a_row: CELL [INTEGER])
+				do a_got.put (a_text); a_row.put (a_list.last_drop_row) end (?, l_text_got, l_landing, l_row_got))
+			l_stack.extend (l_source)
+			l_stack.extend (l_takes_cell)
+			l_stack.extend (l_takes_text)
+			l_stack.extend (l_rows)
+			l_stack.extend (l_landing)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("a source", l_source.is_pebble_source and not l_takes_cell.is_pebble_source)
+			from l_mode := {GUI_WIDGET}.Pick_drag until l_mode > {GUI_WIDGET}.Pick_menu loop
+				l_source.set_pick_mode (l_mode)
+				l_cell_got.put (0)
+				driver.pick (l_source, 0)
+				assert ("picking " + l_mode.out, app.is_picking)
+				assert ("the note target lights " + l_mode.out, driver.is_accepting (l_takes_cell))
+				assert ("the text target does not " + l_mode.out, not driver.is_accepting (l_takes_text) and not driver.is_accepting (l_landing))
+				driver.drop (l_takes_cell, 0)
+				assert ("dropped " + l_mode.out, l_cell_got.item = 42 and not app.is_picking)
+				l_mode := l_mode + 1
+			end
+			l_cell_got.put (0)
+			driver.pick (l_source, 0)
+			driver.cancel_pick
+			assert ("a cancel runs nothing", l_cell_got.item = 0 and not app.is_picking)
+			driver.pick (l_rows, 2)
+			assert ("a row's pebble", attached {STRING_32} app.pebble_in_flight as al_p and then al_p.same_string ("row 2"))
+			assert ("the text targets light", driver.is_accepting (l_landing) and driver.is_accepting (l_takes_text))
+			driver.drop (l_landing, 3)
+			assert ("landed on a row", l_text_got.item.same_string ("row 2") and l_row_got.item = 3)
+			assert ("the note action never ran for text", l_cell_got.item = 0)
+			l_window.close
+		end
+
 	test_rich_text_ranges_round_trip
 			-- Formatting from code is silent and reads back; positions count characters, so an
 			-- emoji (two UTF-16 units on macOS and Windows) is one.

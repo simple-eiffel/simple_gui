@@ -102,6 +102,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_fullscreen_toggles, "fullscreen_toggles")
 				run_test (agent t.test_appearance_can_be_chosen, "appearance_can_be_chosen")
 				run_test (agent t.test_scrolling_into_view, "scrolling_into_view")
+				run_test (agent t.test_pick_and_drop_typed, "pick_and_drop_typed")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then

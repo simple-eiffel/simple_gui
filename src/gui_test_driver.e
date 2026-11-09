@@ -406,6 +406,41 @@ feature -- User actions
 			end
 		end
 
+	pick (a_source: GUI_WIDGET; a_row: INTEGER)
+			-- Start a pick on `a_source' (row `a_row', 0 for the widget itself) as a user would.
+		require
+			has_application: has_application
+		do
+			backend.test_pick (a_source.id, a_row)
+			settle
+		end
+
+	drop (a_target: GUI_WIDGET; a_row: INTEGER)
+			-- Drop what is picked on `a_target' (row `a_row'), as a user would.
+		require
+			has_application: has_application
+		do
+			backend.test_drop (a_target.id, a_row)
+			settle
+		end
+
+	cancel_pick
+		require
+			has_application: has_application
+		do
+			backend.test_cancel_pick
+			settle
+		end
+
+	is_accepting (a_target: GUI_WIDGET): BOOLEAN
+			-- Does `a_target' show that it takes the pebble in flight?
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.test_is_accepting (a_target.id)
+		end
+
 	pill_tip (a_widget: GUI_WIDGET): STRING_32
 			-- The tip `a_widget''s reference pill shows now; empty when it shows none.
 		require
