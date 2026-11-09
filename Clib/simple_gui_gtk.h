@@ -102,8 +102,14 @@ static int sg_id_of(gpointer o) { return GPOINTER_TO_INT(g_object_get_data(G_OBJ
 static void sg_on_click(GtkButton *b, gpointer d) { (void) d; if (!sg_quiet) sg_push(1, sg_id_of(b), 0, 0); }
 static void sg_on_changed(GtkEditable *e, gpointer d) { (void) d; if (!sg_quiet) sg_push(2, sg_id_of(e), 0, 0); }
 static void sg_on_activate(GtkEntry *e, gpointer d) { (void) d; if (!sg_quiet) sg_push(3, sg_id_of(e), 0, 0); }
+/* A selection is reported only when it changes ("sg-row", the row last selected, 1-based): GTK
+   says "row-selected" again for the same row when a shown list takes the focus. */
 static void sg_on_row(GtkListBox *l, GtkListBoxRow *r, gpointer d) {
-    (void) d; if (!sg_quiet) sg_push(4, sg_id_of(l), r ? gtk_list_box_row_get_index(r) + 1 : 0, 0);
+    int now = r ? gtk_list_box_row_get_index(r) + 1 : 0;
+    (void) d;
+    if (now == GPOINTER_TO_INT(g_object_get_data(G_OBJECT(l), "sg-row"))) return;
+    g_object_set_data(G_OBJECT(l), "sg-row", GINT_TO_POINTER(now));
+    if (!sg_quiet) sg_push(4, sg_id_of(l), now, 0);
 }
 static gboolean sg_on_close(GtkWindow *w, gpointer d) { (void) d; sg_push(6, sg_id_of(w), 0, 0); return TRUE; }
 static void sg_on_menu(GSimpleAction *a, GVariant *p, gpointer d) { (void) a; (void) p; sg_push(5, 0, GPOINTER_TO_INT(d), 0); }

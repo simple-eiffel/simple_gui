@@ -1989,7 +1989,8 @@ feature -- The remaining controls (1j)
 			settle_window
 			l_list.scroll_to_row (90)
 			settle_window
-			assert ("quiet", l_list.selected_index = 2 and l_list.selection_actions.fire_count = 0)
+			assert ("quiet: selected " + l_list.selected_index.out + ", fired " + l_list.selection_actions.fire_count.out,
+				l_list.selected_index = 2 and l_list.selection_actions.fire_count = 0)
 			l_window.close
 		end
 
