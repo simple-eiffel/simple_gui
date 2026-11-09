@@ -205,15 +205,19 @@ feature -- Windows and containers
 		do
 			if a_vertical then
 				create l_col.make
-				l_col.set_padding (0.0)
-				l_col.set_gap (a_spacing.max (0).to_double)
+					-- 12 clear around a stack, as GTK and AppKit keep
+				l_col.set_padding (scaled (Stack_margin))
+				l_col.set_gap (scaled (a_spacing))
 				Result := register (l_col)
+				margins.force (scaled (Stack_margin), Result)
 			else
 				create l_row.make
-				l_row.set_gap (a_spacing.max (0).to_double)
+				l_row.set_padding (scaled (Stack_margin))
+				l_row.set_gap (scaled (a_spacing))
 					-- children fill the row's height, as in a GTK box and an NSStackView
 				l_row.set_cross_axis ({SW_ROW}.Cross_stretch)
 				Result := register (l_row)
+				margins.force (scaled (Stack_margin), Result)
 			end
 		end
 
@@ -236,7 +240,7 @@ feature -- Windows and containers
 	stack_set_spacing (a_stack, a_spacing: INTEGER)
 		do
 			if attached {SW_BOX_CONTAINER} widget (a_stack) as al_box then
-				al_box.set_gap (a_spacing.max (0).to_double)
+				al_box.set_gap (scaled (a_spacing))
 			end
 		end
 
@@ -259,9 +263,17 @@ feature -- Windows and containers
 		end
 
 	grid: INTEGER
+		local
+			l_g: SW_GRID
 		do
-			Result := register (create {SW_GRID}.make)
+			create l_g.make
+			l_g.set_padding (scaled (Stack_margin))
+			Result := register (l_g)
+			margins.force (scaled (Stack_margin), Result)
 		end
+
+	Stack_margin: INTEGER = 12
+			-- Logical pixels kept clear around a stack's or a grid's children, on every platform.
 
 	grid_put (a_grid, a_child, a_row, a_column, a_rows, a_columns: INTEGER)
 		do
@@ -273,7 +285,7 @@ feature -- Windows and containers
 	grid_set_spacing (a_grid, a_row_gap, a_column_gap: INTEGER)
 		do
 			if attached {SW_GRID} widget (a_grid) as al_g then
-				al_g.set_gaps (a_row_gap.max (0).to_double, a_column_gap.max (0).to_double)
+				al_g.set_gaps (scaled (a_row_gap), scaled (a_column_gap))
 			end
 		end
 
@@ -652,11 +664,10 @@ feature -- Controls
 		end
 
 	slider (a_min, a_max: INTEGER; a_vertical: BOOLEAN): INTEGER
-			-- (simple_widgets' slider is horizontal; a vertical one is drawn horizontally.)
 		local
 			l_s: GUI_SW_SLIDER
 		do
-			create l_s.make_range (a_min, a_max)
+			create l_s.make_range (a_min, a_max, a_vertical)
 			Result := register (l_s)
 			l_s.set_on_change (agent report_slider (Result, ?))
 		end
@@ -719,12 +730,14 @@ feature -- Controls
 		end
 
 	time_picker: INTEGER
-			-- Midnight, until set.
+			-- The current time, until set.
 		local
 			l_t: SW_TIME_PICKER
+			l_now: SIMPLE_TIME
 		do
 			create l_t.make_picker
-			l_t.set_time (0, 0)
+			create l_now.make_now
+			l_t.set_time (l_now.hour, l_now.minute)
 			Result := register (l_t)
 			l_t.set_on_time_change (agent report_time (Result, ?, ?))
 		end
@@ -824,33 +837,80 @@ feature -- Controls
 		end
 
 	image_set_file (an_id: INTEGER; a_path: POINTER): BOOLEAN
-			-- PNG files (cairo reads PNG).
+			-- PNG, JPEG, GIF, BMP, TGA, PSD, HDR and PNM files.
 		local
-			l_s: CAIRO_SURFACE
+			l_file: RAW_FILE
+			l_m: MANAGED_POINTER
 		do
-			if attached {SW_IMAGE} widget (an_id) as al_i and then (create {RAW_FILE}.make_with_name (from_c (a_path))).exists then
-				create l_s.make_from_png (from_c (a_path))
-				if l_s.is_valid then
-					al_i.set_surface (l_s)
+			create l_file.make_with_name (from_c (a_path))
+			if attached {SW_IMAGE} widget (an_id) and then l_file.exists and then l_file.is_readable
+				and then l_file.count > 0
+			then
+				l_file.open_read
+				create l_m.make (l_file.count)
+				l_file.read_to_managed_pointer (l_m, 0, l_file.count)
+				l_file.close
+				Result := image_set_bytes (an_id, l_m.item, l_m.count)
+			end
+		end
+
+	image_set_bytes (an_id: INTEGER; a_bytes: POINTER; a_count: INTEGER): BOOLEAN
+			-- A whole image file's bytes: PNG through cairo, anything else simple_stb reads.
+		local
+			l_m: MANAGED_POINTER
+		do
+			if attached {SW_IMAGE} widget (an_id) as al_i and then a_count > 0 then
+				create l_m.make_from_pointer (a_bytes, a_count)
+				if attached decoded (l_m) as al_s then
+					al_i.set_surface (al_s)
 					Result := True
 					changed
 				end
 			end
 		end
 
-	image_set_bytes (an_id: INTEGER; a_bytes: POINTER; a_count: INTEGER): BOOLEAN
+	decoded (a_bytes: MANAGED_POINTER): detachable CAIRO_SURFACE
+			-- `a_bytes' as a picture: cairo's own PNG reader, else simple_stb's decoders (JPEG,
+			-- GIF, BMP, ...) premultiplied into ARGB32. Void if neither reads it.
+		require
+			has_bytes: a_bytes.count > 0
 		local
-			l_s: CAIRO_SURFACE
-			l_m: MANAGED_POINTER
+			l_png: CAIRO_SURFACE
+			l_stb: SIMPLE_STB
+			l_img: STB_IMAGE
+			l_src, l_dst: MANAGED_POINTER
+			l_x, l_y, l_at: INTEGER
+			r, g, b, a: NATURAL_32
 		do
-			if attached {SW_IMAGE} widget (an_id) as al_i and then a_count > 0 then
-				create l_m.make_from_pointer (a_bytes, a_count)
-				create l_s.make_from_png_data (l_m)
-				if l_s.is_valid then
-					al_i.set_surface (l_s)
-					Result := True
-					changed
+			create l_png.make_from_png_data (a_bytes)
+			if l_png.is_valid then
+				Result := l_png
+			else
+				create l_stb.make
+				l_img := l_stb.load_rgba_from_memory (a_bytes)
+				if l_img.is_valid and then l_img.width > 0 and then l_img.height > 0 then
+					create l_png.make (l_img.width, l_img.height)
+					if l_png.is_valid then
+						l_png.flush.do_nothing
+						create l_src.share_from_pointer (l_img.data, l_img.width * l_img.height * 4)
+						create l_dst.share_from_pointer (l_png.data, l_png.stride * l_img.height)
+						from l_y := 0 until l_y >= l_img.height loop
+							from l_x := 0 until l_x >= l_img.width loop
+								l_at := (l_y * l_img.width + l_x) * 4
+								a := l_src.read_natural_8 (l_at + 3).to_natural_32
+								r := l_src.read_natural_8 (l_at).to_natural_32 * a // 255
+								g := l_src.read_natural_8 (l_at + 1).to_natural_32 * a // 255
+								b := l_src.read_natural_8 (l_at + 2).to_natural_32 * a // 255
+								l_dst.put_natural_32 ((a |<< 24) | (r |<< 16) | (g |<< 8) | b, l_y * l_png.stride + l_x * 4)
+								l_x := l_x + 1
+							end
+							l_y := l_y + 1
+						end
+						l_png.mark_dirty.do_nothing
+						Result := l_png
+					end
 				end
+				l_img.destroy
 			end
 		end
 
@@ -945,13 +1005,14 @@ feature -- Controls
 		do
 			if attached {GUI_SW_COMBO_BOX} widget (an_id) as al_c then
 				al_c.options.wipe_out
+				changed
 			end
 		end
 
 	combo_box_set_text (an_id: INTEGER; a_text: POINTER)
 		do
 			if attached {GUI_SW_COMBO_BOX} widget (an_id) as al_c then
-				al_c.set_text (from_c (a_text))
+				al_c.set_program_text (from_c (a_text))
 				changed
 			end
 		end
@@ -1016,14 +1077,14 @@ feature -- Controls
 	save_file_named (a_window: INTEGER; a_title, an_extensions, a_name: POINTER): POINTER
 			-- simple_widgets' drawn Save dialog suggesting `a_name', waited for.
 		do
-			if attached windows.item (a_window) as al_w and then attached al_w.choose_file (True, ".", from_c (a_name), from_c (an_extensions)) as al_path then
+			if attached windows.item (a_window) as al_w and then attached al_w.choose_file_titled (True, from_c (a_title), ".", from_c (a_name), from_c (an_extensions)) as al_path then
 				Result := c_text (al_path)
 			end
 		end
 
 	choose_folder (a_window: INTEGER; a_title: POINTER): POINTER
 		do
-			if attached windows.item (a_window) as al_w and then attached al_w.choose_folder (".") as al_path then
+			if attached windows.item (a_window) as al_w and then attached al_w.choose_folder (from_c (a_title), ".") as al_path then
 				Result := c_text (al_path)
 			end
 		end
@@ -1266,7 +1327,7 @@ feature -- Controls
 		local
 			l_r: GUI_SW_RICH_TEXT_AREA
 		do
-			create l_r.make_rich
+			create l_r.make_rich (themed (is_dark).size_body)
 			Result := register (l_r)
 			l_r.set_on_change (agent push (2, Result, 0, 0, 0))
 		end
@@ -1319,7 +1380,7 @@ feature -- Controls
 			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r and then 1 <= i and then i <= al_r.text.count then
 				Result := al_r.style_at (i).size
 				if Result <= 0.0 then
-					Result := themed (is_dark).size_body
+					Result := al_r.body_points
 				end
 			end
 		end
@@ -1972,7 +2033,7 @@ feature -- Every widget
 			-- Logical pixels from the content area's left edge.
 		do
 			if attached widget (an_id) as al_w and then attached content_origin (al_w) as al_o then
-				Result := logical (al_w, al_w.x - al_o.x)
+				Result := logical (al_w, al_w.x + margin_of (an_id) - al_o.x)
 			end
 		end
 
@@ -1980,7 +2041,7 @@ feature -- Every widget
 			-- Logical pixels from the content area's top edge.
 		do
 			if attached widget (an_id) as al_w and then attached content_origin (al_w) as al_o then
-				Result := logical (al_w, al_w.y - al_o.y)
+				Result := logical (al_w, al_w.y + margin_of (an_id) - al_o.y)
 			end
 		end
 
@@ -2050,7 +2111,7 @@ feature -- Canvas
 	width (an_id: INTEGER): INTEGER
 		do
 			if attached widget (an_id) as al_w then
-				Result := logical (al_w, al_w.width)
+				Result := logical (al_w, (al_w.width - 2.0 * margin_of (an_id)).max (0.0))
 			elseif attached windows.item (an_id) as al_win then
 				Result := (al_win.win_w / dpi).rounded
 			end
@@ -2059,7 +2120,7 @@ feature -- Canvas
 	height (an_id: INTEGER): INTEGER
 		do
 			if attached widget (an_id) as al_w then
-				Result := logical (al_w, al_w.height)
+				Result := logical (al_w, (al_w.height - 2.0 * margin_of (an_id)).max (0.0))
 			elseif attached windows.item (an_id) as al_win then
 				Result := (al_win.win_h / dpi).rounded
 			end
@@ -2148,7 +2209,7 @@ feature -- Dialogs
 	open_file (a_window: INTEGER; a_title: POINTER; a_save: BOOLEAN; an_extensions: POINTER): POINTER
 			-- simple_widgets' drawn file dialog, waited for (W9).
 		do
-			if attached windows.item (a_window) as al_w and then attached al_w.choose_file (a_save, ".", "", from_c (an_extensions)) as al_path then
+			if attached windows.item (a_window) as al_w and then attached al_w.choose_file_titled (a_save, from_c (a_title), ".", "", from_c (an_extensions)) as al_path then
 				Result := c_text (al_path)
 			end
 		end
@@ -2482,6 +2543,31 @@ feature {NONE} -- State
 			-- A stack's alignment for children added later.
 		once ("OBJECT")
 			create Result.make (8)
+		end
+
+	margins: HASH_TABLE [REAL_64, INTEGER]
+			-- The device pixels kept clear inside each stack and grid: outside its frame, as a
+			-- GTK margin is, so `widget_x' .. `height' leave them out.
+		once ("OBJECT")
+			create Result.make (16)
+		end
+
+	margin_of (an_id: INTEGER): REAL_64
+			-- Device pixels kept clear inside `an_id' (0 for anything but a stack or a grid).
+		do
+			if margins.has (an_id) then
+				Result := margins.item (an_id)
+			end
+		ensure
+			non_negative: Result >= 0.0
+		end
+
+	scaled (a_logical: INTEGER): REAL_64
+			-- `a_logical' pixels (0 if negative) as device pixels on the desktop.
+		do
+			Result := a_logical.max (0) * dpi
+		ensure
+			non_negative: Result >= 0.0
 		end
 
 	events: ARRAYED_QUEUE [TUPLE [type, id, a, b, c: INTEGER]]

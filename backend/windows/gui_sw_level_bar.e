@@ -1,7 +1,8 @@
 note
 	description: "[
 		GUI_LEVEL_BAR on Windows: a meter (how full, not how far along) drawn in the theme's
-		accent up to the warning value, amber past it and red past the critical value.
+		accent up to the warning value, amber past it and red past the critical value (either
+		threshold may be unset).
 		Screen readers read a meter with its value.
 	]"
 
@@ -71,9 +72,9 @@ feature -- Layout and drawing
 			a_p.rrect_fill (x, y + height / 2.0 - 4.0, width, 8.0, 3.0)
 			l_fill := width * (value - minimum) / (maximum - minimum)
 			if l_fill > 0.0 then
-				if critical > 0 and then value >= critical then
+				if critical > 0 and then value > critical then
 					a_p.set_color (0xE01B24)
-				elseif warning > 0 and then value >= warning then
+				elseif warning > 0 and then value > warning then
 					a_p.set_color (0xE5A50A)
 				else
 					a_p.set_color (t.accent)

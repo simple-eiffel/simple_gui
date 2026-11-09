@@ -20,6 +20,7 @@
 
 #include <gtk/gtk.h>
 #include <string.h>
+#include <math.h>
 
 #define SG_QCAP 2048
 #define SG_MAX 4096
@@ -243,7 +244,13 @@ static void sg_stack_set_alignment(int stack, int a) {
 }
 static void sg_stack_set_spacing(int stack, int s) { gtk_box_set_spacing(GTK_BOX(sg_w[stack]), s); }
 
-static int sg_grid(void) { return sg_reg(gtk_grid_new(), 3); }
+static int sg_grid(void) {
+    GtkWidget *g = gtk_grid_new();
+    /* 12 clear around it, as around a stack */
+    gtk_widget_set_margin_start(g, 12); gtk_widget_set_margin_end(g, 12);
+    gtk_widget_set_margin_top(g, 12); gtk_widget_set_margin_bottom(g, 12);
+    return sg_reg(g, 3);
+}
 static void sg_grid_put(int grid, int child, int row, int col, int rows, int cols) {
     int stretch = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[grid]), "sg-stretch"));
     if (stretch && stretch == col) gtk_widget_set_hexpand(sg_w[child], TRUE);
@@ -1209,6 +1216,7 @@ static int sg_canvas(int w, int h) {
     gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(a), h);
     gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(a), sg_canvas_draw, GINT_TO_POINTER(id), NULL);
     g_signal_connect(a, "resize", G_CALLBACK(sg_canvas_resized), GINT_TO_POINTER(id));
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);   /* every button, not just the primary */
     g_signal_connect(click, "pressed", G_CALLBACK(sg_canvas_pressed), GINT_TO_POINTER(id));
     g_signal_connect(click, "released", G_CALLBACK(sg_canvas_released), GINT_TO_POINTER(id));
     gtk_widget_add_controller(a, GTK_EVENT_CONTROLLER(click));
@@ -1503,6 +1511,7 @@ static GtkWidget *sg_a11y_target(int id) {
 }
 static void sg_set_a11y_label(int id, const char *text) {
     GtkWidget *w = sg_a11y_target(id);
+    g_object_set_data(G_OBJECT(w), "sg-a11y-own", GINT_TO_POINTER(1));
     g_object_set_data_full(G_OBJECT(w), "sg-a11y", g_strdup(text), g_free);
     gtk_accessible_update_property(GTK_ACCESSIBLE(w), GTK_ACCESSIBLE_PROPERTY_LABEL, text, -1);
 }
@@ -1725,6 +1734,21 @@ static void sg_on_slider(GtkRange *r, gpointer d) {
     (void) d;
     if (!sg_quiet) sg_push(2, sg_id_of(r), (int) gtk_range_get_value(r), 0);
 }
+/* The user's moves land on a step from the minimum ("sg-step", 1 by default); a value set from
+   code is kept as given (gtk_range_set_value emits no change-value). */
+static gboolean sg_on_slider_move(GtkRange *r, GtkScrollType s, double v, gpointer d) {
+    int step = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(r), "sg-step"));
+    GtkAdjustment *a = gtk_range_get_adjustment(r);
+    double lo = gtk_adjustment_get_lower(a), hi = gtk_adjustment_get_upper(a);
+    long k;
+    (void) s; (void) d;
+    if (step < 1) step = 1;
+    k = lround((v - lo) / step);
+    if (k < 0) k = 0;
+    if (k > (long) ((hi - lo) / step)) k = (long) ((hi - lo) / step);
+    gtk_range_set_value(r, lo + (double) k * step);
+    return TRUE;
+}
 static int sg_slider(int lo, int hi) {
     GtkWidget *s = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, lo, hi, 1);
     int id = sg_reg(s, 22);
@@ -1734,11 +1758,15 @@ static int sg_slider(int lo, int hi) {
     gtk_widget_set_hexpand(s, TRUE);
     sg_quiet++; gtk_range_set_value(GTK_RANGE(s), lo); sg_quiet--;
     g_signal_connect(s, "value-changed", G_CALLBACK(sg_on_slider), NULL);
+    g_signal_connect(s, "change-value", G_CALLBACK(sg_on_slider_move), NULL);
     return id;
 }
 static void sg_slider_set_value(int id, int v) { sg_quiet++; gtk_range_set_value(GTK_RANGE(sg_w[id]), v); sg_quiet--; }
-static int sg_slider_value(int id) { return (int) (gtk_range_get_value(GTK_RANGE(sg_w[id])) + 0.5); }
-static void sg_slider_set_step(int id, int step) { gtk_range_set_increments(GTK_RANGE(sg_w[id]), step, step * 10.0); }
+static int sg_slider_value(int id) { return (int) lround(gtk_range_get_value(GTK_RANGE(sg_w[id]))); }
+static void sg_slider_set_step(int id, int step) {
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-step", GINT_TO_POINTER(step));
+    gtk_range_set_increments(GTK_RANGE(sg_w[id]), step, step * 10.0);
+}
 
 /* Switch */
 static void sg_on_switch(GObject *o, GParamSpec *p, gpointer d) {
@@ -1785,7 +1813,9 @@ static void sg_on_day(GtkCalendar *cal, gpointer d) {
     sg_push(2, id, v, 0);
 }
 static int sg_date_picker(int y, int m, int d) {
-    GtkWidget *b = gtk_menu_button_new(), *pop = gtk_popover_new(), *cal = gtk_calendar_new();
+    /* a date that drops down a calendar: read as a combo box, as on Windows */
+    GtkWidget *b = g_object_new(GTK_TYPE_MENU_BUTTON, "accessible-role", GTK_ACCESSIBLE_ROLE_COMBO_BOX, NULL);
+    GtkWidget *pop = gtk_popover_new(), *cal = gtk_calendar_new();
     int id = sg_reg(b, 24);
     gtk_popover_set_child(GTK_POPOVER(pop), cal);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(b), pop);
@@ -1879,7 +1909,10 @@ static int sg_scroll_area(void) {
 }
 /* A group box reads as a group named by its title (a GtkFrame's title is a child label, so
    the frame itself would have no name). */
+/* A group box or expander is named by its title, unless the program named it itself
+   (sg_set_a11y_label marks that with "sg-a11y-own"): then a new title leaves the name be. */
 static void sg_group_box_name(GtkWidget *f, const char *title) {
+    if (g_object_get_data(G_OBJECT(f), "sg-a11y-own")) return;
     g_object_set_data_full(G_OBJECT(f), "sg-a11y", g_strdup(title), g_free);
     gtk_accessible_update_property(GTK_ACCESSIBLE(f), GTK_ACCESSIBLE_PROPERTY_LABEL, title, -1);
 }
@@ -1941,19 +1974,19 @@ static int sg_separator(int vertical) {
 }
 
 /* Editable combo: an entry (read as a combo box) whose arrow opens a popover of the options.
-   A commit - Return, leaving the box with changed text, or picking an option - sends 2. */
+   A commit - Return, leaving the box, or picking an option - sends 2 when it changed the text
+   from the last commit (or `set_text'), and nothing when it did not. */
 static void sg_combo_commit(int id) {
     const char *now = gtk_editable_get_text(GTK_EDITABLE(sg_w[id]));
-    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-committed", g_strdup(now), g_free);
-    if (!sg_quiet) sg_push(2, id, 0, 0);
+    const char *was = g_object_get_data(G_OBJECT(sg_w[id]), "sg-committed");
+    int differs = g_strcmp0(was ? was : "", now) != 0;
+    if (differs) {
+        g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-committed", g_strdup(now), g_free);
+        if (!sg_quiet) sg_push(2, id, 0, 0);
+    }
 }
 static void sg_on_combo_activate(GtkEntry *e, gpointer d) { (void) e; sg_combo_commit(GPOINTER_TO_INT(d)); }
-static void sg_on_combo_leave(GtkEventControllerFocus *f, gpointer d) {
-    int id = GPOINTER_TO_INT(d);
-    const char *was = g_object_get_data(G_OBJECT(sg_w[id]), "sg-committed");
-    (void) f;
-    if (g_strcmp0(was ? was : "", gtk_editable_get_text(GTK_EDITABLE(sg_w[id])))) sg_combo_commit(id);
-}
+static void sg_on_combo_leave(GtkEventControllerFocus *f, gpointer d) { (void) f; sg_combo_commit(GPOINTER_TO_INT(d)); }
 static void sg_on_combo_pick(GtkListBox *l, GtkListBoxRow *r, gpointer d) {
     int id = GPOINTER_TO_INT(d);
     (void) l;
@@ -2341,8 +2374,9 @@ static void sg_level_offsets(int id) {
     gtk_level_bar_remove_offset_value(b, GTK_LEVEL_BAR_OFFSET_FULL);
     gtk_level_bar_remove_offset_value(b, "sg-warning");
     gtk_level_bar_remove_offset_value(b, "sg-critical");
-    /* the style is the first offset at or above the value */
-    gtk_level_bar_add_offset_value(b, GTK_LEVEL_BAR_OFFSET_HIGH, warn > 0 ? warn : hi);
+    /* the style is the first offset at or above the value: normal up to the first threshold
+       set, amber past the warning value, red past the critical one (either may be unset) */
+    gtk_level_bar_add_offset_value(b, GTK_LEVEL_BAR_OFFSET_HIGH, warn > 0 ? warn : crit > 0 ? crit : hi);
     if (warn > 0) gtk_level_bar_add_offset_value(b, "sg-warning", crit > warn ? crit : hi);
     if (crit > 0) gtk_level_bar_add_offset_value(b, "sg-critical", hi);
 }

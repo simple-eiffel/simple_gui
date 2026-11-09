@@ -52,6 +52,12 @@
 				<platform value="windows"/>
 			</condition>
 		</library>
+		<!-- Windows: GUI_IMAGE reads JPEG, GIF, BMP and the rest through stb (cairo reads only PNG) -->
+		<library name="simple_stb" location="$SIMPLE_EIFFEL\simple_stb\simple_stb.ecf">
+			<condition>
+				<platform value="windows"/>
+			</condition>
+		</library>
 		<library name="simple_shell" location="$SIMPLE_EIFFEL\simple_shell\simple_shell.ecf">
 			<condition>
 				<platform value="windows"/>

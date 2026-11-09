@@ -1,7 +1,8 @@
 note
 	description: "[
 		A single-column list of text rows (GtkListBox, NSTableView). Rows are 1-based;
-		0 means no selection. `select_row' never fires `selection_actions'.
+		0 means no selection. `select_row' and `clear_selection' never fire `selection_actions';
+		the user's selecting a row, or clearing the selection, does.
 	]"
 
 class
@@ -53,7 +54,8 @@ feature -- Access
 		end
 
 	selection_actions: GUI_ACTIONS [TUPLE [row: INTEGER]]
-			-- Run when the user selects a row.
+			-- Run when the user selects a row, or clears the selection (row 0), so a pane that
+			-- shows the selected row can empty itself.
 
 feature -- Element change
 
