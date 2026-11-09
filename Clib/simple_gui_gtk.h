@@ -274,8 +274,17 @@ static void sg_grid_set_spacing(int grid, int row_gap, int col_gap) {
 }
 /* ---------- splitter: a GtkPaned (kind 12). The first pane keeps its size when the paned
    grows; neither pane shrinks below its minimum. (First pass by MACMINI, untested on GTK.) ---------- */
+/* Until the program sets a position, the divider starts halfway, once the paned first knows
+   its size (GTK would give the first pane its minimum: an ellipsized label shrinks to "..."). */
+static void sg_on_paned_size(GObject *o, GParamSpec *ps, gpointer d) {
+    gboolean set = FALSE; int max = 0;
+    (void) ps; (void) d;
+    g_object_get(o, "position-set", &set, "max-position", &max, NULL);
+    if (!set && max > 0) gtk_paned_set_position(GTK_PANED(o), max / 2);
+}
 static int sg_splitter(int vertical) {
     GtkWidget *p = gtk_paned_new(vertical ? GTK_ORIENTATION_VERTICAL : GTK_ORIENTATION_HORIZONTAL);
+    g_signal_connect(p, "notify::max-position", G_CALLBACK(sg_on_paned_size), NULL);
     gtk_paned_set_resize_start_child(GTK_PANED(p), FALSE);
     gtk_paned_set_resize_end_child(GTK_PANED(p), TRUE);
     gtk_paned_set_shrink_start_child(GTK_PANED(p), FALSE);
@@ -348,6 +357,12 @@ static void sg_field_set_placeholder(int id, const char *t) {
     else gtk_entry_set_placeholder_text(GTK_ENTRY(sg_w[id]), t);
 }
 
+/* A scrolled view of rows asks for its rows' natural height, up to 400 pixels, as the list,
+   table and tree are on macOS and Windows (otherwise GTK gives it its minimum: a row or two). */
+static void sg_natural_rows(GtkWidget *scroll) {
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 400);
+}
 static int sg_list(void) {
     GtkWidget *l = gtk_list_box_new();
     GtkWidget *scroll = gtk_scrolled_window_new();
@@ -356,6 +371,7 @@ static int sg_list(void) {
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), l);
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 80);
     gtk_widget_add_css_class(l, "boxed-list");
+    sg_natural_rows(scroll);
     id = sg_reg(scroll, 7);
     g_object_set_data(G_OBJECT(l), "sg-id", GINT_TO_POINTER(id));
     g_object_set_data(G_OBJECT(scroll), "sg-list", l);
@@ -482,6 +498,7 @@ static int sg_table(const char *titles) {
     g_strfreev(t);
     gtk_column_view_set_reorderable(GTK_COLUMN_VIEW(v), FALSE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), v);
+    sg_natural_rows(scroll);
     id = sg_reg(scroll, 13);
     g_object_set_data_full(G_OBJECT(scroll), "sg-rows", rows, g_object_unref);
     g_object_set_data(G_OBJECT(scroll), "sg-view", v);
@@ -790,6 +807,7 @@ static int sg_tree(void) {
     gtk_single_selection_set_can_unselect(s, TRUE);
     v = gtk_list_view_new(GTK_SELECTION_MODEL(s), f);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), v);
+    sg_natural_rows(scroll);
     id = sg_reg(scroll, 14);
     g_signal_connect(f, "setup", G_CALLBACK(sg_tree_setup), NULL);
     g_signal_connect(f, "bind", G_CALLBACK(sg_tree_bind), GINT_TO_POINTER(id));
@@ -2114,6 +2132,7 @@ static int sg_tree_table(const char *titles) {
     gtk_column_view_set_show_column_separators(GTK_COLUMN_VIEW(v), TRUE);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), v);
     gtk_widget_set_vexpand(scroll, TRUE);
+    sg_natural_rows(scroll);
     id = sg_reg(scroll, 33);
     for (i = 0; t[i]; i++) {
         GtkListItemFactory *f = gtk_signal_list_item_factory_new();
@@ -2578,11 +2597,26 @@ static void sg_on_star(GtkButton *b, gpointer d) {
     int id = sg_id_of(b), i = GPOINTER_TO_INT(d);
     if (i != GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-value"))) { sg_rating_put(id, i); sg_push(2, id, i, 0); }
 }
+/* Rating stars: larger and gold, packed together, as on macOS and Windows. */
+__attribute__((weak)) int sg_rating_css_done = 0;
+static void sg_rating_css(void) {
+    GtkCssProvider *p;
+    if (sg_rating_css_done) return;
+    sg_rating_css_done = 1;
+    p = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(p,
+        ".sg-rating button { font-size: 20px; color: #b07800; padding: 0 1px; min-width: 0; min-height: 0; }");
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(p),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(p);
+}
 static int sg_rating(int max) {
     GtkWidget *box = g_object_new(GTK_TYPE_BOX, "orientation", GTK_ORIENTATION_HORIZONTAL, "spacing", 0,
                                   "accessible-role", GTK_ACCESSIBLE_ROLE_SLIDER, NULL);
     int id = sg_reg(box, 48), i;
     gtk_widget_set_halign(box, GTK_ALIGN_START);
+    sg_rating_css();
+    gtk_widget_add_css_class(box, "sg-rating");
     g_object_set_data(G_OBJECT(box), "sg-max", GINT_TO_POINTER(max));
     for (i = 1; i <= max; i++) {
         GtkWidget *b = g_object_new(GTK_TYPE_BUTTON, "has-frame", FALSE, "accessible-role", GTK_ACCESSIBLE_ROLE_PRESENTATION, NULL);
