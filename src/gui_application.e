@@ -34,6 +34,7 @@ feature {NONE} -- Initialization
 			create message_actions.make
 			create appearance_changed_actions.make
 			create menu.make
+			create pills.make
 			create dialogs
 			create mailbox.make
 			l_n := backend.to_c (a_name)
@@ -71,6 +72,9 @@ feature -- Access
 	appearance_changed_actions: GUI_ACTIONS [TUPLE [dark: BOOLEAN]]
 			-- Run when the system switches between light and dark.
 
+	pills: GUI_PILLS
+			-- The application's reference pills (1l), put on widgets by code.
+
 	Heartbeat_ms: INTEGER = 250
 
 feature -- Status
@@ -80,12 +84,43 @@ feature -- Status
 
 	is_running: BOOLEAN
 
+	pills_shown: BOOLEAN
+			-- Are the reference pills drawn on their widgets?
+
 	is_dark: BOOLEAN
 			-- Is the system appearance dark?
 		require
 			available: is_available
 		do
 			Result := backend.is_dark
+		end
+
+feature -- Reference pills
+
+	set_pills_shown (a_shown: BOOLEAN)
+			-- Show or hide every widget's reference pill; each shows its definition as it is now.
+		require
+			gui_thread: is_gui_thread
+		do
+			pills_shown := a_shown
+			if a_shown then
+				across widgets as ic loop
+					ic.send_pill
+				end
+			end
+			backend.pills_show (a_shown)
+		ensure
+			set: pills_shown = a_shown
+		end
+
+	toggle_pills
+			-- Show the pills if hidden, hide them if shown (the View menu's item).
+		require
+			gui_thread: is_gui_thread
+		do
+			set_pills_shown (not pills_shown)
+		ensure
+			flipped: pills_shown = not old pills_shown
 		end
 
 feature -- Theme colors

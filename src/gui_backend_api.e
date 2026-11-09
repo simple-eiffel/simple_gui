@@ -966,6 +966,31 @@ feature -- Common widget state
 		deferred
 		end
 
+	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
+			-- 1l: widget `an_id' wears the reference pill `a_code' at `a_corner' (1 top-left,
+			-- 2 top-right, 3 bottom-left, 4 bottom-right; leading and trailing mirror right to
+			-- left), reading `a_tip' under the pointer; replaces any pill it had. Drawn while
+			-- `pills_show' is on, above everything in its window, and placed again as layout
+			-- moves its widget. A widget not in a window yet gets its pill when it is.
+		deferred
+		end
+
+	pill_clear (an_id: INTEGER)
+			-- Widget `an_id' wears no pill.
+		deferred
+		end
+
+	pills_show (a_shown: BOOLEAN)
+			-- Draw every pill, or none.
+		deferred
+		end
+
+	pill_tip_shown (an_id: INTEGER): POINTER
+			-- The tip of the pill widget `an_id' shows now, as a person hovering it would read
+			-- it: empty when it has none, pills are hidden, or it is not in a shown window (tests).
+		deferred
+		end
+
 	set_enabled (an_id: INTEGER; a_on: BOOLEAN)
 		deferred
 		end

@@ -541,6 +541,27 @@ feature -- Controls
 		alias "sg_set_tooltip($an_id, (const char *) $a_text);"
 		end
 
+	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
+			-- 1l: a label in the window's overlay (sg_pill_set).
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_pill_set($an_id, (const char *) $a_code, (const char *) $a_tip, $a_corner);"
+		end
+
+	pill_clear (an_id: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_pill_clear($an_id);"
+		end
+
+	pills_show (a_shown: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_pills_show($a_shown ? 1 : 0);"
+		end
+
+	pill_tip_shown (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_pill_tip_shown($an_id);"
+		end
+
 	save_file_named (a_window: INTEGER; a_title, an_extensions, a_name: POINTER): POINTER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return (EIF_POINTER) sg_save_file_named($a_window, (const char *) $a_title, (const char *) $an_extensions, (const char *) $a_name);"

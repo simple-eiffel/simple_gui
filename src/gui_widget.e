@@ -160,6 +160,79 @@ feature -- Tooltip
 			set: tooltip.same_string_general (a_text)
 		end
 
+feature -- Reference pill (1l)
+
+	pill_code: detachable STRING_32
+			-- The code of this widget's reference pill, from `application.pills'; Void for none.
+
+	pill_corner: INTEGER
+			-- Where the pill sits: `Corner_top_left' (the default) .. `Corner_bottom_right'.
+		do
+			Result := pill_corner_set.max (Corner_top_left)
+		ensure
+			known: Result >= Corner_top_left and Result <= Corner_bottom_right
+		end
+
+	Corner_top_left: INTEGER = 1
+	Corner_top_right: INTEGER = 2
+	Corner_bottom_left: INTEGER = 3
+	Corner_bottom_right: INTEGER = 4
+
+	set_pill (a_code: READABLE_STRING_GENERAL)
+			-- Name this widget (a control or a whole group) with the pill `a_code'.
+		require
+			gui_thread: is_gui_thread
+			defined: application.pills.has (a_code)
+		do
+			pill_code := a_code.to_string_32
+			send_pill
+		ensure
+			set: attached pill_code as al_code and then al_code.same_string_general (a_code)
+		end
+
+	set_pill_corner (a_corner: INTEGER)
+		require
+			gui_thread: is_gui_thread
+			known: a_corner >= Corner_top_left and a_corner <= Corner_bottom_right
+		do
+			pill_corner_set := a_corner
+			send_pill
+		ensure
+			set: pill_corner = a_corner
+		end
+
+	clear_pill
+			-- No pill on this widget.
+		require
+			gui_thread: is_gui_thread
+		do
+			if pill_code /= Void then
+				pill_code := Void
+				backend.pill_clear (id)
+			end
+		ensure
+			none: pill_code = Void
+		end
+
+feature {GUI_APPLICATION, GUI_WIDGET} -- Reference pill
+
+	send_pill
+			-- Give the backend this widget's pill as defined now (its tip follows the definition).
+		local
+			l_code, l_tip: C_STRING
+		do
+			if attached pill_code as al_code and then application.pills.has (al_code) then
+				l_code := backend.to_c (al_code)
+				l_tip := backend.to_c (application.pills.item (al_code).tip)
+				backend.pill_set (id, l_code.item, l_tip.item, pill_corner)
+			end
+		end
+
+feature {NONE} -- Reference pill
+
+	pill_corner_set: INTEGER
+			-- `pill_corner' as set; 0 until then.
+
 feature -- Context menu
 
 	context_menu: detachable GUI_MENU

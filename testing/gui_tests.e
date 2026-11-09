@@ -1780,6 +1780,66 @@ feature -- The remaining controls (1j)
 			Result.add_item ("As HTML", "", agent do end)
 		end
 
+	test_reference_pills_show_their_tips
+			-- 1l: pills defined once in the application, put on a control and on a group, show
+			-- nothing until shown; then each reads its code and name, what it does, its place in
+			-- the flow, and its keyboard and menu access, the shortcut as this platform writes
+			-- it. A pill can take its menu path and shortcut from the menu itself. The list
+			-- writes itself as a Markdown table.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_field: GUI_TEXT_FIELD
+			l_button: GUI_BUTTON
+			l_menu: GUI_MENU
+			l_tip, l_primary: STRING_32
+		do
+			l_primary := if {PLATFORM}.is_mac then {STRING_32} "Cmd" else {STRING_32} "Ctrl" end
+			l_menu := app.menu.add_menu ("Pills")
+			l_menu.add_item ("Open Notes...", "primary+shift+O", agent do end)
+			app.pills.define ("T1", "Search box")
+				.with_purpose ("Finds every note holding the words typed.")
+				.with_flow ("Step 1: type here, then pick a result below.")
+				.with_shortcut ("primary+F").do_nothing
+			app.pills.define ("T2", "Open button")
+				.with_purpose ("Opens a notes file.")
+				.with_menu_item (l_menu, l_menu.last_item_id).do_nothing
+			app.pills.define ("T3", "Search group")
+				.with_purpose ("Everything for finding a note.").do_nothing
+			create l_window.make ("Pills", 360, 160)
+			create l_stack.make_vertical
+			create l_field.make
+			create l_button.make ("Open...")
+			l_stack.extend (l_field)
+			l_stack.extend (l_button)
+			l_window.set_content (l_stack)
+			l_field.set_pill ("T1")
+			l_button.set_pill ("T2")
+			l_stack.set_pill ("T3")
+			l_stack.set_pill_corner (l_stack.Corner_top_right)
+			l_window.show
+			settle_window
+			assert ("hidden until shown", driver.pill_tip (l_field).is_empty)
+			app.set_pills_shown (True)
+			settle_window
+			l_tip := driver.pill_tip (l_field)
+			assert ("code and name: " + l_tip.to_string_8, l_tip.starts_with ({STRING_32} "T1: Search box"))
+			assert ("what it does", l_tip.has_substring ({STRING_32} "What it does: Finds every note"))
+			assert ("its place in the flow", l_tip.has_substring ({STRING_32} "In the flow: Step 1"))
+			assert ("keyboard, as this platform writes it", l_tip.has_substring ({STRING_32} "Keyboard: " + l_primary + {STRING_32} "+F"))
+			l_tip := driver.pill_tip (l_button)
+			assert ("menu path from the menu: " + l_tip.to_string_8, l_tip.has_substring ({STRING_32} "Menu: Pills > Open Notes"))
+			assert ("shortcut from the menu", l_tip.has_substring ({STRING_32} "Keyboard: " + l_primary + {STRING_32} "+Shift+O"))
+			assert ("a group wears one too", driver.pill_tip (l_stack).starts_with ({STRING_32} "T3: Search group"))
+			assert ("written for the docs", app.pills.as_markdown.has_substring ({STRING_32} "| T1 | Search box | Finds every note"))
+			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_pills.png")))
+			l_button.clear_pill
+			assert ("cleared", driver.pill_tip (l_button).is_empty)
+			app.set_pills_shown (False)
+			assert ("hidden again", driver.pill_tip (l_field).is_empty)
+			l_window.close
+		end
+
 	test_rich_text_ranges_round_trip
 			-- Formatting from code is silent and reads back; positions count characters, so an
 			-- emoji (two UTF-16 units on macOS and Windows) is one.

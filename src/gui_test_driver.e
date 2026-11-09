@@ -379,6 +379,15 @@ feature -- User actions
 			application.drain_queue
 		end
 
+	pill_tip (a_widget: GUI_WIDGET): STRING_32
+			-- The tip `a_widget''s reference pill shows now; empty when it shows none.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.pill_tip_shown (a_widget.id))
+		end
+
 feature -- Evidence
 
 	snapshot (a_window: GUI_WINDOW; a_path: PATH): BOOLEAN

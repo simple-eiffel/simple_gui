@@ -1082,6 +1082,42 @@ feature -- Controls
 			end
 		end
 
+	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
+			-- 1l: kept here, drawn as the window's reference marks (simple_widgets' pills).
+		do
+			pills.force ([from_c (a_code), from_c (a_tip), a_corner.max (1).min (4)], an_id)
+			apply_all_pills
+		end
+
+	pill_clear (an_id: INTEGER)
+		do
+			pills.remove (an_id)
+			apply_all_pills
+		end
+
+	pills_show (a_shown: BOOLEAN)
+		do
+			pills_are_shown := a_shown
+			apply_all_pills
+		end
+
+	pill_tip_shown (an_id: INTEGER): POINTER
+			-- The tip, while the pills show, its widget is in an open window, and that window
+			-- wears the mark; else empty.
+		local
+			l_tip: STRING_32
+		do
+			create l_tip.make_empty
+			if pills_are_shown and then attached pills.item (an_id) as al_pill
+				and then attached widget (an_id) as al_w and then attached window_of (al_w) as al_win
+				and then al_win.is_window_open and then al_win.reference_marks_shown
+				and then across al_win.reference_marks as ic some ic.widget = al_w end
+			then
+				l_tip := al_pill.tip
+			end
+			Result := c_text (l_tip)
+		end
+
 	save_file_named (a_window: INTEGER; a_title, an_extensions, a_name: POINTER): POINTER
 			-- simple_widgets' drawn Save dialog suggesting `a_name', waited for.
 		do
@@ -2846,6 +2882,60 @@ feature {NONE} -- Drawn views (1i)
 			]"
 		end
 
+feature {NONE} -- Reference pills (1l)
+
+	pills: HASH_TABLE [TUPLE [code, tip: STRING_32; corner: INTEGER], INTEGER]
+			-- Each widget's pill, by widget id.
+		once ("OBJECT")
+			create Result.make (8)
+		end
+
+	pills_are_shown: BOOLEAN
+
+	apply_all_pills
+		do
+			across windows as ic loop
+				if attached ic as al_w then
+					apply_pills (al_w)
+				end
+			end
+		end
+
+	apply_pills (a_w: GUI_SW_WINDOW)
+			-- `a_w''s reference marks: one for each pill whose widget is in it (simple_widgets'
+			-- corners are numbered as simple_gui's).
+		do
+			a_w.clear_reference_marks
+			across pills as ic loop
+				if attached widget (@ic.key) as al_w and then window_of (al_w) = a_w then
+					a_w.add_reference_mark (al_w, ic.code, ic.tip, ic.corner)
+				end
+			end
+			a_w.set_reference_marks_shown (pills_are_shown)
+			if a_w.is_window_open then
+				a_w.request_render
+			end
+		end
+
+	window_of (a_widget: SW_WIDGET): detachable GUI_SW_WINDOW
+			-- The window `a_widget' is in, if any.
+		local
+			l_top: SW_WIDGET
+		do
+			from
+				l_top := a_widget
+			until
+				not attached l_top.parent as al_up
+			loop
+				l_top := al_up
+			end
+			across windows as ic until attached Result loop
+				if attached ic as al_win and then al_win.root = l_top then
+					Result := al_win
+				end
+			end
+		end
+
 feature {NONE} -- State
 
 	items: ARRAYED_LIST [detachable SW_WIDGET]
@@ -3207,6 +3297,7 @@ feature {NONE} -- Implementation
 				l_root.set_layout_direction (window_direction.item (a_window))
 			end
 			a_w.set_root (l_root)
+			apply_pills (a_w)
 		end
 
 	build_menu (a_index: INTEGER; a_w: SW_POINTER_ROUTING): SW_MENU
