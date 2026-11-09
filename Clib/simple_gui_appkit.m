@@ -260,7 +260,8 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 - (void)tableViewSelectionDidChange:(NSNotification *)n
 {
 	NSTableView *t = [n object];
-	if (!s_suppress && [t selectedRow] >= 0) sga_push(4, sga_id_of(t), (int)[t selectedRow] + 1, 0, 0);
+	/* A user's emptying of the selection is a selection too: row 0. */
+	if (!s_suppress) sga_push(4, sga_id_of(t), (int)[t selectedRow] + 1, 0, 0);
 }
 - (BOOL)windowShouldClose:(NSWindow *)w { sga_push(6, sga_id_of(w), 0, 0, 0); return NO; }
 - (void)observeValueForKeyPath:(NSString *)p ofObject:(id)o change:(NSDictionary *)ch context:(void *)ctx
@@ -3164,10 +3165,13 @@ int sga_scale_factor(int a_id)
 }
 
 /* A window's size is its content's (what the program lays out in); a widget's, its own. */
+/* A container's size leaves its margins out (as its position does, and as GTK reports it):
+   the stack or grid inside the wrapper is measured. */
 static NSView *sga_measured_view(int a_id)
 {
 	id o = sga_get(a_id);
-	return [o isKindOfClass:[NSWindow class]] ? [(NSWindow *)o contentView] : (NSView *)o;
+	if ([o isKindOfClass:[NSWindow class]]) return [(NSWindow *)o contentView];
+	return s_margins[a_id][0] ? (NSView *)s_inner[a_id] : (NSView *)o;
 }
 
 int sga_width(int a_id)

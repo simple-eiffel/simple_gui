@@ -1310,6 +1310,10 @@ feature -- Standard controls (1h)
 			assert ("typed", l_combo.change_actions.fire_count = 1)
 			driver.pick_combo_option (l_combo, 2)
 			assert ("picked", l_combo.text.same_string ("fr") and l_combo.change_actions.fire_count = 2)
+			driver.pick_combo_option (l_combo, 2)
+			assert ("the same pick again changes nothing", l_combo.change_actions.fire_count = 2)
+			driver.type_combo (l_combo, "fr")
+			assert ("Return on the same text changes nothing", l_combo.change_actions.fire_count = 2)
 			assert ("options", l_combo.count = 2 and l_combo.i_th (1).same_string ("en"))
 			l_window.close
 		end
@@ -1769,12 +1773,9 @@ feature -- The remaining controls (1j)
 		end
 
 	export_menu: GUI_MENU
-			-- A context menu with two items, from a menu model of its own.
-		local
-			l_model: GUI_MENU_MODEL
+			-- A context menu with two items, from the application's menus.
 		do
-			create l_model.make
-			Result := l_model.new_context_menu
+			Result := app.menu.new_context_menu
 			Result.add_item ("As PDF", "", agent do end)
 			Result.add_item ("As HTML", "", agent do end)
 		end

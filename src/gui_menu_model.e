@@ -1,6 +1,8 @@
 note
 	description: "[
-		The application's menus (on macOS they belong to the application, not a window).
+		The application's menus (on macOS they belong to the application, not a window). There
+		is one, `GUI_APPLICATION.menu': only its items reach their agents, so it is the only one
+		made.
 		Items are numbered 1, 2, 3... across all menus; choosing one runs its agent.
 		Shortcuts are written neutrally: "primary+O" is Cmd+O on macOS and Ctrl+O elsewhere.
 	]"
@@ -11,7 +13,7 @@ class
 inherit
 	GUI_SHARED
 
-create
+create {GUI_APPLICATION}
 	make
 
 feature {NONE} -- Initialization

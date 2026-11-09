@@ -90,14 +90,18 @@ feature {GUI_BACKEND} -- Dialogs (1h)
 			an_answer: 0 <= Result and Result <= 2
 		end
 
-	choose_folder (a_start_dir: READABLE_STRING_GENERAL): detachable STRING_32
-			-- The drawn file dialog in folder mode, waited for: the chosen folder, or Void.
+	choose_folder (a_title, a_start_dir: READABLE_STRING_GENERAL): detachable STRING_32
+			-- The drawn file dialog in folder mode, headed by `a_title' (empty: "Choose Folder"),
+			-- waited for: the chosen folder, or Void.
 		local
 			l_dialog: SW_FILE_DIALOG
 			l_path: CELL [detachable STRING_32]
 		do
 			create l_path.put (Void)
 			create l_dialog.make_folder (a_start_dir)
+			if not a_title.is_empty then
+				l_dialog.set_title (a_title)
+			end
 			l_dialog.set_on_accept (agent take_path (?, l_path))
 			l_dialog.set_on_cancel (agent close_sheet)
 			show_sheet (l_dialog, 560.0)
