@@ -82,12 +82,39 @@ A window titled "Notes" opens with a **Clear** button in its toolbar, a text are
 | `close_requested_actions` | Agents run when the user asks to close the window. See **Events**. |
 | `set_base_direction (a_direction)` | `Direction_auto`, `Direction_left_to_right` or `Direction_right_to_left`. The window passes it to its content, toolbar and status bar, and they pass it on to every child that has not set its own. |
 | `width`, `height` | The current size in logical pixels; 0 before the window is shown. |
+| `add_shortcut (a_shortcut, an_action)` | Runs `an_action` when the keys `a_shortcut` names are pressed while this window is active, wherever the focus is. The window must be open and `a_shortcut` not empty. Afterward `shortcut_count` is one more. |
+| `shortcut_count` | How many shortcuts `add_shortcut` has added. |
+| `set_fullscreen (a_on)` | Fills the screen without the window's frame when `a_on` is true, and goes back when it is false. The window must be open. |
+| `is_fullscreen` | Does the window fill the screen? The window must be open. |
+
+The application chooses the appearance for every window; see **Appearance** below.
 
 `enable`, `disable`, `hide`, the accessibility features and the rest are the [common features](widget.md).
 
 **Size:** `a_width` and `a_height` are logical pixels, so a 480 by 320 window covers 960 by 640 device pixels on a 200% screen. The size is where the window starts. If the content needs more room, the window opens large enough to show all of it, as GTK and AppKit open a window at its content's natural size. On macOS the size is the content area: the toolbar adds to the title bar, and the status bar takes the bottom 24 points of that area, with the content ending above it.
 
 **Events:** `close_requested_actions` fire when the user asks to close the window (its close button, for example). With no agents, the window closes itself. With agents, the window stays open, and your agent decides: call `close` to close it. Calling `close` from code fires nothing.
+
+**Window shortcuts:** `add_shortcut` is for a key that belongs to one window, such as "primary+K" to jump to a search box. It needs no menu item. The shortcut is written as in [menus](menus.md): neutral, so `primary` is Command on macOS and Ctrl elsewhere. It needs a modifier (`primary`, `shift` or `alt`), unless the key is F1 to F12. A shortcut works while its window is active, before the focused control sees the key. A shortcut the platform cannot register is ignored. For a command that should also be in the menu bar, use a menu item instead.
+
+```eiffel
+window.add_shortcut ("primary+K", agent show_search)
+window.add_shortcut ("F5", agent refresh)
+```
+
+**Full screen:** `set_fullscreen (True)` makes the window fill the screen, and `set_fullscreen (False)` brings it back. Code that calls it fires no event. On macOS the call waits for AppKit's animation to finish (at most five seconds) before it returns, and it needs a logged-in session: AppKit refuses full screen to a program that cannot become active.
+
+**Appearance:** by default the program follows the system's light or dark setting. `app.set_appearance (app.Appearance_dark)` makes every window dark, `app.Appearance_light` makes them light, and `app.Appearance_system` follows the system again. `app.appearance` tells which was chosen, and `app.is_dark` what is shown now. Each change that alters what is shown fires `app.appearance_changed_actions` with `dark`, as a change of the system's setting does, so a [canvas](canvas.md) can redraw.
+
+```eiffel
+app.appearance_changed_actions.extend (agent on_appearance)
+app.set_appearance (app.Appearance_dark)
+
+on_appearance (a_dark: BOOLEAN)
+	do
+		status.set_text (if a_dark then "Dark" else "Light" end)
+	end
+```
 
 **Accessibility:** a window's role is `application`, named by its title. Give the window a title that says what it holds.
 
@@ -99,12 +126,18 @@ A window titled "Notes" opens with a **Clear** button in its toolbar, a text are
 | Menu bar | a `GtkPopoverMenuBar` at the top of each window, hidden while the application has no menus | the screen's menu bar, shared by every window | a menu bar in each window |
 | Toolbar | a strip above the content | an `NSToolbar` in the title bar | a strip above the content |
 | Status bar | a strip below the content | a line in the window's bottom bar | a strip below the content |
+| Window shortcut | a `GtkShortcutController`, global in the window | a key monitor that catches the keys while the window is key, before the focused control and the menus | a window accelerator of simple_widgets |
+| Full screen | `gtk_window_fullscreen` | `toggleFullScreen:`; the call waits for AppKit's notice that the change is over, and needs a logged-in session | a borderless window over the whole monitor; the style and place are saved and restored |
+| Appearance choice | the dark-theme setting of GTK, reset to follow the system | the application's appearance, cleared to follow the system | each window follows the Windows setting again |
 | Looks or behaves differently | The size is the window's default size. | The green button and **Window > Enter Full Screen** take the window full screen. `close` orders the window out. | A second window opened while another is open is a floating document window of the first, with the same menu bar. Screen readers do not see a second window yet. |
 
 ## Design guidance
 
 - Give each window one content widget that fills it, usually a vertical [stack](stack.md) with one stretching child, so the window resizes well.
 - Ask for the size your content looks good at. If you ask for too little, the window opens larger, so do not rely on a small size to hide anything.
+- Use `add_shortcut` for a key that belongs to one window; give a command that the whole program has a menu item.
+- Offer a way out of full screen, such as the Escape key through `add_shortcut`; do not leave the user without one.
+- Let the user follow the system's appearance by default. Call `set_appearance` only when the user chooses light or dark in your settings.
 - Build the [menus](menus.md) before the first `show`: that call installs their shortcuts.
 - Keep `close_requested_actions` short: confirm unsaved work, then `close`. With no agent, the window simply closes, which is right for most windows.
 - For a right-to-left language, call `set_base_direction (window.Direction_right_to_left)` on the window, not on each widget. Numbers keep their own order (see [label](label.md)).

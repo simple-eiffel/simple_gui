@@ -54,11 +54,12 @@ A window opens with sixty check boxes in a scroll area and a **Back to the top**
 | `make` | An empty scroll area. Ensures `content = Void`. |
 | `set_content (a_widget)` | Puts `a_widget` inside. Requires `content = Void` (one widget, once), `a_widget.parent = Void` and `a_widget /= Current`. Ensures `content = a_widget`. |
 | `content` | The widget inside, once set. |
+| `scroll_to_widget (a_widget)` | Scrolls so `a_widget`, which is inside the content, starts at the top left, as far as the scroll goes. Quiet. It does nothing before `set_content`. |
 | `scroll_to (a_x, a_y)` | Brings the content's point (`a_x`, `a_y`) to the top left, as far as it goes. Requires `a_x >= 0` and `a_y >= 0`. |
 
 Inherited: `set_base_direction`, `show`, `hide` and the rest of the [common features](widget.md).
 
-**Events:** none. Scrolling, by the user or by `scroll_to`, fires nothing.
+**Events:** none. Scrolling, by the user or by `scroll_to` or `scroll_to_widget`, fires nothing.
 
 **Accessibility:** the role is `generic`, and its scroll bars are left out of `describe_accessibility`; a screen reader goes straight to the content. Label the controls inside.
 
@@ -77,6 +78,7 @@ Inherited: `set_base_direction`, `show`, `hide` and the rest of the [common feat
 - Give the scroll area the spare room with `extend_stretching`; keep buttons that act on the whole window outside it, so they never scroll away.
 - Never put a list, table, tree or text area inside a scroll area: two scroll bars on one axis confuse users.
 - When a form is so long it needs scrolling, consider splitting it into [tabs](tabs.md) or [expanders](expander.md) first.
+- Use `scroll_to_widget` to bring a control into view, such as the first field with an error, after the form has been shown.
 - Use `scroll_to (0, 0)` after replacing what the content shows, so the user starts at the top.
 
 ## Gallery

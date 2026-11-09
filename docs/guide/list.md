@@ -56,13 +56,14 @@ A window opens with a list of three books, none selected, and the line "Pick a b
 | `count` | How many rows there are. |
 | `i_th (i)` | The text of row `i`. Requires 1 <= `i` <= `count`. |
 | `selected_index` | The selected row, or 0 when none is. |
+| `scroll_to_row (i)` | Scrolls so row `i` is in view, with no event; the selection does not change. Requires 1 <= `i` <= `count`. |
 | `select_row (i)` | Selects row `i`, with no event. Requires 1 <= `i` <= `count`. Ensures `selected_index = i`. |
 | `clear_selection` | Selects nothing. Ensures `selected_index = 0`. |
 | `selection_actions` | `GUI_ACTIONS [TUPLE [row: INTEGER]]`: run when the user selects a row. |
 
 Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the rest of the [common features](widget.md).
 
-**Events:** `selection_actions` fires with the row number when the user selects a row. Rows are 1-based; check for 0, which is sent when the user clears the selection (Linux and macOS; on Windows a click always selects a row). `select_row` never fires it: its postcondition is `selection_actions.fire_count = old selection_actions.fire_count`.
+**Events:** `selection_actions` fires with the row number when the user selects a row. Rows are 1-based; check for 0, which is sent when the user clears the selection (Linux and macOS; on Windows a click always selects a row). A list reports a selection only when it changes: choosing the row that is already selected sends nothing. `select_row` and `scroll_to_row` never fire it: its postcondition is `selection_actions.fire_count = old selection_actions.fire_count`.
 
 **Accessibility:** the role is `list`, and each row is a `list-item` read by its text. The list has no visible text of its own, so give it `set_accessible_label` with what the rows are ("Books", "Recent files").
 
@@ -78,6 +79,7 @@ Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the res
 - A list scrolls on its own. Give it room with `extend_stretching`, and never put it in a [scroll area](scroll-area.md).
 - Give it an accessible label, and a visible caption above it when the window has more than one list.
 - To change the rows, call `wipe_out` and `extend` again; then `select_row` to restore a selection, without an event.
+- After `select_row`, call `scroll_to_row` with the same row when a long list may have it out of view. It leaves the selection alone.
 - Read `selected_index` when the user presses a button such as **Open**, rather than acting on every selection change.
 - Add a [context menu](widget.md) for actions on a row (rename, delete) with `set_context_menu`.
 
