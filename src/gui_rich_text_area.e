@@ -124,6 +124,8 @@ feature -- Formatting
 			valid: is_valid_range (a_start, an_end)
 		do
 			backend.rich_text_set_trait (id, a_start, an_end, Trait_italic, a_on)
+		ensure
+			set: a_start <= an_end implies is_italic_at (a_start) = a_on
 		end
 
 	set_underline (a_start, an_end: INTEGER; a_on: BOOLEAN)
@@ -154,6 +156,8 @@ feature -- Formatting
 			positive: a_points > 0
 		do
 			backend.rich_text_set_size (id, a_start, an_end, a_points)
+		ensure
+			set: a_start <= an_end implies (font_size_at (a_start) - a_points).abs < 0.01
 		end
 
 	select_range (a_start, an_end: INTEGER)

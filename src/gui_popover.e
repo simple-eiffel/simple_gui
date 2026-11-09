@@ -9,6 +9,8 @@ class
 
 inherit
 	GUI_SINGLE_CONTAINER
+		export
+			{NONE} show
 		redefine
 			dispatch, is_shown, hide
 		end

@@ -260,7 +260,8 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 - (void)tableViewSelectionDidChange:(NSNotification *)n
 {
 	NSTableView *t = [n object];
-	if (!s_suppress && [t selectedRow] >= 0) sga_push(4, sga_id_of(t), (int)[t selectedRow] + 1, 0, 0);
+	/* A user's emptying of the selection is a selection too: row 0. */
+	if (!s_suppress) sga_push(4, sga_id_of(t), (int)[t selectedRow] + 1, 0, 0);
 }
 - (BOOL)windowShouldClose:(NSWindow *)w { sga_push(6, sga_id_of(w), 0, 0, 0); return NO; }
 - (void)observeValueForKeyPath:(NSString *)p ofObject:(id)o change:(NSDictionary *)ch context:(void *)ctx
@@ -1164,7 +1165,7 @@ int sga_list_selected(int a_id) { return (int)[(NSTableView *)s_inner[a_id] sele
 	if (lo < 0) return;
 	[pending addIndexesInRange:NSMakeRange((NSUInteger)lo, (NSUInteger)(hi - lo + 1))];
 	sga_push(16, sga_id_of(self), (int)lo + 1, (int)hi + 1, 0);
-	if ([cache count] > 4000) {
+	if ([cache count] > 2000) {   /* the bound every backend keeps (docs/lazy-tables.md) */
 		NSInteger l_keep_lo = l_first - 4 * l_margin, l_keep_hi = l_last + 4 * l_margin;
 		for (NSNumber *k in [cache allKeys]) if ([k integerValue] < l_keep_lo || [k integerValue] > l_keep_hi) [cache removeObjectForKey:k];
 	}
@@ -2461,6 +2462,26 @@ int sga_calendar(void)
 
 /* A menu button: a pull-down NSPopUpButton whose first item is the title; its menu is the
    program's (items send menu, 5). Split: an NSComboButton, whose main part sends click (1). */
+/* The button's own menu is rebuilt from the program's menu each time it opens, so items
+   the program adds later are there too (the program's menu itself is never changed). */
+@interface SGAMenuSource : NSObject <NSMenuDelegate>
+{
+@public
+	NSMenu *source;
+	NSString *title;   /* a pull-down's first item, its title; nil for a split button */
+}
+@end
+@implementation SGAMenuSource
+- (void)menuNeedsUpdate:(NSMenu *)a_menu
+{
+	[a_menu removeAllItems];
+	if (title) [a_menu addItemWithTitle:title action:NULL keyEquivalent:@""];
+	for (NSMenuItem *i in [source itemArray]) [a_menu addItem:[i copy]];
+}
+@end
+
+static NSMapTable<id, SGAMenuSource *> *s_menu_sources;   /* button -> its menu's source */
+
 @interface SGAMenuButton : NSPopUpButton
 @end
 @implementation SGAMenuButton
@@ -2481,16 +2502,17 @@ int sga_menu_button(const char *a_text, int a_split)
 /* The program's menu (a GUI_MENU's NSMenu) behind the button. A pull-down keeps its title item first. */
 void sga_menu_button_set_menu(int a_id, void *a_menu)
 {
-	NSMenu *m = (__bridge NSMenu *)a_menu;
 	id b = sga_get(a_id);
-	if ([b isKindOfClass:[NSComboButton class]]) [(NSComboButton *)b setMenu:[m copy]];
-	else {
-		NSPopUpButton *p = b;
-		NSString *l_title = [[p itemAtIndex:0] title] ?: @"";
-		NSMenu *l_copy = [m copy];
-		[l_copy insertItemWithTitle:l_title action:NULL keyEquivalent:@"" atIndex:0];
-		[p setMenu:l_copy];
-	}
+	SGAMenuSource *l_source = [[SGAMenuSource alloc] init];
+	NSMenu *l_shown = [[NSMenu alloc] init];
+	l_source->source = (__bridge NSMenu *)a_menu;
+	if (![b isKindOfClass:[NSComboButton class]]) l_source->title = [[(NSPopUpButton *)b itemAtIndex:0] title] ?: @"";
+	[l_shown setDelegate:l_source];
+	[l_source menuNeedsUpdate:l_shown];
+	if (!s_menu_sources) s_menu_sources = [NSMapTable weakToStrongObjectsMapTable];
+	[s_menu_sources setObject:l_source forKey:b];   /* a menu's delegate is weak: the button keeps it */
+	if ([b isKindOfClass:[NSComboButton class]]) [(NSComboButton *)b setMenu:l_shown];
+	else [(NSPopUpButton *)b setMenu:l_shown];
 }
 
 /* A level bar: an NSLevelIndicator in its continuous capacity style, with warning and
@@ -3143,10 +3165,13 @@ int sga_scale_factor(int a_id)
 }
 
 /* A window's size is its content's (what the program lays out in); a widget's, its own. */
+/* A container's size leaves its margins out (as its position does, and as GTK reports it):
+   the stack or grid inside the wrapper is measured. */
 static NSView *sga_measured_view(int a_id)
 {
 	id o = sga_get(a_id);
-	return [o isKindOfClass:[NSWindow class]] ? [(NSWindow *)o contentView] : (NSView *)o;
+	if ([o isKindOfClass:[NSWindow class]]) return [(NSWindow *)o contentView];
+	return s_margins[a_id][0] ? (NSView *)s_inner[a_id] : (NSView *)o;
 }
 
 int sga_width(int a_id)

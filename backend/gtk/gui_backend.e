@@ -398,7 +398,7 @@ feature -- Controls
 
 	time_picker: INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
-		alias "return sg_time_picker(0, 0);"
+		alias "GDateTime *now = g_date_time_new_now_local(); int id = sg_time_picker(g_date_time_get_hour(now), g_date_time_get_minute(now)); g_date_time_unref(now); return id;"
 		end
 
 	date_picker_set (an_id, a_value: INTEGER)

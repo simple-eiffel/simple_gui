@@ -47,6 +47,7 @@ feature {NONE} -- Initialization
 			minimum_set: minimum = a_min
 			maximum_set: maximum = a_max
 			at_minimum: value = a_min
+			unit_step: step = 1
 			vertical: is_vertical
 		end
 

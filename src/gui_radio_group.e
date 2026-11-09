@@ -25,6 +25,7 @@ feature {NONE} -- Initialization
 			register (backend.radio_group (True))
 		ensure
 			empty: count = 0
+			none_selected: selected_index = 0
 			vertical: not is_horizontal
 		end
 
@@ -39,6 +40,7 @@ feature {NONE} -- Initialization
 			register (backend.radio_group (False))
 		ensure
 			empty: count = 0
+			none_selected: selected_index = 0
 			horizontal: is_horizontal
 		end
 
