@@ -28,7 +28,7 @@ __attribute__((weak)) int sg_q[SG_QCAP][5] = {{0}};
 __attribute__((weak)) int sg_qh = 0;
 __attribute__((weak)) int sg_qt = 0;
 __attribute__((weak)) GtkWidget *sg_w[SG_MAX] = {0};
-__attribute__((weak)) int sg_kind[SG_MAX] = {0};      /* 1 window 2 stack 3 grid 4 label 5 button 6 field 7 list 8 canvas (9 check box, 10 text area, 11 tabs; 13 table, 14 tree; 15 dropdown, 16 spin box, 17 progress bar, 18 toolbar, 19 status bar; 20 radio group, 21 segmented, 22 slider, 23 switch, 24 date, 25 time, 26 color, 27 scroll area, 28 image, 29 separator, 30 group box, 31 expander, 32 combo box, 33 tree table) */
+__attribute__((weak)) int sg_kind[SG_MAX] = {0};      /* 1 window 2 stack 3 grid 4 label 5 button 6 field 7 list 8 canvas (9 check box, 10 text area, 11 tabs; 13 table, 14 tree; 15 dropdown, 16 spin box, 17 progress bar, 18 toolbar, 19 status bar; 20 radio group, 21 segmented, 22 slider, 23 switch, 24 date, 25 time, 26 color, 27 scroll area, 28 image, 29 separator, 30 group box, 31 expander, 32 combo box, 33 tree table; 40 calendar, 41 menu button, 42 split button, 43 level bar, 44 popover, 45 search field, 46 token field, 47 path control, 48 rating, 49 rich text area) */
 __attribute__((weak)) int sg_n = 1;                   /* id 0 is "none" */
 __attribute__((weak)) int sg_quiet = 0;               /* >0 while a programmatic change runs */
 __attribute__((weak)) GThread *sg_gui_thread = NULL;
@@ -336,7 +336,10 @@ static int sg_field(void) {
 }
 static void sg_field_set(int id, const char *t) { sg_quiet++; gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), t); sg_quiet--; }
 static const char *sg_field_get(int id) { return gtk_editable_get_text(GTK_EDITABLE(sg_w[id])); }
-static void sg_field_set_placeholder(int id, const char *t) { gtk_entry_set_placeholder_text(GTK_ENTRY(sg_w[id]), t); }
+static void sg_field_set_placeholder(int id, const char *t) {
+    if (GTK_IS_SEARCH_ENTRY(sg_w[id])) gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(sg_w[id]), t);
+    else gtk_entry_set_placeholder_text(GTK_ENTRY(sg_w[id]), t);
+}
 
 static int sg_list(void) {
     GtkWidget *l = gtk_list_box_new();
@@ -1637,6 +1640,8 @@ static int sg_message(int win, const char *title, const char *text, int confirm)
     return confirm ? (sg_dialog_choice == 1 ? 1 : 0) : 1;
 }
 
+static void sg_calendar_set(int id, int v);
+static int sg_calendar_value(int id);
 /* ---------- 1h: radio group (20) and segmented control (21) - event 4, a = choice;
    slider (22) - 2, a = value, on every move; switch (23) - 12, a = 1 on; date (24) - 2,
    a = y*10000 + m*100 + d; time (25) - 2, a = h*60 + m; color (26) - 2, a = 0xRRGGBB;
@@ -2152,6 +2157,7 @@ static void sg_test_set_value(int id, int v) {
     case 24: if (sg_date_value(id) != v) { sg_date_set(id, v / 10000, (v / 100) % 100, v % 100); sg_push(2, id, v, 0); } break;
     case 25: if (sg_time_value(id) != v) { sg_time_set(id, v / 60, v % 60); sg_push(2, id, v, 0); } break;
     case 26: if (sg_color_value(id) != v) { sg_quiet++; sg_color_put(id, v); sg_quiet--; sg_push(2, id, v, 0); } break;
+    case 40: if (sg_calendar_value(id) != v) { sg_calendar_set(id, v); sg_push(2, id, v, 0); } break;
     default: break;
     }
 }
@@ -2240,10 +2246,574 @@ static void sg_scroll_area_scroll_to(int id, int x, int y) {
 }
 /* A date picker's value is y*10000 + m*100 + d; a time picker's h*60 + m. */
 static void sg_date_or_time_set(int id, int v) {
-    if (sg_kind[id] == 25) sg_time_set(id, v / 60, v % 60);
+    if (sg_kind[id] == 40) sg_calendar_set(id, v);
+    else if (sg_kind[id] == 25) sg_time_set(id, v / 60, v % 60);
     else sg_date_set(id, v / 10000, (v / 100) % 100, v % 100);
 }
-static int sg_date_or_time_value(int id) { return sg_kind[id] == 25 ? sg_time_value(id) : sg_date_value(id); }
+static int sg_date_or_time_value(int id) { return sg_kind[id] == 40 ? sg_calendar_value(id) : sg_kind[id] == 25 ? sg_time_value(id) : sg_date_value(id); }
+
+/* ---------- 1j: calendar (40), menu button (41) and split button (42), level bar (43),
+   popover (44), search field (45), token field (46), path control (47), rating (48),
+   rich text area (49); dialogs ask_text, confirm_with_check, choose_font, show_about.
+   Setters are quiet; the sg_test_ hooks act as a user. ---------- */
+
+/* Calendar: GtkCalendar read as a grid; its value y*10000 + m*100 + d (event 2). */
+static int sg_calendar_value(int id) {
+    GDateTime *dt = gtk_calendar_get_date(GTK_CALENDAR(sg_w[id]));
+    int v = g_date_time_get_year(dt) * 10000 + g_date_time_get_month(dt) * 100 + g_date_time_get_day_of_month(dt);
+    g_date_time_unref(dt);
+    return v;
+}
+static void sg_on_calendar_day(GtkCalendar *c, gpointer d) {
+    (void) d;
+    if (!sg_quiet) sg_push(2, sg_id_of(c), sg_calendar_value(sg_id_of(c)), 0);
+}
+static int sg_calendar(void) {
+    GtkWidget *c = g_object_new(GTK_TYPE_CALENDAR, "accessible-role", GTK_ACCESSIBLE_ROLE_GRID, NULL);
+    int id = sg_reg(c, 40);
+    gtk_widget_set_halign(c, GTK_ALIGN_START);
+    g_signal_connect(c, "day-selected", G_CALLBACK(sg_on_calendar_day), NULL);
+    return id;
+}
+static void sg_calendar_set(int id, int v) {
+    GDateTime *dt = g_date_time_new_local(v / 10000, (v / 100) % 100, v % 100, 0, 0, 0);
+    if (dt) { sg_quiet++; gtk_calendar_select_day(GTK_CALENDAR(sg_w[id]), dt); sg_quiet--; g_date_time_unref(dt); }
+}
+
+/* Menu button: a GtkMenuButton over a GMenu (the context menus' app.itemN actions). A split
+   button is a linked pair: the main GtkButton (click, event 1, on the pair's id) and the
+   arrow. Both read as buttons named by their text. */
+static void sg_on_split_main(GtkButton *b, gpointer d) { (void) b; if (!sg_quiet) sg_push(1, GPOINTER_TO_INT(d), 0, 0); }
+static void sg_name_widget(GtkWidget *w, const char *name) {
+    g_object_set_data_full(G_OBJECT(w), "sg-a11y", g_strdup(name), g_free);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(w), GTK_ACCESSIBLE_PROPERTY_LABEL, name, -1);
+}
+static int sg_menu_button(const char *text, int split) {
+    if (!split) {
+        GtkWidget *m = g_object_new(GTK_TYPE_MENU_BUTTON, "label", text, "accessible-role", GTK_ACCESSIBLE_ROLE_BUTTON, NULL);
+        int id = sg_reg(m, 41);
+        sg_name_widget(m, text);
+        gtk_widget_set_halign(m, GTK_ALIGN_START);
+        return id;
+    } else {
+        GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+        GtkWidget *main_part = gtk_button_new_with_label(text);
+        GtkWidget *arrow = g_object_new(GTK_TYPE_MENU_BUTTON, "accessible-role", GTK_ACCESSIBLE_ROLE_BUTTON, NULL);
+        int id = sg_reg(box, 42);
+        gtk_widget_add_css_class(box, "linked");
+        gtk_widget_set_halign(box, GTK_ALIGN_START);
+        sg_name_widget(arrow, "More");
+        gtk_box_append(GTK_BOX(box), main_part);
+        gtk_box_append(GTK_BOX(box), arrow);
+        g_object_set_data(G_OBJECT(box), "sg-main", main_part);
+        g_object_set_data(G_OBJECT(box), "sg-arrow", arrow);
+        g_signal_connect(main_part, "clicked", G_CALLBACK(sg_on_split_main), GINT_TO_POINTER(id));
+        return id;
+    }
+}
+static void sg_menu_button_set_menu(int id, void *menu) {
+    GtkWidget *m = sg_kind[id] == 42 ? g_object_get_data(G_OBJECT(sg_w[id]), "sg-arrow") : sg_w[id];
+    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(m), G_MENU_MODEL(menu));
+}
+
+/* Level bar: GtkLevelBar read as a meter. Offsets color it: up to the warning value the
+   theme's normal fill, to the critical value amber, beyond it red. */
+__attribute__((weak)) int sg_level_css_done = 0;
+static void sg_level_css(void) {
+    GtkCssProvider *p;
+    if (sg_level_css_done) return;
+    sg_level_css_done = 1;
+    p = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(p,
+        "levelbar block.sg-warning { background-color: #e5a50a; }\n"
+        "levelbar block.sg-critical { background-color: #e01b24; }\n");
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(p),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(p);
+}
+static void sg_level_offsets(int id) {
+    GtkLevelBar *b = GTK_LEVEL_BAR(sg_w[id]);
+    int hi = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-max"));
+    int warn = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-warning"));
+    int crit = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-critical"));
+    gtk_level_bar_remove_offset_value(b, GTK_LEVEL_BAR_OFFSET_LOW);
+    gtk_level_bar_remove_offset_value(b, GTK_LEVEL_BAR_OFFSET_HIGH);
+    gtk_level_bar_remove_offset_value(b, GTK_LEVEL_BAR_OFFSET_FULL);
+    gtk_level_bar_remove_offset_value(b, "sg-warning");
+    gtk_level_bar_remove_offset_value(b, "sg-critical");
+    /* the style is the first offset at or above the value */
+    gtk_level_bar_add_offset_value(b, GTK_LEVEL_BAR_OFFSET_HIGH, warn > 0 ? warn : hi);
+    if (warn > 0) gtk_level_bar_add_offset_value(b, "sg-warning", crit > warn ? crit : hi);
+    if (crit > 0) gtk_level_bar_add_offset_value(b, "sg-critical", hi);
+}
+static int sg_level_bar(int lo, int hi) {
+    GtkWidget *b = g_object_new(GTK_TYPE_LEVEL_BAR, "accessible-role", GTK_ACCESSIBLE_ROLE_METER, NULL);
+    int id = sg_reg(b, 43);
+    sg_level_css();
+    gtk_level_bar_set_min_value(GTK_LEVEL_BAR(b), lo);
+    gtk_level_bar_set_max_value(GTK_LEVEL_BAR(b), hi);
+    gtk_level_bar_set_value(GTK_LEVEL_BAR(b), lo);
+    gtk_widget_set_hexpand(b, TRUE);
+    gtk_widget_set_valign(b, GTK_ALIGN_CENTER);
+    g_object_set_data(G_OBJECT(b), "sg-max", GINT_TO_POINTER(hi));
+    sg_level_offsets(id);
+    return id;
+}
+static void sg_level_bar_set(int id, int v) { gtk_level_bar_set_value(GTK_LEVEL_BAR(sg_w[id]), v); }
+static int sg_level_bar_value(int id) { return (int) (gtk_level_bar_get_value(GTK_LEVEL_BAR(sg_w[id])) + 0.5); }
+static void sg_level_bar_set_warning(int id, int v) { g_object_set_data(G_OBJECT(sg_w[id]), "sg-warning", GINT_TO_POINTER(v)); sg_level_offsets(id); }
+static void sg_level_bar_set_critical(int id, int v) { g_object_set_data(G_OBJECT(sg_w[id]), "sg-critical", GINT_TO_POINTER(v)); sg_level_offsets(id); }
+
+/* Popover: a GtkPopover (read as a dialog) attached to its anchor when shown. The user's
+   dismissal sends closed (17); hide is quiet. */
+static void sg_on_popover_closed(GtkPopover *p, gpointer d) { (void) d; if (!sg_quiet) sg_push(17, sg_id_of(p), 0, 0); }
+static int sg_popover(void) {
+    GtkWidget *p = g_object_new(GTK_TYPE_POPOVER, "accessible-role", GTK_ACCESSIBLE_ROLE_DIALOG, NULL);
+    int id = sg_reg(p, 44);
+    g_object_ref_sink(p);   /* kept while it has no anchor */
+    g_signal_connect(p, "closed", G_CALLBACK(sg_on_popover_closed), NULL);
+    return id;
+}
+static void sg_popover_set_content(int id, int child) { gtk_popover_set_child(GTK_POPOVER(sg_w[id]), sg_w[child]); }
+static void sg_popover_show_at(int id, int anchor) {
+    GtkWidget *p = sg_w[id];
+    if (gtk_widget_get_parent(p) != sg_w[anchor]) {
+        if (gtk_widget_get_parent(p)) gtk_widget_unparent(p);
+        gtk_widget_set_parent(p, sg_w[anchor]);
+    }
+    gtk_popover_popup(GTK_POPOVER(p));
+}
+static void sg_popover_hide(int id) { sg_quiet++; gtk_popover_popdown(GTK_POPOVER(sg_w[id])); sg_quiet--; }
+static int sg_popover_is_shown(int id) { return gtk_widget_get_visible(sg_w[id]) ? 1 : 0; }
+static void sg_test_dismiss_popover(int id) { gtk_popover_popdown(GTK_POPOVER(sg_w[id])); }   /* emits closed */
+
+/* Search field: GtkSearchEntry; changed (2) on each edit as a field, activate (3) on Return. */
+static int sg_search_field(void) {
+    GtkWidget *e = gtk_search_entry_new();
+    int id = sg_reg(e, 45);
+    g_signal_connect(e, "changed", G_CALLBACK(sg_on_changed), NULL);
+    g_signal_connect(e, "activate", G_CALLBACK(sg_on_activate), NULL);
+    return id;
+}
+
+/* Token field: chips (buttons named by their token) then an entry. A comma or Return makes a
+   token; Backspace in the empty entry removes the last. The user's change sends 2. */
+static GtkWidget *sg_token_entry(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-entry"); }
+static GPtrArray *sg_tokens(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-tokens"); }
+static void sg_token_rebuild(int id) {
+    GtkWidget *box = sg_w[id], *c, *next, *entry = sg_token_entry(id);
+    GPtrArray *tk = sg_tokens(id);
+    guint i;
+    for (c = gtk_widget_get_first_child(box); c; c = next) {
+        next = gtk_widget_get_next_sibling(c);
+        if (c != entry) gtk_box_remove(GTK_BOX(box), c);
+    }
+    for (i = 0; i < tk->len; i++) {
+        GtkWidget *chip = gtk_button_new_with_label(g_ptr_array_index(tk, i));
+        gtk_widget_add_css_class(chip, "pill");
+        gtk_widget_set_focusable(chip, FALSE);
+        gtk_box_insert_child_after(GTK_BOX(box), chip, gtk_widget_get_prev_sibling(entry));
+    }
+}
+static int sg_token_add_text(int id, const char *text) {
+    /* every comma-separated piece of `text', trimmed, as a token; answers how many */
+    gchar **parts = g_strsplit(text, ",", -1);
+    int i, n = 0;
+    for (i = 0; parts[i]; i++) {
+        gchar *t = g_strstrip(parts[i]);
+        if (*t) { g_ptr_array_add(sg_tokens(id), g_strdup(t)); n++; }
+    }
+    g_strfreev(parts);
+    if (n) sg_token_rebuild(id);
+    return n;
+}
+static void sg_on_token_activate(GtkEntry *e, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    const char *t = gtk_editable_get_text(GTK_EDITABLE(e));
+    if (sg_token_add_text(id, t)) { sg_quiet++; gtk_editable_set_text(GTK_EDITABLE(e), ""); sg_quiet--; sg_push(2, id, 0, 0); }
+}
+static void sg_on_token_changed(GtkEditable *e, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    const char *t = gtk_editable_get_text(e);
+    if (sg_quiet || !strchr(t, ',')) return;
+    {
+        gchar *copy = g_strdup(t);
+        int n = sg_token_add_text(id, copy);
+        g_free(copy);
+        sg_quiet++; gtk_editable_set_text(e, ""); sg_quiet--;
+        if (n) sg_push(2, id, 0, 0);
+    }
+}
+static gboolean sg_on_token_key(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    GPtrArray *tk = sg_tokens(id);
+    (void) k; (void) code; (void) m;
+    if (key == GDK_KEY_BackSpace && *gtk_editable_get_text(GTK_EDITABLE(sg_token_entry(id))) == '\0' && tk->len > 0) {
+        g_ptr_array_remove_index(tk, tk->len - 1);
+        sg_token_rebuild(id);
+        sg_push(2, id, 0, 0);
+        return TRUE;
+    }
+    return FALSE;
+}
+static int sg_token_field(void) {
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *e = gtk_entry_new();
+    GtkEventController *k = gtk_event_controller_key_new();
+    int id = sg_reg(box, 46);
+    gtk_widget_set_hexpand(e, TRUE);
+    gtk_box_append(GTK_BOX(box), e);
+    g_object_set_data(G_OBJECT(box), "sg-entry", e);
+    g_object_set_data_full(G_OBJECT(box), "sg-tokens", g_ptr_array_new_with_free_func(g_free), (GDestroyNotify) g_ptr_array_unref);
+    g_signal_connect(e, "activate", G_CALLBACK(sg_on_token_activate), GINT_TO_POINTER(id));
+    g_signal_connect(e, "changed", G_CALLBACK(sg_on_token_changed), GINT_TO_POINTER(id));
+    g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_token_key), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(e, k);
+    return id;
+}
+static void sg_token_field_extend(int id, const char *t) { g_ptr_array_add(sg_tokens(id), g_strdup(t)); sg_token_rebuild(id); }
+static void sg_token_field_remove(int id, int i) {
+    if (i >= 1 && (guint) i <= sg_tokens(id)->len) { g_ptr_array_remove_index(sg_tokens(id), (guint) (i - 1)); sg_token_rebuild(id); }
+}
+static void sg_token_field_wipe_out(int id) { g_ptr_array_set_size(sg_tokens(id), 0); sg_token_rebuild(id); }
+static int sg_token_field_count(int id) { return (int) sg_tokens(id)->len; }
+static const char *sg_token_field_item(int id, int i) {
+    return (i >= 1 && (guint) i <= sg_tokens(id)->len) ? g_ptr_array_index(sg_tokens(id), i - 1) : "";
+}
+/* As a user typing "a, b" then Return: one change (2). */
+static void sg_test_type_tokens(int id, const char *text) {
+    if (sg_token_add_text(id, text)) sg_push(2, id, 0, 0);
+}
+
+/* Path control: a navigation of flat link buttons, one per part ("/" first), separated by
+   chevrons. A click sends selection (4, a = the part, 1 = the root). */
+static GPtrArray *sg_path_parts(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-parts"); }
+static void sg_on_path_part(GtkButton *b, gpointer d) {
+    (void) d;
+    sg_push(4, sg_id_of(b), GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-index")), 0);
+}
+static int sg_path_control(void) {
+    GtkWidget *box = g_object_new(GTK_TYPE_BOX, "orientation", GTK_ORIENTATION_HORIZONTAL, "spacing", 0,
+                                  "accessible-role", GTK_ACCESSIBLE_ROLE_NAVIGATION, NULL);
+    int id = sg_reg(box, 47);
+    gtk_widget_set_halign(box, GTK_ALIGN_START);
+    g_object_set_data_full(G_OBJECT(box), "sg-parts", g_ptr_array_new_with_free_func(g_free), (GDestroyNotify) g_ptr_array_unref);
+    return id;
+}
+static void sg_path_control_set(int id, const char *path) {
+    GtkWidget *box = sg_w[id], *c;
+    GPtrArray *parts = sg_path_parts(id);
+    gchar **pieces;
+    guint i;
+    int n = 0;
+    while ((c = gtk_widget_get_first_child(box))) gtk_box_remove(GTK_BOX(box), c);
+    g_ptr_array_set_size(parts, 0);
+    if (path[0] == '/') g_ptr_array_add(parts, g_strdup("/"));
+    pieces = g_strsplit_set(path, "/\\", -1);
+    for (i = 0; pieces[i]; i++) if (*pieces[i]) g_ptr_array_add(parts, g_strdup(pieces[i]));
+    g_strfreev(pieces);
+    for (i = 0; i < parts->len; i++) {
+        GtkWidget *b = g_object_new(GTK_TYPE_BUTTON, "label", (const char *) g_ptr_array_index(parts, i),
+                                    "has-frame", FALSE, "accessible-role", GTK_ACCESSIBLE_ROLE_LINK, NULL);
+        if (i > 0) gtk_box_append(GTK_BOX(box), gtk_label_new("\xe2\x80\xba"));   /* › */
+        g_object_set_data(G_OBJECT(b), "sg-id", GINT_TO_POINTER(id));
+        g_object_set_data(G_OBJECT(b), "sg-index", GINT_TO_POINTER(++n));
+        g_signal_connect(b, "clicked", G_CALLBACK(sg_on_path_part), NULL);
+        gtk_box_append(GTK_BOX(box), b);
+    }
+    g_object_set_data_full(G_OBJECT(box), "sg-path", g_strdup(path), g_free);
+}
+static int sg_path_control_count(int id) { return (int) sg_path_parts(id)->len; }
+static const char *sg_path_control_part(int id, int i) {
+    return (i >= 1 && (guint) i <= sg_path_parts(id)->len) ? g_ptr_array_index(sg_path_parts(id), i - 1) : "";
+}
+
+/* Rating: a row of star buttons read as a slider (value 0 .. maximum). Clicking star i rates
+   i (2, a = i). */
+static void sg_rating_show(int id) {
+    GtkWidget *c;
+    int v = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-value")), n = 1;
+    int max = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-max"));
+    for (c = gtk_widget_get_first_child(sg_w[id]); c; c = gtk_widget_get_next_sibling(c), n++)
+        gtk_button_set_label(GTK_BUTTON(c), n <= v ? "\xe2\x98\x85" : "\xe2\x98\x86");   /* ★ ☆ */
+    gtk_accessible_update_property(GTK_ACCESSIBLE(sg_w[id]), GTK_ACCESSIBLE_PROPERTY_VALUE_MIN, 0.0,
+        GTK_ACCESSIBLE_PROPERTY_VALUE_MAX, (double) max, GTK_ACCESSIBLE_PROPERTY_VALUE_NOW, (double) v, -1);
+}
+static void sg_rating_put(int id, int v) { g_object_set_data(G_OBJECT(sg_w[id]), "sg-value", GINT_TO_POINTER(v)); sg_rating_show(id); }
+static void sg_on_star(GtkButton *b, gpointer d) {
+    int id = sg_id_of(b), i = GPOINTER_TO_INT(d);
+    if (i != GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-value"))) { sg_rating_put(id, i); sg_push(2, id, i, 0); }
+}
+static int sg_rating(int max) {
+    GtkWidget *box = g_object_new(GTK_TYPE_BOX, "orientation", GTK_ORIENTATION_HORIZONTAL, "spacing", 0,
+                                  "accessible-role", GTK_ACCESSIBLE_ROLE_SLIDER, NULL);
+    int id = sg_reg(box, 48), i;
+    gtk_widget_set_halign(box, GTK_ALIGN_START);
+    g_object_set_data(G_OBJECT(box), "sg-max", GINT_TO_POINTER(max));
+    for (i = 1; i <= max; i++) {
+        GtkWidget *b = g_object_new(GTK_TYPE_BUTTON, "has-frame", FALSE, "accessible-role", GTK_ACCESSIBLE_ROLE_PRESENTATION, NULL);
+        g_object_set_data(G_OBJECT(b), "sg-id", GINT_TO_POINTER(id));
+        g_signal_connect(b, "clicked", G_CALLBACK(sg_on_star), GINT_TO_POINTER(i));
+        gtk_box_append(GTK_BOX(box), b);
+    }
+    sg_rating_put(id, 0);
+    return id;
+}
+static void sg_rating_set(int id, int v) { sg_rating_put(id, v); }
+static int sg_rating_value(int id) { return GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-value")); }
+static void sg_test_rate(int id, int v) {
+    if (v != sg_rating_value(id)) { sg_rating_put(id, v); sg_push(2, id, v, 0); }
+}
+
+/* Rich text area: the text area (its set and get work) with formatting tags. Positions are
+   1-based characters, ranges inclusive; a GtkTextIter's offsets are characters already. */
+static int sg_rich_text_area(void) {
+    int id = sg_text_area();
+    sg_kind[id] = 49;
+    return id;
+}
+static GtkTextBuffer *sg_rich_buffer(int id) { return gtk_text_view_get_buffer(sg_view_of(id)); }
+static GtkTextTag *sg_rich_tag(int id, const char *name) {
+    GtkTextBuffer *b = sg_rich_buffer(id);
+    GtkTextTag *t = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), name);
+    if (t) return t;
+    if (!strcmp(name, "sg-bold")) return gtk_text_buffer_create_tag(b, name, "weight", PANGO_WEIGHT_BOLD, NULL);
+    if (!strcmp(name, "sg-italic")) return gtk_text_buffer_create_tag(b, name, "style", PANGO_STYLE_ITALIC, NULL);
+    if (!strcmp(name, "sg-underline")) return gtk_text_buffer_create_tag(b, name, "underline", PANGO_UNDERLINE_SINGLE, NULL);
+    if (g_str_has_prefix(name, "sg-fg-")) {
+        char css[8]; GdkRGBA c;
+        snprintf(css, sizeof css, "#%s", name + 6);
+        gdk_rgba_parse(&c, css);
+        return gtk_text_buffer_create_tag(b, name, "foreground-rgba", &c, NULL);
+    }
+    if (g_str_has_prefix(name, "sg-size-"))
+        return gtk_text_buffer_create_tag(b, name, "size-points", g_ascii_strtod(name + 8, NULL) / 10.0, NULL);
+    return NULL;
+}
+static void sg_rich_iters(int id, int s, int e, GtkTextIter *a, GtkTextIter *z) {
+    gtk_text_buffer_get_iter_at_offset(sg_rich_buffer(id), a, s - 1);
+    gtk_text_buffer_get_iter_at_offset(sg_rich_buffer(id), z, e);
+}
+/* Remove every tag of a family (color or size) from a range, before applying another. */
+static void sg_rich_clear_family(int id, int s, int e, const char *prefix) {
+    GtkTextIter a, z, i;
+    GSList *tags, *l;
+    sg_rich_iters(id, s, e, &a, &z);
+    for (i = a; gtk_text_iter_compare(&i, &z) < 0; gtk_text_iter_forward_char(&i)) {
+        tags = gtk_text_iter_get_tags(&i);
+        for (l = tags; l; l = l->next) {
+            char *name = NULL;
+            g_object_get(l->data, "name", &name, NULL);
+            if (name && g_str_has_prefix(name, prefix)) gtk_text_buffer_remove_tag(sg_rich_buffer(id), GTK_TEXT_TAG(l->data), &a, &z);
+            g_free(name);
+        }
+        g_slist_free(tags);
+    }
+}
+static void sg_rich_apply(int id, int s, int e, const char *name, int on) {
+    GtkTextIter a, z;
+    GtkTextTag *t = sg_rich_tag(id, name);
+    sg_rich_iters(id, s, e, &a, &z);
+    sg_quiet++;
+    if (on) gtk_text_buffer_apply_tag(sg_rich_buffer(id), t, &a, &z);
+    else gtk_text_buffer_remove_tag(sg_rich_buffer(id), t, &a, &z);
+    sg_quiet--;
+}
+static const char *sg_trait_tag(int trait) { return trait == 1 ? "sg-bold" : trait == 2 ? "sg-italic" : "sg-underline"; }
+static void sg_rich_text_set_trait(int id, int s, int e, int trait, int on) { sg_rich_apply(id, s, e, sg_trait_tag(trait), on); }
+static void sg_rich_text_set_color(int id, int s, int e, int rgb) {
+    char name[16];
+    sg_rich_clear_family(id, s, e, "sg-fg-");
+    snprintf(name, sizeof name, "sg-fg-%06X", rgb & 0xFFFFFF);
+    sg_rich_apply(id, s, e, name, 1);
+}
+static void sg_rich_text_set_size(int id, int s, int e, double points) {
+    char name[24];
+    sg_rich_clear_family(id, s, e, "sg-size-");
+    snprintf(name, sizeof name, "sg-size-%d", (int) (points * 10 + 0.5));
+    sg_rich_apply(id, s, e, name, 1);
+}
+static int sg_rich_has(int id, int i, const char *name) {
+    GtkTextIter it;
+    GtkTextTag *t = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(sg_rich_buffer(id)), name);
+    if (!t) return 0;
+    gtk_text_buffer_get_iter_at_offset(sg_rich_buffer(id), &it, i - 1);
+    return gtk_text_iter_has_tag(&it, t) ? 1 : 0;
+}
+static int sg_rich_text_trait_at(int id, int i, int trait) { return sg_rich_has(id, i, sg_trait_tag(trait)); }
+/* The value of the family tag at position `i' (its name past `prefix'), or NULL. */
+static char *sg_rich_family_at(int id, int i, const char *prefix) {
+    GtkTextIter it;
+    GSList *tags, *l;
+    char *found = NULL;
+    gtk_text_buffer_get_iter_at_offset(sg_rich_buffer(id), &it, i - 1);
+    tags = gtk_text_iter_get_tags(&it);
+    for (l = tags; l && !found; l = l->next) {
+        char *name = NULL;
+        g_object_get(l->data, "name", &name, NULL);
+        if (name && g_str_has_prefix(name, prefix)) found = g_strdup(name + strlen(prefix));
+        g_free(name);
+    }
+    g_slist_free(tags);
+    return found;
+}
+static int sg_rich_text_color_at(int id, int i) {
+    char *v = sg_rich_family_at(id, i, "sg-fg-");
+    int rgb = v ? (int) strtol(v, NULL, 16) : -1;
+    g_free(v);
+    return rgb;
+}
+static double sg_rich_text_size_at(int id, int i) {
+    char *v = sg_rich_family_at(id, i, "sg-size-");
+    double pts;
+    if (v) { pts = g_ascii_strtod(v, NULL) / 10.0; g_free(v); return pts; }
+    {   /* the view's own size */
+        PangoFontDescription *f = pango_context_get_font_description(gtk_widget_get_pango_context(GTK_WIDGET(sg_view_of(id))));
+        return f ? pango_font_description_get_size(f) / (double) PANGO_SCALE : 0.0;
+    }
+}
+static int sg_rich_text_selection_start(int id) {
+    GtkTextIter a, z;
+    if (gtk_text_buffer_get_selection_bounds(sg_rich_buffer(id), &a, &z)) return gtk_text_iter_get_offset(&a) + 1;
+    gtk_text_buffer_get_iter_at_mark(sg_rich_buffer(id), &a, gtk_text_buffer_get_insert(sg_rich_buffer(id)));
+    return gtk_text_iter_get_offset(&a) + 1;
+}
+static int sg_rich_text_selection_end(int id) {
+    GtkTextIter a, z;
+    if (gtk_text_buffer_get_selection_bounds(sg_rich_buffer(id), &a, &z)) return gtk_text_iter_get_offset(&z);
+    return sg_rich_text_selection_start(id) - 1;
+}
+static void sg_rich_text_select(int id, int s, int e) {
+    GtkTextIter a, z;
+    sg_rich_iters(id, s, e, &a, &z);
+    gtk_text_buffer_select_range(sg_rich_buffer(id), &a, &z);
+}
+
+/* ---------- 1j dialogs: built in a modal window, waited for; the test auto-cancel closes
+   them as Cancel would. ---------- */
+
+__attribute__((weak)) int sg_box_answer = 0;
+__attribute__((weak)) int sg_box_timer_fired = 0;
+static void sg_box_ok(GtkButton *b, gpointer w) { (void) b; sg_box_answer = 1; gtk_window_destroy(GTK_WINDOW(w)); }
+static void sg_box_cancel(GtkButton *b, gpointer w) { (void) b; sg_box_answer = 0; gtk_window_destroy(GTK_WINDOW(w)); }
+static void sg_box_gone(GtkWidget *w, gpointer d) { (void) w; (void) d; sg_dialog_done = 1; }
+static gboolean sg_box_timeout(gpointer w) { sg_box_timer_fired = 1; sg_box_answer = 0; gtk_window_destroy(GTK_WINDOW(w)); return G_SOURCE_REMOVE; }
+/* Start the test's auto-cancel for window `w' (0 when off). */
+static guint sg_box_timer(GtkWidget *w) { sg_box_timer_fired = 0; return sg_auto_cancel_ms > 0 ? g_timeout_add((guint) sg_auto_cancel_ms, sg_box_timeout, w) : 0; }
+/* After the wait: a timer that has not fired must not fire on the destroyed window. */
+static void sg_box_timer_done(guint timer) { if (timer && !sg_box_timer_fired) g_source_remove(timer); }
+/* A modal window holding `body' over Cancel and OK; waits until answered. 1 OK, 0 cancel. */
+static int sg_run_box(int win, const char *title, GtkWidget *body, GtkWidget *ok_on_activate) {
+    GtkWidget *w = gtk_window_new(), *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *cancel = gtk_button_new_with_label("Cancel"), *ok = gtk_button_new_with_label("OK");
+    guint timer = 0;
+    gtk_window_set_title(GTK_WINDOW(w), title);
+    gtk_window_set_modal(GTK_WINDOW(w), TRUE);
+    gtk_window_set_resizable(GTK_WINDOW(w), FALSE);
+    if (win > 0 && sg_w[win]) gtk_window_set_transient_for(GTK_WINDOW(w), GTK_WINDOW(sg_w[win]));
+    gtk_widget_set_margin_start(outer, 16); gtk_widget_set_margin_end(outer, 16);
+    gtk_widget_set_margin_top(outer, 16); gtk_widget_set_margin_bottom(outer, 16);
+    gtk_widget_add_css_class(ok, "suggested-action");
+    gtk_widget_set_halign(row, GTK_ALIGN_END);
+    gtk_box_append(GTK_BOX(row), cancel);
+    gtk_box_append(GTK_BOX(row), ok);
+    gtk_box_append(GTK_BOX(outer), body);
+    gtk_box_append(GTK_BOX(outer), row);
+    gtk_window_set_child(GTK_WINDOW(w), outer);
+    gtk_window_set_default_widget(GTK_WINDOW(w), ok);
+    g_signal_connect(ok, "clicked", G_CALLBACK(sg_box_ok), w);
+    g_signal_connect(cancel, "clicked", G_CALLBACK(sg_box_cancel), w);
+    g_signal_connect(w, "destroy", G_CALLBACK(sg_box_gone), NULL);
+    if (ok_on_activate) g_signal_connect_swapped(ok_on_activate, "activate", G_CALLBACK(gtk_widget_activate), ok);
+    sg_box_answer = 0; sg_dialog_done = 0;
+    timer = sg_box_timer(w);
+    gtk_window_present(GTK_WINDOW(w));
+    sg_wait_dialog();
+    sg_box_timer_done(timer);
+    return sg_box_answer;
+}
+static const char *sg_ask_text(int win, const char *title, const char *prompt, const char *initial) {
+    GtkWidget *body = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6), *label = gtk_label_new(prompt), *e = gtk_entry_new();
+    static char *answer = NULL;
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+    gtk_editable_set_text(GTK_EDITABLE(e), initial);
+    gtk_box_append(GTK_BOX(body), label);
+    gtk_box_append(GTK_BOX(body), e);
+    g_object_ref(e);
+    g_free(answer); answer = NULL;
+    if (sg_run_box(win, title, body, e)) answer = g_strdup(gtk_editable_get_text(GTK_EDITABLE(e)));
+    g_object_unref(e);
+    return answer;
+}
+/* Bit 0: OK; bit 1: the box was checked. */
+static int sg_confirm_with_check(int win, const char *title, const char *text, const char *check) {
+    GtkWidget *body = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10), *label = gtk_label_new(text), *box = gtk_check_button_new_with_label(check);
+    int ok, checked;
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+    gtk_label_set_wrap(GTK_LABEL(label), TRUE);
+    gtk_box_append(GTK_BOX(body), label);
+    gtk_box_append(GTK_BOX(body), box);
+    g_object_ref(box);
+    ok = sg_run_box(win, title, body, NULL);
+    checked = gtk_check_button_get_active(GTK_CHECK_BUTTON(box)) ? 1 : 0;
+    g_object_unref(box);
+    return (ok ? 1 : 0) | (checked << 1);
+}
+__attribute__((weak)) PangoFontDescription *sg_font_answer = NULL;
+static void sg_font_done(GObject *src, GAsyncResult *res, gpointer d) {
+    (void) d;
+    if (sg_font_answer) pango_font_description_free(sg_font_answer);
+    sg_font_answer = gtk_font_dialog_choose_font_finish(GTK_FONT_DIALOG(src), res, NULL);
+    sg_dialog_done = 1;
+}
+/* "family\x1fpoints\x1fbold\x1fitalic" (bold and italic 0 or 1), or NULL when cancelled. */
+static const char *sg_choose_font(int win, const char *title, const char *family, double points, int bold, int italic) {
+    GtkFontDialog *dlg = gtk_font_dialog_new();
+    PangoFontDescription *initial = pango_font_description_new();
+    static char *answer = NULL;
+    GCancellable *c = sg_dialog_cancellable();
+    gtk_font_dialog_set_title(dlg, title);
+    gtk_font_dialog_set_modal(dlg, TRUE);
+    pango_font_description_set_family(initial, family);
+    if (points > 0) pango_font_description_set_size(initial, (int) (points * PANGO_SCALE));
+    pango_font_description_set_weight(initial, bold ? PANGO_WEIGHT_BOLD : PANGO_WEIGHT_NORMAL);
+    pango_font_description_set_style(initial, italic ? PANGO_STYLE_ITALIC : PANGO_STYLE_NORMAL);
+    if (sg_font_answer) { pango_font_description_free(sg_font_answer); sg_font_answer = NULL; }
+    sg_dialog_done = 0;
+    gtk_font_dialog_choose_font(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, initial, c, sg_font_done, NULL);
+    sg_wait_dialog();
+    g_object_unref(c);
+    g_object_unref(dlg);
+    pango_font_description_free(initial);
+    g_free(answer); answer = NULL;
+    if (sg_font_answer) {
+        const char *fam = pango_font_description_get_family(sg_font_answer);
+        double size = pango_font_description_get_size(sg_font_answer) / (double) PANGO_SCALE;
+        int b = pango_font_description_get_weight(sg_font_answer) >= PANGO_WEIGHT_BOLD;
+        int i = pango_font_description_get_style(sg_font_answer) != PANGO_STYLE_NORMAL;
+        char num[32];
+        g_ascii_dtostr(num, sizeof num, size);
+        answer = g_strdup_printf("%s\x1f%s\x1f%d\x1f%d", fam ? fam : "", num, b, i);
+    }
+    return answer;
+}
+static void sg_show_about(const char *name, const char *version, const char *copyright, const char *comments) {
+    GtkWidget *a = gtk_about_dialog_new();
+    guint timer = 0;
+    gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(a), name);
+    gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(a), version);
+    gtk_about_dialog_set_copyright(GTK_ABOUT_DIALOG(a), copyright);
+    gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(a), comments);
+    gtk_window_set_modal(GTK_WINDOW(a), TRUE);
+    gtk_window_set_hide_on_close(GTK_WINDOW(a), FALSE);
+    g_signal_connect(a, "destroy", G_CALLBACK(sg_box_gone), NULL);
+    sg_dialog_done = 0;
+    timer = sg_box_timer(a);
+    gtk_window_present(GTK_WINDOW(a));
+    sg_wait_dialog();
+    sg_box_timer_done(timer);
+}
 
 /* ---------- appearance ---------- */
 
@@ -2261,6 +2831,7 @@ static void sg_set_dark(int on) { g_object_set(gtk_settings_get_default(), "gtk-
 /* A user's click is the "clicked" signal; gtk_widget_activate would emit it only after a 250 ms press animation. */
 static void sg_test_click(int id) {
     if (sg_kind[id] == 9) gtk_check_button_set_active(GTK_CHECK_BUTTON(sg_w[id]), !gtk_check_button_get_active(GTK_CHECK_BUTTON(sg_w[id])));
+    else if (sg_kind[id] == 42) g_signal_emit_by_name(g_object_get_data(G_OBJECT(sg_w[id]), "sg-main"), "clicked");   /* a split button's main part */
     else if (sg_kind[id] == 23) gtk_switch_set_active(GTK_SWITCH(sg_w[id]), !gtk_switch_get_active(GTK_SWITCH(sg_w[id])));
     else if (sg_kind[id] == 31) gtk_expander_set_expanded(GTK_EXPANDER(sg_w[id]), !gtk_expander_get_expanded(GTK_EXPANDER(sg_w[id])));
     else g_signal_emit_by_name(sg_w[id], "clicked");
@@ -2381,7 +2952,7 @@ static int sg_snapshot(int id, const char *path) {
     return ok;
 }
 /* The tree table answers with its column view (a tree-grid), not the scroll window around it. */
-static const char *sg_role(int id) { return sg_role_nick(sg_kind[id] == 33 ? sg_a11y_target(id) : sg_w[id]); }
+static const char *sg_role(int id) { return sg_role_nick((sg_kind[id] == 33 || sg_kind[id] == 49) ? sg_a11y_target(id) : sg_w[id]); }
 
 /* Drive the loop until the queue stays empty for one turn, or `ms' pass (tests). */
 static void sg_pump_until_idle(int ms) {
