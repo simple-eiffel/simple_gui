@@ -142,12 +142,28 @@ static void sg_pill_css(void) {
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(p);
 }
+__attribute__((weak)) GtkWidget *sg_badge_target[SG_MAX];
 static gboolean sg_pill_position(GtkOverlay *o, GtkWidget *child, GdkRectangle *a, gpointer d) {
     int id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(child), "sg-pill-id")), corner, w, h;
+    int badge = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(child), "sg-badge-id"));
     GtkWidget *t;
     graphene_rect_t r;
     gboolean rtl, right, bottom;
     (void) d;
+    if (badge > 0 && badge < SG_MAX) {
+        /* a badge: over the trailing top corner, mostly inside the widget */
+        if (!(t = sg_badge_target[badge]) || !gtk_widget_get_mapped(t) || !gtk_widget_compute_bounds(t, GTK_WIDGET(o), &r)) return FALSE;
+        gtk_widget_measure(child, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &w, NULL, NULL);
+        gtk_widget_measure(child, GTK_ORIENTATION_VERTICAL, -1, NULL, &h, NULL, NULL);
+        rtl = gtk_widget_get_direction(t) == GTK_TEXT_DIR_RTL;
+        a->x = (int) (rtl ? r.origin.x - w / 3 : r.origin.x + r.size.width - (2 * w) / 3);
+        a->y = (int) (r.origin.y - h / 3);
+        if (a->x < 0) a->x = 0;
+        if (a->y < 0) a->y = 0;
+        a->width = w;
+        a->height = h;
+        return TRUE;
+    }
     if (id <= 0 || id >= SG_MAX || !(t = sg_pill_target[id]) || !gtk_widget_get_mapped(t)) return FALSE;
     if (!gtk_widget_compute_bounds(t, GTK_WIDGET(o), &r)) return FALSE;
     gtk_widget_measure(child, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &w, NULL, NULL);
@@ -196,9 +212,11 @@ static void sg_pill_sync(int id) {
     gtk_widget_set_visible(l, sg_pills_on);
     gtk_widget_queue_allocate(GTK_WIDGET(o));
 }
+static void sg_badge_sync_all(void);
 static void sg_pill_sync_all(void) {
     int i;
     for (i = 1; i < SG_MAX; i++) if (sg_pill_target[i]) sg_pill_sync(i);
+    sg_badge_sync_all();
 }
 static void sg_pill_set(int id, const char *code, const char *tip, int corner) {
     GtkWidget *t = sg_w[id];
@@ -455,15 +473,24 @@ static void sg_label_set_wrap_width(int id, int chars) {
 static void sg_label_set(int id, const char *t) { gtk_label_set_text(GTK_LABEL(sg_w[id]), t); }
 static const char *sg_label_get(int id) { return gtk_label_get_text(GTK_LABEL(sg_w[id])); }
 
+static void sg_button_build(int id);
 static int sg_button(const char *text) {
     GtkWidget *b = gtk_button_new_with_label(text);
     int id = sg_reg(b, 5);
+    g_object_set_data_full(G_OBJECT(b), "sg-text", g_strdup(text ? text : ""), g_free);
     gtk_widget_set_halign(b, GTK_ALIGN_START);
     g_signal_connect(b, "clicked", G_CALLBACK(sg_on_click), NULL);
     return id;
 }
-static void sg_button_set(int id, const char *t) { gtk_button_set_label(GTK_BUTTON(sg_w[id]), t); }
-static const char *sg_button_get(int id) { const char *s = gtk_button_get_label(GTK_BUTTON(sg_w[id])); return s ? s : ""; }
+static void sg_button_set(int id, const char *t) {
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-text", g_strdup(t ? t : ""), g_free);
+    sg_button_build(id);
+}
+static const char *sg_button_get(int id) {
+    const char *s = g_object_get_data(G_OBJECT(sg_w[id]), "sg-text");
+    if (!s) s = gtk_button_get_label(GTK_BUTTON(sg_w[id]));
+    return s ? s : "";
+}
 
 static int sg_field(void) {
     GtkWidget *e = gtk_entry_new();
@@ -1292,7 +1319,9 @@ static void sg_tabs_set_title(int tabs, int page, const char *title) {
     GtkNotebook *nb = GTK_NOTEBOOK(sg_w[tabs]);
     GtkWidget *p = gtk_notebook_get_nth_page(nb, page - 1);
     if (p) {
-        gtk_notebook_set_tab_label_text(nb, p, title);
+        GtkWidget *box_title = g_object_get_data(G_OBJECT(p), "sg-tab-title");
+        if (box_title) gtk_label_set_text(GTK_LABEL(box_title), title);
+        else gtk_notebook_set_tab_label_text(nb, p, title);
         sg_name_tab(nb, p, title);
     }
 }
@@ -1644,15 +1673,8 @@ static const char *sg_menu_title(void *menu) {
     g_menu_model_get_item_attribute(G_MENU_MODEL(sg_menubar), pos, G_MENU_ATTRIBUTE_LABEL, "s", &sg_label_buf);
     return sg_label_buf ? sg_label_buf : "";
 }
-static void sg_menu_set_item_text(int item_id, const char *text) {
-    GMenuItem *mi;
-    if (item_id <= 0 || item_id >= SG_MAX_ITEMS || !sg_item_menu[item_id]) return;
-    mi = g_menu_item_new(text, sg_item_action[item_id]);
-    if (sg_item_accel[item_id]) g_menu_item_set_attribute(mi, "accel", "s", sg_item_accel[item_id]);
-    g_menu_remove(sg_item_menu[item_id], sg_item_pos[item_id]);
-    g_menu_insert_item(sg_item_menu[item_id], sg_item_pos[item_id], mi);
-    g_object_unref(mi);
-}
+static void sg_menu_rebuild_item(int item_id, const char *text);
+static void sg_menu_set_item_text(int item_id, const char *text) { sg_menu_rebuild_item(item_id, text); }
 /* The label GTK's menu model holds now for item `item_id'. */
 static const char *sg_menu_item_text(int item_id) {
     g_free(sg_label_buf); sg_label_buf = NULL;
@@ -3310,6 +3332,222 @@ static void sg_list_scroll_to_row(int id, int row) {
     value = gtk_adjustment_get_value(v);
     if (b.origin.y < value) gtk_adjustment_set_value(v, b.origin.y);
     else if (b.origin.y + b.size.height > value + page) gtk_adjustment_set_value(v, b.origin.y + b.size.height - page);
+}
+
+/* ---------- 1n: icons (GUI_ICON's names as Adwaita symbolic icons; "filter", which Adwaita
+   lacks, is a funnel written once to the cache and found on the icon theme's search path),
+   button styles, badges (in the pill overlay, always shown) and busy buttons. ---------- */
+static const char *sg_icon_gtk(const char *name) {
+    static const char *map[][2] = {
+        {"add", "list-add-symbolic"}, {"remove", "list-remove-symbolic"}, {"close", "window-close-symbolic"},
+        {"check", "object-select-symbolic"}, {"chevron-right", "go-next-symbolic"}, {"chevron-left", "go-previous-symbolic"},
+        {"chevron-up", "go-up-symbolic"}, {"chevron-down", "go-down-symbolic"}, {"back", "go-previous-symbolic"},
+        {"forward", "go-next-symbolic"}, {"search", "system-search-symbolic"}, {"settings", "emblem-system-symbolic"},
+        {"delete", "user-trash-symbolic"}, {"edit", "document-edit-symbolic"}, {"folder", "folder-symbolic"},
+        {"document", "text-x-generic-symbolic"}, {"open", "document-open-symbolic"}, {"save", "document-save-symbolic"},
+        {"copy", "edit-copy-symbolic"}, {"cut", "edit-cut-symbolic"}, {"paste", "edit-paste-symbolic"},
+        {"undo", "edit-undo-symbolic"}, {"redo", "edit-redo-symbolic"}, {"refresh", "view-refresh-symbolic"},
+        {"play", "media-playback-start-symbolic"}, {"pause", "media-playback-pause-symbolic"},
+        {"stop", "media-playback-stop-symbolic"}, {"more", "view-more-horizontal-symbolic"}, {"menu", "open-menu-symbolic"},
+        {"info", "dialog-information-symbolic"}, {"warning", "dialog-warning-symbolic"}, {"error", "dialog-error-symbolic"},
+        {"help", "help-browser-symbolic"}, {"star", "starred-symbolic"}, {"picture", "image-x-generic-symbolic"},
+        {"home", "go-home-symbolic"}, {"user", "avatar-default-symbolic"}, {"mail", "mail-unread-symbolic"},
+        {"calendar", "x-office-calendar-symbolic"}, {"clock", "preferences-system-time-symbolic"},
+        {"lock", "changes-prevent-symbolic"}, {"bell", "preferences-system-notifications-symbolic"},
+        {"download", "folder-download-symbolic"}, {"upload", "send-to-symbolic"}, {"print", "document-print-symbolic"},
+        {"filter", "sg-filter-symbolic"}, {"sort", "view-sort-ascending-symbolic"}, {NULL, NULL}};
+    int i;
+    for (i = 0; map[i][0]; i++) if (!strcmp(map[i][0], name)) return map[i][1];
+    return "image-missing";
+}
+__attribute__((weak)) int sg_icons_done = 0;
+static void sg_icons_ready(void) {
+    gchar *dir, *file;
+    GtkCssProvider *p;
+    if (sg_icons_done) return;
+    sg_icons_done = 1;
+    dir = g_build_filename(g_get_user_cache_dir(), "simple_gui", "icons", NULL);
+    g_mkdir_with_parents(dir, 0755);
+    file = g_build_filename(dir, "sg-filter-symbolic.svg", NULL);
+    g_file_set_contents(file,
+        "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'>"
+        "<path fill='#2e3436' d='M1 2h14l-5.5 6.5V14l-3-1.5V8.5z'/></svg>", -1, NULL);
+    gtk_icon_theme_add_search_path(gtk_icon_theme_get_for_display(gdk_display_get_default()), dir);
+    g_free(file);
+    g_free(dir);
+    p = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(p,
+        "button.sg-pill { border-radius: 9999px; padding-left: 14px; padding-right: 14px; }"
+        " label.sg-badge { background-color: #e01b24; color: #ffffff; border-radius: 9px;"
+        " padding: 0 5px; font-size: 10px; font-weight: bold; min-height: 16px; }"
+        " label.sg-badge.sg-badge-dot { min-width: 10px; min-height: 10px; padding: 0; border-radius: 5px; font-size: 1px; }");
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(p),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(p);
+}
+
+/* A button's content, from what it holds: its text ("sg-text"), icon ("sg-icon") and busy
+   state ("sg-busy"): a plain label, or a spinner or an icon beside the label. */
+static void sg_button_build(int id) {
+    GtkButton *b = GTK_BUTTON(sg_w[id]);
+    const char *text = g_object_get_data(G_OBJECT(b), "sg-text");
+    const char *icon = g_object_get_data(G_OBJECT(b), "sg-icon");
+    int busy = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-busy"));
+    GtkWidget *box, *lead;
+    if (!busy && (!icon || !*icon)) { gtk_button_set_label(b, text ? text : ""); return; }
+    sg_icons_ready();
+    box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    if (busy) { lead = gtk_spinner_new(); gtk_spinner_start(GTK_SPINNER(lead)); }
+    else lead = gtk_image_new_from_icon_name(sg_icon_gtk(icon));
+    gtk_box_append(GTK_BOX(box), lead);
+    if (text && *text) gtk_box_append(GTK_BOX(box), gtk_label_new(text));
+    gtk_button_set_child(b, box);
+}
+static void sg_button_set_icon(int id, const char *name) {
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-icon", g_strdup(name ? name : ""), g_free);
+    sg_button_build(id);
+}
+static void sg_button_set_busy(int id, int on) {
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-busy", GINT_TO_POINTER(on));
+    sg_button_build(id);
+}
+static void sg_button_set_style(int id, int style) {
+    GtkWidget *b = sg_w[id];
+    sg_icons_ready();
+    gtk_widget_remove_css_class(b, "suggested-action");
+    gtk_widget_remove_css_class(b, "destructive-action");
+    gtk_widget_remove_css_class(b, "flat");
+    gtk_widget_remove_css_class(b, "sg-pill");
+    if (style == 1) gtk_widget_add_css_class(b, "suggested-action");
+    else if (style == 2) gtk_widget_add_css_class(b, "destructive-action");
+    else if (style == 3) gtk_widget_add_css_class(b, "flat");
+    else if (style == 4) gtk_widget_add_css_class(b, "sg-pill");
+}
+static const char *sg_test_button_icon(int id) {
+    const char *icon = g_object_get_data(G_OBJECT(sg_w[id]), "sg-icon");
+    return icon ? icon : "";
+}
+
+/* Badges: a label in the window's pill overlay at the widget's trailing top corner. */
+__attribute__((weak)) GtkWidget *sg_badge_target[SG_MAX];
+__attribute__((weak)) GtkWidget *sg_badge_label[SG_MAX] = {0};
+static void sg_badge_sync(int id) {
+    GtkWidget *t = sg_badge_target[id], *l = sg_badge_label[id];
+    GtkOverlay *o;
+    int kind = t ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(t), "sg-badge-kind")) : 0;
+    if (l && (!kind || gtk_widget_get_parent(l) != (GtkWidget *) sg_pill_overlay(t))) {
+        GtkWidget *parent = gtk_widget_get_parent(l);
+        if (parent && GTK_IS_OVERLAY(parent)) gtk_overlay_remove_overlay(GTK_OVERLAY(parent), l);
+        l = sg_badge_label[id];
+    }
+    if (!kind || !(o = sg_pill_overlay(t))) return;
+    if (!l) {
+        l = gtk_label_new("");
+        gtk_widget_add_css_class(l, "sg-badge");
+        gtk_widget_set_can_target(l, FALSE);
+        g_object_set_data(G_OBJECT(l), "sg-badge-id", GINT_TO_POINTER(id));
+        sg_badge_label[id] = l;
+        g_object_add_weak_pointer(G_OBJECT(l), (gpointer *) &sg_badge_label[id]);
+        gtk_overlay_add_overlay(o, l);
+    }
+    if (kind == 2) { gtk_label_set_text(GTK_LABEL(l), ""); gtk_widget_add_css_class(l, "sg-badge-dot"); }
+    else {
+        gtk_widget_remove_css_class(l, "sg-badge-dot");
+        gtk_label_set_text(GTK_LABEL(l), g_object_get_data(G_OBJECT(t), "sg-badge-text"));
+    }
+    gtk_widget_set_visible(l, TRUE);
+    gtk_widget_queue_allocate(GTK_WIDGET(o));
+}
+static void sg_badge_sync_all(void) {
+    int i;
+    for (i = 1; i < SG_MAX; i++) if (sg_badge_target[i]) sg_badge_sync(i);
+}
+static void sg_widget_set_badge(int id, const char *text, int kind) {
+    GtkWidget *t = sg_w[id];
+    if (!t) return;
+    sg_icons_ready();
+    if (sg_badge_target[id] != t) {
+        sg_badge_target[id] = t;
+        g_object_add_weak_pointer(G_OBJECT(t), (gpointer *) &sg_badge_target[id]);
+    }
+    g_object_set_data(G_OBJECT(t), "sg-badge-kind", GINT_TO_POINTER(kind));
+    g_object_set_data_full(G_OBJECT(t), "sg-badge-text", g_strdup(text ? text : ""), g_free);
+    sg_badge_sync(id);
+}
+static const char *sg_test_badge_shown(int id) {
+    GtkWidget *l = id > 0 && id < SG_MAX ? sg_badge_label[id] : NULL;
+    if (!l || !gtk_widget_get_mapped(l) || !sg_badge_target[id]) return "";
+    if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_badge_target[id]), "sg-badge-kind")) == 2) return "\xE2\x80\xA2";
+    return gtk_label_get_text(GTK_LABEL(l));
+}
+
+/* A tab with an icon or a badge: its label becomes a box (icon, title, badge); retitling
+   then sets the box's title (see sg_tabs_set_title). */
+static GtkWidget *sg_tab_box(int tabs, int page) {
+    GtkNotebook *nb = GTK_NOTEBOOK(sg_w[tabs]);
+    GtkWidget *p = gtk_notebook_get_nth_page(nb, page - 1), *box, *title;
+    const char *text;
+    if (!p) return NULL;
+    if ((box = g_object_get_data(G_OBJECT(p), "sg-tab-box"))) return box;
+    sg_icons_ready();
+    text = gtk_notebook_get_tab_label_text(nb, p);
+    box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    title = gtk_label_new(text ? text : "");
+    gtk_box_append(GTK_BOX(box), title);
+    g_object_set_data(G_OBJECT(p), "sg-tab-box", box);
+    g_object_set_data(G_OBJECT(p), "sg-tab-title", title);
+    gtk_notebook_set_tab_label(nb, p, box);
+    return box;
+}
+static void sg_tabs_set_page_icon(int tabs, int page, const char *name) {
+    GtkWidget *box = sg_tab_box(tabs, page), *p, *img;
+    if (!box) return;
+    p = gtk_notebook_get_nth_page(GTK_NOTEBOOK(sg_w[tabs]), page - 1);
+    if ((img = g_object_get_data(G_OBJECT(p), "sg-tab-icon"))) gtk_box_remove(GTK_BOX(box), img);
+    img = gtk_image_new_from_icon_name(sg_icon_gtk(name));
+    gtk_box_prepend(GTK_BOX(box), img);
+    g_object_set_data(G_OBJECT(p), "sg-tab-icon", img);
+}
+static void sg_tabs_set_page_badge(int tabs, int page, const char *text) {
+    GtkWidget *box = sg_tab_box(tabs, page), *p, *b;
+    if (!box) return;
+    p = gtk_notebook_get_nth_page(GTK_NOTEBOOK(sg_w[tabs]), page - 1);
+    b = g_object_get_data(G_OBJECT(p), "sg-tab-badge");
+    if (!b) {
+        b = gtk_label_new("");
+        gtk_widget_add_css_class(b, "sg-badge");
+        gtk_box_append(GTK_BOX(box), b);
+        g_object_set_data(G_OBJECT(p), "sg-tab-badge", b);
+    }
+    gtk_label_set_text(GTK_LABEL(b), text ? text : "");
+    gtk_widget_set_visible(b, text && *text);
+}
+
+/* A menu item's icon, kept so relabeling keeps it (sg_menu_set_item_text). */
+__attribute__((weak)) char *sg_item_icon[SG_MAX_ITEMS] = {0};
+static void sg_menu_rebuild_item(int item_id, const char *text) {
+    GMenuItem *mi;
+    if (item_id <= 0 || item_id >= SG_MAX_ITEMS || !sg_item_menu[item_id]) return;
+    mi = g_menu_item_new(text, sg_item_action[item_id]);
+    if (sg_item_accel[item_id]) g_menu_item_set_attribute(mi, "accel", "s", sg_item_accel[item_id]);
+    if (sg_item_icon[item_id]) {
+        GIcon *gi = g_themed_icon_new(sg_icon_gtk(sg_item_icon[item_id]));
+        g_menu_item_set_icon(mi, gi);
+        g_object_unref(gi);
+    }
+    g_menu_remove(sg_item_menu[item_id], sg_item_pos[item_id]);
+    g_menu_insert_item(sg_item_menu[item_id], sg_item_pos[item_id], mi);
+    g_object_unref(mi);
+}
+static void sg_menu_set_item_icon(int item_id, const char *name) {
+    gchar *label;
+    if (item_id <= 0 || item_id >= SG_MAX_ITEMS || !sg_item_menu[item_id]) return;
+    sg_icons_ready();
+    g_free(sg_item_icon[item_id]);
+    sg_item_icon[item_id] = g_strdup(name);
+    label = g_strdup(sg_menu_item_text(item_id));
+    sg_menu_rebuild_item(item_id, label);
+    g_free(label);
 }
 
 /* ---------- test driver ---------- */
