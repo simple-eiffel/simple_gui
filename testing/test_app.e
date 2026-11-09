@@ -95,6 +95,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_dialogs_1j_cancel_unattended, "dialogs_1j_cancel_unattended")
 				run_test (agent t.test_window_of_1j_controls_describes_roles, "window_of_1j_controls_describes_roles")
 				run_test (agent t.test_window_of_1j_controls_snapshot, "window_of_1j_controls_snapshot")
+				run_test (agent t.test_reference_pills_show_their_tips, "reference_pills_show_their_tips")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then

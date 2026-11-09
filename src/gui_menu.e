@@ -23,6 +23,7 @@ feature {NONE} -- Initialization
 		do
 			model := a_model
 			title := a_title.to_string_32
+			create item_shortcuts.make (8)
 			l_c := backend.to_c (a_title)
 			handle := backend.menu_new (l_c.item)
 		ensure
@@ -34,6 +35,7 @@ feature {NONE} -- Initialization
 		do
 			model := a_model
 			create title.make_empty
+			create item_shortcuts.make (4)
 			is_context := True
 			handle := backend.context_menu_new
 		ensure
@@ -52,6 +54,24 @@ feature -- Access
 
 	last_item_id: INTEGER
 			-- The id of the item most recently added with an agent (for `invoke_menu' in tests).
+
+	has_item (an_item_id: INTEGER): BOOLEAN
+			-- Was item `an_item_id' added to this menu (not another menu of the same model)?
+		do
+			Result := item_shortcuts.has (an_item_id)
+		end
+
+	item_shortcut (an_item_id: INTEGER): STRING_32
+			-- Item `an_item_id''s shortcut, neutral ("primary+O"), or empty.
+		require
+			has_it: has_item (an_item_id)
+		do
+			if attached item_shortcuts.item (an_item_id) as al_shortcut then
+				Result := al_shortcut
+			else
+				create Result.make_empty
+			end
+		end
 
 feature -- Roles
 
@@ -91,6 +111,7 @@ feature -- Element change
 		do
 			model.register_item (an_action, a_shortcut)
 			last_item_id := model.item_count
+			item_shortcuts.force (a_shortcut.to_string_32, last_item_id)
 			l_t := backend.to_c (a_text)
 			l_s := backend.to_c (a_shortcut)
 			backend.menu_add_item (handle, l_t.item, l_s.item, last_item_id, a_role)
@@ -111,6 +132,7 @@ feature -- Element change
 		do
 			model.register_item (agent do_nothing, "")
 			last_item_id := model.item_count
+			item_shortcuts.force ({STRING_32} "", last_item_id)
 			l_t := backend.to_c (a_text)
 			l_s := backend.to_c ("")
 			backend.menu_add_item (handle, l_t.item, l_s.item, last_item_id, a_role)
@@ -180,6 +202,18 @@ feature -- Element change
 			add_edit_item (Role_select_all, "Select All")
 		end
 
+	add_pills_item
+			-- "Show Reference Pills" (primary+shift+P), which shows or hides the application's
+			-- reference pills (1l); put it in a View or Help menu.
+		require
+			gui_thread: is_gui_thread
+			in_the_bar: not is_context
+		do
+			add_item ("Show Reference Pills", "primary+shift+P", agent application.toggle_pills)
+		ensure
+			numbered: last_item_id = model.item_count
+		end
+
 	add_separator
 		require
 			gui_thread: is_gui_thread
@@ -191,5 +225,10 @@ feature {GUI_WIDGET} -- Implementation
 
 	handle: POINTER
 			-- The backend's menu.
+
+feature {NONE} -- Implementation
+
+	item_shortcuts: HASH_TABLE [STRING_32, INTEGER]
+			-- This menu's items by id, each with its neutral shortcut ("" for none).
 
 end

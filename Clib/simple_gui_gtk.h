@@ -113,6 +113,114 @@ static void sg_on_dark(GObject *o, GParamSpec *p, gpointer d) {
     sg_push(10, 0, v ? 1 : 0, 0);
 }
 
+/* ---------- 1l: reference pills. Each window's content sits in a GtkOverlay ("sg-overlay");
+   a pill is a small label over it, placed at a corner of its widget on every layout (corner
+   1 top-left, 2 top-right, 3 bottom-left, 4 bottom-right; left and right mirror right to
+   left), reading its tip as a tooltip. Targets and labels are held by weak pointers, so a
+   widget gone with its window leaves an empty slot, never a dangling one. ---------- */
+__attribute__((weak)) GtkWidget *sg_pill_target[SG_MAX] = {0};
+__attribute__((weak)) GtkWidget *sg_pill_label[SG_MAX] = {0};
+__attribute__((weak)) int sg_pill_corner[SG_MAX] = {0};
+__attribute__((weak)) int sg_pills_on = 0;
+__attribute__((weak)) int sg_pill_css_done = 0;
+static void sg_pill_css(void) {
+    GtkCssProvider *p;
+    if (sg_pill_css_done) return;
+    sg_pill_css_done = 1;
+    p = gtk_css_provider_new();
+    /* the design boards' pill: burnt orange, white text and rim, the same in both themes */
+    gtk_css_provider_load_from_string(p,
+        "label.sg-pill { background-color: #c2410c; color: #ffffff; border: 1px solid #ffffff;"
+        " border-radius: 8px; padding: 0 5px; font-size: 10px; font-weight: bold; }");
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(p),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(p);
+}
+static gboolean sg_pill_position(GtkOverlay *o, GtkWidget *child, GdkRectangle *a, gpointer d) {
+    int id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(child), "sg-pill-id")), corner, w, h;
+    GtkWidget *t;
+    graphene_rect_t r;
+    gboolean rtl, right, bottom;
+    (void) d;
+    if (id <= 0 || id >= SG_MAX || !(t = sg_pill_target[id]) || !gtk_widget_get_mapped(t)) return FALSE;
+    if (!gtk_widget_compute_bounds(t, GTK_WIDGET(o), &r)) return FALSE;
+    gtk_widget_measure(child, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &w, NULL, NULL);
+    gtk_widget_measure(child, GTK_ORIENTATION_VERTICAL, -1, NULL, &h, NULL, NULL);
+    corner = sg_pill_corner[id];
+    rtl = gtk_widget_get_direction(t) == GTK_TEXT_DIR_RTL;
+    right = (corner == 2 || corner == 4) != rtl;
+    bottom = corner == 3 || corner == 4;
+    /* half outside its corner, as simple_bible's pills sit, but kept inside the window */
+    a->x = (int) (right ? r.origin.x + r.size.width - w / 2 : r.origin.x - w / 2);
+    a->y = (int) (bottom ? r.origin.y + r.size.height - h / 2 : r.origin.y - h / 2);
+    if (a->x < 0) a->x = 0;
+    if (a->y < 0) a->y = 0;
+    a->width = w;
+    a->height = h;
+    return TRUE;
+}
+/* The overlay a widget's pill goes in: its window's, once it is in a window. */
+static GtkOverlay *sg_pill_overlay(GtkWidget *t) {
+    GtkRoot *root = t ? gtk_widget_get_root(t) : NULL;
+    return root ? g_object_get_data(G_OBJECT(root), "sg-overlay") : NULL;
+}
+/* Make, update or drop widget `id''s pill label to match what is held for it. */
+static void sg_pill_sync(int id) {
+    GtkWidget *t = sg_pill_target[id], *l = sg_pill_label[id];
+    GtkOverlay *o;
+    const char *code = t ? g_object_get_data(G_OBJECT(t), "sg-pill-code") : NULL;
+    if (l && (!code || gtk_widget_get_parent(l) != (GtkWidget *) sg_pill_overlay(t))) {
+        GtkWidget *parent = gtk_widget_get_parent(l);
+        if (parent && GTK_IS_OVERLAY(parent)) gtk_overlay_remove_overlay(GTK_OVERLAY(parent), l);
+        l = sg_pill_label[id];   /* the weak pointer emptied if that freed it */
+    }
+    if (!code || !(o = sg_pill_overlay(t))) return;
+    if (!l) {
+        l = gtk_label_new(code);
+        gtk_widget_add_css_class(l, "sg-pill");
+        gtk_widget_set_halign(l, GTK_ALIGN_START);
+        gtk_widget_set_valign(l, GTK_ALIGN_START);
+        g_object_set_data(G_OBJECT(l), "sg-pill-id", GINT_TO_POINTER(id));
+        sg_pill_label[id] = l;
+        g_object_add_weak_pointer(G_OBJECT(l), (gpointer *) &sg_pill_label[id]);
+        gtk_overlay_add_overlay(o, l);
+    }
+    gtk_label_set_text(GTK_LABEL(l), code);
+    gtk_widget_set_tooltip_text(l, g_object_get_data(G_OBJECT(t), "sg-pill-tip"));
+    gtk_widget_set_visible(l, sg_pills_on);
+    gtk_widget_queue_allocate(GTK_WIDGET(o));
+}
+static void sg_pill_sync_all(void) {
+    int i;
+    for (i = 1; i < SG_MAX; i++) if (sg_pill_target[i]) sg_pill_sync(i);
+}
+static void sg_pill_set(int id, const char *code, const char *tip, int corner) {
+    GtkWidget *t = sg_w[id];
+    if (!t) return;
+    sg_pill_css();
+    if (sg_pill_target[id] != t) {
+        sg_pill_target[id] = t;
+        g_object_add_weak_pointer(G_OBJECT(t), (gpointer *) &sg_pill_target[id]);
+    }
+    sg_pill_corner[id] = corner;
+    g_object_set_data_full(G_OBJECT(t), "sg-pill-code", g_strdup(code), g_free);
+    g_object_set_data_full(G_OBJECT(t), "sg-pill-tip", g_strdup(tip), g_free);
+    sg_pill_sync(id);
+}
+static void sg_pill_clear(int id) {
+    GtkWidget *t = sg_pill_target[id];
+    if (t) g_object_set_data(G_OBJECT(t), "sg-pill-code", NULL);
+    sg_pill_sync(id);
+}
+static void sg_pills_show(int on) { sg_pills_on = on; sg_pill_sync_all(); }
+static const char *sg_pill_tip_shown(int id) {
+    GtkWidget *l = id > 0 && id < SG_MAX ? sg_pill_label[id] : NULL;
+    const char *tip;
+    if (!sg_pills_on || !l || !gtk_widget_get_mapped(l) || !sg_pill_target[id]) return "";
+    tip = g_object_get_data(G_OBJECT(sg_pill_target[id]), "sg-pill-tip");
+    return tip ? tip : "";
+}
+
 /* ---------- windows and containers ---------- */
 
 static int sg_window(const char *title, int w, int h) {
@@ -184,7 +292,14 @@ static GtkWidget *sg_window_outer(int win) {
     gtk_box_append(GTK_BOX(outer), top);
     gtk_box_append(GTK_BOX(outer), mid);
     gtk_box_append(GTK_BOX(outer), bottom);
-    gtk_window_set_child(GTK_WINDOW(sg_w[win]), outer);
+    {
+        /* the content under an overlay that carries the reference pills (1l) */
+        GtkWidget *overlay = gtk_overlay_new();
+        gtk_overlay_set_child(GTK_OVERLAY(overlay), outer);
+        g_signal_connect(overlay, "get-child-position", G_CALLBACK(sg_pill_position), NULL);
+        g_object_set_data(G_OBJECT(sg_w[win]), "sg-overlay", overlay);
+        gtk_window_set_child(GTK_WINDOW(sg_w[win]), overlay);
+    }
     return outer;
 }
 static GtkBox *sg_window_slot(int win, const char *slot) {
@@ -196,6 +311,7 @@ static void sg_window_set_content(int win, int child) {
     g_object_set_data(G_OBJECT(sg_w[win]), "sg-content", sg_w[child]);
     gtk_widget_set_vexpand(sg_w[child], TRUE);
     gtk_box_append(sg_window_slot(win, "sg-mid"), sg_w[child]);
+    sg_pill_sync_all();
 }
 static void sg_window_set_toolbar(int win, int tb) {
     gtk_box_append(sg_window_slot(win, "sg-top"), sg_w[tb]);
@@ -205,7 +321,7 @@ static void sg_window_set_status_bar(int win, int sb) {
     gtk_box_append(sg_window_slot(win, "sg-bottom"), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
     gtk_box_append(sg_window_slot(win, "sg-bottom"), sg_w[sb]);
 }
-static void sg_window_show(int win) { gtk_window_present(GTK_WINDOW(sg_w[win])); }
+static void sg_window_show(int win) { sg_window_outer(win); gtk_window_present(GTK_WINDOW(sg_w[win])); sg_pill_sync_all(); }
 static void sg_window_close(int win) { gtk_window_destroy(GTK_WINDOW(sg_w[win])); sg_w[win] = NULL; }
 static void sg_window_set_title(int win, const char *t) { gtk_window_set_title(GTK_WINDOW(sg_w[win]), t); }
 
