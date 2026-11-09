@@ -580,6 +580,457 @@ feature -- Controls
 			end
 		end
 
+	radio_group (a_vertical: BOOLEAN): INTEGER
+		local
+			l_r: SW_RADIO_GROUP
+		do
+			create l_r.make
+			l_r.set_vertical (a_vertical)
+			Result := register (l_r)
+			l_r.set_on_change (agent report_choice (Result, ?))
+		end
+
+	radio_group_extend (an_id: INTEGER; a_text: POINTER)
+		do
+			if attached {SW_RADIO_GROUP} widget (an_id) as al_r then
+				al_r.add_option (from_c (a_text))
+				if al_r.options.count = 1 then
+					quietly (agent al_r.select_index (1))
+				end
+				changed
+			end
+		end
+
+	radio_group_select (an_id, i: INTEGER)
+		do
+			if attached {SW_RADIO_GROUP} widget (an_id) as al_r and then 1 <= i and then i <= al_r.options.count then
+				quietly (agent al_r.select_index (i))
+				changed
+			end
+		end
+
+	radio_group_selected (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_RADIO_GROUP} widget (an_id) as al_r then
+				Result := al_r.selected_index
+			end
+		end
+
+	segmented: INTEGER
+		local
+			l_s: SW_SEGMENTED
+		do
+			create l_s.make
+			Result := register (l_s)
+			l_s.set_on_change (agent report_choice (Result, ?))
+		end
+
+	segmented_extend (an_id: INTEGER; a_text: POINTER)
+		do
+			if attached {SW_SEGMENTED} widget (an_id) as al_s then
+				al_s.add_segment (from_c (a_text))
+				if al_s.segments.count = 1 then
+					quietly (agent al_s.select_segment (1))
+				end
+				changed
+			end
+		end
+
+	segmented_select (an_id, i: INTEGER)
+		do
+			if attached {SW_SEGMENTED} widget (an_id) as al_s and then 1 <= i and then i <= al_s.segments.count then
+				quietly (agent al_s.select_segment (i))
+				changed
+			end
+		end
+
+	segmented_selected (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_SEGMENTED} widget (an_id) as al_s then
+				Result := al_s.selected_index
+			end
+		end
+
+	slider (a_min, a_max: INTEGER; a_vertical: BOOLEAN): INTEGER
+			-- (simple_widgets' slider is horizontal; a vertical one is drawn horizontally.)
+		local
+			l_s: GUI_SW_SLIDER
+		do
+			create l_s.make_range (a_min, a_max)
+			Result := register (l_s)
+			l_s.set_on_change (agent report_slider (Result, ?))
+		end
+
+	slider_set_value (an_id, a_value: INTEGER)
+		do
+			if attached {GUI_SW_SLIDER} widget (an_id) as al_s then
+				al_s.set_value (a_value)
+				changed
+			end
+		end
+
+	slider_value (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_SLIDER} widget (an_id) as al_s then
+				Result := al_s.value
+			end
+		end
+
+	slider_set_step (an_id, a_step: INTEGER)
+		do
+			if attached {GUI_SW_SLIDER} widget (an_id) as al_s then
+				al_s.set_step (a_step)
+			end
+		end
+
+	switch: INTEGER
+		local
+			l_s: SW_SWITCH
+		do
+			create l_s.make ("", False, Void)
+			Result := register (l_s)
+			l_s.set_on_change (agent report_switch (Result))
+		end
+
+	switch_set (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_SWITCH} widget (an_id) as al_s then
+				al_s.set_on (a_on)
+				changed
+			end
+		end
+
+	switch_is_on (an_id: INTEGER): BOOLEAN
+		do
+			Result := attached {SW_SWITCH} widget (an_id) as al_s and then al_s.is_on
+		end
+
+	date_picker: INTEGER
+			-- Today, until set.
+		local
+			l_d: SW_DATE_PICKER
+			l_today: SIMPLE_DATE
+		do
+			create l_d.make_picker
+			create l_today.make_now
+			l_d.set_date (l_today.year, l_today.month, l_today.day)
+			Result := register (l_d)
+			l_d.set_on_date_change (agent report_date (Result, ?, ?, ?))
+		end
+
+	time_picker: INTEGER
+			-- Midnight, until set.
+		local
+			l_t: SW_TIME_PICKER
+		do
+			create l_t.make_picker
+			l_t.set_time (0, 0)
+			Result := register (l_t)
+			l_t.set_on_time_change (agent report_time (Result, ?, ?))
+		end
+
+	date_picker_set (an_id, a_value: INTEGER)
+			-- A date as y*10000 + m*100 + d, a time as h*60 + m; quiet.
+		do
+			if attached {SW_DATE_PICKER} widget (an_id) as al_d then
+				quietly (agent al_d.set_date (a_value // 10000, a_value // 100 \\ 100, a_value \\ 100))
+				changed
+			elseif attached {SW_TIME_PICKER} widget (an_id) as al_t then
+				quietly (agent al_t.set_time (a_value // 60, a_value \\ 60))
+				changed
+			end
+		end
+
+	date_picker_value (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_DATE_PICKER} widget (an_id) as al_d then
+				Result := al_d.selected_year * 10000 + al_d.selected_month * 100 + al_d.selected_day
+			elseif attached {SW_TIME_PICKER} widget (an_id) as al_t then
+				Result := al_t.hour * 60 + al_t.minute
+			end
+		end
+
+	color_chooser: INTEGER
+			-- A swatch button that opens simple_widgets' color picker in the window's sheet.
+		local
+			l_c: GUI_SW_COLOR_BUTTON
+		do
+			create l_c.make_color (0)
+			Result := register (l_c)
+			l_c.set_on_request (agent pick_color (Result))
+		end
+
+	color_chooser_set (an_id, a_rgb: INTEGER)
+		do
+			if attached {GUI_SW_COLOR_BUTTON} widget (an_id) as al_c then
+				al_c.set_rgb (a_rgb.to_natural_32)
+				changed
+			end
+		end
+
+	color_chooser_value (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_COLOR_BUTTON} widget (an_id) as al_c then
+				Result := al_c.rgb.to_integer_32
+			end
+		end
+
+	pick_color (an_id: INTEGER)
+			-- The user clicked a color chooser: the picker, waited for; a new color is reported.
+		local
+			l_rgb: INTEGER
+		do
+			if attached {GUI_SW_COLOR_BUTTON} widget (an_id) as al_c and then attached open_window as al_w then
+				l_rgb := al_w.choose_color (al_c.rgb)
+				if l_rgb >= 0 and then l_rgb /= al_c.rgb.to_integer_32 then
+					al_c.set_rgb (l_rgb.to_natural_32)
+					report_color (an_id, al_c.rgb)
+					changed
+				end
+			end
+		end
+
+	scroll_area: INTEGER
+		do
+			Result := register (create {SW_SCROLL_AREA}.make (300.0))
+		end
+
+	scroll_area_set_content (an_id, a_child: INTEGER)
+		do
+			if attached {SW_SCROLL_AREA} widget (an_id) as al_s and then attached widget (a_child) as al_c then
+				al_s.set_child (al_c)
+				changed
+			end
+		end
+
+	scroll_area_scroll_to (an_id, a_x, a_y: INTEGER)
+		do
+			if attached {SW_SCROLL_AREA} widget (an_id) as al_s then
+				al_s.scroll_to (a_y)
+				al_s.scroll_to_x (a_x)
+				changed
+			end
+		end
+
+	image: INTEGER
+			-- An empty picture until a file or PNG bytes are given.
+		do
+			Result := register (create {SW_IMAGE}.make_from_surface (create {CAIRO_SURFACE}.make (1, 1)))
+		end
+
+	image_set_file (an_id: INTEGER; a_path: POINTER): BOOLEAN
+			-- PNG files (cairo reads PNG).
+		local
+			l_s: CAIRO_SURFACE
+		do
+			if attached {SW_IMAGE} widget (an_id) as al_i and then (create {RAW_FILE}.make_with_name (from_c (a_path))).exists then
+				create l_s.make_from_png (from_c (a_path))
+				if l_s.is_valid then
+					al_i.set_surface (l_s)
+					Result := True
+					changed
+				end
+			end
+		end
+
+	image_set_bytes (an_id: INTEGER; a_bytes: POINTER; a_count: INTEGER): BOOLEAN
+		local
+			l_s: CAIRO_SURFACE
+			l_m: MANAGED_POINTER
+		do
+			if attached {SW_IMAGE} widget (an_id) as al_i and then a_count > 0 then
+				create l_m.make_from_pointer (a_bytes, a_count)
+				create l_s.make_from_png_data (l_m)
+				if l_s.is_valid then
+					al_i.set_surface (l_s)
+					Result := True
+					changed
+				end
+			end
+		end
+
+	separator (a_vertical: BOOLEAN): INTEGER
+		local
+			l_s: SW_SEPARATOR
+		do
+			if a_vertical then
+				create l_s.make_vertical
+			else
+				create l_s.make
+			end
+			Result := register (l_s)
+		end
+
+	group_box (a_title: POINTER): INTEGER
+		do
+			Result := register (create {SW_GROUP}.make_titled (from_c (a_title)))
+		end
+
+	group_box_set_title (an_id: INTEGER; a_title: POINTER)
+		do
+			if attached {SW_GROUP} widget (an_id) as al_g then
+				al_g.set_title (from_c (a_title))
+				changed
+			end
+		end
+
+	group_box_set_content (an_id, a_child: INTEGER)
+		do
+			if attached {SW_GROUP} widget (an_id) as al_g and then attached widget (a_child) as al_c then
+				al_g.put (al_c)
+				changed
+			end
+		end
+
+	expander (a_title: POINTER): INTEGER
+		local
+			l_e: GUI_SW_EXPANDER
+		do
+			create l_e.make_titled (from_c (a_title))
+			Result := register (l_e)
+			l_e.set_on_change (agent report_expander (Result, ?))
+		end
+
+	expander_set_title (an_id: INTEGER; a_title: POINTER)
+		do
+			if attached {GUI_SW_EXPANDER} widget (an_id) as al_e then
+				al_e.set_title (from_c (a_title))
+				changed
+			end
+		end
+
+	expander_set_content (an_id, a_child: INTEGER)
+		do
+			if attached {GUI_SW_EXPANDER} widget (an_id) as al_e and then attached widget (a_child) as al_c then
+				al_e.set_content (al_c)
+				changed
+			end
+		end
+
+	expander_set_expanded (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {GUI_SW_EXPANDER} widget (an_id) as al_e then
+				quietly (agent al_e.set_expanded (a_on))
+				changed
+			end
+		end
+
+	expander_is_expanded (an_id: INTEGER): BOOLEAN
+		do
+			Result := attached {GUI_SW_EXPANDER} widget (an_id) as al_e and then al_e.is_expanded
+		end
+
+	combo_box: INTEGER
+		local
+			l_c: GUI_SW_COMBO_BOX
+		do
+			create l_c.make_combo
+			Result := register (l_c)
+			l_c.set_on_commit (agent report_commit (Result))
+		end
+
+	combo_box_extend (an_id: INTEGER; a_text: POINTER)
+		do
+			if attached {GUI_SW_COMBO_BOX} widget (an_id) as al_c then
+				al_c.add_option (from_c (a_text))
+			end
+		end
+
+	combo_box_wipe_out (an_id: INTEGER)
+		do
+			if attached {GUI_SW_COMBO_BOX} widget (an_id) as al_c then
+				al_c.options.wipe_out
+			end
+		end
+
+	combo_box_set_text (an_id: INTEGER; a_text: POINTER)
+		do
+			if attached {GUI_SW_COMBO_BOX} widget (an_id) as al_c then
+				al_c.set_text (from_c (a_text))
+				changed
+			end
+		end
+
+	combo_box_text (an_id: INTEGER): POINTER
+		do
+			if attached {GUI_SW_COMBO_BOX} widget (an_id) as al_c then
+				Result := c_text (al_c.text)
+			end
+		end
+
+	tree_table (a_titles: POINTER): INTEGER
+			-- An SW_TREE_TABLE over node numbers: column 1 is the tree (the node's text, as in
+			-- `tree'), and each further title a column whose cells the backend keeps.
+		local
+			l_t: SW_TREE_TABLE [INTEGER]
+			l_roots: ARRAYED_LIST [INTEGER]
+			l_titles: LIST [STRING_32]
+			i: INTEGER
+		do
+			create l_t.make (150.0)
+			Result := register (l_t)
+			l_titles := from_c (a_titles).split ('%/31/')
+			if not l_titles.is_empty then
+				l_t.set_tree_title (l_titles.first)
+			end
+			from
+				i := 2
+			until
+				i > l_titles.count
+			loop
+				l_t.add_column (create {SW_GRID_COLUMN [INTEGER]}.make (l_titles.i_th (i), 120.0, agent tree_cell (Result, ?, i)))
+				i := i + 1
+			end
+			create l_roots.make (8)
+			tree_roots.force (l_roots, Result)
+			l_t.set_roots (l_roots)
+			l_t.set_children (agent tree_children (Result, ?))
+			l_t.set_label (agent tree_label (Result, ?))
+			l_t.set_on_select (agent report_tree_select (Result, ?))
+			l_t.set_on_expansion (agent report_expansion (Result, ?, ?))
+		end
+
+	tree_table_set_cell (an_id, a_node, a_column: INTEGER; a_text: POINTER)
+			-- Column 1 is the node's own text.
+		do
+			if a_column = 1 then
+				node_text.force (from_c (a_text), node_key (an_id, a_node))
+			else
+				node_cells.force (from_c (a_text), node_key (an_id, a_node).out + ":" + a_column.out)
+			end
+			changed
+		end
+
+	set_tooltip (an_id: INTEGER; a_text: POINTER)
+		do
+			if attached widget (an_id) as al_w then
+				al_w.set_tooltip (from_c (a_text))
+			end
+		end
+
+	save_file_named (a_window: INTEGER; a_title, an_extensions, a_name: POINTER): POINTER
+			-- simple_widgets' drawn Save dialog suggesting `a_name', waited for.
+		do
+			if attached windows.item (a_window) as al_w and then attached al_w.choose_file (True, ".", from_c (a_name), from_c (an_extensions)) as al_path then
+				Result := c_text (al_path)
+			end
+		end
+
+	choose_folder (a_window: INTEGER; a_title: POINTER): POINTER
+		do
+			if attached windows.item (a_window) as al_w and then attached al_w.choose_folder (".") as al_path then
+				Result := c_text (al_path)
+			end
+		end
+
+	ask (a_window: INTEGER; a_title, a_text: POINTER): INTEGER
+			-- 1 yes, 2 no, 0 cancel.
+		do
+			if attached windows.item (a_window) as al_w then
+				Result := al_w.ask_three (from_c (a_title), from_c (a_text))
+			end
+		end
+
 	check_box (a_text: POINTER): INTEGER
 		local
 			l_c: SW_CHECK_BOX
@@ -1431,6 +1882,16 @@ feature -- Test doors (act on the widget as a user would)
 				al_tabs.select_tab (a_row)
 			elseif attached {GUI_SW_DROPDOWN} widget (an_id) as al_d and then a_row >= 1 and then a_row <= al_d.options.count then
 				al_d.pick (a_row)
+			elseif attached {SW_RADIO_GROUP} widget (an_id) as al_r and then a_row >= 1 and then a_row <= al_r.options.count then
+				if al_r.selected_index /= a_row then
+					al_r.select_index (a_row)
+				end
+			elseif attached {SW_SEGMENTED} widget (an_id) as al_s and then a_row >= 1 and then a_row <= al_s.segments.count then
+				if al_s.selected_index /= a_row then
+					al_s.select_segment (a_row)
+				end
+			elseif attached {GUI_SW_COMBO_BOX} widget (an_id) as al_c and then a_row >= 1 and then a_row <= al_c.options.count then
+				al_c.choose_option (a_row)
 			end
 			changed
 		end
@@ -1444,6 +1905,60 @@ feature -- Test doors (act on the widget as a user would)
 				changed
 			end
 		end
+
+	test_slide (an_id, a_value: INTEGER)
+			-- As the user moving the slider to `a_value'.
+		do
+			if attached {GUI_SW_SLIDER} widget (an_id) as al_s and then al_s.value /= a_value then
+				al_s.set_value (a_value)
+				report_slider (an_id, al_s.fraction)
+				changed
+			end
+		end
+
+	test_set_date (an_id, a_value: INTEGER)
+			-- As the user entering a date (y*10000 + m*100 + d) or a time (h*60 + m): one report.
+		do
+			if date_picker_value (an_id) /= a_value then
+				date_picker_set (an_id, a_value)
+				push (2, an_id, a_value, 0, 0)
+			end
+		end
+
+	test_set_color (an_id, a_rgb: INTEGER)
+		do
+			if color_chooser_value (an_id) /= a_rgb then
+				color_chooser_set (an_id, a_rgb)
+				push (2, an_id, a_rgb, 0, 0)
+			end
+		end
+
+	test_type_combo (an_id: INTEGER; a_text: POINTER)
+			-- As the user typing `a_text' and pressing Return.
+		do
+			if attached {GUI_SW_COMBO_BOX} widget (an_id) as al_c then
+				al_c.set_text (from_c (a_text))
+				al_c.commit
+				changed
+			end
+		end
+
+	test_toggle_expander (an_id: INTEGER)
+			-- As the user clicking the expander's title.
+		do
+			if attached {GUI_SW_EXPANDER} widget (an_id) as al_e then
+				al_e.set_expanded (not al_e.is_expanded)
+				changed
+			end
+		end
+
+	test_auto_cancel_dialogs (a_ms: INTEGER)
+		do
+			auto_cancel_ms := a_ms.max (0)
+		end
+
+	auto_cancel_ms: INTEGER
+			-- Tests: cancel each dialog this long after it opens (0: never).
 
 	test_menu (an_item_id: INTEGER)
 		do
@@ -2119,6 +2634,87 @@ feature {NONE} -- Implementation
 	report_number (an_id, a_value: INTEGER)
 		do
 			push (2, an_id, a_value, 0, 0)
+		end
+
+	report_choice (an_id, i: INTEGER)
+			-- A radio group's or segmented control's choice, unless the program made it.
+		do
+			if quiet = 0 then
+				push (4, an_id, i, 0, 0)
+			end
+		end
+
+	report_slider (an_id: INTEGER; a_fraction: REAL_64)
+		do
+			if quiet = 0 and then attached {GUI_SW_SLIDER} widget (an_id) as al_s then
+				push (2, an_id, al_s.value, 0, 0)
+			end
+		end
+
+	report_switch (an_id: INTEGER)
+		do
+			if quiet = 0 then
+				push (12, an_id, switch_is_on (an_id).to_integer, 0, 0)
+			end
+		end
+
+	report_date (an_id, y, m, d: INTEGER)
+		do
+			if quiet = 0 then
+				push (2, an_id, y * 10000 + m * 100 + d, 0, 0)
+			end
+		end
+
+	report_time (an_id, h, m: INTEGER)
+		do
+			if quiet = 0 then
+				push (2, an_id, h * 60 + m, 0, 0)
+			end
+		end
+
+	report_color (an_id: INTEGER; a_rgb: NATURAL_32)
+		do
+			if quiet = 0 then
+				push (2, an_id, a_rgb.to_integer_32, 0, 0)
+			end
+		end
+
+	report_expander (an_id, a_section: INTEGER)
+		do
+			if quiet = 0 then
+				push (12, an_id, expander_is_expanded (an_id).to_integer, 0, 0)
+			end
+		end
+
+	report_commit (an_id: INTEGER)
+		do
+			if quiet = 0 then
+				push (2, an_id, 0, 0, 0)
+			end
+		end
+
+	quietly (a_change: PROCEDURE)
+			-- Run the program's own change without reporting it.
+		do
+			quiet := quiet + 1
+			a_change.call
+			quiet := quiet - 1
+		end
+
+	tree_cell (a_tree, a_node, a_column: INTEGER): STRING_32
+			-- A tree table's cell (column 2 on).
+		do
+			if attached node_cells.item (node_key (a_tree, a_node).out + ":" + a_column.out) as al_s then
+				Result := al_s
+			else
+				create Result.make_empty
+			end
+		end
+
+	node_cells: HASH_TABLE [STRING_32, STRING]
+			-- Tree table cells, by node key and column.
+		once ("OBJECT")
+			create Result.make (64)
 		end
 
 	report_pointer (an_id, a_kind: INTEGER; a_x, a_y: REAL_64; a_button, a_modifiers: INTEGER)

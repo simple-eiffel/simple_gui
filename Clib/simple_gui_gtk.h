@@ -1968,6 +1968,7 @@ static int sg_combo_box(void) {
     GtkEventController *focus = gtk_event_controller_focus_new();
     int id = sg_reg(e, 32);
     gtk_entry_set_icon_from_icon_name(GTK_ENTRY(e), GTK_ENTRY_ICON_SECONDARY, "pan-down-symbolic");
+    gtk_editable_set_width_chars(GTK_EDITABLE(e), 12);   /* room for a word in a row of controls */
     gtk_popover_set_child(GTK_POPOVER(pop), list);
     gtk_widget_set_parent(pop, e);
     gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
