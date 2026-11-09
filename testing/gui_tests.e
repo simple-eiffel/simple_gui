@@ -1696,7 +1696,8 @@ feature -- The remaining controls (1j)
 			l_window.set_content (l_crumbs)
 			l_window.show
 			settle_window
-			assert ("path", attached l_crumbs.path as al_path and then al_path.name.same_string ("/tmp"))
+				-- compared in this platform's form (a backslash on Windows)
+			assert ("path", attached l_crumbs.path as al_path and then al_path.name.same_string ((create {PATH}.make_from_string ("/tmp")).name))
 			assert ("parts", l_crumbs.part_count >= 1)
 			assert ("navigation", l_crumbs.accessible_role.same_string ("navigation"))
 			l_window.close

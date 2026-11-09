@@ -121,6 +121,10 @@ feature {NONE} -- Initialization
 				if attached al_e.description as al_why then
 					print ("        why: " + al_why.to_string_8 + "%N")
 				end
+				if attached (create {EXECUTION_ENVIRONMENT}).item ("GUI_TRACE") and then attached al_e.trace as al_trace then
+						-- GUI_TRACE=1: where it failed
+					print (al_trace.to_string_8 + "%N")
+				end
 			end
 			failed := failed + 1
 			l_retried := True

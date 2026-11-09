@@ -732,7 +732,10 @@ feature -- Controls
 	date_picker_set (an_id, a_value: INTEGER)
 			-- A date as y*10000 + m*100 + d, a time as h*60 + m; quiet.
 		do
-			if attached {SW_DATE_PICKER} widget (an_id) as al_d then
+			if attached {SW_CALENDAR} widget (an_id) as al_c then
+				al_c.select_date (a_value // 10000, a_value // 100 \\ 100, a_value \\ 100)
+				changed
+			elseif attached {SW_DATE_PICKER} widget (an_id) as al_d then
 				quietly (agent al_d.set_date (a_value // 10000, a_value // 100 \\ 100, a_value \\ 100))
 				changed
 			elseif attached {SW_TIME_PICKER} widget (an_id) as al_t then
@@ -743,7 +746,9 @@ feature -- Controls
 
 	date_picker_value (an_id: INTEGER): INTEGER
 		do
-			if attached {SW_DATE_PICKER} widget (an_id) as al_d then
+			if attached {SW_CALENDAR} widget (an_id) as al_c then
+				Result := al_c.selected_year * 10000 + al_c.selected_month * 100 + al_c.selected_day
+			elseif attached {SW_DATE_PICKER} widget (an_id) as al_d then
 				Result := al_d.selected_year * 10000 + al_d.selected_month * 100 + al_d.selected_day
 			elseif attached {SW_TIME_PICKER} widget (an_id) as al_t then
 				Result := al_t.hour * 60 + al_t.minute
@@ -1029,6 +1034,379 @@ feature -- Controls
 			if attached windows.item (a_window) as al_w then
 				Result := al_w.ask_three (from_c (a_title), from_c (a_text))
 			end
+		end
+
+	calendar: INTEGER
+			-- Today, until set.
+		local
+			l_c: SW_CALENDAR
+			l_today: SIMPLE_DATE
+		do
+			create l_c.make
+			create l_today.make_now
+			l_c.select_date (l_today.year, l_today.month, l_today.day)
+			Result := register (l_c)
+			l_c.set_on_pick (agent report_date (Result, ?, ?, ?))
+		end
+
+	menu_button (a_text: POINTER; a_split: BOOLEAN): INTEGER
+		local
+			l_m: GUI_SW_MENU_BUTTON
+			l_s: GUI_SW_SPLIT_BUTTON
+		do
+			if a_split then
+				create l_s.make_split (from_c (a_text))
+				Result := register (l_s)
+				l_s.main_part.set_on_click (agent push (1, Result, 0, 0, 0))
+			else
+				create l_m.make_menu (from_c (a_text))
+				Result := register (l_m)
+			end
+		end
+
+	menu_button_set_menu (an_id: INTEGER; a_menu: POINTER)
+		local
+			l_index: INTEGER
+		do
+			l_index := menu_index (a_menu)
+			if attached {GUI_SW_SPLIT_BUTTON} widget (an_id) as al_s then
+				al_s.arrow.set_filler (agent fill_context (?, 0.0, 0.0, l_index))
+			elseif attached {GUI_SW_MENU_BUTTON} widget (an_id) as al_m then
+				al_m.set_filler (agent fill_context (?, 0.0, 0.0, l_index))
+			end
+		end
+
+	level_bar (a_min, a_max: INTEGER): INTEGER
+		do
+			Result := register (create {GUI_SW_LEVEL_BAR}.make_range (a_min, a_max))
+		end
+
+	level_bar_set (an_id, a_value: INTEGER)
+		do
+			if attached {GUI_SW_LEVEL_BAR} widget (an_id) as al_l then
+				al_l.set_value (a_value)
+				changed
+			end
+		end
+
+	level_bar_value (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_LEVEL_BAR} widget (an_id) as al_l then
+				Result := al_l.value
+			end
+		end
+
+	level_bar_set_warning (an_id, a_value: INTEGER)
+		do
+			if attached {GUI_SW_LEVEL_BAR} widget (an_id) as al_l then
+				al_l.set_warning (a_value)
+				changed
+			end
+		end
+
+	level_bar_set_critical (an_id, a_value: INTEGER)
+		do
+			if attached {GUI_SW_LEVEL_BAR} widget (an_id) as al_l then
+				al_l.set_critical (a_value)
+				changed
+			end
+		end
+
+	popover: INTEGER
+		do
+			Result := register (create {GUI_SW_POPOVER_PANEL}.make)
+		end
+
+	popover_set_content (an_id, a_child: INTEGER)
+		do
+			if attached {GUI_SW_POPOVER_PANEL} widget (an_id) as al_p and then attached widget (a_child) as al_c then
+				al_p.set_content (al_c)
+				changed
+			end
+		end
+
+	popover_show_at (an_id, an_anchor: INTEGER)
+			-- Under the anchor, on the window's sheet layer.
+		do
+			if attached {GUI_SW_POPOVER_PANEL} widget (an_id) as al_p and then attached widget (an_anchor) as al_a
+				and then attached open_window as al_w
+			then
+				al_w.show_popover_panel (al_p, an_id, al_a.x, al_a.y + al_a.height)
+				changed
+			end
+		end
+
+	popover_hide (an_id: INTEGER)
+		do
+			if attached open_window as al_w then
+				al_w.hide_popover_quietly
+				changed
+			end
+		end
+
+	popover_is_shown (an_id: INTEGER): BOOLEAN
+		do
+			Result := attached open_window as al_w and then attached al_w.popover_shown as al_p
+				and then attached widget (an_id) as al_w2 and then al_p = al_w2
+		end
+
+	search_field: INTEGER
+		local
+			l_s: GUI_SW_SEARCH_FIELD
+		do
+			create l_s.make_search
+			Result := register (l_s)
+			l_s.set_on_change (agent push (2, Result, 0, 0, 0))
+			l_s.set_on_activate (agent push (3, Result, 0, 0, 0))
+		end
+
+	token_field: INTEGER
+		local
+			l_t: GUI_SW_TOKEN_FIELD
+		do
+			create l_t.make_tokens
+			Result := register (l_t)
+			l_t.set_on_change (agent push (2, Result, 0, 0, 0))
+		end
+
+	token_field_extend (an_id: INTEGER; a_text: POINTER)
+		do
+			if attached {GUI_SW_TOKEN_FIELD} widget (an_id) as al_t then
+				al_t.extend_token (from_c (a_text))
+				changed
+			end
+		end
+
+	token_field_remove (an_id, i: INTEGER)
+		do
+			if attached {GUI_SW_TOKEN_FIELD} widget (an_id) as al_t and then 1 <= i and then i <= al_t.tokens.count then
+				al_t.remove_token (i)
+				changed
+			end
+		end
+
+	token_field_wipe_out (an_id: INTEGER)
+		do
+			if attached {GUI_SW_TOKEN_FIELD} widget (an_id) as al_t then
+				al_t.wipe_out
+				changed
+			end
+		end
+
+	token_field_count (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_TOKEN_FIELD} widget (an_id) as al_t then
+				Result := al_t.tokens.count
+			end
+		end
+
+	token_field_item (an_id, i: INTEGER): POINTER
+		do
+			if attached {GUI_SW_TOKEN_FIELD} widget (an_id) as al_t and then 1 <= i and then i <= al_t.tokens.count then
+				Result := c_text (al_t.tokens.i_th (i))
+			end
+		end
+
+	path_control: INTEGER
+		local
+			l_p: GUI_SW_PATH_CONTROL
+		do
+			create l_p.make_path
+			Result := register (l_p)
+			l_p.set_on_part (agent report_row (Result, ?))
+		end
+
+	path_control_set (an_id: INTEGER; a_path: POINTER)
+		do
+			if attached {GUI_SW_PATH_CONTROL} widget (an_id) as al_p then
+				al_p.set_path (from_c (a_path))
+				changed
+			end
+		end
+
+	path_control_count (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_PATH_CONTROL} widget (an_id) as al_p then
+				Result := al_p.parts.count
+			end
+		end
+
+	path_control_part (an_id, i: INTEGER): POINTER
+		do
+			if attached {GUI_SW_PATH_CONTROL} widget (an_id) as al_p and then 1 <= i and then i <= al_p.parts.count then
+				Result := c_text (al_p.parts.i_th (i))
+			end
+		end
+
+	rating (a_maximum: INTEGER): INTEGER
+		local
+			l_r: SW_RATING
+		do
+			create l_r.make (0, a_maximum, Void)
+			Result := register (l_r)
+			l_r.set_on_change (agent report_number (Result, ?))
+		end
+
+	rating_set (an_id, a_value: INTEGER)
+		do
+			if attached {SW_RATING} widget (an_id) as al_r then
+				al_r.set_value (a_value)
+				changed
+			end
+		end
+
+	rating_value (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_RATING} widget (an_id) as al_r then
+				Result := al_r.value
+			end
+		end
+
+	rich_text_area: INTEGER
+		local
+			l_r: GUI_SW_RICH_TEXT_AREA
+		do
+			create l_r.make_rich
+			Result := register (l_r)
+			l_r.set_on_change (agent push (2, Result, 0, 0, 0))
+		end
+
+	rich_text_set_trait (an_id, a_start, an_end, a_trait: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
+				al_r.set_trait (a_start, an_end, a_trait, a_on)
+				changed
+			end
+		end
+
+	rich_text_set_color (an_id, a_start, an_end, a_rgb: INTEGER)
+		do
+			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
+				al_r.set_color (a_start, an_end, a_rgb)
+				changed
+			end
+		end
+
+	rich_text_set_size (an_id, a_start, an_end: INTEGER; a_points: REAL_64)
+		do
+			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
+				al_r.set_size (a_start, an_end, a_points)
+			end
+		end
+
+	rich_text_trait_at (an_id, i, a_trait: INTEGER): BOOLEAN
+		do
+			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r and then 1 <= i and then i <= al_r.text.count then
+				inspect a_trait
+				when 1 then Result := al_r.style_at (i).bold
+				when 2 then Result := al_r.style_at (i).italic
+				else Result := al_r.style_at (i).underline
+				end
+			end
+		end
+
+	rich_text_color_at (an_id, i: INTEGER): INTEGER
+		do
+			Result := -1
+			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r and then 1 <= i and then i <= al_r.text.count then
+				Result := al_r.style_at (i).color
+			end
+		end
+
+	rich_text_size_at (an_id, i: INTEGER): REAL_64
+			-- The character's own size, else the box's (the theme's body size).
+		do
+			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r and then 1 <= i and then i <= al_r.text.count then
+				Result := al_r.style_at (i).size
+				if Result <= 0.0 then
+					Result := themed (is_dark).size_body
+				end
+			end
+		end
+
+	rich_text_selection_start (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
+				Result := al_r.selection_first
+			end
+		end
+
+	rich_text_selection_end (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
+				Result := al_r.selection_last
+			end
+		end
+
+	rich_text_select (an_id, a_start, an_end: INTEGER)
+		do
+			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
+				al_r.select_characters (a_start, an_end)
+				changed
+			end
+		end
+
+	ask_text (a_window: INTEGER; a_title, a_prompt, an_initial: POINTER): POINTER
+		do
+			if attached windows.item (a_window) as al_w and then attached al_w.ask_text_sheet (from_c (a_title), from_c (a_prompt), from_c (an_initial)) as al_t then
+				Result := c_text (al_t)
+			end
+		end
+
+	confirm_with_check (a_window: INTEGER; a_title, a_text, a_check: POINTER): INTEGER
+		do
+			if attached windows.item (a_window) as al_w then
+				Result := al_w.confirm_check_sheet (from_c (a_title), from_c (a_text), from_c (a_check))
+			end
+		end
+
+	choose_font (a_window: INTEGER; a_title, a_family: POINTER; a_points: REAL_64; a_bold, an_italic: BOOLEAN): POINTER
+		do
+			if attached windows.item (a_window) as al_w and then attached al_w.choose_font_sheet (from_c (a_title), font_families,
+				from_c (a_family), a_points, a_bold, an_italic) as al_f
+			then
+				Result := c_text (al_f)
+			end
+		end
+
+	show_about (a_name, a_version, a_copyright, a_comments: POINTER)
+		do
+			if attached open_window as al_w then
+				al_w.about_sheet (from_c (a_name), from_c (a_version), from_c (a_copyright), from_c (a_comments))
+			end
+		end
+
+	font_families: ARRAYED_LIST [STRING_32]
+			-- The installed font families (GDI), sorted, each once.
+		local
+			l_buf: MANAGED_POINTER
+			l_sorted: SORTED_TWO_WAY_LIST [STRING_32]
+			n: INTEGER
+		do
+			create Result.make (256)
+			create l_buf.make (2 * Font_buffer)
+			n := c_font_families (l_buf.item, Font_buffer)
+			if n > 0 then
+				create l_sorted.make
+				across (create {UTF_CONVERTER}).utf_16_0_pointer_to_string_32 (l_buf).split ('%/31/') as ic loop
+					if not ic.is_empty then
+						l_sorted.extend (ic.twin)
+					end
+				end
+				across l_sorted as ic loop
+					Result.extend (ic)
+				end
+			end
+		end
+
+	Font_buffer: INTEGER = 131072
+			-- WCHARs for the family names.
+
+	c_font_families (a_buf: POINTER; a_cap: INTEGER): INTEGER
+		external
+			"C inline use %"simple_gui_win.h%""
+		alias
+			"return sgw_font_families((WCHAR *) $a_buf, (int) $a_cap);"
 		end
 
 	check_box (a_text: POINTER): INTEGER
@@ -1609,7 +1987,11 @@ feature -- Every widget
 	accessible_role (an_id: INTEGER): POINTER
 		do
 			if attached widget (an_id) as al_w then
-				Result := c_text (accessibility_names.role_name (al_w.accessible_role))
+				if attached al_w.shared_role_name as al_shared then
+					Result := c_text (al_shared)
+				else
+					Result := c_text (accessibility_names.role_name (al_w.accessible_role))
+				end
 			else
 				Result := c_text ({STRING_32} "application")
 			end
@@ -1829,7 +2211,10 @@ feature -- Test doors (act on the widget as a user would)
 
 	test_click (an_id: INTEGER)
 		do
-			if attached widget (an_id) as al_w then
+			if attached {GUI_SW_SPLIT_BUTTON} widget (an_id) as al_s then
+				al_s.main_part.perform_click
+				changed
+			elseif attached widget (an_id) as al_w then
 				al_w.perform_click
 				changed
 			end
@@ -1959,6 +2344,33 @@ feature -- Test doors (act on the widget as a user would)
 
 	auto_cancel_ms: INTEGER
 			-- Tests: cancel each dialog this long after it opens (0: never).
+
+	test_dismiss_popover (an_id: INTEGER)
+			-- As the user clicking outside: closed (17).
+		do
+			if attached open_window as al_w and then attached al_w.popover_shown then
+				al_w.close_sheet
+				changed
+			end
+		end
+
+	test_type_tokens (an_id: INTEGER; a_text: POINTER)
+			-- As the user typing "a, b" then Return: one change.
+		do
+			if attached {GUI_SW_TOKEN_FIELD} widget (an_id) as al_t and then al_t.add_typed (from_c (a_text)) > 0 then
+				al_t.report
+				changed
+			end
+		end
+
+	test_rate (an_id, a_value: INTEGER)
+		do
+			if attached {SW_RATING} widget (an_id) as al_r and then al_r.value /= a_value then
+				al_r.set_value (a_value)
+				report_number (an_id, a_value)
+				changed
+			end
+		end
 
 	test_menu (an_item_id: INTEGER)
 		do
