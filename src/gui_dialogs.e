@@ -161,7 +161,8 @@ feature -- Messages
 		end
 
 	show_about (a_name, a_version, a_copyright, a_comments: READABLE_STRING_GENERAL)
-			-- The platform's About window for this program.
+			-- The platform's About window for this program. The one exception to this class's
+			-- rule: on macOS the standard About panel is not modal, and this returns at once.
 		require
 			gui_thread: is_gui_thread
 		local

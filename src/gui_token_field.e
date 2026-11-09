@@ -99,6 +99,7 @@ feature -- Element change
 			backend.token_field_wipe_out (id)
 		ensure
 			empty: count = 0
+			no_event: change_actions.fire_count = old change_actions.fire_count
 		end
 
 feature {GUI_APPLICATION} -- Events
