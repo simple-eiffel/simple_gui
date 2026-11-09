@@ -1864,14 +1864,19 @@ feature -- The remaining controls (1j)
 		end
 
 	test_clipboard_round_trip
-			-- 1m: text on the clipboard reads back, beyond the BMP too.
+			-- 1m: text on the clipboard reads back, beyond the BMP too. The person's own
+			-- clipboard is put back afterward: a test must not take what they copied.
 		local
-			l_text: STRING_32
+			l_text, l_theirs, l_read: STRING_32
 		do
+			l_theirs := app.clipboard.text
 			create l_text.make_from_string ("simple_gui clipboard ")
 			l_text.append_code (0x1F600)
 			app.clipboard.set_text (l_text)
-			assert ("round trip: " + {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (app.clipboard.text), app.clipboard.text.same_string (l_text))
+			l_read := app.clipboard.text
+			app.clipboard.set_text (l_theirs)
+			assert ("round trip: " + {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (l_read), l_read.same_string (l_text))
+			assert ("theirs back", app.clipboard.text.same_string (l_theirs))
 		end
 
 	test_window_shortcut_fires
