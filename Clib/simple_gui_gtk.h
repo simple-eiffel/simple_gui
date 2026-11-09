@@ -3200,6 +3200,112 @@ static int sg_is_dark(void) {
 }
 static void sg_set_dark(int on) { g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", on ? TRUE : FALSE, NULL); }
 
+/* ---------- 1m: timers (event 24, id 0, a = timer id), the clipboard, window shortcuts
+   (event 25, id = window, a = shortcut id), full screen, following the system's appearance,
+   and scrolling a list or table row into view. ---------- */
+__attribute__((weak)) GHashTable *sg_timer_sources = NULL;   /* timer id -> GLib source id */
+typedef struct { int id; int repeat; } sg_timer_rec;
+static gboolean sg_on_timer(gpointer d) {
+    sg_timer_rec *r = d;
+    sg_push(24, 0, r->id, 0);
+    if (!r->repeat && sg_timer_sources) g_hash_table_remove(sg_timer_sources, GINT_TO_POINTER(r->id));
+    return r->repeat ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+}
+static void sg_timer_start(int id, int ms, int repeat) {
+    sg_timer_rec *r = g_new(sg_timer_rec, 1);
+    guint src;
+    if (!sg_timer_sources) sg_timer_sources = g_hash_table_new(g_direct_hash, g_direct_equal);
+    r->id = id; r->repeat = repeat;
+    src = g_timeout_add_full(G_PRIORITY_DEFAULT, (guint) ms, sg_on_timer, r, g_free);
+    g_hash_table_insert(sg_timer_sources, GINT_TO_POINTER(id), GUINT_TO_POINTER(src));
+}
+static void sg_timer_stop(int id) {
+    guint src;
+    if (!sg_timer_sources) return;
+    src = GPOINTER_TO_UINT(g_hash_table_lookup(sg_timer_sources, GINT_TO_POINTER(id)));
+    if (src) { g_source_remove(src); g_hash_table_remove(sg_timer_sources, GINT_TO_POINTER(id)); }
+}
+
+/* The clipboard. GTK reads it asynchronously: the loop turns until the text arrives (at most
+   a second), so the Eiffel query can answer at once. */
+__attribute__((weak)) char *sg_clip_text = NULL;
+__attribute__((weak)) int sg_clip_done = 0;
+static void sg_clip_read_done(GObject *o, GAsyncResult *res, gpointer d) {
+    char *t = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(o), res, NULL);
+    (void) d;
+    g_free(sg_clip_text);
+    sg_clip_text = t ? t : g_strdup("");
+    sg_clip_done = 1;
+}
+static const char *sg_clipboard_text(void) {
+    GdkClipboard *c = gdk_display_get_clipboard(gdk_display_get_default());
+    gint64 until = g_get_monotonic_time() + G_USEC_PER_SEC;
+    sg_clip_done = 0;
+    gdk_clipboard_read_text_async(c, NULL, sg_clip_read_done, NULL);
+    while (!sg_clip_done && g_get_monotonic_time() < until) g_main_context_iteration(NULL, TRUE);
+    return sg_clip_done && sg_clip_text ? sg_clip_text : "";
+}
+static void sg_clipboard_set_text(const char *t) {
+    gdk_clipboard_set_text(gdk_display_get_clipboard(gdk_display_get_default()), t ? t : "");
+}
+
+/* A window's own shortcuts: one GtkShortcutController, global in the window, each shortcut
+   pushing 25; the window remembers each accelerator's shortcut id (for the test driver). */
+static gboolean sg_on_window_shortcut(GtkWidget *w, GVariant *args, gpointer d) {
+    (void) args;
+    sg_push(25, sg_id_of(w), GPOINTER_TO_INT(d), 0);
+    return TRUE;
+}
+static void sg_window_add_shortcut(int win, const char *spec, int shortcut_id) {
+    GtkWidget *w = sg_w[win];
+    GtkEventController *c = g_object_get_data(G_OBJECT(w), "sg-own-shortcuts");
+    char accel[64], key[80];
+    GtkShortcutTrigger *trigger;
+    sg_accel(spec, accel, sizeof accel);
+    if (!accel[0] || !(trigger = gtk_shortcut_trigger_parse_string(accel))) return;
+    if (!c) {
+        c = gtk_shortcut_controller_new();
+        gtk_shortcut_controller_set_scope(GTK_SHORTCUT_CONTROLLER(c), GTK_SHORTCUT_SCOPE_GLOBAL);
+        gtk_widget_add_controller(w, c);
+        g_object_set_data(G_OBJECT(w), "sg-own-shortcuts", c);
+    }
+    gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(c),
+        gtk_shortcut_new(trigger, gtk_callback_action_new(sg_on_window_shortcut, GINT_TO_POINTER(shortcut_id), NULL)));
+    snprintf(key, sizeof key, "sg-sc:%s", accel);
+    g_object_set_data(G_OBJECT(w), key, GINT_TO_POINTER(shortcut_id));
+}
+static void sg_test_press_shortcut(int win, const char *spec) {
+    char accel[64], key[80];
+    int sid;
+    sg_accel(spec, accel, sizeof accel);
+    snprintf(key, sizeof key, "sg-sc:%s", accel);
+    sid = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[win]), key));
+    if (sid > 0) sg_push(25, win, sid, 0);
+}
+
+static void sg_window_set_fullscreen(int win, int on) {
+    if (on) gtk_window_fullscreen(GTK_WINDOW(sg_w[win])); else gtk_window_unfullscreen(GTK_WINDOW(sg_w[win]));
+}
+static int sg_window_is_fullscreen(int win) { return gtk_window_is_fullscreen(GTK_WINDOW(sg_w[win])) ? 1 : 0; }
+
+/* Follow the system again: the setting goes back to its default (the dark handler reports a change). */
+static void sg_follow_system_appearance(void) {
+    gtk_settings_reset_property(gtk_settings_get_default(), "gtk-application-prefer-dark-theme");
+}
+
+/* A row into view: the list moves its adjustment to the row's bounds; the table asks the view. */
+static void sg_list_scroll_to_row(int id, int row) {
+    GtkListBoxRow *r = gtk_list_box_get_row_at_index(sg_list_box(id), row - 1);
+    GtkAdjustment *v = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sg_w[id]));
+    graphene_rect_t b;
+    double page, value;
+    if (!r || !gtk_widget_compute_bounds(GTK_WIDGET(r), GTK_WIDGET(sg_list_box(id)), &b)) return;
+    page = gtk_adjustment_get_page_size(v);
+    value = gtk_adjustment_get_value(v);
+    if (b.origin.y < value) gtk_adjustment_set_value(v, b.origin.y);
+    else if (b.origin.y + b.size.height > value + page) gtk_adjustment_set_value(v, b.origin.y + b.size.height - page);
+}
+
 /* ---------- test driver ---------- */
 
 /* A user's click is the "clicked" signal; gtk_widget_activate would emit it only after a 250 ms press animation. */

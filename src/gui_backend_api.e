@@ -1008,10 +1008,6 @@ feature -- Common widget state
 		deferred
 		end
 
-	table_scroll_to_row (an_id, a_row: INTEGER)
-		deferred
-		end
-
 	test_press_shortcut (a_window: INTEGER; a_shortcut: POINTER)
 			-- As the user pressing `a_shortcut' in `a_window' (event 25 when it is one of its own).
 		deferred

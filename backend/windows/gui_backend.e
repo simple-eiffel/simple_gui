@@ -38,16 +38,21 @@ feature -- Lifecycle and loop
 		end
 
 	pump (a_ms: INTEGER)
-			-- Run the open window's loop until an event is queued or `a_ms' pass; then ask
-			-- for the rows lazy tables are about to show.
+			-- Run the open window's loop until an event is queued or `a_ms' pass (or the next
+			-- timer is due); then fire the timers due and ask for the rows lazy tables are about
+			-- to show.
+		local
+			l_wait: INTEGER
 		do
 			if events.is_empty then
+				l_wait := a_ms.max (0).min (ms_to_next_timer)
 				if attached open_window as al_w and then al_w.is_window_open then
-					al_w.shell_turn (a_ms.max (0))
+					al_w.shell_turn (l_wait)
 				else
-					pump_windowless (a_ms.max (0))
+					pump_windowless (l_wait)
 				end
 			end
+			fire_due_timers
 			check_rows_wanted
 		end
 
@@ -825,10 +830,11 @@ feature -- Controls
 		end
 
 	scroll_area_scroll_to (an_id, a_x, a_y: INTEGER)
+			-- `a_x' and `a_y' are logical pixels; simple_widgets scrolls in device pixels.
 		do
 			if attached {SW_SCROLL_AREA} widget (an_id) as al_s then
-				al_s.scroll_to (a_y)
-				al_s.scroll_to_x (a_x)
+				al_s.scroll_to (scaled (a_y))
+				al_s.scroll_to_x (scaled (a_x))
 				changed
 			end
 		end
@@ -1079,6 +1085,94 @@ feature -- Controls
 		do
 			if attached widget (an_id) as al_w then
 				al_w.set_tooltip (from_c (a_text))
+			end
+		end
+
+	timer_start (a_timer_id, a_ms: INTEGER; a_repeat: BOOLEAN)
+			-- 1m: a deadline the pump keeps (it waits no longer than the next one).
+		do
+			gui_timers.force ([a_ms.max (1), a_repeat, clock.milliseconds + a_ms.max (1)], a_timer_id)
+		end
+
+	timer_stop (a_timer_id: INTEGER)
+		do
+			gui_timers.remove (a_timer_id)
+		end
+
+	clipboard_text: POINTER
+		do
+			Result := c_text ((create {SW_CLIPBOARD}).text)
+		end
+
+	clipboard_set_text (a_text: POINTER)
+		do
+			(create {SW_CLIPBOARD}).set_text (from_c (a_text))
+		end
+
+	window_add_shortcut (a_window: INTEGER; a_shortcut: POINTER; a_shortcut_id: INTEGER)
+			-- simple_widgets' window accelerator; remembered for the test driver.
+		local
+			l_spec: STRING_32
+		do
+			l_spec := from_c (a_shortcut)
+			if attached windows.item (a_window) as al_w and then (create {SW_SHORTCUT}.make (l_spec)).is_registrable then
+				al_w.register_shortcut (l_spec, agent push (25, a_window, a_shortcut_id, 0, 0))
+				window_shortcuts.force (a_shortcut_id, shortcut_key (a_window, l_spec))
+			end
+		end
+
+	test_press_shortcut (a_window: INTEGER; a_shortcut: POINTER)
+		local
+			l_spec: STRING_32
+		do
+			l_spec := shortcut_key (a_window, from_c (a_shortcut))
+			if window_shortcuts.has (l_spec) then
+				push (25, a_window, window_shortcuts.item (l_spec), 0, 0)
+			end
+		end
+
+	window_set_fullscreen (a_window: INTEGER; a_on: BOOLEAN)
+			-- Borderless over the whole monitor, and back to the style and place it had.
+		local
+			l_saved: MANAGED_POINTER
+		do
+			if attached windows.item (a_window) as al_w and then al_w.hwnd /= default_pointer then
+				if a_on and not fullscreen_saves.has (a_window) then
+					create l_saved.make (24)
+					c_enter_fullscreen (al_w.hwnd, l_saved.item)
+					fullscreen_saves.force (l_saved, a_window)
+				elseif not a_on and then attached fullscreen_saves.item (a_window) as al_saved then
+					c_leave_fullscreen (al_w.hwnd, al_saved.item)
+					fullscreen_saves.remove (a_window)
+				end
+			end
+		end
+
+	window_is_fullscreen (a_window: INTEGER): BOOLEAN
+		do
+			Result := fullscreen_saves.has (a_window)
+		end
+
+	follow_system_appearance
+			-- Every window follows the Windows light or dark setting again.
+		local
+			l_was: BOOLEAN
+		do
+			l_was := is_dark
+			forced_dark_set := False
+			across windows as ic loop
+				ic.follow_system_theme (themed (False), themed (True))
+			end
+			if is_dark /= l_was then
+				push (10, 0, is_dark.to_integer, 0, 0)
+			end
+		end
+
+	list_scroll_to_row (an_id, a_row: INTEGER)
+		do
+			if attached {SW_LIST} widget (an_id) as al_l and then a_row >= 1 and then a_row <= al_l.row_count then
+				al_l.scroll_to_row (a_row)
+				changed
 			end
 		end
 
@@ -2879,6 +2973,113 @@ feature {NONE} -- Drawn views (1i)
 				cairo_paint(cr);
 				cairo_destroy(cr);
 				return c;
+			]"
+		end
+
+feature {NONE} -- Timers, shortcuts and full screen (1m)
+
+	gui_timers: HASH_TABLE [TUPLE [ms: INTEGER; repeat: BOOLEAN; due: INTEGER_64], INTEGER]
+			-- Each running timer: its interval, whether it repeats, and when it is next due.
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	ms_to_next_timer: INTEGER
+			-- Milliseconds until the soonest timer is due (0 if one is due; a large number if none).
+		local
+			l_now, l_soonest: INTEGER_64
+		do
+			l_soonest := {INTEGER_64} 1_000_000
+			l_now := clock.milliseconds
+			across gui_timers as ic loop
+				l_soonest := l_soonest.min (ic.due - l_now)
+			end
+			Result := l_soonest.max (0).min (1_000_000).to_integer_32
+		ensure
+			non_negative: Result >= 0
+		end
+
+	fire_due_timers
+			-- Event 24 for every timer due; a repeating one is due again an interval later.
+		local
+			l_now: INTEGER_64
+			l_done: ARRAYED_LIST [INTEGER]
+		do
+			if not gui_timers.is_empty then
+				l_now := clock.milliseconds
+				create l_done.make (0)
+				across gui_timers as ic loop
+					if l_now >= ic.due then
+						push (24, 0, @ic.key, 0, 0)
+						if ic.repeat then
+							ic.due := (ic.due + ic.ms).max (l_now + 1)
+						else
+							l_done.extend (@ic.key)
+						end
+					end
+				end
+				across l_done as ic loop
+					gui_timers.remove (ic)
+				end
+			end
+		end
+
+	window_shortcuts: HASH_TABLE [INTEGER, STRING_32]
+			-- Each window shortcut id, by "window:shortcut" (lower case), for the test driver.
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	shortcut_key (a_window: INTEGER; a_spec: READABLE_STRING_GENERAL): STRING_32
+			-- "window:shortcut", the shortcut in lower case.
+		do
+			create Result.make (16)
+			Result.append_integer (a_window)
+			Result.append_character (':')
+			Result.append_string_general (a_spec)
+			Result.to_lower
+		end
+
+	fullscreen_saves: HASH_TABLE [MANAGED_POINTER, INTEGER]
+			-- Each full-screen window: its style and rectangle before, to go back to.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	c_enter_fullscreen (a_hwnd, a_save: POINTER)
+			-- Save the window style and rectangle in `a_save' (24 bytes), then make it a
+			-- borderless window over its whole monitor.
+		external
+			"C inline use <windows.h>"
+		alias
+			"[
+				HWND h = (HWND) $a_hwnd;
+				LONG_PTR *saved = (LONG_PTR *) $a_save;
+				RECT *r = (RECT *) ((char *) $a_save + 8);
+				MONITORINFO mi;
+				saved[0] = GetWindowLongPtrW(h, GWL_STYLE);
+				GetWindowRect(h, r);
+				mi.cbSize = sizeof mi;
+				GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mi);
+				SetWindowLongPtrW(h, GWL_STYLE, (saved[0] & ~WS_OVERLAPPEDWINDOW) | WS_POPUP);
+				SetWindowPos(h, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+					mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+					SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+			]"
+		end
+
+	c_leave_fullscreen (a_hwnd, a_save: POINTER)
+			-- Give the window back the style and rectangle `a_save' holds.
+		external
+			"C inline use <windows.h>"
+		alias
+			"[
+				HWND h = (HWND) $a_hwnd;
+				LONG_PTR *saved = (LONG_PTR *) $a_save;
+				RECT *r = (RECT *) ((char *) $a_save + 8);
+				SetWindowLongPtrW(h, GWL_STYLE, saved[0]);
+				SetWindowPos(h, NULL, r->left, r->top, r->right - r->left, r->bottom - r->top,
+					SWP_FRAMECHANGED | SWP_NOZORDER | SWP_NOOWNERZORDER);
 			]"
 		end
 

@@ -244,15 +244,6 @@ feature -- Element change
 			set: is_multiple_selection = a_on
 		end
 
-	scroll_to_row (r: INTEGER)
-			-- Scroll so row `r' is in view (1m). Quiet: the selection does not change.
-		require
-			gui_thread: is_gui_thread
-			valid: 1 <= r and r <= row_count
-		do
-			backend.table_scroll_to_row (id, r)
-		end
-
 	select_row (r: INTEGER)
 			-- Select only row `r', without a selection event.
 		require
