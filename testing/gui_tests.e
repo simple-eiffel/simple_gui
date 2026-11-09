@@ -1840,6 +1840,160 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_timers_fire_and_cancel
+			-- 1m: a repeating timer fires on the GUI processor until canceled; a one-shot timer
+			-- fires once and is done.
+		local
+			l_ticks, l_once: CELL [INTEGER]
+			l_every, l_after: GUI_TIMER
+			l_before: INTEGER
+		do
+			create l_ticks.put (0)
+			create l_once.put (0)
+			l_every := app.every (100, agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_ticks))
+			driver.wait (700)
+			assert ("repeats: " + l_ticks.item.out, l_ticks.item >= 3)
+			assert ("counted", l_every.fire_count = l_ticks.item and l_every.is_active)
+			l_every.cancel
+			l_before := l_ticks.item
+			driver.wait (300)
+			assert ("canceled", l_ticks.item = l_before and not l_every.is_active)
+			l_after := app.after (50, agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_once))
+			driver.wait (400)
+			assert ("once: " + l_once.item.out, l_once.item = 1 and not l_after.is_active)
+		end
+
+	test_clipboard_round_trip
+			-- 1m: text on the clipboard reads back, beyond the BMP too. The person's own
+			-- clipboard is put back afterward: a test must not take what they copied.
+		local
+			l_text, l_theirs, l_read: STRING_32
+		do
+			l_theirs := app.clipboard.text
+			create l_text.make_from_string ("simple_gui clipboard ")
+			l_text.append_code (0x1F600)
+			app.clipboard.set_text (l_text)
+			l_read := app.clipboard.text
+			app.clipboard.set_text (l_theirs)
+			assert ("round trip: " + {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (l_read), l_read.same_string (l_text))
+			assert ("theirs back", app.clipboard.text.same_string (l_theirs))
+		end
+
+	test_window_shortcut_fires
+			-- 1m: a window's own shortcut runs its agent, with no menu item; another does nothing.
+		local
+			l_window: GUI_WINDOW
+			l_hits: CELL [INTEGER]
+		do
+			create l_hits.put (0)
+			create l_window.make ("Shortcut", 300, 120)
+			l_window.set_content (create {GUI_TEXT_FIELD}.make)
+			l_window.add_shortcut ("primary+K", agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_hits))
+			l_window.show
+			settle_window
+			driver.press_shortcut (l_window, "primary+K")
+			assert ("fired once", l_hits.item = 1)
+			driver.press_shortcut (l_window, "primary+J")
+			assert ("not its own", l_hits.item = 1)
+			l_window.close
+		end
+
+	test_fullscreen_toggles
+			-- 1m: a window fills the screen and comes back.
+		local
+			l_window: GUI_WINDOW
+		do
+			create l_window.make ("Full screen", 300, 120)
+			l_window.set_content (create {GUI_LABEL}.make ("Full"))
+			l_window.show
+			settle_window
+			l_window.set_fullscreen (True)
+			settle_window
+			assert ("full screen", l_window.is_fullscreen)
+			l_window.set_fullscreen (False)
+			settle_window
+			assert ("back", not l_window.is_fullscreen)
+			l_window.close
+		end
+
+	test_appearance_can_be_chosen
+			-- 1m: the program chooses dark or light over the system, or follows it again; each
+			-- change fires the appearance actions.
+		local
+			l_window: GUI_WINDOW
+			l_changes: CELL [INTEGER]
+		do
+			create l_changes.put (0)
+			app.appearance_changed_actions.extend (agent (d: BOOLEAN; c: CELL [INTEGER]) do c.put (c.item + 1) end (?, l_changes))
+			create l_window.make ("Appearance", 300, 120)
+			l_window.set_content (create {GUI_LABEL}.make ("Theme"))
+			l_window.show
+			settle_window
+			app.set_appearance (app.Appearance_dark)
+			settle_window
+			assert ("dark", app.is_dark and app.appearance = app.Appearance_dark)
+			app.set_appearance (app.Appearance_light)
+			settle_window
+			assert ("light", not app.is_dark and app.appearance = app.Appearance_light)
+			assert ("told: " + l_changes.item.out, l_changes.item >= 2)
+			app.set_appearance (app.Appearance_system)
+			settle_window
+			assert ("following", app.appearance = app.Appearance_system)
+			l_window.close
+		end
+
+	test_scrolling_into_view
+			-- 1m: a scroll area brings a widget far down into view; a list and a table scroll to a
+			-- row quietly (the selection stays).
+		local
+			l_window: GUI_WINDOW
+			l_area: GUI_SCROLL_AREA
+			l_column: GUI_STACK
+			l_target: detachable GUI_LABEL
+			l_label: GUI_LABEL
+			l_list: GUI_LIST
+			i: INTEGER
+		do
+			create l_window.make ("Scroll", 300, 200)
+			create l_area.make
+			create l_column.make_vertical
+			from i := 1 until i > 60 loop
+				create l_label.make ("Line " + i.out)
+				l_column.extend (l_label)
+				if i = 50 then
+					l_target := l_label
+				end
+				i := i + 1
+			end
+			l_area.set_content (l_column)
+			l_window.set_content (l_area)
+			l_window.show
+			settle_window
+			check attached l_target as al_target then
+				assert ("out of view at first", al_target.y > l_area.y + l_area.height)
+				l_area.scroll_to_widget (al_target)
+				settle_window
+				assert ("in view: " + al_target.y.out + " in " + l_area.y.out + ".." + (l_area.y + l_area.height).out,
+					al_target.y >= l_area.y - 1 and al_target.y + al_target.height <= l_area.y + l_area.height + 1)
+			end
+			l_window.close
+			create l_window.make ("Rows", 300, 160)
+			create l_list.make
+			from i := 1 until i > 100 loop
+				l_list.extend ("Row " + i.out)
+				i := i + 1
+			end
+			l_list.select_row (2)
+			l_window.set_content (l_list)
+			l_window.show
+			settle_window
+			l_list.scroll_to_row (90)
+			settle_window
+			assert ("quiet: selected " + l_list.selected_index.out + ", fired " + l_list.selection_actions.fire_count.out,
+				l_list.selected_index = 2 and l_list.selection_actions.fire_count = 0)
+			l_window.close
+		end
+
 	test_rich_text_ranges_round_trip
 			-- Formatting from code is silent and reads back; positions count characters, so an
 			-- emoji (two UTF-16 units on macOS and Windows) is one.

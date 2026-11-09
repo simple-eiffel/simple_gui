@@ -84,6 +84,15 @@ feature -- Element change
 			none_selected: selected_index = 0
 		end
 
+	scroll_to_row (i: INTEGER)
+			-- Scroll so row `i' is in view (1m). Quiet: the selection does not change.
+		require
+			gui_thread: is_gui_thread
+			valid: 1 <= i and i <= count
+		do
+			backend.list_scroll_to_row (id, i)
+		end
+
 	select_row (i: INTEGER)
 			-- Select row `i', without a selection event.
 		require

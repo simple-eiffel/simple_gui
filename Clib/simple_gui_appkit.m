@@ -3211,6 +3211,142 @@ void sga_drawn_set_description(int a_id, const char *a_text)
 /* As the view would: an event put on the queue for the drawn view `a_id'. */
 void sga_test_drawn_event(int a_id, int a_type, int a, int b, int c) { sga_push(a_type, a_id, a, b, c); }
 
+/* ------------------------------------------------------ 1m: the small basics */
+
+/* Timers: NSTimers in the common run-loop modes (so they fire during menus and live resize).
+   Each fire puts event 24 (id 0, a = the timer's id) on the queue and wakes the loop. */
+@interface SGATimerTarget : NSObject
+@end
+@implementation SGATimerTarget
+- (void)fired:(NSTimer *)t
+{
+	NSNumber *l_id = [t userInfo];
+	sga_push(24, 0, [l_id intValue], 0, 0);
+	if (![t isValid]) { }
+	sga_wake();
+}
+@end
+
+static NSMutableDictionary<NSNumber *, NSTimer *> *s_timers;
+static SGATimerTarget *s_timer_target;
+
+void sga_timer_start(int a_timer_id, int a_ms, int a_repeat)
+{
+	if (!s_timers) { s_timers = [NSMutableDictionary dictionary]; s_timer_target = [[SGATimerTarget alloc] init]; }
+	[s_timers[@(a_timer_id)] invalidate];
+	NSTimer *t = [NSTimer timerWithTimeInterval:MAX(a_ms, 1) / 1000.0 target:s_timer_target selector:@selector(fired:)
+		userInfo:@(a_timer_id) repeats:a_repeat != 0];
+	[t setTolerance:MIN(a_ms / 10000.0, 0.01)];
+	[[NSRunLoop currentRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
+	s_timers[@(a_timer_id)] = t;
+}
+
+void sga_timer_stop(int a_timer_id)
+{
+	[s_timers[@(a_timer_id)] invalidate];
+	[s_timers removeObjectForKey:@(a_timer_id)];
+}
+
+/* The clipboard: the general pasteboard's plain text. */
+const char *sga_clipboard_text(void)
+{
+	return sga_return(Kind_field, [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString] ?: @"");
+}
+
+void sga_clipboard_set_text(const char *a_text)
+{
+	NSPasteboard *p = [NSPasteboard generalPasteboard];
+	[p clearContents];
+	[p setString:sga_string(a_text) forType:NSPasteboardTypeString];
+}
+
+/* Window shortcuts: a neutral spec ("primary+K") as a key and modifier mask, per window. A
+   local key monitor catches them while their window is key, wherever the focus is, before
+   the focused control and the menus; a match sends event 25 (id = window, a = shortcut). */
+static NSString *sga_key_of(NSString *a_shortcut, NSEventModifierFlags *a_mask);
+static NSMutableDictionary<NSNumber *, NSMutableArray<NSArray *> *> *s_shortcuts;   /* window id -> [key, mask, id] */
+static id s_shortcut_monitor;
+
+static const NSEventModifierFlags Sga_shortcut_mask = NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagControl;
+
+static int sga_shortcut_match(int a_window, NSString *a_key, NSEventModifierFlags a_mask)
+{
+	for (NSArray *s in s_shortcuts[@(a_window)])
+		if ([[s[0] lowercaseString] isEqualToString:[a_key lowercaseString]] && [s[1] unsignedIntegerValue] == (a_mask & Sga_shortcut_mask))
+			return [s[2] intValue];
+	return 0;
+}
+
+void sga_window_add_shortcut(int a_window, const char *a_shortcut, int a_shortcut_id)
+{
+	NSEventModifierFlags l_mask;
+	NSString *l_key = sga_key_of(sga_string(a_shortcut), &l_mask);
+	if (![l_key length]) return;
+	if (!s_shortcuts) s_shortcuts = [NSMutableDictionary dictionary];
+	if (!s_shortcuts[@(a_window)]) s_shortcuts[@(a_window)] = [NSMutableArray array];
+	[s_shortcuts[@(a_window)] addObject:@[l_key, @(l_mask & Sga_shortcut_mask), @(a_shortcut_id)]];
+	if (!s_shortcut_monitor)
+		s_shortcut_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *e) {
+			int l_window = sga_id_of([e window]);
+			int l_id = l_window ? sga_shortcut_match(l_window, [e charactersIgnoringModifiers] ?: @"", [e modifierFlags]) : 0;
+			if (l_id) { sga_push(25, l_window, l_id, 0, 0); return nil; }
+			return e;
+		}];
+}
+
+/* As the user pressing `a_shortcut' in `a_window': event 25 only when it is one of its own. */
+void sga_test_press_shortcut(int a_window, const char *a_shortcut)
+{
+	NSEventModifierFlags l_mask;
+	NSString *l_key = sga_key_of(sga_string(a_shortcut), &l_mask);
+	int l_id = sga_shortcut_match(a_window, l_key, l_mask);
+	if (l_id) sga_push(25, a_window, l_id, 0, 0);
+}
+
+/* Full screen: AppKit animates into its own Space; this turns the loop until AppKit says the
+   transition is over (at most 5 seconds), so `is_fullscreen' answers the new state on return.
+   AppKit refuses full screen to an application that cannot become active (no one logged in). */
+static int sga_run_once(NSDate *a_until);
+
+int sga_window_is_fullscreen(int a_window)
+{
+	return ([(NSWindow *)sga_get(a_window) styleMask] & NSWindowStyleMaskFullScreen) ? 1 : 0;
+}
+
+void sga_window_set_fullscreen(int a_window, int a_on)
+{
+	NSWindow *w = sga_get(a_window);
+	if (sga_window_is_fullscreen(a_window) == (a_on != 0)) return;
+	/* Wait for AppKit's own word that the transition is over: leaving before it has finished
+	   entering is refused ("not in fullscreen state"). */
+	__block BOOL l_done = NO;
+	NSNotificationName l_name = a_on ? NSWindowDidEnterFullScreenNotification : NSWindowDidExitFullScreenNotification;
+	id l_observer = [[NSNotificationCenter defaultCenter] addObserverForName:l_name object:w queue:nil
+		usingBlock:^(NSNotification *n) { (void)n; l_done = YES; }];
+	id l_failed = [[NSNotificationCenter defaultCenter] addObserverForName:@"NSWindowDidFailToEnterFullScreenNotification" object:w queue:nil
+		usingBlock:^(NSNotification *n) { (void)n; l_done = YES; }];
+	[w toggleFullScreen:nil];
+	NSDate *l_limit = [NSDate dateWithTimeIntervalSinceNow:5];
+	while (!l_done && [l_limit timeIntervalSinceNow] > 0) sga_run_once([NSDate dateWithTimeIntervalSinceNow:0.05]);
+	[[NSNotificationCenter defaultCenter] removeObserver:l_observer];
+	[[NSNotificationCenter defaultCenter] removeObserver:l_failed];
+}
+
+/* Follow the system's light or dark again (event 10 when that changes what is shown). */
+int sga_is_dark(void);
+void sga_follow_system_appearance(void)
+{
+	int l_before = sga_is_dark();
+	s_setting_dark++;
+	[NSApp setAppearance:nil];
+	s_setting_dark--;
+	if (sga_is_dark() != l_before) sga_push(10, 0, sga_is_dark(), 0, 0);
+}
+
+/* A list's or table's row brought into view, quietly (the selection stays). */
+void sga_list_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
+void sga_table_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
+
 /* ----------------------------------------------------------------- common */
 
 void sga_set_enabled(int a_id, int a_on)

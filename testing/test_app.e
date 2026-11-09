@@ -96,6 +96,12 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_window_of_1j_controls_describes_roles, "window_of_1j_controls_describes_roles")
 				run_test (agent t.test_window_of_1j_controls_snapshot, "window_of_1j_controls_snapshot")
 				run_test (agent t.test_reference_pills_show_their_tips, "reference_pills_show_their_tips")
+				run_test (agent t.test_timers_fire_and_cancel, "timers_fire_and_cancel")
+				run_test (agent t.test_clipboard_round_trip, "clipboard_round_trip")
+				run_test (agent t.test_window_shortcut_fires, "window_shortcut_fires")
+				run_test (agent t.test_fullscreen_toggles, "fullscreen_toggles")
+				run_test (agent t.test_appearance_can_be_chosen, "appearance_can_be_chosen")
+				run_test (agent t.test_scrolling_into_view, "scrolling_into_view")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
