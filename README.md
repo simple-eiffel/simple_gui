@@ -4,9 +4,9 @@ Native GUI for Eiffel: write the program once, and it **is and looks native** on
 
 | Platform | Backend | Status |
 |---|---|---|
-| Linux | GTK 4 (native GtkButton, GtkEntry, GtkColumnView, GtkNotebook...) | all 40 shared tests pass |
-| macOS | AppKit (native NSButton, NSTextField, NSTableView, NSTabView...) | all 40 shared tests pass |
-| Windows | simple_widgets on simple_shell (the Cairo look, drawn) | all 40 shared tests pass |
+| Linux | GTK 4 (native GtkButton, GtkEntry, GtkColumnView, GtkNotebook...) | all 50 shared tests pass |
+| macOS | AppKit (native NSButton, NSTextField, NSTableView, NSTabView...) | all 50 shared tests pass |
+| Windows | simple_widgets on simple_shell (the Cairo look, drawn) | all 50 shared tests pass |
 
 The same program, unchanged, runs on all three: [simple_graph_calc](https://github.com/simple-eiffel/simple_graph_calc), a graphing calculator, passes its 19 tests on each.
 
@@ -69,6 +69,19 @@ end
 - **Programmatic changes never fire events** (`set_text`, `select_row`); only the user's do.
 - **Accessible by default:** every control has an accessible label (its visible text unless set); a placeholder is never the label.
 - **Testable:** `GUI_TEST_DRIVER` clicks, types, chooses rows and menu items as a user would, takes PNG snapshots, and reads the assistive tree.
+
+## Toolbars, status bars and more (1g)
+
+GUI_DROPDOWN, GUI_SPIN_BOX and GUI_PROGRESS_BAR are ordinary controls. GUI_TOOLBAR (ordinary GUI_BUTTONs) and GUI_STATUS_BAR are placed by the window with `set_toolbar` and `set_status_bar`, where each platform expects them:
+
+| Platform | Placement |
+|---|---|
+| macOS | NSToolbar in the title bar; the status line in the window's bottom bar |
+| Linux and Windows | a strip above the content and one below it |
+
+| Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
+|---|---|---|
+| ![Linux](docs/gallery/linux/1g_controls.png) | ![macOS](docs/gallery/macos/1g_controls.png) | ![Windows](docs/gallery/windows/1g_controls.png) |
 
 ## Large tables
 
