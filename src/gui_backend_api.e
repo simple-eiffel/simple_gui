@@ -11,7 +11,8 @@ note
 		| 8 key (a = key code, b = character, c = modifiers << 8) | 9 resize (a, b)
 		| 10 appearance (a = 1 dark) | 11 wake | 12 toggled (a = 1 checked)
 		| 13 page changed (a = page, 1-based).
-		Text areas report text changed (2) like fields.
+		Text areas report text changed (2) like fields; spin boxes report it with a = the
+		new value; dropdowns report selection (4).
 
 		Menu roles: 0 none | 1 about | 2 settings | 3 quit | 10 undo | 11 redo | 12 cut
 		| 13 copy | 14 paste | 15 select all. A backend places role items where its
@@ -75,6 +76,16 @@ feature -- Windows and containers
 		end
 
 	window_set_content (a_window, a_child: INTEGER)
+		deferred
+		end
+
+	window_set_toolbar (a_window, a_toolbar: INTEGER)
+			-- Place `a_toolbar' where the platform expects a window's toolbar.
+		deferred
+		end
+
+	window_set_status_bar (a_window, a_bar: INTEGER)
+			-- Place `a_bar' at the window's bottom.
 		deferred
 		end
 
@@ -443,6 +454,105 @@ feature -- Controls
 
 feature -- Common widget state
 
+	dropdown: INTEGER
+			-- An empty pick-one dropdown.
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	dropdown_extend (an_id: INTEGER; a_text: POINTER)
+			-- Add a row; the first row added becomes the selection, without an event.
+		deferred
+		end
+
+	dropdown_wipe_out (an_id: INTEGER)
+		deferred
+		end
+
+	dropdown_select (an_id, a_row: INTEGER)
+			-- Select `a_row' (1-based), without an event.
+		require
+			positive: a_row >= 1
+		deferred
+		end
+
+	dropdown_selected (an_id: INTEGER): INTEGER
+			-- The selected row, or 0 when empty.
+		deferred
+		end
+
+	spin_box (a_min, a_max: INTEGER): INTEGER
+			-- A spin box at `a_min', stepping by 1.
+		require
+			ordered: a_min <= a_max
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	spin_box_set_value (an_id, a_value: INTEGER)
+			-- Without an event.
+		deferred
+		end
+
+	spin_box_value (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	spin_box_set_step (an_id, a_step: INTEGER)
+		require
+			positive: a_step > 0
+		deferred
+		end
+
+	progress_bar: INTEGER
+			-- A progress bar at 0.
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	progress_bar_set (an_id, a_percent: INTEGER)
+		require
+			percent: 0 <= a_percent and a_percent <= 100
+		deferred
+		end
+
+	progress_bar_value (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	toolbar: INTEGER
+			-- An empty toolbar.
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	toolbar_extend (a_toolbar, a_button: INTEGER)
+		deferred
+		end
+
+	toolbar_add_separator (a_toolbar: INTEGER)
+		deferred
+		end
+
+	status_bar: INTEGER
+			-- An empty status bar.
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	status_bar_set_text (an_id: INTEGER; a_text: POINTER)
+		deferred
+		end
+
+	status_bar_text (an_id: INTEGER): POINTER
+		deferred
+		end
+
 	set_enabled (an_id: INTEGER; a_on: BOOLEAN)
 		deferred
 		end
@@ -645,6 +755,11 @@ feature -- Test driver
 	test_choose (an_id, a_row: INTEGER)
 			-- Select row `a_row' of a list, or show page `a_row' of tabs, AS A USER WOULD
 			-- (emits selection, or page changed).
+		deferred
+		end
+
+	test_set_number (an_id, a_value: INTEGER)
+			-- Set a spin box's value as a user would (emits text changed).
 		deferred
 		end
 

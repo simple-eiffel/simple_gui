@@ -115,6 +115,30 @@ feature -- User actions
 			selected: a_list.selected_index = a_row
 		end
 
+	choose_option (a_dropdown: GUI_DROPDOWN; a_row: INTEGER)
+			-- Choose a row as a user would (fires selection).
+		require
+			has_application: has_application
+			valid: 1 <= a_row and a_row <= a_dropdown.count
+		do
+			backend.test_choose (a_dropdown.id, a_row)
+			settle
+		ensure
+			selected: a_dropdown.selected_index = a_row
+		end
+
+	enter_number (a_spin: GUI_SPIN_BOX; a_value: INTEGER)
+			-- Set the value as a user would (fires change).
+		require
+			has_application: has_application
+			in_range: a_spin.minimum <= a_value and a_value <= a_spin.maximum
+		do
+			backend.test_set_number (a_spin.id, a_value)
+			settle
+		ensure
+			set: a_spin.value = a_value
+		end
+
 	choose_page (a_tabs: GUI_TABS; a_page: INTEGER)
 			-- Click tab `a_page' as a user would (fires page changed).
 		require

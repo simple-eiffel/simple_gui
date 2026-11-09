@@ -2,7 +2,9 @@ note
 	description: "[
 		A top-level native window holding one content widget (usually a GUI_STACK or
 		GUI_GRID). The application menu bar appears above the content on Linux and in
-		the screen's menu bar on macOS. Closing is an event: `close_requested_actions'
+		the screen's menu bar on macOS. A toolbar and a status bar, when set, go where the
+		platform expects them (an NSToolbar and the bottom bar on macOS; strips above and
+		below the content elsewhere). Closing is an event: `close_requested_actions'
 		decide; with no agents the window closes, and the application quits when its
 		last window closes.
 	]"
@@ -44,6 +46,10 @@ feature -- Access
 
 	content: detachable GUI_WIDGET
 
+	toolbar: detachable GUI_TOOLBAR
+
+	status_bar: detachable GUI_STATUS_BAR
+
 	close_requested_actions: GUI_ACTIONS [TUPLE]
 			-- Run when the user asks to close the window.
 
@@ -67,6 +73,40 @@ feature -- Element change
 		ensure
 			set: content = a_widget
 			parent_set: a_widget.parent = Current
+		end
+
+	set_toolbar (a_toolbar: GUI_TOOLBAR)
+			-- Give the window `a_toolbar'.
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+			no_toolbar: toolbar = Void
+			not_parented: a_toolbar.parent = Void
+		do
+			toolbar := a_toolbar
+			a_toolbar.set_parent (Current)
+			a_toolbar.inherit_direction (base_direction)
+			backend.window_set_toolbar (id, a_toolbar.id)
+		ensure
+			set: toolbar = a_toolbar
+			parent_set: a_toolbar.parent = Current
+		end
+
+	set_status_bar (a_bar: GUI_STATUS_BAR)
+			-- Give the window `a_bar'.
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+			no_status_bar: status_bar = Void
+			not_parented: a_bar.parent = Void
+		do
+			status_bar := a_bar
+			a_bar.set_parent (Current)
+			a_bar.inherit_direction (base_direction)
+			backend.window_set_status_bar (id, a_bar.id)
+		ensure
+			set: status_bar = a_bar
+			parent_set: a_bar.parent = Current
 		end
 
 	set_title (a_title: READABLE_STRING_GENERAL)
@@ -132,6 +172,12 @@ feature {NONE} -- Implementation
 		do
 			if attached content as al_content then
 				al_content.inherit_direction (base_direction)
+			end
+			if attached toolbar as al_toolbar then
+				al_toolbar.inherit_direction (base_direction)
+			end
+			if attached status_bar as al_bar then
+				al_bar.inherit_direction (base_direction)
 			end
 		end
 

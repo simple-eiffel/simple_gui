@@ -924,6 +924,261 @@ feature -- Tests
 			l_window.close
 		end
 
+feature -- More controls (1g)
+
+	test_dropdown_extend_selects_first_silently
+			-- An empty dropdown has no selection; the first row added becomes it, silently.
+		local
+			l_window: GUI_WINDOW
+			l_drop: GUI_DROPDOWN
+		do
+			create l_window.make ("Dropdown", 300, 120)
+			create l_drop.make
+			l_window.set_content (l_drop)
+			assert ("empty", l_drop.count = 0 and l_drop.selected_index = 0)
+			l_drop.extend ("Whisper")
+			l_drop.extend ("Sherpa")
+			l_drop.extend ("Sherpa")
+			l_window.show
+			settle_window
+			assert ("duplicates kept", l_drop.count = 3)
+			assert ("first selected", l_drop.selected_index = 1 and l_drop.selected_text.same_string ("Whisper"))
+			assert ("silent", l_drop.selection_actions.fire_count = 0)
+			l_window.close
+		end
+
+	test_dropdown_select_row_is_silent_and_choose_option_emits
+			-- select_row is silent; a user's choice is reported with its row; choosing the
+			-- selected row again is not.
+		local
+			l_window: GUI_WINDOW
+			l_drop: GUI_DROPDOWN
+		do
+			create l_window.make ("Dropdown", 300, 120)
+			create l_drop.make
+			l_drop.extend ("English")
+			l_drop.extend ("Hebrew")
+			l_drop.extend ("Greek")
+			l_drop.selection_actions.extend (agent (r: INTEGER) do chosen_row := r end)
+			l_window.set_content (l_drop)
+			l_window.show
+			settle_window
+			l_drop.select_row (3)
+			driver.pump_until_idle (200)
+			assert ("silent", l_drop.selected_index = 3 and l_drop.selection_actions.fire_count = 0)
+			driver.choose_option (l_drop, 2)
+			assert ("reported", l_drop.selection_actions.fire_count = 1 and chosen_row = 2)
+			driver.choose_option (l_drop, 2)
+			assert ("same row again is not", l_drop.selection_actions.fire_count = 1)
+			l_window.close
+		end
+
+	test_dropdown_wipe_out_clears
+		local
+			l_window: GUI_WINDOW
+			l_drop: GUI_DROPDOWN
+		do
+			create l_window.make ("Dropdown", 300, 120)
+			create l_drop.make
+			l_drop.extend ("One")
+			l_drop.extend ("Two")
+			l_window.set_content (l_drop)
+			l_window.show
+			settle_window
+			l_drop.wipe_out
+			assert ("cleared", l_drop.count = 0 and l_drop.selected_index = 0)
+			l_drop.extend ("Three")
+			assert ("first again", l_drop.selected_index = 1 and l_drop.selection_actions.fire_count = 0)
+			l_window.close
+		end
+
+	test_spin_box_set_value_is_silent_and_enter_number_emits
+		local
+			l_window: GUI_WINDOW
+			l_spin: GUI_SPIN_BOX
+		do
+			create l_window.make ("Spin box", 300, 120)
+			create l_spin.make (1, 32)
+			l_spin.change_actions.extend (agent (v: INTEGER) do chosen_row := v end)
+			l_window.set_content (l_spin)
+			l_window.show
+			settle_window
+			assert ("starts at the minimum", l_spin.value = 1)
+			l_spin.set_value (8)
+			driver.pump_until_idle (200)
+			assert ("silent", l_spin.value = 8 and l_spin.change_actions.fire_count = 0)
+			driver.enter_number (l_spin, 12)
+			assert ("reported", l_spin.change_actions.fire_count = 1 and chosen_row = 12 and l_spin.value = 12)
+			l_window.close
+		end
+
+	test_spin_box_range_and_step
+		local
+			l_window: GUI_WINDOW
+			l_spin: GUI_SPIN_BOX
+		do
+			create l_window.make ("Spin box", 300, 120)
+			create l_spin.make (-5, 5)
+			l_window.set_content (l_spin)
+			l_window.show
+			settle_window
+			assert ("range", l_spin.minimum = -5 and l_spin.maximum = 5 and l_spin.value = -5)
+			l_spin.set_step (2)
+			assert ("step", l_spin.step = 2)
+			l_spin.set_value (5)
+			assert ("top", l_spin.value = 5)
+			l_window.close
+		end
+
+	test_progress_bar_value_round_trips
+		local
+			l_window: GUI_WINDOW
+			l_bar: GUI_PROGRESS_BAR
+			i: INTEGER
+		do
+			create l_window.make ("Progress", 300, 120)
+			create l_bar.make
+			l_window.set_content (l_bar)
+			l_window.show
+			settle_window
+			assert ("starts at 0", l_bar.value = 0)
+			from i := 0 until i > 100 loop
+				l_bar.set_value (i)
+				assert ("round trip " + i.out, l_bar.value = i)
+				i := i + 1
+			end
+			l_bar.set_value (60)
+			settle_window
+			assert ("60", l_bar.value = 60)
+			l_window.close
+		end
+
+	test_toolbar_buttons_click_and_disable
+			-- Toolbar buttons are ordinary buttons: they click, and a disabled one does not.
+		local
+			l_window: GUI_WINDOW
+			l_bar: GUI_TOOLBAR
+			l_open, l_run: GUI_BUTTON
+			l_label: GUI_LABEL
+		do
+			create l_window.make ("Toolbar", 400, 160)
+			create l_bar.make
+			create l_open.make ("Open")
+			create l_run.make ("Transcribe")
+			l_open.click_actions.extend (agent count_click)
+			l_bar.extend (l_open)
+			l_bar.add_separator
+			l_bar.extend (l_run)
+			assert ("two buttons, one separator", l_bar.count = 2 and l_bar.separator_count = 1)
+			assert ("parented", l_open.parent = l_bar and l_run.parent = l_bar)
+			l_window.set_toolbar (l_bar)
+			create l_label.make ("Content")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			clicks := 0
+			driver.perform_click (l_open)
+			assert ("clicked", clicks = 1)
+			l_run.disable
+			settle_window
+			assert ("disabled", not l_run.is_enabled)
+			l_window.close
+		end
+
+	test_status_bar_text_round_trips
+		local
+			l_window: GUI_WINDOW
+			l_status: GUI_STATUS_BAR
+			l_label: GUI_LABEL
+		do
+			create l_window.make ("Status", 400, 160)
+			create l_status.make
+			assert ("empty", l_status.text.is_empty)
+			create l_label.make ("Content")
+			l_window.set_content (l_label)
+			l_window.set_status_bar (l_status)
+			l_window.show
+			settle_window
+			l_status.set_text ({STRING_32} "Ready: shalom שלום")
+			settle_window
+			assert ("text", l_status.text.same_string ({STRING_32} "Ready: shalom שלום"))
+			l_window.close
+		end
+
+	test_window_with_toolbar_and_status_bar_describes_roles
+			-- Each new control is in the assistive tree under the shared role names
+			-- (present; other lines may be there too).
+		local
+			l_window: GUI_WINDOW
+			l_tree: STRING_32
+		do
+			l_window := controls_1g_window
+			settle_window
+			l_tree := driver.describe_accessibility (l_window)
+			print (indented (l_tree))
+			assert ("toolbar", l_tree.has_substring ("toolbar:"))
+			assert ("toolbar button", l_tree.has_substring ("button: Transcribe"))
+			assert ("dropdown", l_tree.has_substring ("combo-box:"))
+			assert ("spin box", l_tree.has_substring ("spin-button:"))
+			assert ("progress bar", l_tree.has_substring ("progress-bar:"))
+			assert ("status", l_tree.has_substring ("status:"))
+			l_window.close
+		end
+
+	test_window_with_toolbar_and_status_bar_snapshot
+		local
+			l_window: GUI_WINDOW
+		do
+			l_window := controls_1g_window
+			settle_window
+			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_1g_controls.png")))
+			assert ("file", (create {RAW_FILE}.make_with_name ("simple_gui_1g_controls.png")).exists)
+			l_window.close
+		end
+
+	controls_1g_window: GUI_WINDOW
+			-- A window with all five 1g controls, shown.
+		local
+			l_bar: GUI_TOOLBAR
+			l_open, l_run, l_cancel: GUI_BUTTON
+			l_stack: GUI_STACK
+			l_drop: GUI_DROPDOWN
+			l_spin: GUI_SPIN_BOX
+			l_progress: GUI_PROGRESS_BAR
+			l_status: GUI_STATUS_BAR
+		do
+			create Result.make ("Speech", 480, 260)
+			create l_bar.make
+			create l_open.make ("Open")
+			create l_run.make ("Transcribe")
+			create l_cancel.make ("Cancel")
+			l_bar.extend (l_open)
+			l_bar.add_separator
+			l_bar.extend (l_run)
+			l_bar.extend (l_cancel)
+			l_cancel.disable
+			Result.set_toolbar (l_bar)
+			create l_stack.make_vertical
+			create l_drop.make
+			l_drop.extend ("Whisper")
+			l_drop.extend ("Sherpa")
+			l_drop.set_accessible_label ("Engine")
+			create l_spin.make (1, 32)
+			l_spin.set_value (4)
+			l_spin.set_accessible_label ("Threads")
+			create l_progress.make
+			l_progress.set_value (60)
+			l_progress.set_accessible_label ("Progress")
+			l_stack.extend (l_drop)
+			l_stack.extend (l_spin)
+			l_stack.extend (l_progress)
+			Result.set_content (l_stack)
+			create l_status.make
+			l_status.set_text ("Transcribing: 60%%")
+			Result.set_status_bar (l_status)
+			Result.show
+		end
+
 feature -- Lazy tables (1f)
 
 	test_a_row_source_asks_only_for_rows_in_view
