@@ -160,6 +160,55 @@ feature -- Tooltip
 			set: tooltip.same_string_general (a_text)
 		end
 
+feature -- Badge (1n)
+
+	badge: detachable STRING_32
+			-- The badge shown at the trailing top corner: Void for none, empty for a dot, else
+			-- its short text ("3", "New").
+
+	set_badge (a_text: READABLE_STRING_GENERAL)
+			-- A small red bubble with `a_text' at the trailing top corner.
+		require
+			gui_thread: is_gui_thread
+			has_text: not a_text.is_empty
+			short: a_text.count <= 8
+		local
+			l_c: C_STRING
+		do
+			badge := a_text.to_string_32
+			l_c := backend.to_c (a_text)
+			backend.widget_set_badge (id, l_c.item, 1)
+		ensure
+			set: attached badge as al_badge and then al_badge.same_string_general (a_text)
+		end
+
+	set_badge_dot
+			-- A small red dot at the trailing top corner (something new, no count).
+		require
+			gui_thread: is_gui_thread
+		local
+			l_c: C_STRING
+		do
+			create badge.make_empty
+			l_c := backend.to_c ("")
+			backend.widget_set_badge (id, l_c.item, 2)
+		ensure
+			dot: attached badge as al_badge and then al_badge.is_empty
+		end
+
+	clear_badge
+		require
+			gui_thread: is_gui_thread
+		local
+			l_c: C_STRING
+		do
+			badge := Void
+			l_c := backend.to_c ("")
+			backend.widget_set_badge (id, l_c.item, 0)
+		ensure
+			none: badge = Void
+		end
+
 feature -- Reference pill (1l)
 
 	pill_code: detachable STRING_32

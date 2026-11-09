@@ -88,6 +88,32 @@ feature -- Element change
 			no_event: page_changed_actions.fire_count = old page_changed_actions.fire_count
 		end
 
+	set_page_icon (i: INTEGER; a_name: READABLE_STRING_GENERAL)
+			-- Show icon `a_name' before tab `i''s title.
+		require
+			gui_thread: is_gui_thread
+			valid: 1 <= i and i <= count
+			known: (create {GUI_ICON}).is_known (a_name)
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_name)
+			backend.tabs_set_page_icon (id, i, l_c.item)
+		end
+
+	set_page_badge (i: INTEGER; a_text: READABLE_STRING_GENERAL)
+			-- Show `a_text' as a badge on tab `i' (empty: none).
+		require
+			gui_thread: is_gui_thread
+			valid: 1 <= i and i <= count
+			short: a_text.count <= 8
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_text)
+			backend.tabs_set_page_badge (id, i, l_c.item)
+		end
+
 	set_page_title (i: INTEGER; a_title: READABLE_STRING_GENERAL)
 			-- Retitle tab `i' (for example on a change of language).
 		require
