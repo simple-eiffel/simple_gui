@@ -13,6 +13,8 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - [Check box](check-box.md): an option, on or off
 - [Separator](separator.md): a line between groups
 - [Image](image.md): a picture from a file or PNG bytes
+- [Reference pills](reference-pills.md): names and tips that let people talk about parts of a window
+- [Timers and clipboard](timers-and-clipboard.md): run an agent later or often; read and write the clipboard
 
 ## Input
 - [Text field](text-field.md): one line of text
