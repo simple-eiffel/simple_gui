@@ -1020,6 +1020,106 @@ feature -- Common widget state
 		alias "return (EIF_POINTER) sga_pill_tip_shown($an_id);"
 		end
 
+	password_field: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_password_field();"
+		end
+
+	password_set_revealed (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_password_set_revealed($an_id, $a_on ? 1 : 0);"
+		end
+
+	password_is_revealed (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_password_is_revealed($an_id) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	caps_lock_on: BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_caps_lock_on() ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	field_set_error (an_id: INTEGER; a_message: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_field_set_error($an_id, (const char *) $a_message);"
+		end
+
+	field_set_suggestions (an_id: INTEGER; a_joined: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_field_set_suggestions($an_id, (const char *) $a_joined);"
+		end
+
+	dropdown_add_header (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dropdown_add_header($an_id, (const char *) $a_text);"
+		end
+
+	dropdown_add_separator (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dropdown_add_separator($an_id);"
+		end
+
+	date_time_picker (a_kind: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_date_time_picker($a_kind);"
+		end
+
+	date_time_set (an_id, a_date, a_time: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_date_time_set($an_id, $a_date, $a_time);"
+		end
+
+	date_time_date (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_date_time_date($an_id);"
+		end
+
+	date_time_time (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_date_time_time($an_id);"
+		end
+
+	range_slider (a_min, a_max: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_range_slider($a_min, $a_max);"
+		end
+
+	range_slider_set (an_id, a_low, a_high: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_range_slider_set($an_id, $a_low, $a_high);"
+		end
+
+	range_slider_low (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_range_slider_low($an_id);"
+		end
+
+	range_slider_high (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_range_slider_high($an_id);"
+		end
+
+	range_slider_set_step (an_id, a_step: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_range_slider_set_step($an_id, $a_step);"
+		end
+
+	list_set_multiple (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_list_set_multiple($an_id, $a_on ? 1 : 0);"
+		end
+
+	list_selected_count (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_list_selected_count($an_id);"
+		end
+
+	list_selected_at (an_id, i: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_list_selected_at($an_id, $i);"
+		end
+
 	set_tooltip (an_id: INTEGER; a_text: POINTER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_set_tooltip($an_id, (const char *) $a_text);"
@@ -1306,6 +1406,41 @@ feature -- Test driver
 	test_drawn_event (an_id, a_type, a_a, a_b, a_c: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_drawn_event($an_id, $a_type, $a_a, $a_b, $a_c);"
+		end
+
+	test_toggle_reveal (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_toggle_reveal($an_id);"
+		end
+
+	test_pick_suggestion (an_id, i: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_pick_suggestion($an_id, $i);"
+		end
+
+	test_end_editing (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_drawn_event($an_id, 26, 0, 0, 0);"
+		end
+
+	test_set_date_time (an_id, a_date, a_time: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_set_date_time($an_id, $a_date, $a_time);"
+		end
+
+	test_slide_range (an_id, a_low, a_high: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_slide_range($an_id, $a_low, $a_high);"
+		end
+
+	test_extend_list_selection (an_id, a_row: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_extend_list_selection($an_id, $a_row);"
+		end
+
+	field_error_shown (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_field_error_shown($an_id);"
 		end
 
 	test_menu (an_item_id: INTEGER)

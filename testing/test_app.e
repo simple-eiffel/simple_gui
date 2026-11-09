@@ -102,6 +102,16 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_fullscreen_toggles, "fullscreen_toggles")
 				run_test (agent t.test_appearance_can_be_chosen, "appearance_can_be_chosen")
 				run_test (agent t.test_scrolling_into_view, "scrolling_into_view")
+				run_test (agent t.test_password_field_reveals_and_hides, "password_field_reveals_and_hides")
+				run_test (agent t.test_validation_kinds_and_live_check, "validation_kinds_and_live_check")
+				run_test (agent t.test_autocomplete_suggests_and_fills, "autocomplete_suggests_and_fills")
+				run_test (agent t.test_file_field_shows_the_path, "file_field_shows_the_path")
+				run_test (agent t.test_dropdown_groups_do_not_count, "dropdown_groups_do_not_count")
+				run_test (agent t.test_date_time_and_month_pickers_round_trip, "date_time_and_month_pickers_round_trip")
+				run_test (agent t.test_range_slider_keeps_low_below_high, "range_slider_keeps_low_below_high")
+				run_test (agent t.test_list_multiple_selection, "list_multiple_selection")
+				run_test (agent t.test_window_of_1p_controls_describes_roles, "window_of_1p_controls_describes_roles")
+				run_test (agent t.test_window_of_1p_controls_snapshot, "window_of_1p_controls_snapshot")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
