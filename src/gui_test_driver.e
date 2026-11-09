@@ -228,13 +228,16 @@ feature -- User actions
 feature -- Evidence
 
 	snapshot (a_window: GUI_WINDOW; a_path: PATH): BOOLEAN
-			-- Render `a_window' to a PNG at `a_path'.
+			-- Render `a_window' to a PNG at `a_path', after letting the loop settle: a
+			-- change made just before (a label set, rows added) is laid out first, since GTK
+			-- draws nothing for a widget whose layout is still pending.
 		require
 			has_application: has_application
 			open: not a_window.is_closed
 		local
 			l_c: C_STRING
 		do
+			settle
 			l_c := backend.to_c (a_path.name)
 			Result := backend.snapshot (a_window.id, l_c.item)
 		end
