@@ -510,6 +510,231 @@ feature -- Common widget state
 		alias "return (EIF_POINTER) sga_status_bar_text($an_id);"
 		end
 
+	radio_group (a_vertical: BOOLEAN): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_radio_group($a_vertical ? 1 : 0);"
+		end
+
+	radio_group_extend (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_radio_group_extend($an_id, (const char *) $a_text);"
+		end
+
+	radio_group_select (an_id, i: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_radio_group_select($an_id, $i);"
+		end
+
+	radio_group_selected (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_radio_group_selected($an_id);"
+		end
+
+	segmented: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_segmented();"
+		end
+
+	segmented_extend (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_segmented_extend($an_id, (const char *) $a_text);"
+		end
+
+	segmented_select (an_id, i: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_segmented_select($an_id, $i);"
+		end
+
+	segmented_selected (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_segmented_selected($an_id);"
+		end
+
+	slider (a_min, a_max: INTEGER; a_vertical: BOOLEAN): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_slider($a_min, $a_max, $a_vertical ? 1 : 0);"
+		end
+
+	slider_set_value (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_slider_set_value($an_id, $a_value);"
+		end
+
+	slider_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_slider_value($an_id);"
+		end
+
+	slider_set_step (an_id, a_step: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_slider_set_step($an_id, $a_step);"
+		end
+
+	switch: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_switch();"
+		end
+
+	switch_set (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_switch_set($an_id, $a_on ? 1 : 0);"
+		end
+
+	switch_is_on (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_switch_is_on($an_id) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	date_picker: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_date_picker();"
+		end
+
+	time_picker: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_time_picker();"
+		end
+
+	date_picker_set (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_date_picker_set($an_id, $a_value);"
+		end
+
+	date_picker_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_date_picker_value($an_id);"
+		end
+
+	color_chooser: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_color_chooser();"
+		end
+
+	color_chooser_set (an_id, a_rgb: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_color_chooser_set($an_id, $a_rgb);"
+		end
+
+	color_chooser_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_color_chooser_value($an_id);"
+		end
+
+	scroll_area: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_scroll_area();"
+		end
+
+	scroll_area_set_content (an_id, a_child: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_scroll_area_set_content($an_id, $a_child);"
+		end
+
+	scroll_area_scroll_to (an_id, a_x, a_y: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_scroll_area_scroll_to($an_id, $a_x, $a_y);"
+		end
+
+	image: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_image();"
+		end
+
+	image_set_file (an_id: INTEGER; a_path: POINTER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_image_set_file($an_id, (const char *) $a_path) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	image_set_bytes (an_id: INTEGER; a_bytes: POINTER; a_count: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_image_set_bytes($an_id, (const void *) $a_bytes, $a_count) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	separator (a_vertical: BOOLEAN): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_separator($a_vertical ? 1 : 0);"
+		end
+
+	group_box (a_title: POINTER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_group_box((const char *) $a_title);"
+		end
+
+	group_box_set_title (an_id: INTEGER; a_title: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_group_box_set_title($an_id, (const char *) $a_title);"
+		end
+
+	group_box_set_content (an_id, a_child: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_group_box_set_content($an_id, $a_child);"
+		end
+
+	expander (a_title: POINTER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_expander((const char *) $a_title);"
+		end
+
+	expander_set_title (an_id: INTEGER; a_title: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_expander_set_title($an_id, (const char *) $a_title);"
+		end
+
+	expander_set_content (an_id, a_child: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_expander_set_content($an_id, $a_child);"
+		end
+
+	expander_set_expanded (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_expander_set_expanded($an_id, $a_on ? 1 : 0);"
+		end
+
+	expander_is_expanded (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_expander_is_expanded($an_id) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	combo_box: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_combo_box();"
+		end
+
+	combo_box_extend (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_combo_box_extend($an_id, (const char *) $a_text);"
+		end
+
+	combo_box_wipe_out (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_combo_box_wipe_out($an_id);"
+		end
+
+	combo_box_set_text (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_combo_box_set_text($an_id, (const char *) $a_text);"
+		end
+
+	combo_box_text (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_combo_box_text($an_id);"
+		end
+
+	tree_table (a_titles: POINTER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_tree_table((const char *) $a_titles);"
+		end
+
+	tree_table_set_cell (an_id, a_node, a_column: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_tree_table_set_cell($an_id, $a_node, $a_column, (const char *) $a_text);"
+		end
+
+	set_tooltip (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_set_tooltip($an_id, (const char *) $a_text);"
+		end
+
 	set_enabled (an_id: INTEGER; a_on: BOOLEAN)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_set_enabled($an_id, $a_on ? 1 : 0);"
@@ -657,6 +882,21 @@ feature -- Dialogs
 		alias "return sga_message($a_window, (const char *) $a_title, (const char *) $a_text, $a_confirm ? 1 : 0) ? EIF_TRUE : EIF_FALSE;"
 		end
 
+	save_file_named (a_window: INTEGER; a_title, an_extensions, a_name: POINTER): POINTER
+		external "C blocking inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_save_file_named($a_window, (const char *) $a_title, (const char *) $an_extensions, (const char *) $a_name);"
+		end
+
+	choose_folder (a_window: INTEGER; a_title: POINTER): POINTER
+		external "C blocking inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_choose_folder($a_window, (const char *) $a_title);"
+		end
+
+	ask (a_window: INTEGER; a_title, a_text: POINTER): INTEGER
+		external "C blocking inline use %"simple_gui_appkit.h%""
+		alias "return sga_ask($a_window, (const char *) $a_title, (const char *) $a_text);"
+		end
+
 feature -- Appearance
 
 	is_dark: BOOLEAN
@@ -706,6 +946,36 @@ feature -- Test driver
 	test_set_number (an_id, a_value: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_set_number($an_id, $a_value);"
+		end
+
+	test_slide (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_slide($an_id, $a_value);"
+		end
+
+	test_set_date (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_set_date($an_id, $a_value);"
+		end
+
+	test_set_color (an_id, a_rgb: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_set_color($an_id, $a_rgb);"
+		end
+
+	test_type_combo (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_type_combo($an_id, (const char *) $a_text);"
+		end
+
+	test_toggle_expander (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_toggle_expander($an_id);"
+		end
+
+	test_auto_cancel_dialogs (a_ms: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_auto_cancel_dialogs($a_ms);"
 		end
 
 	test_menu (an_item_id: INTEGER)

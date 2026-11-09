@@ -553,6 +553,216 @@ feature -- Common widget state
 		deferred
 		end
 
+	radio_group (a_vertical: BOOLEAN): INTEGER
+			-- An empty radio group, one above the next or in a row.
+		deferred
+		end
+
+	radio_group_extend (an_id: INTEGER; a_text: POINTER)
+			-- Add a radio; the first is chosen, without an event.
+		deferred
+		end
+
+	radio_group_select (an_id, i: INTEGER)
+			-- Choose radio `i' (1-based), without an event.
+		deferred
+		end
+
+	radio_group_selected (an_id: INTEGER): INTEGER
+			-- The chosen radio, or 0 when there are none.
+		deferred
+		end
+
+	segmented: INTEGER
+			-- An empty segmented control.
+		deferred
+		end
+
+	segmented_extend (an_id: INTEGER; a_text: POINTER)
+			-- Add a segment; the first is selected, without an event.
+		deferred
+		end
+
+	segmented_select (an_id, i: INTEGER)
+			-- Select segment `i', without an event.
+		deferred
+		end
+
+	segmented_selected (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	slider (a_min, a_max: INTEGER; a_vertical: BOOLEAN): INTEGER
+			-- A slider at `a_min' that reports every move (2, a = value).
+		deferred
+		end
+
+	slider_set_value (an_id, a_value: INTEGER)
+			-- Without an event.
+		deferred
+		end
+
+	slider_value (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	slider_set_step (an_id, a_step: INTEGER)
+			-- The knob stops every `a_step'.
+		deferred
+		end
+
+	switch: INTEGER
+			-- A switch, off; a flip sends toggled (12).
+		deferred
+		end
+
+	switch_set (an_id: INTEGER; a_on: BOOLEAN)
+			-- Without an event.
+		deferred
+		end
+
+	switch_is_on (an_id: INTEGER): BOOLEAN
+		deferred
+		end
+
+	date_picker: INTEGER
+			-- A date picker showing today; value year * 10000 + month * 100 + day.
+		deferred
+		end
+
+	time_picker: INTEGER
+			-- A time picker showing now; value hour * 60 + minute.
+		deferred
+		end
+
+	date_picker_set (an_id, a_value: INTEGER)
+			-- A date or a time picker's value, without an event.
+		deferred
+		end
+
+	date_picker_value (an_id: INTEGER): INTEGER
+			-- A date or a time picker's value.
+		deferred
+		end
+
+	color_chooser: INTEGER
+			-- A color chooser holding black (0xRRGGBB, sRGB).
+		deferred
+		end
+
+	color_chooser_set (an_id, a_rgb: INTEGER)
+			-- Without an event.
+		deferred
+		end
+
+	color_chooser_value (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	scroll_area: INTEGER
+			-- An empty scroll area.
+		deferred
+		end
+
+	scroll_area_set_content (an_id, a_child: INTEGER)
+		deferred
+		end
+
+	scroll_area_scroll_to (an_id, a_x, a_y: INTEGER)
+		deferred
+		end
+
+	image: INTEGER
+			-- An empty image.
+		deferred
+		end
+
+	image_set_file (an_id: INTEGER; a_path: POINTER): BOOLEAN
+			-- Show the picture in the file; False when it is not one.
+		deferred
+		end
+
+	image_set_bytes (an_id: INTEGER; a_bytes: POINTER; a_count: INTEGER): BOOLEAN
+			-- Show the PNG picture in the bytes; False when they are not one.
+		deferred
+		end
+
+	separator (a_vertical: BOOLEAN): INTEGER
+		deferred
+		end
+
+	group_box (a_title: POINTER): INTEGER
+			-- An empty titled frame.
+		deferred
+		end
+
+	group_box_set_title (an_id: INTEGER; a_title: POINTER)
+		deferred
+		end
+
+	group_box_set_content (an_id, a_child: INTEGER)
+		deferred
+		end
+
+	expander (a_title: POINTER): INTEGER
+			-- An empty expander, collapsed; a user's toggle sends toggled (12, a = 1 expanded).
+		deferred
+		end
+
+	expander_set_title (an_id: INTEGER; a_title: POINTER)
+		deferred
+		end
+
+	expander_set_content (an_id, a_child: INTEGER)
+		deferred
+		end
+
+	expander_set_expanded (an_id: INTEGER; a_on: BOOLEAN)
+			-- Without an event.
+		deferred
+		end
+
+	expander_is_expanded (an_id: INTEGER): BOOLEAN
+		deferred
+		end
+
+	combo_box: INTEGER
+			-- An empty editable combo box; a committed change sends text changed (2).
+		deferred
+		end
+
+	combo_box_extend (an_id: INTEGER; a_text: POINTER)
+		deferred
+		end
+
+	combo_box_wipe_out (an_id: INTEGER)
+		deferred
+		end
+
+	combo_box_set_text (an_id: INTEGER; a_text: POINTER)
+			-- Without an event.
+		deferred
+		end
+
+	combo_box_text (an_id: INTEGER): POINTER
+		deferred
+		end
+
+	tree_table (a_titles: POINTER): INTEGER
+			-- An empty tree table; column titles joined by 0x1F.
+		deferred
+		end
+
+	tree_table_set_cell (an_id, a_node, a_column: INTEGER; a_text: POINTER)
+			-- Node `a_node''s text in column `a_column' (1: its node text).
+		deferred
+		end
+
+	set_tooltip (an_id: INTEGER; a_text: POINTER)
+			-- Short help on hover; empty removes it.
+		deferred
+		end
+
 	set_enabled (an_id: INTEGER; a_on: BOOLEAN)
 		deferred
 		end
@@ -709,6 +919,21 @@ feature -- Dialogs
 		deferred
 		end
 
+	save_file_named (a_window: INTEGER; a_title, an_extensions, a_name: POINTER): POINTER
+			-- Chosen path (UTF-8), offered `a_name' first, or default_pointer when canceled.
+		deferred
+		end
+
+	choose_folder (a_window: INTEGER; a_title: POINTER): POINTER
+			-- Chosen folder (UTF-8), or default_pointer when canceled.
+		deferred
+		end
+
+	ask (a_window: INTEGER; a_title, a_text: POINTER): INTEGER
+			-- 1 yes, 2 no, 0 cancel.
+		deferred
+		end
+
 feature -- Appearance
 
 	is_dark: BOOLEAN
@@ -760,6 +985,36 @@ feature -- Test driver
 
 	test_set_number (an_id, a_value: INTEGER)
 			-- Set a spin box's value as a user would (emits text changed).
+		deferred
+		end
+
+	test_slide (an_id, a_value: INTEGER)
+			-- Move a slider's knob as a user would (emits text changed).
+		deferred
+		end
+
+	test_set_date (an_id, a_value: INTEGER)
+			-- Enter a date or a time picker's value as a user would (emits text changed).
+		deferred
+		end
+
+	test_set_color (an_id, a_rgb: INTEGER)
+			-- Choose a color as a user would (emits text changed).
+		deferred
+		end
+
+	test_type_combo (an_id: INTEGER; a_text: POINTER)
+			-- Type into a combo box and press Return, as a user would (emits text changed on a change).
+		deferred
+		end
+
+	test_toggle_expander (an_id: INTEGER)
+			-- Click an expander's title as a user would (emits toggled).
+		deferred
+		end
+
+	test_auto_cancel_dialogs (a_ms: INTEGER)
+			-- Cancel each dialog `a_ms' after it opens (0: never), so tests run unattended.
 		deferred
 		end
 

@@ -73,6 +73,16 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_status_bar_text_round_trips, "status_bar_text_round_trips")
 				run_test (agent t.test_window_with_toolbar_and_status_bar_describes_roles, "window_with_toolbar_and_status_bar_describes_roles")
 				run_test (agent t.test_window_with_toolbar_and_status_bar_snapshot, "window_with_toolbar_and_status_bar_snapshot")
+				run_test (agent t.test_radio_group_and_segmented_choose, "radio_group_and_segmented_choose")
+				run_test (agent t.test_slider_and_switch, "slider_and_switch")
+				run_test (agent t.test_date_time_and_color_round_trip, "date_time_and_color_round_trip")
+				run_test (agent t.test_combo_box_commits, "combo_box_commits")
+				run_test (agent t.test_containers_hold_their_content, "containers_hold_their_content")
+				run_test (agent t.test_image_separator_and_tooltip, "image_separator_and_tooltip")
+				run_test (agent t.test_tree_table_cells, "tree_table_cells")
+				run_test (agent t.test_dialogs_cancel_unattended, "dialogs_cancel_unattended")
+				run_test (agent t.test_window_of_1h_controls_describes_roles, "window_of_1h_controls_describes_roles")
+				run_test (agent t.test_window_of_1h_controls_snapshot, "window_of_1h_controls_snapshot")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then

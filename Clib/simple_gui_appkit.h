@@ -156,6 +156,56 @@ const char *sga_status_bar_text(int a_id);
 void sga_window_set_toolbar(int a_window, int a_toolbar);   /* in the title bar; the content keeps its size */
 void sga_window_set_status_bar(int a_window, int a_bar);   /* in the window's bottom bar */
 
+/* 1h: the standard controls */
+int sga_radio_group(int a_vertical);
+void sga_radio_group_extend(int a_id, const char *a_text);   /* the first is chosen, silently */
+void sga_radio_group_select(int a_id, int i);   /* silent */
+int sga_radio_group_selected(int a_id);
+int sga_slider(int a_min, int a_max, int a_vertical);
+void sga_slider_set_value(int a_id, int a_value);   /* silent */
+int sga_slider_value(int a_id);
+void sga_slider_set_step(int a_id, int a_step);
+int sga_switch(void);
+void sga_switch_set(int a_id, int a_on);   /* silent */
+int sga_switch_is_on(int a_id);
+int sga_segmented(void);
+void sga_segmented_extend(int a_id, const char *a_text);   /* the first is selected, silently */
+void sga_segmented_select(int a_id, int i);   /* silent */
+int sga_segmented_selected(int a_id);
+int sga_date_picker(void);   /* value: year * 10000 + month * 100 + day */
+int sga_time_picker(void);   /* value: hour * 60 + minute */
+void sga_date_picker_set(int a_id, int a_value);   /* silent; a date or a time picker */
+int sga_date_picker_value(int a_id);
+int sga_color_chooser(void);   /* 0xRRGGBB, sRGB */
+void sga_color_chooser_set(int a_id, int a_rgb);   /* silent */
+int sga_color_chooser_value(int a_id);
+int sga_scroll_area(void);
+void sga_scroll_area_set_content(int a_id, int a_child);
+void sga_scroll_area_scroll_to(int a_id, int a_x, int a_y);
+int sga_image(void);
+int sga_image_set_file(int a_id, const char *a_path);   /* 0: not a picture */
+int sga_image_set_bytes(int a_id, const void *a_bytes, int a_count);   /* PNG and the other formats AppKit reads */
+int sga_separator(int a_vertical);
+int sga_group_box(const char *a_title);
+void sga_group_box_set_title(int a_id, const char *a_title);
+void sga_group_box_set_content(int a_id, int a_child);
+int sga_expander(const char *a_title);   /* collapsed */
+void sga_expander_set_content(int a_id, int a_child);
+void sga_expander_set_expanded(int a_id, int a_on);   /* silent */
+int sga_expander_is_expanded(int a_id);
+void sga_expander_set_title(int a_id, const char *a_title);
+int sga_combo_box(void);
+void sga_combo_box_extend(int a_id, const char *a_text);
+void sga_combo_box_wipe_out(int a_id);
+void sga_combo_box_set_text(int a_id, const char *a_text);   /* silent */
+const char *sga_combo_box_text(int a_id);
+const char *sga_save_file_named(int a_window, const char *a_title, const char *a_extensions, const char *a_name);
+const char *sga_choose_folder(int a_window, const char *a_title);
+int sga_ask(int a_window, const char *a_title, const char *a_text);   /* 1 yes, 2 no, 0 cancel */
+void sga_set_tooltip(int a_id, const char *a_text);   /* empty removes it */
+int sga_tree_table(const char *a_titles);   /* titles joined by 0x1F; a tree's nodes, with columns */
+void sga_tree_table_set_cell(int a_id, int a_node, int a_column, const char *a_text);   /* column 1 is the node's text */
+
 /* Appearance */
 int sga_is_dark(void);
 void sga_set_dark(int a_on);
@@ -168,6 +218,11 @@ void sga_test_expand(int a_id, int a_node, int a_on);   /* expansion, as a user 
 void sga_test_type(int a_id, const char *a_text);
 void sga_test_choose(int a_id, int a_row);   /* a list's, table's, tree's, tabs' or dropdown's row, as a user */
 void sga_test_set_number(int a_id, int a_value);   /* typed, then Return, as a user */
+void sga_test_slide(int a_id, int a_value);   /* the knob moved there, as a user */
+void sga_test_set_date(int a_id, int a_value);   /* a date or a time entered, as a user */
+void sga_test_set_color(int a_id, int a_rgb);   /* chosen in the color panel, as a user */
+void sga_test_type_combo(int a_id, const char *a_text);   /* typed, then Return, as a user */
+void sga_test_toggle_expander(int a_id);   /* a click on the triangle */
 void sga_test_menu(int a_item_id);
 void sga_test_request_close(int a_window);
 void sga_test_focus(int a_id);   /* as a click: key window, first responder */

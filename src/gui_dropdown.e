@@ -10,10 +10,7 @@ class
 	GUI_DROPDOWN
 
 inherit
-	GUI_WIDGET
-		redefine
-			dispatch
-		end
+	GUI_CHOOSER
 
 create
 	make
@@ -25,8 +22,7 @@ feature {NONE} -- Initialization
 			gui_thread: is_gui_thread
 			has_application: has_application
 		do
-			create selection_actions.make
-			create rows.make (8)
+			make_chooser
 			register (backend.dropdown)
 		ensure
 			empty: count = 0
@@ -35,57 +31,13 @@ feature {NONE} -- Initialization
 
 feature -- Access
 
-	count: INTEGER
-		do
-			Result := rows.count
-		end
-
-	i_th (i: INTEGER): STRING_32
-		require
-			valid: 1 <= i and i <= count
-		do
-			Result := rows.i_th (i)
-		end
-
 	selected_index: INTEGER
 			-- The selected row, or 0 when empty.
 		do
 			Result := backend.dropdown_selected (id)
-		ensure
-			in_range: 0 <= Result and Result <= count
 		end
 
-	selected_text: STRING_32
-			-- The selected row's text, or empty when nothing is selected.
-		do
-			if selected_index > 0 then
-				Result := i_th (selected_index)
-			else
-				create Result.make_empty
-			end
-		end
-
-	selection_actions: GUI_ACTIONS [TUPLE [row: INTEGER]]
-			-- Run when the user chooses a row.
-
-feature -- Element change
-
-	extend (a_text: READABLE_STRING_GENERAL)
-			-- Add a row; the first row added becomes the selection, without an event.
-		require
-			gui_thread: is_gui_thread
-		local
-			l_c: C_STRING
-		do
-			rows.extend (a_text.to_string_32)
-			l_c := backend.to_c (a_text)
-			backend.dropdown_extend (id, l_c.item)
-		ensure
-			one_more: count = old count + 1
-			last: i_th (count).same_string_general (a_text)
-			first_selected: old count = 0 implies selected_index = 1
-			no_event: selection_actions.fire_count = old selection_actions.fire_count
-		end
+feature -- Removal
 
 	wipe_out
 		require
@@ -98,32 +50,16 @@ feature -- Element change
 			none_selected: selected_index = 0
 		end
 
-	select_row (i: INTEGER)
-			-- Select row `i', without a selection event.
-		require
-			gui_thread: is_gui_thread
-			valid: 1 <= i and i <= count
-		do
-			backend.dropdown_select (id, i)
-		ensure
-			selected: selected_index = i
-			no_event: selection_actions.fire_count = old selection_actions.fire_count
-		end
-
-feature {GUI_APPLICATION} -- Events
-
-	dispatch (a_type, a_a, a_b, a_c: INTEGER)
-		do
-			if a_type = 4 then
-				selection_actions.call ([a_a])
-			end
-		end
-
 feature {NONE} -- Implementation
 
-	rows: ARRAYED_LIST [STRING_32]
+	backend_extend (a_text: POINTER)
+		do
+			backend.dropdown_extend (id, a_text)
+		end
 
-invariant
-	rows_exist: rows /= Void
+	backend_select (i: INTEGER)
+		do
+			backend.dropdown_select (id, i)
+		end
 
 end

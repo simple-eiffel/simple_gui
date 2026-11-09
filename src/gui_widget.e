@@ -141,6 +141,25 @@ feature -- Accessibility
 			Result := backend.from_c (backend.accessible_role (id))
 		end
 
+feature -- Tooltip
+
+	tooltip: STRING_32
+			-- The short help shown when the pointer rests on this widget (empty: none).
+
+	set_tooltip (a_text: READABLE_STRING_GENERAL)
+			-- Show `a_text' when the pointer rests on this widget; empty removes it.
+		require
+			gui_thread: is_gui_thread
+		local
+			l_c: C_STRING
+		do
+			tooltip := a_text.to_string_32
+			l_c := backend.to_c (a_text)
+			backend.set_tooltip (id, l_c.item)
+		ensure
+			set: tooltip.same_string_general (a_text)
+		end
+
 feature -- Context menu
 
 	context_menu: detachable GUI_MENU
@@ -241,6 +260,7 @@ feature {NONE} -- Implementation
 		do
 			id := a_id
 			create accessible_description.make_empty
+			create tooltip.make_empty
 			application.register (Current)
 		ensure
 			named: id = a_id

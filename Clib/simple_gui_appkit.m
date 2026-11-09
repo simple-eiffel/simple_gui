@@ -633,11 +633,12 @@ static void sga_place(SGASlot *a_slot, int a_alignment)
 	[NSLayoutConstraint activateConstraints:a_slot->placing];
 }
 
-/* Buttons (a dropdown too) and spin boxes keep their natural width (GTK: halign START);
-   everything else fills. */
+/* Buttons (a dropdown too), spin boxes and segmented controls keep their natural width
+   (GTK: halign START); everything else fills. */
 static int sga_default_alignment(NSView *a_child)
 {
-	return [a_child isKindOfClass:[NSButton class]] || [a_child isKindOfClass:NSClassFromString(@"SGASpin")] ? 1 : 0;
+	return [a_child isKindOfClass:[NSButton class]] || [a_child isKindOfClass:NSClassFromString(@"SGASpin")]
+		|| [a_child isKindOfClass:[NSSegmentedControl class]] ? 1 : 0;
 }
 
 void sga_stack_extend(int a_stack, int a_child, int a_stretch)
@@ -1370,6 +1371,7 @@ void sga_test_click_header(int a_id, int a_column)
 @public
 	int number;
 	NSString *text;
+	NSMutableArray<NSString *> *cells;   /* a tree table's columns 2 .. n (1h); empty in a plain tree */
 	NSMutableArray<SGANode *> *children;
 	SGANode *parent;
 }
@@ -1382,6 +1384,7 @@ void sga_test_click_header(int a_id, int a_column)
 @public
 	NSMutableArray<SGANode *> *roots;
 	NSMutableArray<SGANode *> *nodes;   /* node n at index n - 1 */
+	BOOL is_table;   /* a tree table (1h): read as a tree grid, as GUI_TABLE is */
 }
 @end
 @implementation SGATree
@@ -1402,7 +1405,10 @@ void sga_test_click_header(int a_id, int a_column)
 		[f setIdentifier:@"sga_tree_cell"];
 		[f setLineBreakMode:NSLineBreakByTruncatingTail];
 	}
-	[f setStringValue:((SGANode *)an_item)->text];
+	/* Column 1 is the node's text; a tree table's other columns are its cells. */
+	SGANode *n = an_item;
+	NSUInteger k = [[o tableColumns] indexOfObject:c];
+	[f setStringValue:k == 0 || k == NSNotFound ? n->text : (k <= [n->cells count] ? n->cells[k - 1] : @"")];
 	return f;
 }
 - (void)outlineViewSelectionDidChange:(NSNotification *)n
@@ -1449,6 +1455,47 @@ static SGANode *sga_tree_node(SGATree *t, int a_node)
 	return (a_node >= 1 && a_node <= (int)[t->nodes count]) ? t->nodes[(NSUInteger)(a_node - 1)] : nil;
 }
 
+static NSArray<NSString *> *sga_fields(const char *a_joined);
+
+/* A tree table (1h): a tree with titled columns, the first holding the outline. Nodes come
+   and go as in a tree; `sga_tree_table_set_cell' gives a node's text in another column. */
+int sga_tree_table(const char *a_titles)
+{
+	int l_id = sga_tree();
+	SGATree *t = s_inner[l_id];
+	NSArray<NSString *> *l_titles = sga_fields(a_titles);
+	NSTableColumn *l_first = [[t tableColumns] firstObject];
+	[l_first setTitle:[l_titles count] ? l_titles[0] : @""];
+	[l_first setResizingMask:NSTableColumnAutoresizingMask | NSTableColumnUserResizingMask];
+	for (NSUInteger k = 1; k < [l_titles count]; k++) {
+		NSTableColumn *c = [[NSTableColumn alloc] initWithIdentifier:[NSString stringWithFormat:@"sga_tree_c%lu", (unsigned long)k + 1]];
+		[c setTitle:l_titles[k]];
+		[c setResizingMask:NSTableColumnAutoresizingMask | NSTableColumnUserResizingMask];
+		[t addTableColumn:c];
+	}
+	t->is_table = YES;
+	[t setHeaderView:[[NSTableHeaderView alloc] init]];
+	[t setAllowsColumnReordering:NO];
+	[t setUsesAlternatingRowBackgroundColors:YES];
+	[t setStyle:NSTableViewStyleFullWidth];
+	return l_id;
+}
+
+void sga_tree_table_set_cell(int a_id, int a_node, int a_column, const char *a_text)
+{
+	SGATree *t = s_inner[a_id];
+	SGANode *n = sga_tree_node(t, a_node);
+	if (!n || a_column < 1) return;
+	if (a_column == 1) n->text = sga_string(a_text);
+	else {
+		while ((int)[n->cells count] < a_column - 1) [n->cells addObject:@""];
+		n->cells[(NSUInteger)(a_column - 2)] = sga_string(a_text);
+	}
+	s_suppress++;
+	[t reloadItem:n];
+	s_suppress--;
+}
+
 void sga_tree_add(int a_id, int a_node, int a_parent, const char *a_text)
 {
 	SGATree *t = s_inner[a_id];
@@ -1456,6 +1503,7 @@ void sga_tree_add(int a_id, int a_node, int a_parent, const char *a_text)
 	SGANode *p = sga_tree_node(t, a_parent);
 	n->number = a_node;
 	n->text = sga_string(a_text);
+	n->cells = [NSMutableArray array];
 	n->children = [NSMutableArray array];
 	n->parent = p;
 	[t->nodes addObject:n];
@@ -1837,6 +1885,560 @@ void sga_window_set_toolbar(int a_window, int a_toolbar)
 	[w setContentSize:l_size];
 }
 
+/* ------------------------------------------------- 1h: the standard controls */
+
+/* Events (spec 1h): a radio group's or segmented control's pick sends selection (4, a = the
+   1-based choice); a slider's every move, and a committed date, time, color or combo box
+   text, send text changed (2, a = the value); a switch and an expander send toggled (12,
+   a = 1 on). Setting from code sends nothing. */
+
+/* A radio group: radio buttons in a stack. AppKit makes radios that share a superview and
+   an action exclusive, so the group's stack is all it takes. */
+@interface SGARadioGroup : NSStackView
+{
+@public
+	NSInteger chosen;   /* 1-based; 0 = none */
+}
+@end
+@implementation SGARadioGroup
+- (void)picked:(NSButton *)a_radio
+{
+	NSInteger i = (NSInteger)[[self arrangedSubviews] indexOfObject:a_radio] + 1;
+	if (i != chosen) {
+		chosen = i;
+		if (!s_suppress) sga_push(4, sga_id_of(self), (int)i, 0, 0);
+	}
+}
+@end
+
+int sga_radio_group(int a_vertical)
+{
+	SGARadioGroup *g = [[SGARadioGroup alloc] init];
+	[g setOrientation:a_vertical ? NSUserInterfaceLayoutOrientationVertical : NSUserInterfaceLayoutOrientationHorizontal];
+	[g setAlignment:a_vertical ? NSLayoutAttributeLeading : NSLayoutAttributeCenterY];
+	[g setSpacing:a_vertical ? 6 : 16];
+	return sga_keep(g);
+}
+
+/* The first radio added is chosen, without an event (one is always on, as on GTK). */
+void sga_radio_group_extend(int a_id, const char *a_text)
+{
+	SGARadioGroup *g = sga_get(a_id);
+	NSButton *b = [NSButton radioButtonWithTitle:sga_string(a_text) target:g action:@selector(picked:)];
+	[g addArrangedSubview:b];
+	if (g->chosen == 0) {
+		[b setState:NSControlStateValueOn];
+		g->chosen = 1;
+	}
+}
+
+void sga_radio_group_select(int a_id, int i)
+{
+	SGARadioGroup *g = sga_get(a_id);
+	NSArray<NSView *> *l_radios = [g arrangedSubviews];
+	for (NSUInteger k = 0; k < [l_radios count]; k++)
+		[(NSButton *)l_radios[k] setState:(NSInteger)k == i - 1 ? NSControlStateValueOn : NSControlStateValueOff];
+	g->chosen = i;
+}
+
+int sga_radio_group_selected(int a_id) { return (int)((SGARadioGroup *)sga_get(a_id))->chosen; }
+
+/* A slider: an NSSlider over whole numbers that reports every move, as GtkScale does. */
+@interface SGASlider : NSSlider
+{
+@public
+	NSInteger last;
+}
+@end
+@implementation SGASlider
+- (void)moved:(id)a_sender
+{
+	NSInteger v = (NSInteger)lround([self doubleValue]);
+	(void)a_sender;
+	if (v != last) {
+		last = v;
+		if (!s_suppress) sga_push(2, sga_id_of(self), (int)v, 0, 0);
+	}
+}
+@end
+
+int sga_slider(int a_min, int a_max, int a_vertical)
+{
+	SGASlider *s = [SGASlider sliderWithValue:a_min minValue:a_min maxValue:a_max target:nil action:NULL];
+	[s setTarget:s];
+	[s setAction:@selector(moved:)];
+	[s setContinuous:YES];
+	[s setVertical:a_vertical != 0];
+	s->last = a_min;
+	[s setTranslatesAutoresizingMaskIntoConstraints:NO];
+	if (a_vertical) [[s.heightAnchor constraintGreaterThanOrEqualToConstant:100] setActive:YES];
+	else [[s.widthAnchor constraintGreaterThanOrEqualToConstant:100] setActive:YES];
+	return sga_keep(s);
+}
+
+void sga_slider_set_value(int a_id, int a_value) { SGASlider *s = sga_get(a_id); [s setIntegerValue:a_value]; s->last = a_value; }
+int sga_slider_value(int a_id) { return (int)lround([(NSSlider *)sga_get(a_id) doubleValue]); }
+
+/* Tick marks every `a_step' (0: none); with ticks the knob stops on them. */
+void sga_slider_set_step(int a_id, int a_step)
+{
+	NSSlider *s = sga_get(a_id);
+	NSInteger l_span = (NSInteger)([s maxValue] - [s minValue]);
+	if (a_step > 0 && l_span > 0 && l_span / a_step <= 100) {
+		[s setNumberOfTickMarks:l_span / a_step + 1];
+		[s setAllowsTickMarkValuesOnly:YES];
+	} else {
+		[s setNumberOfTickMarks:0];
+		[s setAllowsTickMarkValuesOnly:NO];
+	}
+}
+
+/* As a user: the knob moved to `a_value', then the action. */
+void sga_test_slide(int a_id, int a_value)
+{
+	SGASlider *s = sga_get(a_id);
+	[s setIntegerValue:a_value];
+	[s sendAction:[s action] to:[s target]];
+}
+
+/* A switch: an NSSwitch. Flipping it sends toggled (12, a = 1 on). */
+@interface SGASwitch : NSSwitch
+@end
+@implementation SGASwitch
+- (void)flipped:(id)a_sender { (void)a_sender; if (!s_suppress) sga_push(12, sga_id_of(self), [self state] == NSControlStateValueOn ? 1 : 0, 0, 0); }
+@end
+
+int sga_switch(void)
+{
+	SGASwitch *s = [[SGASwitch alloc] init];
+	[s setTarget:s];
+	[s setAction:@selector(flipped:)];
+	return sga_keep(s);
+}
+
+void sga_switch_set(int a_id, int a_on) { [(NSSwitch *)sga_get(a_id) setState:a_on ? NSControlStateValueOn : NSControlStateValueOff]; }
+int sga_switch_is_on(int a_id) { return [(NSSwitch *)sga_get(a_id) state] == NSControlStateValueOn ? 1 : 0; }
+
+/* A segmented control: one segment selected at a time; the first added is selected. */
+@interface SGASegmented : NSSegmentedControl
+{
+@public
+	NSInteger chosen;
+}
+@end
+@implementation SGASegmented
+- (void)picked:(id)a_sender
+{
+	NSInteger i = [self selectedSegment] + 1;
+	(void)a_sender;
+	if (i != chosen) {
+		chosen = i;
+		if (!s_suppress) sga_push(4, sga_id_of(self), (int)i, 0, 0);
+	}
+}
+@end
+
+int sga_segmented(void)
+{
+	SGASegmented *s = [[SGASegmented alloc] init];
+	[s setTrackingMode:NSSegmentSwitchTrackingSelectOne];
+	[s setSegmentCount:0];
+	[s setTarget:s];
+	[s setAction:@selector(picked:)];
+	return sga_keep(s);
+}
+
+void sga_segmented_extend(int a_id, const char *a_text)
+{
+	SGASegmented *s = sga_get(a_id);
+	NSInteger n = [s segmentCount];
+	[s setSegmentCount:n + 1];
+	[s setLabel:sga_string(a_text) forSegment:n];
+	[s setWidth:0 forSegment:n];   /* sized to its label */
+	if (s->chosen == 0) { [s setSelectedSegment:0]; s->chosen = 1; }
+	[s invalidateIntrinsicContentSize];
+}
+
+void sga_segmented_select(int a_id, int i) { SGASegmented *s = sga_get(a_id); [s setSelectedSegment:i - 1]; s->chosen = i; }
+int sga_segmented_selected(int a_id) { return (int)((SGASegmented *)sga_get(a_id))->chosen; }
+
+/* A date or a time: an NSDatePicker, text with a stepper, in the Gregorian calendar and
+   the local time zone. A date is given as year * 10000 + month * 100 + day, a time as
+   hour * 60 + minute. */
+@interface SGADatePicker : NSDatePicker
+{
+@public
+	BOOL is_time;
+	NSInteger last;
+}
+@end
+static NSInteger sga_date_value(SGADatePicker *p)
+{
+	NSCalendar *c = [NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian];
+	NSDateComponents *k = [c components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay | NSCalendarUnitHour | NSCalendarUnitMinute fromDate:[p dateValue]];
+	return p->is_time ? [k hour] * 60 + [k minute] : [k year] * 10000 + [k month] * 100 + [k day];
+}
+@implementation SGADatePicker
+- (void)changed:(id)a_sender
+{
+	NSInteger v = sga_date_value(self);
+	(void)a_sender;
+	if (v != last) {
+		last = v;
+		if (!s_suppress) sga_push(2, sga_id_of(self), (int)v, 0, 0);
+	}
+}
+@end
+
+static int sga_new_date_picker(BOOL a_time)
+{
+	SGADatePicker *p = [[SGADatePicker alloc] init];
+	p->is_time = a_time;
+	[p setDatePickerStyle:NSDatePickerStyleTextFieldAndStepper];
+	[p setDatePickerElements:a_time ? NSDatePickerElementFlagHourMinute : NSDatePickerElementFlagYearMonthDay];
+	[p setCalendar:[NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian]];
+	[p setTimeZone:[NSTimeZone localTimeZone]];
+	[p setDateValue:[NSDate date]];
+	[p setTarget:p];
+	[p setAction:@selector(changed:)];
+	p->last = sga_date_value(p);
+	return sga_keep(p);
+}
+
+int sga_date_picker(void) { return sga_new_date_picker(NO); }
+int sga_time_picker(void) { return sga_new_date_picker(YES); }
+
+static NSDate *sga_date_of(SGADatePicker *p, int a_value)
+{
+	NSCalendar *c = [NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian];
+	NSDateComponents *k = [c components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay | NSCalendarUnitHour | NSCalendarUnitMinute fromDate:[p dateValue]];
+	if (p->is_time) { [k setHour:a_value / 60]; [k setMinute:a_value % 60]; }
+	else { [k setYear:a_value / 10000]; [k setMonth:a_value / 100 % 100]; [k setDay:a_value % 100]; }
+	return [c dateFromComponents:k];
+}
+
+void sga_date_picker_set(int a_id, int a_value)
+{
+	SGADatePicker *p = sga_get(a_id);
+	[p setDateValue:sga_date_of(p, a_value)];
+	p->last = sga_date_value(p);
+}
+
+int sga_date_picker_value(int a_id) { return (int)sga_date_value(sga_get(a_id)); }
+
+/* As a user: the date or time entered, then the action. */
+void sga_test_set_date(int a_id, int a_value)
+{
+	SGADatePicker *p = sga_get(a_id);
+	[p setDateValue:sga_date_of(p, a_value)];
+	[p sendAction:[p action] to:[p target]];
+}
+
+/* A color chooser: an NSColorWell; choosing opens the shared color panel. Colors are 0xRRGGBB in sRGB. */
+@interface SGAColorWell : NSColorWell
+{
+@public
+	int last;
+}
+@end
+static int sga_color_rgb(NSColor *a_color)
+{
+	NSColor *c = [a_color colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
+	int r = (int)lround([c redComponent] * 255), g = (int)lround([c greenComponent] * 255), b = (int)lround([c blueComponent] * 255);
+	return (r << 16) | (g << 8) | b;
+}
+static NSColor *sga_rgb_color(int a_rgb)
+{
+	return [NSColor colorWithSRGBRed:((a_rgb >> 16) & 0xff) / 255.0 green:((a_rgb >> 8) & 0xff) / 255.0 blue:(a_rgb & 0xff) / 255.0 alpha:1];
+}
+@implementation SGAColorWell
+- (id)accessibilityValue { return [NSString stringWithFormat:@"#%06X", sga_color_rgb([self color])]; }
+- (void)changed:(id)a_sender
+{
+	int v = sga_color_rgb([self color]);
+	(void)a_sender;
+	if (v != last) {
+		last = v;
+		if (!s_suppress) sga_push(2, sga_id_of(self), v, 0, 0);
+	}
+}
+@end
+
+int sga_color_chooser(void)
+{
+	SGAColorWell *w = [[SGAColorWell alloc] initWithFrame:NSMakeRect(0, 0, 44, 24)];
+	[w setColorWellStyle:NSColorWellStyleDefault];
+	[w setColor:sga_rgb_color(0)];
+	w->last = 0;
+	[w setTarget:w];
+	[w setAction:@selector(changed:)];
+	return sga_keep(w);
+}
+
+void sga_color_chooser_set(int a_id, int a_rgb) { SGAColorWell *w = sga_get(a_id); [w setColor:sga_rgb_color(a_rgb)]; w->last = sga_color_rgb([w color]); }
+int sga_color_chooser_value(int a_id) { return sga_color_rgb([(NSColorWell *)sga_get(a_id) color]); }
+
+/* As a user: the color chosen in the panel, then the well's action. */
+void sga_test_set_color(int a_id, int a_rgb)
+{
+	SGAColorWell *w = sga_get(a_id);
+	[w setColor:sga_rgb_color(a_rgb)];
+	[w sendAction:[w action] to:[w target]];
+}
+
+/* A scroll area: an NSScrollView whose document is a flipped wrapper holding the child at
+   its natural size, at least as large as the visible area; scrollers come as needed. */
+int sga_scroll_area(void)
+{
+	NSScrollView *s = [[NSScrollView alloc] init];
+	[s setHasVerticalScroller:YES];
+	[s setHasHorizontalScroller:YES];
+	[s setAutohidesScrollers:YES];
+	[s setDrawsBackground:NO];
+	SGAWrapper *w = [[SGAWrapper alloc] init];
+	[w setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[s setDocumentView:w];
+	NSClipView *c = [s contentView];
+	[NSLayoutConstraint activateConstraints:@[
+		[w.leadingAnchor constraintEqualToAnchor:c.leadingAnchor],
+		[w.topAnchor constraintEqualToAnchor:c.topAnchor],
+		[w.widthAnchor constraintGreaterThanOrEqualToAnchor:c.widthAnchor],
+		[w.heightAnchor constraintGreaterThanOrEqualToAnchor:c.heightAnchor]]];
+	int l_id = sga_keep(s);
+	s_inner[l_id] = w;
+	return l_id;
+}
+
+void sga_scroll_area_set_content(int a_id, int a_child)
+{
+	SGAWrapper *w = s_inner[a_id];
+	NSView *v = sga_get(a_child);
+	for (NSView *l_old in [[w subviews] copy]) [l_old removeFromSuperview];
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[w addSubview:v];
+	NSLayoutConstraint *l_fill_w = [v.widthAnchor constraintEqualToAnchor:w.widthAnchor];
+	NSLayoutConstraint *l_fill_h = [v.heightAnchor constraintEqualToAnchor:w.heightAnchor];
+	[l_fill_w setPriority:NSLayoutPriorityDefaultLow];
+	[l_fill_h setPriority:NSLayoutPriorityDefaultLow];
+	[NSLayoutConstraint activateConstraints:@[
+		[v.leadingAnchor constraintEqualToAnchor:w.leadingAnchor],
+		[v.topAnchor constraintEqualToAnchor:w.topAnchor],
+		[v.trailingAnchor constraintLessThanOrEqualToAnchor:w.trailingAnchor],
+		[v.bottomAnchor constraintLessThanOrEqualToAnchor:w.bottomAnchor],
+		[w.widthAnchor constraintGreaterThanOrEqualToAnchor:v.widthAnchor],
+		[w.heightAnchor constraintGreaterThanOrEqualToAnchor:v.heightAnchor],
+		l_fill_w, l_fill_h]];
+}
+
+/* Scroll so that the point (x, y) of the content is at the top left, as far as it goes. */
+void sga_scroll_area_scroll_to(int a_id, int a_x, int a_y)
+{
+	NSScrollView *s = sga_get(a_id);
+	[[s documentView] scrollPoint:NSMakePoint(a_x, a_y)];
+}
+
+/* An image: an NSImageView that scales the picture down to fit, keeping its proportions. */
+int sga_image(void)
+{
+	NSImageView *v = [[NSImageView alloc] init];
+	[v setImageScaling:NSImageScaleProportionallyDown];
+	[v setEditable:NO];
+	[v setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[v setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationVertical];
+	return sga_keep(v);
+}
+
+/* 1 when the file held a picture AppKit reads (PNG, JPEG, GIF, TIFF, HEIC, PDF and more). */
+int sga_image_set_file(int a_id, const char *a_path)
+{
+	NSImage *i = [[NSImage alloc] initWithContentsOfFile:sga_string(a_path)];
+	[(NSImageView *)sga_get(a_id) setImage:i];
+	return i ? 1 : 0;
+}
+
+int sga_image_set_bytes(int a_id, const void *a_bytes, int a_count)
+{
+	NSImage *i = a_count > 0 ? [[NSImage alloc] initWithData:[NSData dataWithBytes:a_bytes length:(NSUInteger)a_count]] : nil;
+	[(NSImageView *)sga_get(a_id) setImage:i];
+	return i ? 1 : 0;
+}
+
+/* A separator: a thin line across (horizontal) or down (vertical). */
+int sga_separator(int a_vertical)
+{
+	NSBox *b = [[NSBox alloc] initWithFrame:a_vertical ? NSMakeRect(0, 0, 1, 20) : NSMakeRect(0, 0, 20, 1)];
+	[b setBoxType:NSBoxSeparator];
+	[b setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[[a_vertical ? b.widthAnchor : b.heightAnchor constraintEqualToConstant:1] setActive:YES];
+	return sga_keep(b);
+}
+
+/* A group box: an NSBox with a title, its content inside with the box's own margins. */
+int sga_group_box(const char *a_title)
+{
+	NSBox *b = [[NSBox alloc] init];
+	[b setBoxType:NSBoxPrimary];
+	[b setTitle:sga_string(a_title)];
+	[b setTitlePosition:NSAtTop];
+	[b setContentViewMargins:NSMakeSize(8, 8)];
+	return sga_keep(b);
+}
+
+void sga_group_box_set_title(int a_id, const char *a_title) { [(NSBox *)sga_get(a_id) setTitle:sga_string(a_title)]; }
+
+void sga_group_box_set_content(int a_id, int a_child)
+{
+	NSBox *b = sga_get(a_id);
+	NSView *c = [b contentView];
+	NSView *v = sga_get(a_child);
+	for (NSView *l_old in [[c subviews] copy]) [l_old removeFromSuperview];
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[c addSubview:v];
+	[NSLayoutConstraint activateConstraints:@[
+		[v.leadingAnchor constraintEqualToAnchor:c.leadingAnchor constant:4],
+		[v.trailingAnchor constraintEqualToAnchor:c.trailingAnchor constant:-4],
+		[v.topAnchor constraintEqualToAnchor:c.topAnchor constant:4],
+		[v.bottomAnchor constraintEqualToAnchor:c.bottomAnchor constant:-4]]];
+}
+
+/* An expander: a disclosure triangle with a title, and the content it shows or hides
+   below (AppKit has no one control for this; Finder's info window uses this pair). The
+   whole header is the button, so a click on the title works too. Collapsed, the content
+   takes no room. Toggling it sends toggled (12, a = 1 expanded). */
+@interface SGAExpander : NSStackView
+{
+@public
+	NSButton *triangle;
+	NSButton *title;
+	NSView *content;
+}
+@end
+@implementation SGAExpander
+- (void)show:(BOOL)a_on
+{
+	[triangle setState:a_on ? NSControlStateValueOn : NSControlStateValueOff];
+	[content setHidden:!a_on];
+}
+- (void)toggled:(id)a_sender
+{
+	BOOL l_on = a_sender == title ? [triangle state] != NSControlStateValueOn : [triangle state] == NSControlStateValueOn;
+	[self show:l_on];
+	if (!s_suppress) sga_push(12, sga_id_of(self), l_on ? 1 : 0, 0, 0);
+}
+@end
+
+int sga_expander(const char *a_title)
+{
+	SGAExpander *e = [[SGAExpander alloc] init];
+	[e setOrientation:NSUserInterfaceLayoutOrientationVertical];
+	[e setAlignment:NSLayoutAttributeLeading];
+	[e setSpacing:6];
+	e->triangle = [[NSButton alloc] init];
+	[e->triangle setBezelStyle:NSBezelStyleDisclosure];
+	[e->triangle setButtonType:NSButtonTypePushOnPushOff];
+	[e->triangle setTitle:@""];
+	[e->triangle setTarget:e];
+	[e->triangle setAction:@selector(toggled:)];
+	e->title = [NSButton buttonWithTitle:sga_string(a_title) target:e action:@selector(toggled:)];
+	[e->title setBordered:NO];
+	[e->title setAccessibilityElement:NO];   /* the triangle is the control; it carries the title */
+	[[e->title cell] setAccessibilityElement:NO];
+	[e->triangle setAccessibilityLabel:sga_string(a_title)];
+	[[e->triangle cell] setAccessibilityLabel:sga_string(a_title)];
+	NSStackView *l_header = [NSStackView stackViewWithViews:@[e->triangle, e->title]];
+	[l_header setSpacing:2];
+	[e addArrangedSubview:l_header];
+	[e show:NO];
+	return sga_keep(e);
+}
+
+void sga_expander_set_content(int a_id, int a_child)
+{
+	SGAExpander *e = sga_get(a_id);
+	NSView *v = sga_get(a_child);
+	BOOL l_on = [e->triangle state] == NSControlStateValueOn;
+	if (e->content) [e removeArrangedSubview:e->content], [e->content removeFromSuperview];
+	e->content = v;
+	[e addArrangedSubview:v];
+	[[v.trailingAnchor constraintLessThanOrEqualToAnchor:e.trailingAnchor] setActive:YES];
+	[e show:l_on];
+}
+
+void sga_expander_set_expanded(int a_id, int a_on) { [(SGAExpander *)sga_get(a_id) show:a_on != 0]; }
+int sga_expander_is_expanded(int a_id) { return [((SGAExpander *)sga_get(a_id))->triangle state] == NSControlStateValueOn ? 1 : 0; }
+void sga_expander_set_title(int a_id, const char *a_title)
+{
+	SGAExpander *e = sga_get(a_id);
+	[e->title setTitle:sga_string(a_title)];
+	[e->triangle setAccessibilityLabel:sga_string(a_title)];
+	[[e->triangle cell] setAccessibilityLabel:sga_string(a_title)];
+}
+
+/* As a user: a click on the triangle. */
+void sga_test_toggle_expander(int a_id) { [((SGAExpander *)sga_get(a_id))->triangle performClick:nil]; }
+
+/* An editable combo box: an NSComboBox. The text is committed by Return, by leaving the
+   box, or by picking an option from its list; a commit that changes the text sends text
+   changed (2). */
+@interface SGAComboBox : NSComboBox <NSComboBoxDelegate>
+{
+@public
+	NSString *committed;
+}
+@end
+@implementation SGAComboBox
+- (void)commit
+{
+	NSString *t = [self stringValue] ?: @"";
+	if (![t isEqualToString:committed ?: @""]) {
+		committed = [t copy];
+		if (!s_suppress) sga_push(2, sga_id_of(self), 0, 0, 0);
+	}
+}
+- (void)entered:(id)a_sender { (void)a_sender; [self commit]; }
+- (void)controlTextDidEndEditing:(NSNotification *)n { (void)n; [self commit]; }
+- (void)comboBoxSelectionDidChange:(NSNotification *)n
+{
+	(void)n;
+	NSInteger i = [self indexOfSelectedItem];
+	if (i >= 0) {
+		/* The text follows the pick only after this notification: set it now, then commit. */
+		[self setStringValue:[self itemObjectValueAtIndex:i]];
+		[self commit];
+	}
+}
+@end
+
+int sga_combo_box(void)
+{
+	SGAComboBox *c = [[SGAComboBox alloc] init];
+	[c setUsesDataSource:NO];
+	[c setCompletes:YES];
+	[c setDelegate:c];
+	[c setTarget:c];
+	[c setAction:@selector(entered:)];
+	c->committed = @"";
+	return sga_keep(c);
+}
+
+void sga_combo_box_extend(int a_id, const char *a_text) { [(NSComboBox *)sga_get(a_id) addItemWithObjectValue:sga_string(a_text)]; }
+void sga_combo_box_wipe_out(int a_id) { [(NSComboBox *)sga_get(a_id) removeAllItems]; }
+void sga_combo_box_set_text(int a_id, const char *a_text)
+{
+	SGAComboBox *c = sga_get(a_id);
+	[c setStringValue:sga_string(a_text)];
+	c->committed = [[c stringValue] copy];
+}
+const char *sga_combo_box_text(int a_id) { return sga_return(Kind_field, [(NSComboBox *)sga_get(a_id) stringValue]); }
+
+/* As a user: text typed, then Return. */
+void sga_test_type_combo(int a_id, const char *a_text)
+{
+	SGAComboBox *c = sga_get(a_id);
+	[c setStringValue:sga_string(a_text)];
+	[c commit];
+}
+
 /* ----------------------------------------------------------------- common */
 
 void sga_set_enabled(int a_id, int a_on)
@@ -1846,6 +2448,11 @@ void sga_set_enabled(int a_id, int a_on)
 		[((SGASpin *)o)->field setEnabled:a_on != 0];
 		[((SGASpin *)o)->stepper setEnabled:a_on != 0];
 	}
+	if ([o isKindOfClass:[SGARadioGroup class]]) for (NSButton *b in [(SGARadioGroup *)o arrangedSubviews]) [b setEnabled:a_on != 0];
+	if ([o isKindOfClass:[SGAExpander class]]) {
+		[((SGAExpander *)o)->triangle setEnabled:a_on != 0];
+		[((SGAExpander *)o)->title setEnabled:a_on != 0];
+	}
 	if ([o isKindOfClass:[NSControl class]]) [(NSControl *)o setEnabled:a_on != 0];
 	[[s_toolbar_item objectForKey:o] setEnabled:a_on != 0];
 }
@@ -1854,6 +2461,8 @@ int sga_is_enabled(int a_id)
 {
 	id o = sga_core(a_id);
 	if ([o isKindOfClass:[SGASpin class]]) return [((SGASpin *)o)->field isEnabled] ? 1 : 0;
+	if ([o isKindOfClass:[SGARadioGroup class]]) return [[[(SGARadioGroup *)o arrangedSubviews] firstObject] isEnabled] || ![[(SGARadioGroup *)o arrangedSubviews] count] ? 1 : 0;
+	if ([o isKindOfClass:[SGAExpander class]]) return [((SGAExpander *)o)->triangle isEnabled] ? 1 : 0;
 	return [o isKindOfClass:[NSControl class]] ? ([(NSControl *)o isEnabled] ? 1 : 0) : 1;
 }
 
@@ -1960,6 +2569,16 @@ void sga_set_direction(int a_id, int a_direction)
 	}
 }
 
+/* Short help shown when the pointer rests on the widget (1h); empty removes it. A widget
+   wrapped in a scroll view gets it on both, so it shows over the scroll bars too. */
+void sga_set_tooltip(int a_id, const char *a_text)
+{
+	NSString *l_tip = [sga_string(a_text) length] ? sga_string(a_text) : nil;
+	id o = sga_get(a_id);
+	if ([o isKindOfClass:[NSView class]]) [(NSView *)o setToolTip:l_tip];
+	if (sga_core(a_id) != o && [sga_core(a_id) isKindOfClass:[NSView class]]) [(NSView *)sga_core(a_id) setToolTip:l_tip];
+}
+
 /* The object assistive tools read for a widget: a simple control's cell. */
 static id sga_accessible(int a_id)
 {
@@ -1999,17 +2618,24 @@ static NSString *sga_role_name(NSString *a_role)
 		NSAccessibilitySliderRole: @"slider", NSAccessibilityTextAreaRole: @"text-box",
 		NSAccessibilityTabGroupRole: @"tab-list", NSAccessibilityPopUpButtonRole: @"combo-box",
 		NSAccessibilityProgressIndicatorRole: @"progress-bar", NSAccessibilityToolbarRole: @"toolbar",
-		NSAccessibilityIncrementorRole: @"spin-button"};
+		NSAccessibilityIncrementorRole: @"spin-button", NSAccessibilityRadioButtonRole: @"radio",
+		NSAccessibilityComboBoxRole: @"combo-box", NSAccessibilityColorWellRole: @"button",
+		NSAccessibilityDisclosureTriangleRole: @"button"};
 	return l_names[a_role] ?: @"generic";
 }
 
 const char *sga_accessible_role(int a_id)
 {
 	if ([sga_core(a_id) isKindOfClass:[SGAGridTable class]]) return sga_return(Kind_role, @"tree-grid");
-	if ([sga_core(a_id) isKindOfClass:[SGATree class]]) return sga_return(Kind_role, @"tree");
+	if ([sga_core(a_id) isKindOfClass:[SGATree class]]) return sga_return(Kind_role, ((SGATree *)sga_core(a_id))->is_table ? @"tree-grid" : @"tree");
 	if ([sga_core(a_id) isKindOfClass:[SGASpin class]]) return sga_return(Kind_role, @"spin-button");
 	if ([sga_core(a_id) isKindOfClass:[SGAStatus class]]) return sga_return(Kind_role, @"status");
 	if ([sga_core(a_id) isKindOfClass:[SGAToolbar class]]) return sga_return(Kind_role, @"toolbar");
+	if ([sga_core(a_id) isKindOfClass:[SGASwitch class]]) return sga_return(Kind_role, @"switch");
+	if ([sga_core(a_id) isKindOfClass:[SGARadioGroup class]] || [sga_core(a_id) isKindOfClass:[SGASegmented class]]) return sga_return(Kind_role, @"radio-group");
+	if ([sga_core(a_id) isKindOfClass:[SGADatePicker class]]) return sga_return(Kind_role, @"spin-button");
+	if ([sga_core(a_id) isKindOfClass:[SGAExpander class]]) return sga_return(Kind_role, @"button");
+	if ([sga_core(a_id) isKindOfClass:[NSBox class]]) return sga_return(Kind_role, [(NSBox *)sga_core(a_id) boxType] == NSBoxSeparator ? @"separator" : @"group");
 	return sga_return(Kind_role, sga_role_name([sga_accessible(a_id) accessibilityRole]));
 }
 
@@ -2343,6 +2969,54 @@ int sga_message(int a_window, const char *a_title, const char *a_text, int a_con
 	return [l_alert runModal] == NSAlertFirstButtonReturn ? 1 : 0;
 }
 
+/* Dialogs (1h). Like the others, app-modal; sga_test_auto_cancel_dialogs cancels them. */
+
+/* Save, with a suggested file name; NULL when cancelled. */
+const char *sga_save_file_named(int a_window, const char *a_title, const char *a_extensions, const char *a_name)
+{
+	NSArray *l_types = sga_types(a_extensions);
+	NSSavePanel *p = [NSSavePanel savePanel];
+	(void)a_window;
+	[p setMessage:sga_string(a_title)];
+	if ([l_types count]) [p setAllowedContentTypes:l_types];
+	[p setNameFieldStringValue:sga_string(a_name)];
+	sga_maybe_auto_cancel();
+	return [p runModal] == NSModalResponseOK ? sga_return(Kind_path, [[p URL] path]) : NULL;
+}
+
+/* Choose a folder; NULL when cancelled. A new folder can be made from the panel. */
+const char *sga_choose_folder(int a_window, const char *a_title)
+{
+	NSOpenPanel *p = [NSOpenPanel openPanel];
+	(void)a_window;
+	[p setMessage:sga_string(a_title)];
+	[p setCanChooseFiles:NO];
+	[p setCanChooseDirectories:YES];
+	[p setCanCreateDirectories:YES];
+	[p setAllowsMultipleSelection:NO];
+	sga_maybe_auto_cancel();
+	return [p runModal] == NSModalResponseOK ? sga_return(Kind_path, [[[p URLs] firstObject] path]) : NULL;
+}
+
+/* A three-way question: 1 yes, 2 no, 0 cancel. Mac keys: Return is Yes, Escape is Cancel,
+   Command-D is No (as in "Don't Save"). */
+int sga_ask(int a_window, const char *a_title, const char *a_text)
+{
+	NSAlert *l_alert = [[NSAlert alloc] init];
+	(void)a_window;
+	[l_alert setMessageText:sga_string(a_title)];
+	[l_alert setInformativeText:sga_string(a_text)];
+	[l_alert addButtonWithTitle:@"Yes"];
+	NSButton *l_no = [l_alert addButtonWithTitle:@"No"];
+	[l_no setKeyEquivalent:@"d"];
+	[l_no setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
+	NSButton *l_cancel = [l_alert addButtonWithTitle:@"Cancel"];
+	[l_cancel setKeyEquivalent:@"\033"];
+	sga_maybe_auto_cancel();
+	NSModalResponse r = [l_alert runModal];
+	return r == NSAlertFirstButtonReturn ? 1 : r == NSAlertSecondButtonReturn ? 2 : 0;
+}
+
 /* ------------------------------------------------------------- appearance */
 
 int sga_is_dark(void)
@@ -2429,6 +3103,20 @@ void sga_test_choose(int a_id, int a_row)
 {
 	if ([sga_get(a_id) isKindOfClass:[SGADropdown class]]) {
 		sga_test_choose_option(a_id, a_row);
+		return;
+	}
+	if ([sga_get(a_id) isKindOfClass:[SGARadioGroup class]]) {   /* a click on that radio */
+		[(NSButton *)[(SGARadioGroup *)sga_get(a_id) arrangedSubviews][(NSUInteger)(a_row - 1)] performClick:nil];
+		return;
+	}
+	if ([sga_get(a_id) isKindOfClass:[SGASegmented class]]) {   /* a click on that segment */
+		SGASegmented *l_seg = sga_get(a_id);
+		[l_seg setSelectedSegment:a_row - 1];
+		[l_seg sendAction:[l_seg action] to:[l_seg target]];
+		return;
+	}
+	if ([sga_get(a_id) isKindOfClass:[SGAComboBox class]]) {   /* that option picked from the list */
+		[(SGAComboBox *)sga_get(a_id) selectItemAtIndex:a_row - 1];
 		return;
 	}
 	if ([s_inner[a_id] isKindOfClass:[SGATree class]]) {   /* a node, by its number: shown, then clicked */
@@ -2601,6 +3289,13 @@ static id sga_ax(id a_element, SEL a_modern, NSString *a_attribute)
    GTK 4.14): the table "tree-grid", its rows "row", cells "grid-cell", and the header's sort
    buttons "column-header"; 2 inside a GUI_TREE: the tree "tree", its rows "tree-item" (their
    cell left out, so each item's label sits under it); 0 elsewhere. */
+/* A switch is a button with the switch subrole on AppKit. */
+static BOOL sga_is_switch(id a_element)
+{
+	id l_sub = sga_ax(a_element, @selector(accessibilitySubrole), NSAccessibilitySubroleAttribute);
+	return [l_sub isKindOfClass:[NSString class]] && [l_sub isEqualToString:NSAccessibilitySwitchSubrole];
+}
+
 static void sga_describe(id a_element, int a_depth, int a_within, NSMutableString *a_out)
 {
 	id l_role_value = sga_ax(a_element, @selector(accessibilityRole), NSAccessibilityRoleAttribute);
@@ -2608,11 +3303,16 @@ static void sga_describe(id a_element, int a_depth, int a_within, NSMutableStrin
 	NSString *l_name = sga_role_name(l_role);
 	/* A control may answer through its cell: the view says what it is. */
 	id l_view = [a_element isKindOfClass:[NSCell class]] ? [(NSCell *)a_element controlView] : a_element;
-	int l_within = [a_element isKindOfClass:[SGAGridTable class]] ? 1 : [a_element isKindOfClass:[SGATree class]] ? 2 : a_within;
-	if ([a_element isKindOfClass:[SGAGridTable class]]) l_name = @"tree-grid";
+	BOOL l_tree_table = [a_element isKindOfClass:[SGATree class]] && ((SGATree *)a_element)->is_table;
+	int l_within = [a_element isKindOfClass:[SGAGridTable class]] || l_tree_table ? 1 : [a_element isKindOfClass:[SGATree class]] ? 2 : a_within;
+	if ([a_element isKindOfClass:[SGAGridTable class]] || l_tree_table) l_name = @"tree-grid";
 	else if ([a_element isKindOfClass:[SGATree class]]) l_name = @"tree";
 	else if ([a_element isKindOfClass:[SGASpin class]]) l_name = @"spin-button";
 	else if ([l_view isKindOfClass:[SGAStatus class]]) l_name = @"status";
+	else if ([l_view isKindOfClass:[SGADatePicker class]]) l_name = @"spin-button";
+	else if ([l_view isKindOfClass:[NSBox class]] && [(NSBox *)l_view boxType] != NSBoxSeparator) l_name = @"group";
+	else if ([l_role isEqualToString:NSAccessibilityScrollBarRole]) return;   /* scroll bars are the scroll area's own */
+	else if (sga_is_switch(a_element)) l_name = @"switch";
 	else if (a_within == 2) {
 		if ([l_role isEqualToString:NSAccessibilityRowRole]) l_name = @"tree-item";
 		else if ([l_role isEqualToString:NSAccessibilityCellRole]) l_name = @"generic";
@@ -2633,6 +3333,13 @@ static void sga_describe(id a_element, int a_depth, int a_within, NSMutableStrin
 		id l_label = sga_ax(a_element, @selector(accessibilityLabel), NSAccessibilityDescriptionAttribute);
 		id l_title = sga_ax(a_element, @selector(accessibilityTitle), NSAccessibilityTitleAttribute);
 		id l_value = sga_ax(a_element, @selector(accessibilityValue), NSAccessibilityValueAttribute);
+		if ([l_view isKindOfClass:[SGADatePicker class]]) {   /* the value, as ISO 8601 */
+			SGADatePicker *l_picker = l_view;
+			NSInteger v = sga_date_value(l_picker);
+			l_value = l_picker->is_time ? [NSString stringWithFormat:@"%02ld:%02ld", (long)(v / 60), (long)(v % 60)]
+				: [NSString stringWithFormat:@"%04ld-%02ld-%02ld", (long)(v / 10000), (long)(v / 100 % 100), (long)(v % 100)];
+		}
+		if ([l_view isKindOfClass:[NSBox class]]) l_title = [(NSBox *)l_view title];
 		NSString *l_text = ([l_label isKindOfClass:[NSString class]] && [l_label length]) ? l_label
 			: ([l_title isKindOfClass:[NSString class]] && [l_title length]) ? l_title
 			: ([l_value isKindOfClass:[NSString class]] ? l_value : @"");
@@ -2640,9 +3347,10 @@ static void sga_describe(id a_element, int a_depth, int a_within, NSMutableStrin
 		[a_out appendFormat:@"%@: %@\n", l_name, l_text];
 		l_next = a_depth + 1;
 	}
-	id l_children = [a_element isKindOfClass:[SGASpin class]] ? nil   /* its field and stepper are the one spin button */
+	id l_children = [a_element isKindOfClass:[SGASpin class]] || [l_view isKindOfClass:[SGADatePicker class]] ? nil   /* one spin button */
 		: sga_ax(a_element, @selector(accessibilityChildren), NSAccessibilityChildrenAttribute);
-	if (a_depth < 16 && [l_children isKindOfClass:[NSArray class]]) for (id c in l_children) sga_describe(c, l_next, l_within, a_out);
+	id l_box_title = [l_view isKindOfClass:[NSBox class]] ? [(NSBox *)l_view titleCell] : nil;   /* already the group's name */
+	if (a_depth < 16 && [l_children isKindOfClass:[NSArray class]]) for (id c in l_children) if (c != l_box_title) sga_describe(c, l_next, l_within, a_out);
 }
 
 const char *sga_describe_accessibility(int a_window)
