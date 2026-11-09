@@ -226,7 +226,7 @@ feature -- Element change
 		end
 
 	scroll_to_row (r: INTEGER)
-			-- Bring row `r' into view.
+			-- Bring row `r' into view (1f; 1m's scrolling into view). Quiet: the selection does not change.
 		require
 			gui_thread: is_gui_thread
 			valid: 1 <= r and r <= row_count
@@ -242,15 +242,6 @@ feature -- Element change
 			backend.table_set_multiple (id, a_on)
 		ensure
 			set: is_multiple_selection = a_on
-		end
-
-	scroll_to_row (r: INTEGER)
-			-- Scroll so row `r' is in view (1m). Quiet: the selection does not change.
-		require
-			gui_thread: is_gui_thread
-			valid: 1 <= r and r <= row_count
-		do
-			backend.table_scroll_to_row (id, r)
 		end
 
 	select_row (r: INTEGER)
