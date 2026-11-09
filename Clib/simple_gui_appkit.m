@@ -3303,8 +3303,9 @@ void sga_test_press_shortcut(int a_window, const char *a_shortcut)
 	if (l_id) sga_push(25, a_window, l_id, 0, 0);
 }
 
-/* Full screen: AppKit animates into its own Space; this turns the loop until the window is
-   there (at most 3 seconds), so `is_fullscreen' answers the new state on return. */
+/* Full screen: AppKit animates into its own Space; this turns the loop until AppKit says the
+   transition is over (at most 5 seconds), so `is_fullscreen' answers the new state on return.
+   AppKit refuses full screen to an application that cannot become active (no one logged in). */
 static int sga_run_once(NSDate *a_until);
 
 int sga_window_is_fullscreen(int a_window)
@@ -3316,13 +3317,19 @@ void sga_window_set_fullscreen(int a_window, int a_on)
 {
 	NSWindow *w = sga_get(a_window);
 	if (sga_window_is_fullscreen(a_window) == (a_on != 0)) return;
+	/* Wait for AppKit's own word that the transition is over: leaving before it has finished
+	   entering is refused ("not in fullscreen state"). */
+	__block BOOL l_done = NO;
+	NSNotificationName l_name = a_on ? NSWindowDidEnterFullScreenNotification : NSWindowDidExitFullScreenNotification;
+	id l_observer = [[NSNotificationCenter defaultCenter] addObserverForName:l_name object:w queue:nil
+		usingBlock:^(NSNotification *n) { (void)n; l_done = YES; }];
+	id l_failed = [[NSNotificationCenter defaultCenter] addObserverForName:@"NSWindowDidFailToEnterFullScreenNotification" object:w queue:nil
+		usingBlock:^(NSNotification *n) { (void)n; l_done = YES; }];
 	[w toggleFullScreen:nil];
-	NSDate *l_limit = [NSDate dateWithTimeIntervalSinceNow:3];
-	while (sga_window_is_fullscreen(a_window) != (a_on != 0) && [l_limit timeIntervalSinceNow] > 0)
-		sga_run_once([NSDate dateWithTimeIntervalSinceNow:0.05]);
-	/* AppKit reports the new style a moment before the animation ends: let it finish. */
-	NSDate *l_settle = [NSDate dateWithTimeIntervalSinceNow:0.3];
-	while ([l_settle timeIntervalSinceNow] > 0) sga_run_once([NSDate dateWithTimeIntervalSinceNow:0.05]);
+	NSDate *l_limit = [NSDate dateWithTimeIntervalSinceNow:5];
+	while (!l_done && [l_limit timeIntervalSinceNow] > 0) sga_run_once([NSDate dateWithTimeIntervalSinceNow:0.05]);
+	[[NSNotificationCenter defaultCenter] removeObserver:l_observer];
+	[[NSNotificationCenter defaultCenter] removeObserver:l_failed];
 }
 
 /* Follow the system's light or dark again (event 10 when that changes what is shown). */
