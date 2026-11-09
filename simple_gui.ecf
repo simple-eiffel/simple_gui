@@ -84,6 +84,11 @@
 		<cluster name="testing" location=".\testing\" recursive="true"/>
 	</target>
 
+	<target name="simple_gui_guide_gallery" extends="simple_gui">
+		<description>The Control Guide's pictures: each control alone in a small window, saved as docs/guide/images/&lt;platform&gt;/&lt;page&gt;.png.</description>
+		<root class="GUIDE_GALLERY_APP" feature="make"/>
+		<cluster name="guide_gallery" location=".\examples\guide_gallery\"/>
+	</target>
 	<target name="simple_gui_showcase" extends="simple_gui">
 		<description>Every simple_gui control in one window; with --gallery &lt;folder&gt; it works the window as a user would and saves the README pictures.</description>
 		<root class="SHOWCASE_APP" feature="make"/>

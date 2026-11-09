@@ -1,0 +1,88 @@
+# List
+
+`GUI_LIST` is a single column of text rows, from which the user selects one. Use it when the choices are many, or change while the program runs, and the user benefits from seeing several at once. For a few fixed choices in little room, use a [dropdown](dropdown.md) or a [radio group](radio-group.md); for rows with several columns, use a [table](table.md); for a hierarchy, use a [tree](tree.md).
+
+## Example
+
+```eiffel
+class BOOKS create make
+feature
+	app: GUI_APPLICATION
+	books: GUI_LIST
+	shown: GUI_LABEL
+
+	make
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+		do
+			create app.make ("Books", "org.example.books")
+			create l_window.make ("Books", 320, 260)
+			create l_stack.make_vertical
+			create books.make
+			books.set_accessible_label ("Books")
+			books.extend ("Genesis")
+			books.extend ("Exodus")
+			books.extend ("Leviticus")
+			create shown.make ("Pick a book.")
+			books.selection_actions.extend (agent on_book)
+			l_stack.extend_stretching (books)
+			l_stack.extend (shown)
+			l_window.set_content (l_stack)
+			l_window.show
+			app.run
+		end
+
+	on_book (a_row: INTEGER)
+		do
+			if a_row > 0 then
+				shown.set_text ({STRING_32} "You picked " + books.i_th (a_row))
+			end
+		end
+end
+```
+
+## Try it
+
+A window opens with a list of three books, none selected, and the line "Pick a book." under it. Click **Exodus**: `selection_actions` fires with 2, and the line says "You picked Exodus".
+
+## API
+
+| Feature | What it does |
+|---|---|
+| `make` | An empty list. Ensures `count = 0`. |
+| `extend (a_text)` | Adds a row at the end. Ensures `count = old count + 1` and `i_th (count)` is `a_text`. |
+| `wipe_out` | Removes every row. Ensures `count = 0` and `selected_index = 0`. |
+| `count` | How many rows there are. |
+| `i_th (i)` | The text of row `i`. Requires 1 <= `i` <= `count`. |
+| `selected_index` | The selected row, or 0 when none is. |
+| `select_row (i)` | Selects row `i`, with no event. Requires 1 <= `i` <= `count`. Ensures `selected_index = i`. |
+| `clear_selection` | Selects nothing. Ensures `selected_index = 0`. |
+| `selection_actions` | `GUI_ACTIONS [TUPLE [row: INTEGER]]`: run when the user selects a row. |
+
+Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the rest of the [common features](widget.md).
+
+**Events:** `selection_actions` fires with the row number when the user selects a row. Rows are 1-based; check for 0, which some toolkits send when the selection is cleared. `select_row` never fires it: its postcondition is `selection_actions.fire_count = old selection_actions.fire_count`.
+
+**Accessibility:** the role is `list`, and each row is a `list-item` read by its text. The list has no visible text of its own, so give it `set_accessible_label` with what the rows are ("Books", "Recent files").
+
+## On each platform
+
+| | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
+|---|---|---|---|
+| Native control | `GtkListBox` (single selection, `boxed-list` style) in a `GtkScrolledWindow` | `NSTableView` with one column and no header, inset style, in a bordered `NSScrollView` | `SW_TEXT_LIST`: a drawn list that names its rows for screen readers |
+| Looks or behaves differently | At least 80 pixels tall. A cleared selection sends row 0. | A cleared selection sends no event. | — <!-- PROD: confirm --> |
+
+## Design guidance
+
+- A list scrolls on its own. Give it room with `extend_stretching`, and never put it in a [scroll area](scroll-area.md).
+- Give it an accessible label, and a visible caption above it when the window has more than one list.
+- To change the rows, call `wipe_out` and `extend` again; then `select_row` to restore a selection, without an event.
+- Read `selected_index` when the user presses a button such as **Open**, rather than acting on every selection change.
+- Add a [context menu](widget.md) for actions on a row (rename, delete) with `set_context_menu`.
+
+## Gallery
+
+| Linux | macOS | Windows |
+|---|---|---|
+| <!-- PROD: Linux picture --> | ![list on macOS](images/macos/list.png) | <!-- PROD: Windows picture --> |
