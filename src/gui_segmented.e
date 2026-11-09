@@ -24,6 +24,7 @@ feature {NONE} -- Initialization
 			register (backend.segmented)
 		ensure
 			empty: count = 0
+			none_selected: selected_index = 0
 		end
 
 feature -- Access
