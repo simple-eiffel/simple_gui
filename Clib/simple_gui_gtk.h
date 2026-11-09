@@ -3428,6 +3428,20 @@ static int sg_snapshot(int id, const char *path) {
     gtk_snapshot_scale(s, (float) k, (float) k);   /* GSK redraws text and lines at that scale */
     gdk_paintable_snapshot(p, GDK_SNAPSHOT(s), W, H);
     n = gtk_snapshot_free_to_node(s);
+    {
+        /* A widget waiting for its allocation (something was just added, such as a toast in
+           the overlay) paints nothing until the next frame lays it out: wait for frames, up to
+           half a second, and draw again. */
+        gint64 until = g_get_monotonic_time() + 500 * 1000;
+        while (!n && g_get_monotonic_time() < until) {
+            while (g_main_context_iteration(NULL, FALSE)) { }
+            g_usleep(10000);
+            s = gtk_snapshot_new();
+            gtk_snapshot_scale(s, (float) k, (float) k);
+            gdk_paintable_snapshot(p, GDK_SNAPSHOT(s), W, H);
+            n = gtk_snapshot_free_to_node(s);
+        }
+    }
     if (!n) { g_warning("simple_gui snapshot: widget %d drew nothing", id); g_object_unref(p); return 0; }
     graphene_rect_init(&vp, 0, 0, (float) (W * k), (float) (H * k));
     t = gsk_renderer_render_texture(gtk_native_get_renderer(GTK_NATIVE(w)), n, &vp);
@@ -3447,6 +3461,230 @@ static void sg_pump_until_idle(int ms) {
         while (g_main_context_iteration(NULL, FALSE)) { }
         if (!g_main_context_pending(NULL)) break;
     }
+}
+
+/* ---------- 1o: spinner (kind 51), info bar (kind 52, event 26), toasts (event 27) and
+   desktop notifications (D-Bus org.freedesktop.Notifications, event 28). ---------- */
+__attribute__((weak)) int sg_feedback_css_done = 0;
+static void sg_feedback_css(void) {
+    GtkCssProvider *p;
+    if (sg_feedback_css_done) return;
+    sg_feedback_css_done = 1;
+    p = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(p,
+        "box.sg-info-bar { padding: 6px 10px; border-radius: 6px; }"
+        " box.sg-info-1 { background-color: #dbe9fb; color: #1a3a6b; }"
+        " box.sg-info-2 { background-color: #def4e1; color: #1e5b2a; }"
+        " box.sg-info-3 { background-color: #fff1c9; color: #6b4e00; }"
+        " box.sg-info-4 { background-color: #fde0e0; color: #7a1d1d; }"
+        " box.sg-toast { background-color: rgba(30,30,30,0.92); color: #ffffff; border-radius: 9999px;"
+        " padding: 6px 16px; margin-bottom: 18px; }"
+        " box.sg-toast button { color: #8ab4f8; }");
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(p),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(p);
+}
+
+static int sg_spinner(void) {
+    GtkWidget *s = gtk_spinner_new();
+    gtk_widget_set_halign(s, GTK_ALIGN_START);
+    gtk_widget_set_size_request(s, 20, 20);
+    return sg_reg(s, 51);
+}
+static void sg_spinner_set(int id, int on) {
+    if (on) gtk_spinner_start(GTK_SPINNER(sg_w[id])); else gtk_spinner_stop(GTK_SPINNER(sg_w[id]));
+}
+
+static const char *sg_info_icon(int kind) {
+    return kind == 2 ? "object-select-symbolic" : kind == 3 ? "dialog-warning-symbolic"
+        : kind == 4 ? "dialog-error-symbolic" : "dialog-information-symbolic";
+}
+static void sg_on_info_action(GtkButton *b, gpointer d) {
+    GtkWidget *bar = g_object_get_data(G_OBJECT(b), "sg-bar");
+    sg_push(26, sg_id_of(bar), GPOINTER_TO_INT(d), 0);
+}
+static int sg_info_bar(int kind, const char *message) {
+    GtkWidget *bar = g_object_new(GTK_TYPE_BOX, "orientation", GTK_ORIENTATION_HORIZONTAL, "spacing", 8,
+                                  "accessible-role", GTK_ACCESSIBLE_ROLE_ALERT, NULL);
+    GtkWidget *icon = gtk_image_new_from_icon_name(sg_info_icon(kind));
+    GtkWidget *label = gtk_label_new(message);
+    GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    GtkWidget *close = gtk_button_new_from_icon_name("window-close-symbolic");
+    char cls[16];
+    int id = sg_reg(bar, 52);
+    sg_feedback_css();
+    gtk_widget_add_css_class(bar, "sg-info-bar");
+    snprintf(cls, sizeof cls, "sg-info-%d", kind);
+    gtk_widget_add_css_class(bar, cls);
+    g_object_set_data(G_OBJECT(bar), "sg-kind-class", GINT_TO_POINTER(kind));
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_NONE);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+    gtk_widget_set_hexpand(label, TRUE);
+    gtk_widget_add_css_class(close, "flat");
+    gtk_widget_set_visible(close, FALSE);
+    g_object_set_data(G_OBJECT(close), "sg-bar", bar);
+    g_signal_connect(close, "clicked", G_CALLBACK(sg_on_info_action), GINT_TO_POINTER(0));
+    gtk_box_append(GTK_BOX(bar), icon);
+    gtk_box_append(GTK_BOX(bar), label);
+    gtk_box_append(GTK_BOX(bar), actions);
+    gtk_box_append(GTK_BOX(bar), close);
+    g_object_set_data(G_OBJECT(bar), "sg-icon", icon);
+    g_object_set_data(G_OBJECT(bar), "sg-label", label);
+    g_object_set_data(G_OBJECT(bar), "sg-actions", actions);
+    g_object_set_data(G_OBJECT(bar), "sg-close", close);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(bar), GTK_ACCESSIBLE_PROPERTY_LABEL, message, -1);
+    g_object_set_data_full(G_OBJECT(bar), "sg-a11y", g_strdup(message), g_free);
+    return id;
+}
+static void sg_info_bar_set(int id, int kind, const char *message) {
+    GtkWidget *bar = sg_w[id];
+    char cls[16];
+    snprintf(cls, sizeof cls, "sg-info-%d", GPOINTER_TO_INT(g_object_get_data(G_OBJECT(bar), "sg-kind-class")));
+    gtk_widget_remove_css_class(bar, cls);
+    snprintf(cls, sizeof cls, "sg-info-%d", kind);
+    gtk_widget_add_css_class(bar, cls);
+    g_object_set_data(G_OBJECT(bar), "sg-kind-class", GINT_TO_POINTER(kind));
+    gtk_image_set_from_icon_name(GTK_IMAGE(g_object_get_data(G_OBJECT(bar), "sg-icon")), sg_info_icon(kind));
+    gtk_label_set_text(GTK_LABEL(g_object_get_data(G_OBJECT(bar), "sg-label")), message);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(bar), GTK_ACCESSIBLE_PROPERTY_LABEL, message, -1);
+    g_object_set_data_full(G_OBJECT(bar), "sg-a11y", g_strdup(message), g_free);
+}
+static void sg_info_bar_add_action(int id, const char *text, int number) {
+    GtkWidget *b = gtk_button_new_with_label(text);
+    g_object_set_data(G_OBJECT(b), "sg-bar", sg_w[id]);
+    g_signal_connect(b, "clicked", G_CALLBACK(sg_on_info_action), GINT_TO_POINTER(number));
+    gtk_box_append(GTK_BOX(g_object_get_data(G_OBJECT(sg_w[id]), "sg-actions")), b);
+}
+static void sg_info_bar_set_closable(int id, int on) {
+    gtk_widget_set_visible(g_object_get_data(G_OBJECT(sg_w[id]), "sg-close"), on);
+}
+
+/* A toast: a dark pill at the bottom of the window's overlay, gone after its life. */
+static void sg_toast_remove(GtkWidget *win) {
+    GtkWidget *t = g_object_get_data(G_OBJECT(win), "sg-toast");
+    guint src = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(win), "sg-toast-src"));
+    if (src) g_source_remove(src);
+    g_object_set_data(G_OBJECT(win), "sg-toast-src", NULL);
+    if (t) {
+        GtkWidget *parent = gtk_widget_get_parent(t);
+        if (parent && GTK_IS_OVERLAY(parent)) gtk_overlay_remove_overlay(GTK_OVERLAY(parent), t);
+    }
+    g_object_set_data(G_OBJECT(win), "sg-toast", NULL);
+    g_object_set_data(G_OBJECT(win), "sg-toast-button", NULL);
+    g_object_set_data(G_OBJECT(win), "sg-toast-id", NULL);
+    g_object_set_data_full(G_OBJECT(win), "sg-toast-text", g_strdup(""), g_free);
+}
+static gboolean sg_toast_expired(gpointer d) {
+    GtkWidget *win = d;
+    g_object_set_data(G_OBJECT(win), "sg-toast-src", NULL);
+    sg_toast_remove(win);
+    return G_SOURCE_REMOVE;
+}
+static void sg_toast_on_destroy(GtkWidget *win, gpointer d) {
+    guint src = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(win), "sg-toast-src"));
+    (void) d;
+    if (src) g_source_remove(src);
+    g_object_set_data(G_OBJECT(win), "sg-toast-src", NULL);
+}
+static void sg_on_toast_action(GtkButton *b, gpointer d) {
+    GtkWidget *win = d;
+    int tid = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(win), "sg-toast-id"));
+    (void) b;
+    if (tid > 0) sg_push(27, sg_id_of(win), tid, 0);
+    sg_toast_remove(win);
+}
+static void sg_window_show_toast(int win, const char *message, const char *action, int toast_id) {
+    GtkWidget *w = sg_w[win], *box, *button;
+    GtkOverlay *o = g_object_get_data(G_OBJECT(w), "sg-overlay");
+    guint src;
+    if (!o) { sg_window_outer(win); o = g_object_get_data(G_OBJECT(w), "sg-overlay"); }
+    if (!o) return;
+    sg_feedback_css();
+    if (!g_object_get_data(G_OBJECT(w), "sg-toast-hooked")) {
+        g_signal_connect(w, "destroy", G_CALLBACK(sg_toast_on_destroy), NULL);
+        g_object_set_data(G_OBJECT(w), "sg-toast-hooked", GINT_TO_POINTER(1));
+    }
+    sg_toast_remove(w);
+    box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_add_css_class(box, "sg-toast");
+    gtk_widget_set_halign(box, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(box, GTK_ALIGN_END);
+    gtk_box_append(GTK_BOX(box), gtk_label_new(message));
+    if (action && *action) {
+        button = gtk_button_new_with_label(action);
+        g_object_set_data(G_OBJECT(w), "sg-toast-button", button);
+        gtk_widget_add_css_class(button, "flat");
+        g_signal_connect(button, "clicked", G_CALLBACK(sg_on_toast_action), w);
+        gtk_box_append(GTK_BOX(box), button);
+    }
+    gtk_overlay_add_overlay(o, box);
+    g_object_set_data(G_OBJECT(w), "sg-toast", box);
+    g_object_set_data(G_OBJECT(w), "sg-toast-id", GINT_TO_POINTER(toast_id));
+    g_object_set_data_full(G_OBJECT(w), "sg-toast-text", g_strdup(message), g_free);
+    src = g_timeout_add(toast_id > 0 ? 8000 : 4000, sg_toast_expired, w);
+    g_object_set_data(G_OBJECT(w), "sg-toast-src", GUINT_TO_POINTER(src));
+}
+static const char *sg_test_toast_shown(int win) {
+    const char *t = g_object_get_data(G_OBJECT(sg_w[win]), "sg-toast") ? g_object_get_data(G_OBJECT(sg_w[win]), "sg-toast-text") : NULL;
+    return t ? t : "";
+}
+static void sg_test_toast_press(int win) {
+    GtkWidget *b = g_object_get_data(G_OBJECT(sg_w[win]), "sg-toast-button");
+    if (b) g_signal_emit_by_name(b, "clicked");
+}
+static void sg_test_info_bar_press(int id, int number) {
+    GtkWidget *b = NULL;
+    if (number == 0) b = g_object_get_data(G_OBJECT(sg_w[id]), "sg-close");
+    else {
+        GtkWidget *c = gtk_widget_get_first_child(g_object_get_data(G_OBJECT(sg_w[id]), "sg-actions"));
+        int i;
+        for (i = 1; c && i < number; i++) c = gtk_widget_get_next_sibling(c);
+        b = c;
+    }
+    if (b) g_signal_emit_by_name(b, "clicked");
+}
+
+/* Desktop notifications over D-Bus (no new library): Notify, and ActionInvoked for a click.
+   With no notification server (a bare session) the call fails quietly. */
+__attribute__((weak)) GDBusConnection *sg_notify_bus = NULL;
+__attribute__((weak)) GHashTable *sg_notify_ids = NULL;   /* server id -> our id */
+static void sg_on_notify_action(GDBusConnection *c, const gchar *sender, const gchar *path, const gchar *iface,
+                                const gchar *signal, GVariant *params, gpointer d) {
+    guint32 server_id = 0;
+    const gchar *key = NULL;
+    int ours;
+    (void) c; (void) sender; (void) path; (void) iface; (void) signal; (void) d;
+    g_variant_get(params, "(u&s)", &server_id, &key);
+    ours = sg_notify_ids ? GPOINTER_TO_INT(g_hash_table_lookup(sg_notify_ids, GUINT_TO_POINTER(server_id))) : 0;
+    if (ours > 0) sg_push(28, 0, ours, 0);
+}
+static void sg_notify_done(GObject *src, GAsyncResult *res, gpointer d) {
+    GVariant *r = g_dbus_connection_call_finish(G_DBUS_CONNECTION(src), res, NULL);
+    if (r) {
+        guint32 server_id = 0;
+        g_variant_get(r, "(u)", &server_id);
+        if (GPOINTER_TO_INT(d) > 0 && sg_notify_ids)
+            g_hash_table_insert(sg_notify_ids, GUINT_TO_POINTER(server_id), d);
+        g_variant_unref(r);
+    }
+}
+static void sg_notify(const char *title, const char *body, int notification_id) {
+    GVariantBuilder actions, hints;
+    if (!sg_notify_bus) {
+        sg_notify_bus = g_bus_get_sync(G_BUS_TYPE_SESSION, NULL, NULL);
+        if (!sg_notify_bus) return;
+        sg_notify_ids = g_hash_table_new(g_direct_hash, g_direct_equal);
+        g_dbus_connection_signal_subscribe(sg_notify_bus, "org.freedesktop.Notifications",
+            "org.freedesktop.Notifications", "ActionInvoked", "/org/freedesktop/Notifications",
+            NULL, G_DBUS_SIGNAL_FLAGS_NONE, sg_on_notify_action, NULL, NULL);
+    }
+    g_variant_builder_init(&actions, G_VARIANT_TYPE("as"));
+    if (notification_id > 0) { g_variant_builder_add(&actions, "s", "default"); g_variant_builder_add(&actions, "s", "Open"); }
+    g_variant_builder_init(&hints, G_VARIANT_TYPE("a{sv}"));
+    g_dbus_connection_call(sg_notify_bus, "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
+        "org.freedesktop.Notifications", "Notify",
+        g_variant_new("(susssasa{sv}i)", sg_app_name, (guint32) 0, "", title, body ? body : "", &actions, &hints, -1),
+        G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE, 2000, NULL, sg_notify_done, GINT_TO_POINTER(notification_id));
 }
 
 #endif
