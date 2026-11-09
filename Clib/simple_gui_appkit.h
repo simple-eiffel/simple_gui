@@ -231,6 +231,16 @@ int sga_path_control(void);
 void sga_path_control_set(int a_id, const char *a_path);
 int sga_path_control_count(int a_id);
 const char *sga_path_control_part(int a_id, int i);
+int sga_rich_text_area(void);   /* a text area's set and get, plus: */
+void sga_rich_text_set_trait(int a_id, int a_start, int an_end, int a_trait, int a_on);   /* 1 bold, 2 italic, 3 underline */
+void sga_rich_text_set_color(int a_id, int a_start, int an_end, int a_rgb);
+void sga_rich_text_set_size(int a_id, int a_start, int an_end, double a_points);
+int sga_rich_text_trait_at(int a_id, int i, int a_trait);
+int sga_rich_text_color_at(int a_id, int i);   /* -1: the default color */
+double sga_rich_text_size_at(int a_id, int i);
+int sga_rich_text_selection_start(int a_id);
+int sga_rich_text_selection_end(int a_id);   /* start - 1 when empty */
+void sga_rich_text_select(int a_id, int a_start, int an_end);
 int sga_rating(int a_maximum);
 void sga_rating_set(int a_id, int a_value);   /* silent */
 int sga_rating_value(int a_id);

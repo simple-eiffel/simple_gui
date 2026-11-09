@@ -91,6 +91,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_token_field_makes_and_removes_tokens, "token_field_makes_and_removes_tokens")
 				run_test (agent t.test_path_control_parts, "path_control_parts")
 				run_test (agent t.test_rating_set_silently_and_user_emits, "rating_set_silently_and_user_emits")
+				run_test (agent t.test_rich_text_ranges_round_trip, "rich_text_ranges_round_trip")
 				run_test (agent t.test_dialogs_1j_cancel_unattended, "dialogs_1j_cancel_unattended")
 				run_test (agent t.test_window_of_1j_controls_describes_roles, "window_of_1j_controls_describes_roles")
 				run_test (agent t.test_window_of_1j_controls_snapshot, "window_of_1j_controls_snapshot")

@@ -881,6 +881,50 @@ feature -- Common widget state
 		deferred
 		end
 
+	rich_text_area: INTEGER
+			-- An empty rich text area: a text area's features, plus formatting.
+		deferred
+		end
+
+	rich_text_set_trait (an_id, a_start, an_end, a_trait: INTEGER; a_on: BOOLEAN)
+			-- Bold (1), italic (2) or underline (3) over `a_start' .. `an_end' (1-based characters, inclusive).
+		deferred
+		end
+
+	rich_text_set_color (an_id, a_start, an_end, a_rgb: INTEGER)
+		deferred
+		end
+
+	rich_text_set_size (an_id, a_start, an_end: INTEGER; a_points: REAL_64)
+		deferred
+		end
+
+	rich_text_trait_at (an_id, i, a_trait: INTEGER): BOOLEAN
+		deferred
+		end
+
+	rich_text_color_at (an_id, i: INTEGER): INTEGER
+			-- 0xRRGGBB, or -1 for the theme's text color.
+		deferred
+		end
+
+	rich_text_size_at (an_id, i: INTEGER): REAL_64
+		deferred
+		end
+
+	rich_text_selection_start (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	rich_text_selection_end (an_id: INTEGER): INTEGER
+			-- `rich_text_selection_start' - 1 when nothing is selected.
+		deferred
+		end
+
+	rich_text_select (an_id, a_start, an_end: INTEGER)
+		deferred
+		end
+
 	set_tooltip (an_id: INTEGER; a_text: POINTER)
 			-- Short help on hover; empty removes it.
 		deferred

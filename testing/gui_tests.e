@@ -1778,6 +1778,43 @@ feature -- The remaining controls (1j)
 			Result.add_item ("As HTML", "", agent do end)
 		end
 
+	test_rich_text_ranges_round_trip
+			-- Formatting from code is silent and reads back; positions count characters, so an
+			-- emoji (two UTF-16 units on macOS and Windows) is one.
+		local
+			l_window: GUI_WINDOW
+			l_rich: GUI_RICH_TEXT_AREA
+			l_text: STRING_32
+		do
+			create l_window.make ("Rich text", 420, 200)
+			create l_rich.make
+			l_window.set_content (l_rich)
+			l_window.show
+			settle_window
+			create l_text.make_from_string ("Hello ")
+			l_text.append_code (0x1F600)
+			l_text.append (" world")
+			l_rich.set_text (l_text)
+			assert ("count", l_rich.count = 13)
+			l_rich.set_bold (1, 5, True)
+			l_rich.set_italic (9, 13, True)
+			l_rich.set_underline (9, 13, True)
+			l_rich.set_text_color (7, 7, 0xCC3300)
+			l_rich.set_font_size (9, 13, 20.0)
+			assert ("bold", l_rich.is_bold_at (1) and l_rich.is_bold_at (5) and not l_rich.is_bold_at (6))
+			assert ("italic after the emoji", l_rich.is_italic_at (9) and not l_rich.is_italic_at (8))
+			assert ("underline", l_rich.is_underlined_at (13) and not l_rich.is_underlined_at (1))
+			assert ("emoji color", l_rich.has_text_color_at (7) and l_rich.text_color_at (7) = 0xCC3300 and not l_rich.has_text_color_at (8))
+			assert ("size", l_rich.font_size_at (10) = 20.0)
+			l_rich.select_range (9, 13)
+			assert ("selection", l_rich.selection_start = 9 and l_rich.selection_end = 13)
+			assert ("silent", l_rich.change_actions.fire_count = 0)
+			l_rich.set_bold (1, 5, False)
+			assert ("unbold", not l_rich.is_bold_at (3))
+			assert ("text box", l_rich.accessible_role.same_string ("text-box"))
+			l_window.close
+		end
+
 	controls_1j_window: GUI_WINDOW
 			-- A window with the 1j controls, shown.
 		local

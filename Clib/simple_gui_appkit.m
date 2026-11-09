@@ -2734,6 +2734,149 @@ int sga_rating_value(int a_id) { return (int)[(NSLevelIndicator *)sga_get(a_id) 
 /* As a user: a click on star `a_value'. */
 void sga_test_rate(int a_id, int a_value) { SGARating *r = sga_get(a_id); [r setIntegerValue:a_value]; [r sendAction:[r action] to:[r target]]; }
 
+/* A rich text area (1j): a text area whose NSTextView keeps attributes. Positions are
+   1-based characters (code points, as an Eiffel STRING_32 counts them); a range is
+   `a_start' .. `an_end', inclusive. Formatting from code is silent: AppKit sends
+   textDidChange only for the user's edits. */
+int sga_rich_text_area(void)
+{
+	int l_id = sga_text_area();
+	NSTextView *t = s_inner[l_id];
+	[t setRichText:YES];
+	[t setImportsGraphics:NO];
+	[t setUsesFontPanel:YES];
+	return l_id;
+}
+
+/* The UTF-16 offset of code point `a_index' (0-based) in `s'. */
+static NSUInteger sga_utf16_offset(NSString *s, NSInteger a_index)
+{
+	NSUInteger k = 0, n = [s length];
+	for (NSInteger i = 0; i < a_index && k < n; i++) {
+		unichar c = [s characterAtIndex:k];
+		k += (CFStringIsSurrogateHighCharacter(c) && k + 1 < n) ? 2 : 1;
+	}
+	return k;
+}
+
+/* The code-point index (0-based) of UTF-16 offset `an_offset' in `s'. */
+static NSInteger sga_code_point_index(NSString *s, NSUInteger an_offset)
+{
+	NSInteger i = 0;
+	for (NSUInteger k = 0; k < an_offset && k < [s length]; i++) {
+		unichar c = [s characterAtIndex:k];
+		k += (CFStringIsSurrogateHighCharacter(c) && k + 1 < [s length]) ? 2 : 1;
+	}
+	return i;
+}
+
+static NSRange sga_rich_range(NSTextView *t, int a_start, int an_end)
+{
+	NSString *s = [[t textStorage] string];
+	NSUInteger l_from = sga_utf16_offset(s, a_start - 1), l_to = sga_utf16_offset(s, an_end);
+	return NSMakeRange(l_from, l_to > l_from ? l_to - l_from : 0);
+}
+
+/* Bold (1), italic (2) or underline (3), on or off, over a range. */
+void sga_rich_text_set_trait(int a_id, int a_start, int an_end, int a_trait, int a_on)
+{
+	NSTextView *t = s_inner[a_id];
+	NSTextStorage *m = [t textStorage];
+	NSRange r = sga_rich_range(t, a_start, an_end);
+	if (r.length == 0) return;
+	[m beginEditing];
+	if (a_trait == 3) {
+		if (a_on) [m addAttribute:NSUnderlineStyleAttributeName value:@(NSUnderlineStyleSingle) range:r];
+		else [m removeAttribute:NSUnderlineStyleAttributeName range:r];
+	} else {
+		NSFontManager *f = [NSFontManager sharedFontManager];
+		NSFontTraitMask l_trait = a_trait == 1 ? NSBoldFontMask : NSItalicFontMask;
+		[m enumerateAttribute:NSFontAttributeName inRange:r options:0 usingBlock:^(id a_font, NSRange a_run, BOOL *a_stop) {
+			(void)a_stop;
+			NSFont *l_font = a_font ?: [t font] ?: [NSFont systemFontOfSize:0];
+			l_font = a_on ? [f convertFont:l_font toHaveTrait:l_trait] : [f convertFont:l_font toNotHaveTrait:l_trait];
+			[m addAttribute:NSFontAttributeName value:l_font range:a_run];
+		}];
+	}
+	[m endEditing];
+}
+
+void sga_rich_text_set_color(int a_id, int a_start, int an_end, int a_rgb)
+{
+	NSTextView *t = s_inner[a_id];
+	NSRange r = sga_rich_range(t, a_start, an_end);
+	if (r.length) [[t textStorage] addAttribute:NSForegroundColorAttributeName value:sga_rgb_color(a_rgb) range:r];
+}
+
+void sga_rich_text_set_size(int a_id, int a_start, int an_end, double a_points)
+{
+	NSTextView *t = s_inner[a_id];
+	NSTextStorage *m = [t textStorage];
+	NSRange r = sga_rich_range(t, a_start, an_end);
+	if (r.length == 0 || a_points <= 0) return;
+	[m beginEditing];
+	[m enumerateAttribute:NSFontAttributeName inRange:r options:0 usingBlock:^(id a_font, NSRange a_run, BOOL *a_stop) {
+		(void)a_stop;
+		NSFont *l_font = a_font ?: [t font] ?: [NSFont systemFontOfSize:0];
+		[m addAttribute:NSFontAttributeName value:[[NSFontManager sharedFontManager] convertFont:l_font toSize:a_points] range:a_run];
+	}];
+	[m endEditing];
+}
+
+static NSDictionary *sga_rich_attributes_at(int a_id, int i)
+{
+	NSTextView *t = s_inner[a_id];
+	NSString *s = [[t textStorage] string];
+	NSUInteger k = sga_utf16_offset(s, i - 1);
+	return k < [s length] ? [[t textStorage] attributesAtIndex:k effectiveRange:NULL] : @{};
+}
+
+/* 1 when character `i' has the trait (1 bold, 2 italic, 3 underline). */
+int sga_rich_text_trait_at(int a_id, int i, int a_trait)
+{
+	NSDictionary *d = sga_rich_attributes_at(a_id, i);
+	if (a_trait == 3) return [d[NSUnderlineStyleAttributeName] integerValue] != 0 ? 1 : 0;
+	NSFont *f = d[NSFontAttributeName];
+	NSFontDescriptorSymbolicTraits l_traits = f ? [[f fontDescriptor] symbolicTraits] : 0;
+	return (l_traits & (a_trait == 1 ? NSFontDescriptorTraitBold : NSFontDescriptorTraitItalic)) ? 1 : 0;
+}
+
+/* Character `i''s color as 0xRRGGBB; -1 when it has the default (the theme's text color). */
+int sga_rich_text_color_at(int a_id, int i)
+{
+	NSColor *c = sga_rich_attributes_at(a_id, i)[NSForegroundColorAttributeName];
+	NSTextView *t = s_inner[a_id];
+	/* A rich text view gives new text its own text color as an attribute: that is the default. */
+	BOOL l_default = !c || [c isEqual:[t textColor]] || [c isEqual:[NSColor textColor]] || [c isEqual:[NSColor labelColor]];
+	return l_default ? -1 : sga_color_rgb(c);
+}
+
+double sga_rich_text_size_at(int a_id, int i)
+{
+	NSFont *f = sga_rich_attributes_at(a_id, i)[NSFontAttributeName] ?: [(NSTextView *)s_inner[a_id] font];
+	return f ? (double)[f pointSize] : 0;
+}
+
+/* The selection, 1-based: start, and end (start - 1 when nothing is selected, at the caret). */
+int sga_rich_text_selection_start(int a_id)
+{
+	NSTextView *t = s_inner[a_id];
+	return (int)sga_code_point_index([[t textStorage] string], [t selectedRange].location) + 1;
+}
+
+int sga_rich_text_selection_end(int a_id)
+{
+	NSTextView *t = s_inner[a_id];
+	NSRange r = [t selectedRange];
+	return (int)sga_code_point_index([[t textStorage] string], NSMaxRange(r));
+}
+
+void sga_rich_text_select(int a_id, int a_start, int an_end)
+{
+	NSTextView *t = s_inner[a_id];
+	[t setSelectedRange:sga_rich_range(t, a_start, an_end)];
+}
+
 /* ----------------------------------------------------------------- common */
 
 void sga_set_enabled(int a_id, int a_on)

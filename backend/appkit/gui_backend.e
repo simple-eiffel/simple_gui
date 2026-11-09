@@ -865,6 +865,56 @@ feature -- Common widget state
 		alias "return sga_rating_value($an_id);"
 		end
 
+	rich_text_area: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_rich_text_area();"
+		end
+
+	rich_text_set_trait (an_id, a_start, an_end, a_trait: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_rich_text_set_trait($an_id, $a_start, $an_end, $a_trait, $a_on ? 1 : 0);"
+		end
+
+	rich_text_set_color (an_id, a_start, an_end, a_rgb: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_rich_text_set_color($an_id, $a_start, $an_end, $a_rgb);"
+		end
+
+	rich_text_set_size (an_id, a_start, an_end: INTEGER; a_points: REAL_64)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_rich_text_set_size($an_id, $a_start, $an_end, $a_points);"
+		end
+
+	rich_text_trait_at (an_id, i, a_trait: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_rich_text_trait_at($an_id, $i, $a_trait) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	rich_text_color_at (an_id, i: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_rich_text_color_at($an_id, $i);"
+		end
+
+	rich_text_size_at (an_id, i: INTEGER): REAL_64
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_rich_text_size_at($an_id, $i);"
+		end
+
+	rich_text_selection_start (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_rich_text_selection_start($an_id);"
+		end
+
+	rich_text_selection_end (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_rich_text_selection_end($an_id);"
+		end
+
+	rich_text_select (an_id, a_start, an_end: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_rich_text_select($an_id, $a_start, $an_end);"
+		end
+
 	set_tooltip (an_id: INTEGER; a_text: POINTER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_set_tooltip($an_id, (const char *) $a_text);"
