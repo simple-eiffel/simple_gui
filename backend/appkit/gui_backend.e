@@ -64,6 +64,16 @@ feature -- Windows and containers
 		alias "sga_window_set_content($a_window, $a_child);"
 		end
 
+	window_set_toolbar (a_window, a_toolbar: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_window_set_toolbar($a_window, $a_toolbar);"
+		end
+
+	window_set_status_bar (a_window, a_bar: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_window_set_status_bar($a_window, $a_bar);"
+		end
+
 	window_show (a_window: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_window_show($a_window);"
@@ -410,6 +420,96 @@ feature -- Controls
 
 feature -- Common widget state
 
+	dropdown: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_dropdown();"
+		end
+
+	dropdown_extend (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dropdown_extend($an_id, (const char *) $a_text);"
+		end
+
+	dropdown_wipe_out (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dropdown_wipe_out($an_id);"
+		end
+
+	dropdown_select (an_id, a_row: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dropdown_select($an_id, $a_row);"
+		end
+
+	dropdown_selected (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_dropdown_selected($an_id);"
+		end
+
+	spin_box (a_min, a_max: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_spin_box($a_min, $a_max);"
+		end
+
+	spin_box_set_value (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_spin_box_set_value($an_id, $a_value);"
+		end
+
+	spin_box_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_spin_box_value($an_id);"
+		end
+
+	spin_box_set_step (an_id, a_step: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_spin_box_set_step($an_id, $a_step);"
+		end
+
+	progress_bar: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_progress_bar();"
+		end
+
+	progress_bar_set (an_id, a_percent: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_progress_bar_set($an_id, $a_percent);"
+		end
+
+	progress_bar_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_progress_bar_value($an_id);"
+		end
+
+	toolbar: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_toolbar();"
+		end
+
+	toolbar_extend (a_toolbar, a_button: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_toolbar_extend($a_toolbar, $a_button);"
+		end
+
+	toolbar_add_separator (a_toolbar: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_toolbar_add_separator($a_toolbar);"
+		end
+
+	status_bar: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_status_bar();"
+		end
+
+	status_bar_set_text (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_status_bar_set_text($an_id, (const char *) $a_text);"
+		end
+
+	status_bar_text (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_status_bar_text($an_id);"
+		end
+
 	set_enabled (an_id: INTEGER; a_on: BOOLEAN)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_set_enabled($an_id, $a_on ? 1 : 0);"
@@ -601,6 +701,11 @@ feature -- Test driver
 	test_choose (an_id, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_choose($an_id, $a_row);"
+		end
+
+	test_set_number (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_set_number($an_id, $a_value);"
 		end
 
 	test_menu (an_item_id: INTEGER)

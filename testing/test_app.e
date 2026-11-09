@@ -63,6 +63,16 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_a_row_source_selects_by_number, "a_row_source_selects_by_number")
 				run_test (agent t.test_set_row_count_resizes, "set_row_count_resizes")
 				run_test (agent t.test_edit_items_follow_the_focus, "edit_items_follow_the_focus")
+				run_test (agent t.test_dropdown_extend_selects_first_silently, "dropdown_extend_selects_first_silently")
+				run_test (agent t.test_dropdown_select_row_is_silent_and_choose_option_emits, "dropdown_select_row_is_silent_and_choose_option_emits")
+				run_test (agent t.test_dropdown_wipe_out_clears, "dropdown_wipe_out_clears")
+				run_test (agent t.test_spin_box_set_value_is_silent_and_enter_number_emits, "spin_box_set_value_is_silent_and_enter_number_emits")
+				run_test (agent t.test_spin_box_range_and_step, "spin_box_range_and_step")
+				run_test (agent t.test_progress_bar_value_round_trips, "progress_bar_value_round_trips")
+				run_test (agent t.test_toolbar_buttons_click_and_disable, "toolbar_buttons_click_and_disable")
+				run_test (agent t.test_status_bar_text_round_trips, "status_bar_text_round_trips")
+				run_test (agent t.test_window_with_toolbar_and_status_bar_describes_roles, "window_with_toolbar_and_status_bar_describes_roles")
+				run_test (agent t.test_window_with_toolbar_and_status_bar_snapshot, "window_with_toolbar_and_status_bar_snapshot")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then

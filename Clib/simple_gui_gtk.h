@@ -28,7 +28,7 @@ __attribute__((weak)) int sg_q[SG_QCAP][5] = {{0}};
 __attribute__((weak)) int sg_qh = 0;
 __attribute__((weak)) int sg_qt = 0;
 __attribute__((weak)) GtkWidget *sg_w[SG_MAX] = {0};
-__attribute__((weak)) int sg_kind[SG_MAX] = {0};      /* 1 window 2 stack 3 grid 4 label 5 button 6 field 7 list 8 canvas (9 check box, 10 text area, 11 tabs) */
+__attribute__((weak)) int sg_kind[SG_MAX] = {0};      /* 1 window 2 stack 3 grid 4 label 5 button 6 field 7 list 8 canvas (9 check box, 10 text area, 11 tabs; 13 table, 14 tree; 15 dropdown, 16 spin box, 17 progress bar, 18 toolbar, 19 status bar) */
 __attribute__((weak)) int sg_n = 1;                   /* id 0 is "none" */
 __attribute__((weak)) int sg_quiet = 0;               /* >0 while a programmatic change runs */
 __attribute__((weak)) GThread *sg_gui_thread = NULL;
@@ -152,20 +152,57 @@ static void sg_bar_items(GMenuModel *m, int pos, int removed, int added, gpointe
     /* Relabeling rebuilds the bar's items: give the new ones the window's direction. */
     if (d) sg_direction_tree(GTK_WIDGET(bar), (GtkTextDirection) d);
 }
-static void sg_window_set_content(int win, int child) {
-    GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    /* Positions (sg_x, sg_y) are measured from the content's top-left: no title bar, no menu bar. */
-    g_object_set_data(G_OBJECT(sg_w[win]), "sg-content", sg_w[child]);
-    GtkWidget *bar = gtk_popover_menu_bar_new_from_model(G_MENU_MODEL(sg_menubar));
+/* The window's outer box, made once: the menu bar, then three slots - the toolbar ("sg-top"),
+   the content ("sg-mid", which grows) and the status bar ("sg-bottom"). The slots carry the
+   window's direction, since a GTK 4 widget with none takes the global default. */
+static GtkWidget *sg_window_outer(int win) {
+    GtkWidget *outer = g_object_get_data(G_OBJECT(sg_w[win]), "sg-outer");
+    GtkWidget *bar, *top, *mid, *bottom;
+    GtkTextDirection dir;
+    if (outer) return outer;
+    dir = gtk_widget_get_direction(sg_w[win]);
+    outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    bar = gtk_popover_menu_bar_new_from_model(G_MENU_MODEL(sg_menubar));
     /* The bar follows the application's menu model: hidden while it is empty. */
     gtk_widget_set_visible(bar, g_menu_model_get_n_items(G_MENU_MODEL(sg_menubar)) > 0);
     g_signal_connect_object(sg_menubar, "items-changed", G_CALLBACK(sg_bar_items), bar, 0);
+    top = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    mid = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    bottom = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_vexpand(mid, TRUE);
+    gtk_widget_set_direction(outer, dir);
+    gtk_widget_set_direction(top, dir);
+    gtk_widget_set_direction(mid, dir);
+    gtk_widget_set_direction(bottom, dir);
     g_object_set_data(G_OBJECT(sg_w[win]), "sg-bar", bar);
     g_object_set_data(G_OBJECT(sg_w[win]), "sg-outer", outer);
+    g_object_set_data(G_OBJECT(sg_w[win]), "sg-top", top);
+    g_object_set_data(G_OBJECT(sg_w[win]), "sg-mid", mid);
+    g_object_set_data(G_OBJECT(sg_w[win]), "sg-bottom", bottom);
     gtk_box_append(GTK_BOX(outer), bar);
-    gtk_widget_set_vexpand(sg_w[child], TRUE);
-    gtk_box_append(GTK_BOX(outer), sg_w[child]);
+    gtk_box_append(GTK_BOX(outer), top);
+    gtk_box_append(GTK_BOX(outer), mid);
+    gtk_box_append(GTK_BOX(outer), bottom);
     gtk_window_set_child(GTK_WINDOW(sg_w[win]), outer);
+    return outer;
+}
+static GtkBox *sg_window_slot(int win, const char *slot) {
+    sg_window_outer(win);
+    return GTK_BOX(g_object_get_data(G_OBJECT(sg_w[win]), slot));
+}
+static void sg_window_set_content(int win, int child) {
+    /* Positions (sg_x, sg_y) are measured from the content's top-left: no title bar, no menu bar. */
+    g_object_set_data(G_OBJECT(sg_w[win]), "sg-content", sg_w[child]);
+    gtk_widget_set_vexpand(sg_w[child], TRUE);
+    gtk_box_append(sg_window_slot(win, "sg-mid"), sg_w[child]);
+}
+static void sg_window_set_toolbar(int win, int tb) {
+    gtk_box_append(sg_window_slot(win, "sg-top"), sg_w[tb]);
+    gtk_box_append(sg_window_slot(win, "sg-top"), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+}
+static void sg_window_set_status_bar(int win, int sb) {
+    gtk_box_append(sg_window_slot(win, "sg-bottom"), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+    gtk_box_append(sg_window_slot(win, "sg-bottom"), sg_w[sb]);
 }
 static void sg_window_show(int win) { gtk_window_present(GTK_WINDOW(sg_w[win])); }
 static void sg_window_close(int win) { gtk_window_destroy(GTK_WINDOW(sg_w[win])); sg_w[win] = NULL; }
@@ -853,6 +890,103 @@ static int sg_check_box_is_checked(int id) { return gtk_check_button_get_active(
 static void sg_check_box_set_text(int id, const char *t) { gtk_check_button_set_label(GTK_CHECK_BUTTON(sg_w[id]), t); }
 static const char *sg_check_box_text(int id) { const char *s = gtk_check_button_get_label(GTK_CHECK_BUTTON(sg_w[id])); return s ? s : ""; }
 
+/* ---------- 1g: dropdown (15; event 4, a = row), spin box (16; event 2, a = value),
+   progress bar (17), toolbar (18), status bar (19) ---------- */
+
+static void sg_on_dropdown(GObject *o, GParamSpec *p, gpointer d) {
+    guint s;
+    (void) p; (void) d;
+    if (sg_quiet) return;
+    s = gtk_drop_down_get_selected(GTK_DROP_DOWN(o));
+    sg_push(4, sg_id_of(o), s == GTK_INVALID_LIST_POSITION ? 0 : (int) s + 1, 0);
+}
+static int sg_dropdown(void) {
+    /* gtk_drop_down_new takes the model's reference (transfer full) */
+    GtkWidget *dd = gtk_drop_down_new(G_LIST_MODEL(gtk_string_list_new(NULL)), NULL);
+    int id = sg_reg(dd, 15);
+    gtk_widget_set_halign(dd, GTK_ALIGN_START);
+    g_signal_connect(dd, "notify::selected", G_CALLBACK(sg_on_dropdown), NULL);
+    return id;
+}
+static GtkStringList *sg_dropdown_model(int id) { return GTK_STRING_LIST(gtk_drop_down_get_model(GTK_DROP_DOWN(sg_w[id]))); }
+static void sg_dropdown_extend(int id, const char *t) {
+    sg_quiet++;
+    gtk_string_list_append(sg_dropdown_model(id), t);
+    if (g_list_model_get_n_items(G_LIST_MODEL(sg_dropdown_model(id))) == 1)
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(sg_w[id]), 0);   /* the first row is the selection */
+    sg_quiet--;
+}
+static void sg_dropdown_wipe_out(int id) {
+    guint n = g_list_model_get_n_items(G_LIST_MODEL(sg_dropdown_model(id)));
+    sg_quiet++;
+    gtk_string_list_splice(sg_dropdown_model(id), 0, n, NULL);
+    sg_quiet--;
+}
+static void sg_dropdown_select(int id, int row) {
+    sg_quiet++;
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(sg_w[id]), (guint) (row - 1));
+    sg_quiet--;
+}
+static int sg_dropdown_selected(int id) {
+    guint s = gtk_drop_down_get_selected(GTK_DROP_DOWN(sg_w[id]));
+    if (g_list_model_get_n_items(G_LIST_MODEL(sg_dropdown_model(id))) == 0) return 0;
+    return s == GTK_INVALID_LIST_POSITION ? 0 : (int) s + 1;
+}
+
+static void sg_on_spin(GtkSpinButton *s, gpointer d) {
+    (void) d;
+    if (!sg_quiet) sg_push(2, sg_id_of(s), gtk_spin_button_get_value_as_int(s), 0);
+}
+static int sg_spin_box(int lo, int hi) {
+    GtkWidget *s = gtk_spin_button_new_with_range(lo, hi, 1);
+    int id = sg_reg(s, 16);
+    gtk_spin_button_set_digits(GTK_SPIN_BUTTON(s), 0);
+    gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(s), TRUE);
+    sg_quiet++; gtk_spin_button_set_value(GTK_SPIN_BUTTON(s), lo); sg_quiet--;
+    gtk_widget_set_halign(s, GTK_ALIGN_START);
+    g_signal_connect(s, "value-changed", G_CALLBACK(sg_on_spin), NULL);
+    return id;
+}
+static void sg_spin_box_set_value(int id, int v) { sg_quiet++; gtk_spin_button_set_value(GTK_SPIN_BUTTON(sg_w[id]), v); sg_quiet--; }
+static int sg_spin_box_value(int id) { return gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(sg_w[id])); }
+static void sg_spin_box_set_step(int id, int step) { gtk_spin_button_set_increments(GTK_SPIN_BUTTON(sg_w[id]), step, step * 10.0); }
+static void sg_test_set_number(int id, int v) { gtk_spin_button_set_value(GTK_SPIN_BUTTON(sg_w[id]), v); }   /* emits */
+
+static int sg_progress_bar(void) {
+    GtkWidget *p = gtk_progress_bar_new();
+    int id = sg_reg(p, 17);
+    gtk_widget_set_hexpand(p, TRUE);
+    gtk_widget_set_valign(p, GTK_ALIGN_CENTER);
+    return id;
+}
+/* The percent is kept as given: the fraction would not round-trip every integer. */
+static void sg_progress_bar_set(int id, int percent) {
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-percent", GINT_TO_POINTER(percent));
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(sg_w[id]), percent / 100.0);
+}
+static int sg_progress_bar_value(int id) { return GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-percent")); }
+
+static int sg_toolbar(void) {
+    GtkWidget *b = g_object_new(GTK_TYPE_BOX, "orientation", GTK_ORIENTATION_HORIZONTAL, "spacing", 4,
+                                "accessible-role", GTK_ACCESSIBLE_ROLE_TOOLBAR, NULL);
+    gtk_widget_add_css_class(b, "toolbar");
+    gtk_widget_set_margin_start(b, 4); gtk_widget_set_margin_end(b, 4);
+    gtk_widget_set_margin_top(b, 4); gtk_widget_set_margin_bottom(b, 4);
+    return sg_reg(b, 18);
+}
+static void sg_toolbar_extend(int tb, int button) { gtk_box_append(GTK_BOX(sg_w[tb]), sg_w[button]); }
+static void sg_toolbar_add_separator(int tb) { gtk_box_append(GTK_BOX(sg_w[tb]), gtk_separator_new(GTK_ORIENTATION_VERTICAL)); }
+
+static int sg_status_bar(void) {
+    GtkWidget *l = g_object_new(GTK_TYPE_LABEL, "label", "", "xalign", 0.0f,
+                                "accessible-role", GTK_ACCESSIBLE_ROLE_STATUS, NULL);
+    gtk_widget_set_margin_start(l, 8); gtk_widget_set_margin_end(l, 8);
+    gtk_widget_set_margin_top(l, 3); gtk_widget_set_margin_bottom(l, 3);
+    return sg_reg(l, 19);
+}
+static void sg_status_bar_set_text(int id, const char *t) { gtk_label_set_text(GTK_LABEL(sg_w[id]), t); }
+static const char *sg_status_bar_text(int id) { return gtk_label_get_text(GTK_LABEL(sg_w[id])); }
+
 /* ---------- text area (kind 10; event 2 on change) ---------- */
 
 __attribute__((weak)) char *sg_text_buf = NULL;
@@ -950,7 +1084,13 @@ static void sg_set_direction(int id, int d) {
     if (sg_kind[id] == 1) {
         GtkWidget *bar = g_object_get_data(G_OBJECT(sg_w[id]), "sg-bar");
         GtkWidget *outer = g_object_get_data(G_OBJECT(sg_w[id]), "sg-outer");
+        static const char *slots[] = {"sg-top", "sg-mid", "sg-bottom", NULL};
+        int s;
         if (outer) gtk_widget_set_direction(outer, l_dir);
+        for (s = 0; slots[s]; s++) {
+            GtkWidget *slot = g_object_get_data(G_OBJECT(sg_w[id]), slots[s]);
+            if (slot) gtk_widget_set_direction(slot, l_dir);
+        }
         if (bar) {
             g_object_set_data(G_OBJECT(bar), "sg-dir", GINT_TO_POINTER((int) l_dir));
             sg_direction_tree(bar, l_dir);
@@ -1506,6 +1646,7 @@ static void sg_test_choose(int id, int row) {
     if (sg_kind[id] == 14) { sg_test_choose_node(id, row); return; }   /* a tree node, by its number */
     if (sg_kind[id] == 13) { gtk_selection_model_select_item(sg_table_model(id), (guint) (row - 1), TRUE); return; }   /* a table row, as a click */
     if (sg_kind[id] == 11) { gtk_notebook_set_current_page(GTK_NOTEBOOK(sg_w[id]), row - 1); return; }   /* a click on the tab */
+    if (sg_kind[id] == 15) { gtk_drop_down_set_selected(GTK_DROP_DOWN(sg_w[id]), (guint) (row - 1)); return; }   /* a pick from the popup */
     GtkListBoxRow *r = gtk_list_box_get_row_at_index(sg_list_box(id), row - 1);
     if (r) gtk_list_box_select_row(sg_list_box(id), r);
 }

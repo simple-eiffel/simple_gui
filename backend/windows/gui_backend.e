@@ -122,6 +122,22 @@ feature -- Windows and containers
 			end
 		end
 
+	window_set_toolbar (a_window, a_toolbar: INTEGER)
+		do
+			window_toolbar.force (a_toolbar, a_window)
+			if attached windows.item (a_window) as al_w and then al_w.is_window_open then
+				compose (a_window, al_w)
+			end
+		end
+
+	window_set_status_bar (a_window, a_bar: INTEGER)
+		do
+			window_status_bar.force (a_bar, a_window)
+			if attached windows.item (a_window) as al_w and then al_w.is_window_open then
+				compose (a_window, al_w)
+			end
+		end
+
 	window_show (a_window: INTEGER)
 			-- Open the window: the first as simple_shell's main window, one shown while that is
 			-- open as a floating document window of it (W3).
@@ -416,6 +432,151 @@ feature -- Controls
 			if attached {SW_TEXT_BOX} widget (an_id) as al_t then
 				al_t.set_placeholder (from_c (a_text))
 				changed
+			end
+		end
+
+	dropdown: INTEGER
+		local
+			l_d: GUI_SW_DROPDOWN
+		do
+			create l_d.make_dropdown
+			Result := register (l_d)
+			l_d.set_on_pick (agent report_row (Result, ?))
+		end
+
+	dropdown_extend (an_id: INTEGER; a_text: POINTER)
+		do
+			if attached {GUI_SW_DROPDOWN} widget (an_id) as al_d then
+				al_d.extend_option (from_c (a_text))
+				changed
+			end
+		end
+
+	dropdown_wipe_out (an_id: INTEGER)
+		do
+			if attached {GUI_SW_DROPDOWN} widget (an_id) as al_d then
+				al_d.clear_options
+				changed
+			end
+		end
+
+	dropdown_select (an_id, a_row: INTEGER)
+		do
+			if attached {GUI_SW_DROPDOWN} widget (an_id) as al_d and then a_row <= al_d.options.count then
+				al_d.select_quietly (a_row)
+				changed
+			end
+		end
+
+	dropdown_selected (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_DROPDOWN} widget (an_id) as al_d then
+				Result := al_d.selected_index
+			end
+		end
+
+	spin_box (a_min, a_max: INTEGER): INTEGER
+		local
+			l_s: GUI_SW_SPIN_BOX
+		do
+			create l_s.make (a_min, a_min, a_max, Void)
+			Result := register (l_s)
+			l_s.set_on_change (agent report_number (Result, ?))
+		end
+
+	spin_box_set_value (an_id, a_value: INTEGER)
+		do
+			if attached {GUI_SW_SPIN_BOX} widget (an_id) as al_s then
+				al_s.set_value (a_value)
+				changed
+			end
+		end
+
+	spin_box_value (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_SPIN_BOX} widget (an_id) as al_s then
+				Result := al_s.value
+			end
+		end
+
+	spin_box_set_step (an_id, a_step: INTEGER)
+		do
+			if attached {GUI_SW_SPIN_BOX} widget (an_id) as al_s then
+				al_s.set_step (a_step)
+			end
+		end
+
+	progress_bar: INTEGER
+		local
+			l_p: SW_PROGRESS
+		do
+			create l_p.make (0.0)
+			Result := register (l_p)
+		end
+
+	progress_bar_set (an_id, a_percent: INTEGER)
+		do
+			if attached {SW_PROGRESS} widget (an_id) as al_p then
+				al_p.set_fraction (a_percent / 100)
+				changed
+			end
+		end
+
+	progress_bar_value (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_PROGRESS} widget (an_id) as al_p then
+				Result := (al_p.fraction * 100).rounded
+			end
+		end
+
+	toolbar: INTEGER
+		local
+			l_t: GUI_SW_TOOLBAR_ROW
+		do
+			create l_t.make
+			l_t.set_gap (4.0)
+			Result := register (l_t)
+		end
+
+	toolbar_extend (a_toolbar, a_button: INTEGER)
+		do
+			if attached {GUI_SW_TOOLBAR_ROW} widget (a_toolbar) as al_t and then attached widget (a_button) as al_b then
+				al_t.put (al_b)
+				changed
+			end
+		end
+
+	toolbar_add_separator (a_toolbar: INTEGER)
+		local
+			l_s: SW_SEPARATOR
+		do
+			if attached {GUI_SW_TOOLBAR_ROW} widget (a_toolbar) as al_t then
+				create l_s.make_vertical
+				al_t.put (l_s)
+				changed
+			end
+		end
+
+	status_bar: INTEGER
+		local
+			l_s: SW_STATUS_BAR
+		do
+			create l_s.make
+			Result := register (l_s)
+		end
+
+	status_bar_set_text (an_id: INTEGER; a_text: POINTER)
+		do
+			if attached {SW_STATUS_BAR} widget (an_id) as al_s then
+				al_s.set_left (from_c (a_text))
+				changed
+			end
+		end
+
+	status_bar_text (an_id: INTEGER): POINTER
+		do
+			if attached {SW_STATUS_BAR} widget (an_id) as al_s then
+				Result := c_text (al_s.left_text)
 			end
 		end
 
@@ -1268,8 +1429,20 @@ feature -- Test doors (act on the widget as a user would)
 				al_t.select_node (a_row)
 			elseif attached {SW_TABS} widget (an_id) as al_tabs and then a_row >= 1 and then a_row <= al_tabs.pages.count then
 				al_tabs.select_tab (a_row)
+			elseif attached {GUI_SW_DROPDOWN} widget (an_id) as al_d and then a_row >= 1 and then a_row <= al_d.options.count then
+				al_d.pick (a_row)
 			end
 			changed
+		end
+
+	test_set_number (an_id, a_value: INTEGER)
+			-- As the user committing `a_value': reported when it changes the value.
+		do
+			if attached {GUI_SW_SPIN_BOX} widget (an_id) as al_s and then a_value /= al_s.value then
+				al_s.set_value (a_value)
+				report_number (an_id, al_s.value)
+				changed
+			end
 		end
 
 	test_menu (an_item_id: INTEGER)
@@ -1357,6 +1530,18 @@ feature {NONE} -- State
 
 	window_content: HASH_TABLE [INTEGER, INTEGER]
 			-- Each window's content widget.
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	window_toolbar: HASH_TABLE [INTEGER, INTEGER]
+			-- Each window's toolbar.
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	window_status_bar: HASH_TABLE [INTEGER, INTEGER]
+			-- Each window's status bar.
 		once ("OBJECT")
 			create Result.make (4)
 		end
@@ -1633,7 +1818,8 @@ feature {NONE} -- Implementation
 		end
 
 	compose (a_window: INTEGER; a_w: GUI_SW_WINDOW)
-			-- The window's root: the menu bar (when there are menus) above the content.
+			-- The window's root: the menu bar (when there are menus), the toolbar, the content
+			-- and the status bar, top to bottom.
 		local
 			l_root: SW_COLUMN
 			l_bar: SW_MENU_BAR
@@ -1651,9 +1837,15 @@ feature {NONE} -- Implementation
 				l_root.put (l_bar)
 				a_w.set_menu_bar (l_bar)
 			end
+			if window_toolbar.has (a_window) and then attached widget (window_toolbar.item (a_window)) as al_toolbar then
+				l_root.put (al_toolbar)
+			end
 			if window_content.has (a_window) and then attached widget (window_content.item (a_window)) as al_content then
 				al_content.set_grow (1.0)
 				l_root.put (al_content)
+			end
+			if window_status_bar.has (a_window) and then attached widget (window_status_bar.item (a_window)) as al_status then
+				l_root.put (al_status)
 			end
 			if window_direction.has (a_window) then
 				l_root.set_layout_direction (window_direction.item (a_window))
@@ -1922,6 +2114,11 @@ feature {NONE} -- Implementation
 	report_row (an_id, a_row: INTEGER)
 		do
 			push (4, an_id, a_row, 0, 0)
+		end
+
+	report_number (an_id, a_value: INTEGER)
+		do
+			push (2, an_id, a_value, 0, 0)
 		end
 
 	report_pointer (an_id, a_kind: INTEGER; a_x, a_y: REAL_64; a_button, a_modifiers: INTEGER)

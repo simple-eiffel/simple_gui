@@ -211,6 +211,111 @@ feature -- Controls
 		alias "sg_field_set_placeholder($an_id, (const char *) $a_text);"
 		end
 
+	window_set_toolbar (a_window, a_toolbar: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_window_set_toolbar($a_window, $a_toolbar);"
+		end
+
+	window_set_status_bar (a_window, a_bar: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_window_set_status_bar($a_window, $a_bar);"
+		end
+
+	dropdown: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_dropdown();"
+		end
+
+	dropdown_extend (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dropdown_extend($an_id, (const char *) $a_text);"
+		end
+
+	dropdown_wipe_out (an_id: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dropdown_wipe_out($an_id);"
+		end
+
+	dropdown_select (an_id, a_row: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dropdown_select($an_id, $a_row);"
+		end
+
+	dropdown_selected (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_dropdown_selected($an_id);"
+		end
+
+	spin_box (a_min, a_max: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_spin_box($a_min, $a_max);"
+		end
+
+	spin_box_set_value (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_spin_box_set_value($an_id, $a_value);"
+		end
+
+	spin_box_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_spin_box_value($an_id);"
+		end
+
+	spin_box_set_step (an_id, a_step: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_spin_box_set_step($an_id, $a_step);"
+		end
+
+	progress_bar: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_progress_bar();"
+		end
+
+	progress_bar_set (an_id, a_percent: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_progress_bar_set($an_id, $a_percent);"
+		end
+
+	progress_bar_value (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_progress_bar_value($an_id);"
+		end
+
+	toolbar: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_toolbar();"
+		end
+
+	toolbar_extend (a_toolbar, a_button: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_toolbar_extend($a_toolbar, $a_button);"
+		end
+
+	toolbar_add_separator (a_toolbar: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_toolbar_add_separator($a_toolbar);"
+		end
+
+	status_bar: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_status_bar();"
+		end
+
+	status_bar_set_text (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_status_bar_set_text($an_id, (const char *) $a_text);"
+		end
+
+	status_bar_text (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_status_bar_text($an_id);"
+		end
+
+	test_set_number (an_id, a_value: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_set_number($an_id, $a_value);"
+		end
+
 	check_box (a_text: POINTER): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_check_box((const char *) $a_text);"
