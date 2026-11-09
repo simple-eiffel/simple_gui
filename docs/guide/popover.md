@@ -96,4 +96,4 @@ Use `show_at`, not the inherited `show`, to open it. The rest are the [common fe
 
 | Linux | macOS | Windows |
 |---|---|---|
-| A popover is a window of its own, outside a window's picture. | <!-- MACMINI: picture taken by hand: a popover is a window of its own, outside a window snapshot --> | A popover is a window of its own, outside a window's picture. |
+| A popover is a window of its own, outside a window's picture. | ![popover on macOS](images/macos/popover.png)<br>The popover's real content; its bubble is drawn in, since AppKit's popover material does not render in an offscreen picture. | A popover is a window of its own, outside a window's picture. |
