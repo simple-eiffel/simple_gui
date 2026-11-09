@@ -438,6 +438,11 @@ void sga_window_set_content(int a_window, int a_child)
 	NSView *v = sga_get(a_child);
 	for (NSView *l_old in [[l_content subviews] copy]) if (![l_old isKindOfClass:[SGAStatus class]]) [l_old removeFromSuperview];
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	/* The window keeps the size the program asked for: a lone control (a button, a label) must
+	   not pull it down to its own natural size. */
+	for (NSInteger o = 0; o < 2; o++)
+		if ([v contentHuggingPriorityForOrientation:o] >= NSLayoutPriorityWindowSizeStayPut)
+			[v setContentHuggingPriority:NSLayoutPriorityWindowSizeStayPut - 1 forOrientation:o];
 	[l_content addSubview:v];
 	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:l_content.bottomAnchor constant:-l_content->bottom_bar];
 	[NSLayoutConstraint activateConstraints:@[
@@ -1713,7 +1718,7 @@ int sga_spin_box(int a_min, int a_max)
 		[s.heightAnchor constraintEqualToConstant:MAX([s->field fittingSize].height, [s->stepper fittingSize].height)]]];
 	/* Wide enough for the range; a filling alignment may widen the field. */
 	NSLayoutConstraint *l_wide = [s->field.widthAnchor constraintEqualToConstant:MAX(l_width, 48)];
-	[l_wide setPriority:NSLayoutPriorityDefaultHigh];
+	[l_wide setPriority:NSLayoutPriorityDefaultLow];   /* below the window's own size: alone in a window, the field widens instead */
 	[[s->field.widthAnchor constraintGreaterThanOrEqualToConstant:MAX(l_width, 48)] setActive:YES];
 	[l_wide setActive:YES];
 	[s show];
