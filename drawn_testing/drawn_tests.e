@@ -34,7 +34,7 @@ feature -- Tests
 			create l_window.make ("Drawn chart", 420, 280)
 			l_window.set_content (l_drawn)
 			l_window.show
-			driver.pump_until_idle (300)
+			settle_window
 			assert ("presented", l_drawn.frame_count > 0)
 			assert ("laid out", l_chart.width > 0 and l_chart.height > 0)
 			assert ("bars drawn", colored_pixels (l_drawn, l_chart) > 100)
@@ -57,7 +57,7 @@ feature -- Tests
 			create l_window.make ("Drawn click", 380, 180)
 			l_window.set_content (l_drawn)
 			l_window.show
-			driver.pump_until_idle (300)
+			settle_window
 			driver.click_drawn (l_drawn, center_x (l_drawn, l_button), center_y (l_drawn, l_button))
 			assert ("clicked once", clicks = 1)
 			l_window.close
@@ -79,7 +79,7 @@ feature -- Tests
 			create l_window.make ("Drawn typing", 380, 140)
 			l_window.set_content (l_drawn)
 			l_window.show
-			driver.pump_until_idle (300)
+			settle_window
 			driver.click_drawn (l_drawn, center_x (l_drawn, l_box), center_y (l_drawn, l_box))
 			create l_text.make_from_string ("hi ")
 			l_text.append_code (0x1F600)
@@ -102,7 +102,7 @@ feature -- Tests
 			create l_window.make ("Drawn wheel", 320, 220)
 			l_window.set_content (l_drawn)
 			l_window.show
-			driver.pump_until_idle (300)
+			settle_window
 			assert ("at the top", l_list.scroll_y = 0.0)
 			driver.wheel_drawn (l_drawn, center_x (l_drawn, l_list), center_y (l_drawn, l_list), -360)
 			assert ("scrolled", l_list.scroll_y > 0.0)
@@ -127,7 +127,7 @@ feature -- Tests
 			create l_window.make ("Drawn menu", 320, 240)
 			l_window.set_content (l_drawn)
 			l_window.show
-			driver.pump_until_idle (300)
+			settle_window
 			driver.click_drawn (l_drawn, center_x (l_drawn, l_select), center_y (l_drawn, l_select))
 				-- The menu opens with nothing highlighted: Down to the first, Down to the second, Return.
 			driver.press_key_drawn (l_drawn, 0xFF54)
@@ -152,7 +152,7 @@ feature -- Tests
 			create l_window.make ("Drawn tree", 320, 140)
 			l_window.set_content (l_drawn)
 			l_window.show
-			driver.pump_until_idle (300)
+			settle_window
 			l_tree := driver.describe_accessibility (l_window)
 			print (l_tree.to_string_8)
 			assert ("group", l_tree.has_substring ("group: Chart tools"))
@@ -200,7 +200,7 @@ feature -- Tests
 			create l_window.make ("Drawn widgets", 500, 340)
 			l_window.set_content (l_drawn)
 			l_window.show
-			driver.pump_until_idle (300)
+			settle_window
 			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_drawn.png")))
 			l_window.close
 		end
@@ -208,6 +208,19 @@ feature -- Tests
 feature {NONE} -- Implementation
 
 	app: GUI_APPLICATION
+
+	settle_window
+			-- Let a new window map and size itself (as simple_gui's own suite does): GTK under
+			-- WSLg maps a window over several frames, and an idle loop alone returns before that.
+		local
+			i: INTEGER
+		do
+			from i := 1 until i > 10 loop
+				app.process_events (30)
+				i := i + 1
+			end
+			driver.pump_until_idle (100)
+		end
 
 	driver: GUI_DRAWN_TEST_DRIVER
 

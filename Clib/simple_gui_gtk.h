@@ -29,7 +29,7 @@ __attribute__((weak)) int sg_q[SG_QCAP][5] = {{0}};
 __attribute__((weak)) int sg_qh = 0;
 __attribute__((weak)) int sg_qt = 0;
 __attribute__((weak)) GtkWidget *sg_w[SG_MAX] = {0};
-__attribute__((weak)) int sg_kind[SG_MAX] = {0};      /* 1 window 2 stack 3 grid 4 label 5 button 6 field 7 list 8 canvas (9 check box, 10 text area, 11 tabs; 13 table, 14 tree; 15 dropdown, 16 spin box, 17 progress bar, 18 toolbar, 19 status bar; 20 radio group, 21 segmented, 22 slider, 23 switch, 24 date, 25 time, 26 color, 27 scroll area, 28 image, 29 separator, 30 group box, 31 expander, 32 combo box, 33 tree table; 40 calendar, 41 menu button, 42 split button, 43 level bar, 44 popover, 45 search field, 46 token field, 47 path control, 48 rating, 49 rich text area) */
+__attribute__((weak)) int sg_kind[SG_MAX] = {0};      /* 1 window 2 stack 3 grid 4 label 5 button 6 field 7 list 8 canvas (9 check box, 10 text area, 11 tabs; 13 table, 14 tree; 15 dropdown, 16 spin box, 17 progress bar, 18 toolbar, 19 status bar; 20 radio group, 21 segmented, 22 slider, 23 switch, 24 date, 25 time, 26 color, 27 scroll area, 28 image, 29 separator, 30 group box, 31 expander, 32 combo box, 33 tree table; 40 calendar, 41 menu button, 42 split button, 43 level bar, 44 popover, 45 search field, 46 token field, 47 path control, 48 rating, 49 rich text area; 50 drawn view) */
 __attribute__((weak)) int sg_n = 1;                   /* id 0 is "none" */
 __attribute__((weak)) int sg_quiet = 0;               /* >0 while a programmatic change runs */
 __attribute__((weak)) GThread *sg_gui_thread = NULL;
@@ -1180,10 +1180,10 @@ static void sg_tabs_set_title(int tabs, int page, const char *title) {
 /* Device pixels per logical pixel: the surface's own scale, fractional under Wayland's
    fractional scaling (GTK 4.12+); the whole-number factor before the widget is realized. */
 static double sg_scale(int id) {
-    GtkNative *n = gtk_widget_get_native(sg_w[id]);
+    GtkNative *n = sg_w[id] ? gtk_widget_get_native(sg_w[id]) : NULL;
     GdkSurface *s = n ? gtk_native_get_surface(n) : NULL;
     double v = s ? gdk_surface_get_scale(s) : 0.0;
-    return v > 0.0 ? v : (double) gtk_widget_get_scale_factor(sg_w[id]);
+    return v > 0.0 ? v : sg_w[id] ? (double) gtk_widget_get_scale_factor(sg_w[id]) : 1.0;
 }
 static void sg_canvas_draw(GtkDrawingArea *a, cairo_t *cr, int w, int h, gpointer d) {
     int id = GPOINTER_TO_INT(d);
@@ -1246,13 +1246,183 @@ static int sg_canvas(int w, int h) {
     return id;
 }
 static int sg_scale_factor(int id) { return gtk_widget_get_scale_factor(sg_w[id]); }
-static int sg_width(int id) { return gtk_widget_get_width(sg_w[id]); }
-static int sg_height(int id) { return gtk_widget_get_height(sg_w[id]); }
+/* 0 for a slot that went empty (a drawn view destroyed with its window). */
+static int sg_width(int id) { return sg_w[id] ? gtk_widget_get_width(sg_w[id]) : 0; }
+static int sg_height(int id) { return sg_w[id] ? gtk_widget_get_height(sg_w[id]) : 0; }
 /* Keep a reference to `image' (a cairo_surface_t) and redraw. The caller keeps its own reference. */
 static void sg_canvas_present(int id, void *image) {
     if (sg_canvas_image[id]) cairo_surface_destroy(sg_canvas_image[id]);
     sg_canvas_image[id] = image ? cairo_surface_reference((cairo_surface_t *) image) : NULL;
     gtk_widget_queue_draw(sg_w[id]);
+}
+
+/* ---------- 1i: the drawn view (kind 50). A GUI_DRAWN hosts a simple_widgets window in it: a
+   canvas (its draw and resize, 9 in logical pixels) with the whole input SW needs.
+   18 pointer (c = kind + button * 16 + modifiers * 256; kind 1 press, 2 release, 3 move,
+   4 leave, 5 double press, 6 triple press; button 1 primary, 2 secondary, 3 middle),
+   19 wheel (c = delta, 120 a notch, positive away from the user), 20 key (a = GDK keyval,
+   b = 1 down or 0 up), 21 character (a = code point; Return, Tab, Backspace and Escape too,
+   as 13, 9, 8, 27, as the Windows WM_CHAR gives them), 22 focus (a = 1 in), 23 timers (a = 0
+   the tick, 1 the fast tick, 2 the dwell shot with b = its serial). Text is the key's own
+   character (no input method: committed text only, as SW has it). ---------- */
+static int sg_drawn_button(GtkGestureSingle *g) {
+    guint b = gtk_gesture_single_get_current_button(g);
+    return b == 1 ? 1 : b == 3 ? 2 : b == 2 ? 3 : 0;
+}
+static int sg_drawn_held(GdkModifierType m) {
+    return (m & GDK_BUTTON1_MASK) ? 1 : (m & GDK_BUTTON3_MASK) ? 2 : (m & GDK_BUTTON2_MASK) ? 3 : 0;
+}
+static void sg_drawn_pointer(GtkEventController *c, int id, int kind, int button, double x, double y) {
+    GdkModifierType m = gtk_event_controller_get_current_event_state(c);
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-px", GINT_TO_POINTER((int) lround(x)));
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-py", GINT_TO_POINTER((int) lround(y)));
+    sg_push5(18, id, (int) lround(x), (int) lround(y), kind + button * 16 + sg_mods(m) * 256);
+}
+static void sg_drawn_pressed(GtkGestureClick *g, int n, double x, double y, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    gtk_widget_grab_focus(sg_w[id]);
+    sg_drawn_pointer(GTK_EVENT_CONTROLLER(g), id, n == 2 ? 5 : n >= 3 ? 6 : 1, sg_drawn_button(GTK_GESTURE_SINGLE(g)), x, y);
+}
+static void sg_drawn_released(GtkGestureClick *g, int n, double x, double y, gpointer d) {
+    (void) n;
+    sg_drawn_pointer(GTK_EVENT_CONTROLLER(g), GPOINTER_TO_INT(d), 2, sg_drawn_button(GTK_GESTURE_SINGLE(g)), x, y);
+}
+static void sg_drawn_motion(GtkEventControllerMotion *c, double x, double y, gpointer d) {
+    sg_drawn_pointer(GTK_EVENT_CONTROLLER(c), GPOINTER_TO_INT(d), 3,
+        sg_drawn_held(gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(c))), x, y);
+}
+static void sg_drawn_leave(GtkEventControllerMotion *c, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    sg_push5(18, id, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-px")),
+        GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-py")),
+        4 + sg_mods(gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(c))) * 256);
+}
+static gboolean sg_drawn_scroll(GtkEventControllerScroll *c, double dx, double dy, gpointer d) {
+    int id = GPOINTER_TO_INT(d), delta = (int) lround(-dy * 120.0);
+    (void) c; (void) dx;
+    if (delta != 0)
+        sg_push5(19, id, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-px")),
+            GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-py")), delta);
+    return TRUE;
+}
+static gboolean sg_drawn_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType m, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    gunichar u = gdk_keyval_to_unicode(keyval);
+    (void) c; (void) code;
+    sg_push5(20, id, (int) keyval, 1, sg_mods(m) * 256);
+    if (keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter) u = 13;
+    else if (keyval == GDK_KEY_Tab || keyval == GDK_KEY_ISO_Left_Tab) u = 9;
+    else if (keyval == GDK_KEY_BackSpace) u = 8;
+    else if (keyval == GDK_KEY_Escape) u = 27;
+    /* Control, Alt and Super keys are shortcuts, not text */
+    if (u != 0 && !(m & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK))) sg_push5(21, id, (int) u, 0, 0);
+    return TRUE;
+}
+static void sg_drawn_key_up(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType m, gpointer d) {
+    (void) c; (void) code;
+    sg_push5(20, GPOINTER_TO_INT(d), (int) keyval, 0, sg_mods(m) * 256);
+}
+static void sg_drawn_focus_in(GtkEventControllerFocus *f, gpointer d) { (void) f; sg_push5(22, GPOINTER_TO_INT(d), 1, 0, 0); }
+static void sg_drawn_focus_out(GtkEventControllerFocus *f, gpointer d) { (void) f; sg_push5(22, GPOINTER_TO_INT(d), 0, 0, 0); }
+static gboolean sg_drawn_tick(gpointer d) { sg_push5(23, GPOINTER_TO_INT(d), 0, 0, 0); return G_SOURCE_CONTINUE; }
+static gboolean sg_drawn_fast(gpointer d) { sg_push5(23, GPOINTER_TO_INT(d), 1, 0, 0); return G_SOURCE_CONTINUE; }
+static void sg_drawn_stop(GtkWidget *w, const char *key) {
+    guint s = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(w), key));
+    if (s) { g_source_remove(s); g_object_set_data(G_OBJECT(w), key, NULL); }
+}
+static void sg_drawn_destroyed(GtkWidget *w, gpointer d) {
+    int id = sg_id_of(w);
+    (void) d;
+    /* its slot goes empty: the drawn calls below ignore a view that is gone */
+    if (id > 0 && sg_w[id] == w) sg_w[id] = NULL;
+    sg_drawn_stop(w, "sg-tick");
+    sg_drawn_stop(w, "sg-fast");
+    sg_drawn_stop(w, "sg-dwell");
+}
+static int sg_drawn(int w, int h) {
+    GtkWidget *a = g_object_new(GTK_TYPE_DRAWING_AREA, "accessible-role", GTK_ACCESSIBLE_ROLE_GROUP, NULL);
+    GtkGesture *click = gtk_gesture_click_new();
+    GtkEventController *motion = gtk_event_controller_motion_new();
+    GtkEventController *scroll = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+    GtkEventController *keys = gtk_event_controller_key_new();
+    GtkEventController *focus = gtk_event_controller_focus_new();
+    int id = sg_reg(a, 50);
+    g_object_set_data(G_OBJECT(a), "sg-drawn", GINT_TO_POINTER(1));
+    gtk_drawing_area_set_content_width(GTK_DRAWING_AREA(a), w);
+    gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(a), h);
+    gtk_widget_set_hexpand(a, TRUE);
+    gtk_widget_set_vexpand(a, TRUE);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(a), sg_canvas_draw, GINT_TO_POINTER(id), NULL);
+    g_signal_connect(a, "resize", G_CALLBACK(sg_canvas_resized), GINT_TO_POINTER(id));
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
+    g_signal_connect(click, "pressed", G_CALLBACK(sg_drawn_pressed), GINT_TO_POINTER(id));
+    g_signal_connect(click, "released", G_CALLBACK(sg_drawn_released), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(a, GTK_EVENT_CONTROLLER(click));
+    g_signal_connect(motion, "motion", G_CALLBACK(sg_drawn_motion), GINT_TO_POINTER(id));
+    g_signal_connect(motion, "leave", G_CALLBACK(sg_drawn_leave), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(a, motion);
+    g_signal_connect(scroll, "scroll", G_CALLBACK(sg_drawn_scroll), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(a, scroll);
+    g_signal_connect(keys, "key-pressed", G_CALLBACK(sg_drawn_key), GINT_TO_POINTER(id));
+    g_signal_connect(keys, "key-released", G_CALLBACK(sg_drawn_key_up), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(a, keys);
+    g_signal_connect(focus, "enter", G_CALLBACK(sg_drawn_focus_in), GINT_TO_POINTER(id));
+    g_signal_connect(focus, "leave", G_CALLBACK(sg_drawn_focus_out), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(a, focus);
+    g_signal_connect(a, "destroy", G_CALLBACK(sg_drawn_destroyed), NULL);
+    gtk_widget_set_focusable(a, TRUE);
+    return id;
+}
+/* The top-left w by h device pixels of the hosted frame (which may be larger: it grows in
+   steps), copied, so the next frame can be drawn while this one shows. */
+static void sg_drawn_present(int id, void *surface, int w, int h) {
+    cairo_surface_t *s = (cairo_surface_t *) surface, *copy;
+    cairo_t *cr;
+    if (!sg_w[id] || !s || w <= 0 || h <= 0 || cairo_surface_get_type(s) != CAIRO_SURFACE_TYPE_IMAGE) return;
+    cairo_surface_flush(s);
+    if (w > cairo_image_surface_get_width(s)) w = cairo_image_surface_get_width(s);
+    if (h > cairo_image_surface_get_height(s)) h = cairo_image_surface_get_height(s);
+    copy = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    cr = cairo_create(copy);
+    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+    cairo_set_source_surface(cr, s, 0, 0);
+    cairo_paint(cr);
+    cairo_destroy(cr);
+    if (sg_canvas_image[id]) cairo_surface_destroy(sg_canvas_image[id]);
+    sg_canvas_image[id] = copy;
+    gtk_widget_queue_draw(sg_w[id]);
+}
+static void sg_drawn_set_cursor(int id, int kind) {
+    static const char *names[] = {"default", "text", "pointer", "ew-resize", "ns-resize", "crosshair", "wait"};
+    if (!sg_w[id]) return;
+    gtk_widget_set_cursor_from_name(sg_w[id], names[kind >= 0 && kind <= 6 ? kind : 0]);
+}
+static void sg_drawn_set_ticks(int id, int tick_ms, int fast_ms) {
+    GtkWidget *w = sg_w[id];
+    if (!w) return;
+    sg_drawn_stop(w, "sg-tick");
+    sg_drawn_stop(w, "sg-fast");
+    if (tick_ms > 0) g_object_set_data(G_OBJECT(w), "sg-tick", GUINT_TO_POINTER(g_timeout_add((guint) tick_ms, sg_drawn_tick, GINT_TO_POINTER(id))));
+    if (fast_ms > 0) g_object_set_data(G_OBJECT(w), "sg-fast", GUINT_TO_POINTER(g_timeout_add((guint) fast_ms, sg_drawn_fast, GINT_TO_POINTER(id))));
+}
+static gboolean sg_drawn_dwell(gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    if (sg_w[id]) {
+        g_object_set_data(G_OBJECT(sg_w[id]), "sg-dwell", NULL);
+        sg_push5(23, id, 2, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-dwell-serial")), 0);
+    }
+    return G_SOURCE_REMOVE;
+}
+static void sg_drawn_arm_dwell(int id, int ms, int serial) {
+    GtkWidget *w = sg_w[id];
+    if (!w) return;
+    sg_drawn_stop(w, "sg-dwell");
+    g_object_set_data(G_OBJECT(w), "sg-dwell-serial", GINT_TO_POINTER(serial));
+    if (ms > 0) g_object_set_data(G_OBJECT(w), "sg-dwell", GUINT_TO_POINTER(g_timeout_add((guint) ms, sg_drawn_dwell, GINT_TO_POINTER(id))));
+}
+static void sg_drawn_set_description(int id, const char *text) {
+    if (!sg_w[id]) return;
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-drawn-tree", g_strdup(text ? text : ""), g_free);
 }
 
 /* ---------- menus ---------- */
@@ -1560,7 +1730,27 @@ static int sg_named_from_content(const char *role) {
 }
 static void sg_describe_walk(GtkWidget *w, int depth) {
     GtkWidget *c;
-    const char *role = sg_role_nick(w);
+    const char *role;
+    if (g_object_get_data(G_OBJECT(w), "sg-drawn")) {
+        /* A drawn view (1i): a group named by its label, with the hosted window's own tree under
+           it (its first line, the hosted window itself, left out), as on macOS. */
+        const char *tree = g_object_get_data(G_OBJECT(w), "sg-drawn-tree");
+        const char *label = g_object_get_data(G_OBJECT(w), "sg-a11y");
+        gchar **lines = g_strsplit(tree ? tree : "", "\n", -1);
+        int i, k;
+        for (i = 0; i < depth; i++) g_string_append(sg_describe_buf, "  ");
+        g_string_append_printf(sg_describe_buf, "group: %s\n", label ? label : "");
+        for (k = 1; lines[k]; k++) {
+            const char *s = lines[k];
+            while (*s == ' ') s++;
+            if (!*s) continue;
+            for (i = 0; i <= depth; i++) g_string_append(sg_describe_buf, "  ");
+            g_string_append_printf(sg_describe_buf, "%s\n", s);
+        }
+        g_strfreev(lines);
+        return;
+    }
+    role = sg_role_nick(w);
     const char *name = g_object_get_data(G_OBJECT(w), "sg-a11y");
     if (!name && GTK_IS_LABEL(w)) name = gtk_label_get_text(GTK_LABEL(w));
     if (!name && GTK_IS_BUTTON(w)) name = gtk_button_get_label(GTK_BUTTON(w));

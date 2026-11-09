@@ -53,6 +53,10 @@ feature {NONE} -- Initialization
 			sw_window.set_dialog_delegate (agent ask, agent choose_file)
 			application.appearance_changed_actions.extend (agent on_appearance)
 			backend.drawn_set_ticks (id, Tick_ms, 0)
+				-- laid out at the preferred size at once, so it draws and publishes its tree even
+				-- before the view's first resize (9) arrives, which corrects it (WSLg can be late)
+			sw_window.host_event ({SHELL_EVENTS}.Event_window_resize, device (a_width), device (a_height), 0)
+			sw_window.request_render
 		ensure
 			root_set: root = a_root
 		end
