@@ -73,8 +73,8 @@ The picture is scaled down to fit the space it is given, keeping its proportions
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkPicture`, scaled down to fit | `NSImageView`, scaled down proportionally | `SW_IMAGE` over a Cairo surface |
-| Files it reads | the formats GDK's texture loader reads | PNG, JPEG, GIF, TIFF, HEIC, PDF and more | PNG only (Cairo reads PNG) |
-| Looks or behaves differently | — | Gives way before other widgets when space is short. | — <!-- PROD: confirm --> |
+| Files it reads | the formats GDK's texture loader reads | PNG, JPEG, GIF, TIFF, HEIC, PDF and more | PNG, JPEG, GIF, BMP, TGA, PSD, HDR and PNM |
+| Looks or behaves differently | — | Gives way before other widgets when space is short. | Drawn centered in the space it is given, scaled to fit, keeping its proportions. |
 
 ## Design guidance
 

@@ -70,7 +70,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkSwitch` | `NSSwitch` | `SW_SWITCH` |
-| Looks or behaves differently | Aligned to the start and centered on the row. | Assistive tools see a button with the switch subrole. | — <!-- PROD: confirm --> |
+| Looks or behaves differently | Aligned to the start and centered on the row. | Assistive tools see a button with the switch subrole. | A pill track with a sliding knob, in the accent color when on. In a column it is as wide as the column, and a click anywhere along that width flips it. |
 
 ## Design guidance
 

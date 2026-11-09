@@ -68,7 +68,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkScale` | `NSSlider`, continuous | `SW_SLIDER` |
-| Looks or behaves differently | Shows the value beside the knob. Takes the spare width (or, vertical, the spare height). `set_step` sets the arrow-key step, and Page Up and Page Down move ten steps. <!-- PROD: confirm the knob stops on steps --> | At least 100 pixels long. With a step, tick marks are drawn and the knob stops on them, when the range has at most 100 steps. | A vertical slider is drawn horizontally. The value is rounded to the nearest step. |
+| Looks or behaves differently | Shows the value beside the knob. Takes the spare width (or, vertical, the spare height). `set_step` sets the arrow-key step, and Page Up and Page Down move ten steps. The user's moves land on a step from the minimum; a value set from code is kept exactly. | At least 100 pixels long. With a step, tick marks are drawn and the knob stops on them, when the range has at most 100 steps. | A vertical slider is drawn vertically, with the minimum at the bottom. The user's moves land on a step from the minimum; a value set from code is kept exactly. Arrow keys move one step, Page Up and Page Down ten, and Home and End go to the ends. |
 
 ## Design guidance
 

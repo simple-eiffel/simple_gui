@@ -69,7 +69,7 @@ Inherited: `set_accessible_label`, `set_tooltip` and the rest of the [common fea
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkExpander` | A disclosure triangle (`NSButton`) and a borderless title button, with the content below; AppKit has no single control for this | `GUI_SW_EXPANDER`, drawn |
-| Looks or behaves differently | — <!-- PROD: confirm --> | A click on the title works as well as a click on the triangle. The triangle carries the accessible name. Collapsed, the content takes no room. | — <!-- PROD: confirm --> |
+| Looks or behaves differently | A new title leaves an accessible name the program set as it was. | A click on the title works as well as a click on the triangle. The triangle carries the accessible name. Collapsed, the content takes no room. | A click anywhere on the title row opens or closes it. A chevron shows the state. Collapsed, the content takes no room. |
 
 ## Design guidance
 

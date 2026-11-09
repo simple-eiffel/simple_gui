@@ -46,7 +46,7 @@ A window opens with a time picker showing 07:30 and the line "No alarm set." `se
 
 | Feature | What it does |
 |---|---|
-| `make` | A picker showing the current time. <!-- PROD: GTK and Windows start at 00:00 (sg_time_picker (0, 0), SW_TIME_PICKER set_time (0, 0)); macOS starts at the current time --> |
+| `make` | A picker showing the current time, on every platform. |
 | `hour` | The hour shown, 0 to 23. |
 | `minute` | The minute shown, 0 to 59. |
 | `set_time (a_hour, a_minute)` | Shows that time, with no event. Requires 0 <= `a_hour` <= 23 and 0 <= `a_minute` <= 59. Ensures `hour = a_hour` and `minute = a_minute`. |
@@ -70,7 +70,7 @@ Inherited: `set_accessible_label`, `set_tooltip`, `enable`, `disable` and the re
 - Put the picker at its natural width beside a caption that says what the time is for; in a form, use a [grid](grid.md).
 - Give it an accessible label: a caption beside it is a separate widget, and the picker has no text of its own.
 - Hours are 0 to 23 in the API on every platform, whatever the locale shows. Convert in the program if you display times elsewhere.
-- Set the time you want shown with `set_time` right after `make`, so every platform starts the same.
+- Set the time you want shown with `set_time` right after `make`, for the time you want; every platform starts at the current time.
 - A time picker has no date. Pair it with a [date picker](date-picker.md) when the user needs both.
 
 ## Gallery

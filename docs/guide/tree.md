@@ -85,7 +85,7 @@ Inherited: `set_accessible_label`, `set_context_menu` and the rest of the [commo
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkListView` over a `GtkTreeListModel`, in a `GtkScrolledWindow` | `NSOutlineView` with one column and no header, inset style, in a bordered `NSScrollView` | `SW_TREE`: a drawn tree over node numbers |
-| Looks or behaves differently | — <!-- PROD: confirm --> | A node with no children shows no disclosure triangle. | Children are asked for only when a node is expanded. The arrow keys move; Left collapses, Right expands. |
+| Looks or behaves differently | A node with no children shows no disclosure triangle. | A node with no children shows no disclosure triangle. | Children are asked for only when a node is expanded. The arrow keys move; Left collapses, Right expands. |
 
 ## Design guidance
 

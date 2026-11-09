@@ -189,7 +189,7 @@ Every feature must be called on the GUI processor (`is_gui_thread`).
 
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
-| `open_file`, `save_file`, `save_file_named`, `choose_folder` | `GtkFileDialog`; extensions become a file filter (`*.txt`) | `NSOpenPanel` and `NSSavePanel`, with the title as the panel's message; extensions become content types. `choose_folder` can make a new folder. | simple_widgets' drawn file dialog, starting in the current folder; the title is not shown <!-- PROD: confirm --> |
+| `open_file`, `save_file`, `save_file_named`, `choose_folder` | `GtkFileDialog`; extensions become a file filter (`*.txt`) | `NSOpenPanel` and `NSSavePanel`, with the title as the panel's message; extensions become content types. `choose_folder` can make a new folder. | simple_widgets' drawn file dialog, starting in the current folder, with the program's title |
 | `inform`, `confirm` | `GtkAlertDialog` with OK, or Cancel and OK | `NSAlert` with OK, or OK and Cancel | simple_widgets' drawn dialog |
 | `ask` | `GtkAlertDialog` with Cancel, No and Yes; Yes is the default, Escape cancels | `NSAlert` with Yes, No and Cancel. Return is Yes, Escape is Cancel and Command-D is No. | a drawn dialog with Yes, No and Cancel |
 | `ask_text` | a modal window with the prompt, a `GtkEntry`, Cancel and OK | `NSAlert` with a text field | a drawn sheet with the title, the prompt, an `SW_TEXT_BOX`, OK and Cancel |

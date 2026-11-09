@@ -67,7 +67,7 @@ Inherited: `set_accessible_label`, `set_base_direction` and the rest of the [com
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkFrame` with the title as its label | `NSBox` with its title at the top | `SW_GROUP`: a hairline frame with the title set into its top edge |
-| Looks or behaves differently | The frame is given the title as its accessible label, since GTK's frame title is a separate label. | The content sits inside the box's own margins (8 pixels) plus 4 more on each side. | The content is a padded column. |
+| Looks or behaves differently | The frame is given the title as its accessible label, since GTK's frame title is a separate label. A new title keeps an accessible name the program set. | The content sits inside the box's own margins (8 pixels) plus 4 more on each side. | The content is a padded column. |
 
 ## Design guidance
 
@@ -75,7 +75,7 @@ Inherited: `set_accessible_label`, `set_base_direction` and the rest of the [com
 - Use short titles that name the section ("Output", "Proxy"), not sentences.
 - Do not nest group boxes; a frame inside a frame wastes room and reads poorly. Use a caption or a [separator](separator.md) inside instead.
 - Do not put a single control in a group box; give that control a clear text of its own.
-- When the title changes with the language, call `set_title`; the accessible label follows it.
+- When the title changes with the language, call `set_title`; the accessible label follows it, unless the program set its own.
 
 ## Gallery
 

@@ -64,7 +64,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkTextView` in a framed `GtkScrolledWindow` | `NSTextView` in a bordered `NSScrollView` | `SW_TEXT_BOX`, multi-line |
-| Looks or behaves differently | Wraps at words, or inside a word too long for the line. At least 80 pixels tall. Read-only also hides the text cursor. | Plain text, with undo; no curly quotes or dash substitution. Asks for at least 64 pixels of height, weakly, so a stack can give it more. | — <!-- PROD: confirm --> |
+| Looks or behaves differently | Wraps at words, or inside a word too long for the line. At least 80 pixels tall. Read-only also hides the text cursor. | Plain text, with undo; no curly quotes or dash substitution. Asks for at least 64 pixels of height, weakly, so a stack can give it more. | Wraps at words and grows with its text, never shorter than one line. Ctrl+Z and Ctrl+Y undo and redo. |
 
 ## Design guidance
 

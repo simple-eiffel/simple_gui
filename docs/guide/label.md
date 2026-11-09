@@ -64,7 +64,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkLabel`, aligned to the start | `NSTextField` made as a label | `SW_LABEL` |
-| Looks or behaves differently | Wrapping uses the width as the label's natural width (`max_width_chars`) and breaks at words, or inside a word when one is too long. | Wrapping sets a fixed layout width from the font's average character width. A one-line label gives way first when space runs short and ends in "…". | — <!-- PROD: confirm --> |
+| Looks or behaves differently | Wrapping uses the width as the label's natural width (`max_width_chars`) and breaks at words, or inside a word when one is too long. | Wrapping sets a fixed layout width from the font's average character width. A one-line label gives way first when space runs short and ends in "…". | Wrapping caps the width at the wrap width times the font's average character width, and breaks at words. A one-line label that does not fit gets no "…". |
 
 ## Design guidance
 

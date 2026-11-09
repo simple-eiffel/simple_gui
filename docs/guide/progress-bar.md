@@ -64,7 +64,7 @@ Inherited: `set_accessible_label`, `set_tooltip`, `show`, `hide` and the rest of
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkProgressBar`, expanding horizontally, centered vertically | `NSProgressIndicator`, bar style, determinate, 0 to 100 | `SW_PROGRESS`: a drawn track with the fill in the accent color |
-| Looks or behaves differently | The percent is kept as given, so `value` reads back exactly. | At least 100 pixels wide, since a bar has no natural width of its own. | — <!-- PROD: confirm --> |
+| Looks or behaves differently | The percent is kept as given, so `value` reads back exactly. | At least 100 pixels wide, since a bar has no natural width of its own. | A thin bar in the accent color, with no percent caption. It has no width of its own and takes the width it is given. The percent reads back exactly. |
 
 ## Design guidance
 

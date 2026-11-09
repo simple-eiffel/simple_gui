@@ -65,7 +65,7 @@ Inherited: `set_base_direction`, `show`, `hide` and the rest of the [common feat
 
 **Events:** none. `set_position` fires nothing, and the user's drag has no event: read `position` when you need it (for example, to save it when the window closes).
 
-**Accessibility:** a screen reader goes through the panes; the divider itself is the toolkit's. On macOS the splitter reads as `generic`, which `describe_accessibility` skips. <!-- PROD: confirm the role on GTK and Windows --> Label the panes' contents, not the splitter.
+**Accessibility:** a screen reader goes through the panes; the divider itself is the toolkit's. On macOS and Windows the splitter reads as `generic`, which `describe_accessibility` skips; on Linux GTK gives it the role `group`. Label the panes' contents, not the splitter.
 
 **Sizes.** When the splitter grows, the first pane keeps its size and the second takes the change. A position set before the window shows is kept and applied once the splitter has a size.
 

@@ -62,7 +62,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`. See als
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkSeparator` | `NSBox`, separator type, 1 pixel thick | `SW_SEPARATOR`, an etched line |
-| Looks or behaves differently | — | — | — <!-- PROD: confirm --> |
+| Looks or behaves differently | — | — | The line sits in a slot 9 pixels thick. |
 
 ## Design guidance
 

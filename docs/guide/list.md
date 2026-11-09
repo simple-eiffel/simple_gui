@@ -62,7 +62,7 @@ A window opens with a list of three books, none selected, and the line "Pick a b
 
 Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the rest of the [common features](widget.md).
 
-**Events:** `selection_actions` fires with the row number when the user selects a row. Rows are 1-based; check for 0, which some toolkits send when the selection is cleared. `select_row` never fires it: its postcondition is `selection_actions.fire_count = old selection_actions.fire_count`.
+**Events:** `selection_actions` fires with the row number when the user selects a row. Rows are 1-based; check for 0, which is sent when the user clears the selection (Linux and macOS; on Windows a click always selects a row). `select_row` never fires it: its postcondition is `selection_actions.fire_count = old selection_actions.fire_count`.
 
 **Accessibility:** the role is `list`, and each row is a `list-item` read by its text. The list has no visible text of its own, so give it `set_accessible_label` with what the rows are ("Books", "Recent files").
 
@@ -71,7 +71,7 @@ Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the res
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkListBox` (single selection, `boxed-list` style) in a `GtkScrolledWindow` | `NSTableView` with one column and no header, inset style, in a bordered `NSScrollView` | `SW_TEXT_LIST`: a drawn list that names its rows for screen readers |
-| Looks or behaves differently | At least 80 pixels tall. A cleared selection sends row 0. | A cleared selection sends no event. | — <!-- PROD: confirm --> |
+| Looks or behaves differently | At least 80 pixels tall. A cleared selection sends row 0. | A cleared selection sends row 0. | Starts 120 pixels tall. A click always selects a row, so the user has no way to clear the selection and row 0 does not arrive. |
 
 ## Design guidance
 

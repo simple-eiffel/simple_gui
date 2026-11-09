@@ -67,8 +67,8 @@ Every command requires `is_gui_thread`: call it only from the GUI processor, nev
 | Accessible label and description | The accessible label and description properties | `accessibilityLabel` and `accessibilityHelp` | The UI Automation tree simple_shell publishes |
 | Tooltip | `gtk_widget_set_tooltip_text` | The view's `toolTip` (on the scroll bars too, for widgets in a scroll view) | The simple_widgets hint |
 | Context menu | A `GtkPopoverMenu` where the secondary click lands | The view's `menu` | The model's items, replacing the widget's own right-click menu |
-| Hiding | — <!-- PROD: confirm --> | A hidden widget in a stack gives up its slot, so no gap is left. | — <!-- PROD: confirm --> |
-| Disabling | — <!-- PROD: confirm --> | A spin box disables its field and stepper; a radio group disables every radio. | — <!-- PROD: confirm --> |
+| Hiding | A hidden widget in a stack gives up its slot, so no gap is left. | A hidden widget in a stack gives up its slot, so no gap is left. | A hidden widget in a stack gives up its slot, so no gap is left. |
+| Disabling | Disabling a container dims everything inside it. | A spin box disables its field and stepper; a radio group disables every radio. | A disabled widget is drawn muted and takes no input. Disabling a container does not pass down to the widgets inside it. |
 
 ## Design guidance
 

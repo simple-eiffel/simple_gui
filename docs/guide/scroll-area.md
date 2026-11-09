@@ -68,8 +68,8 @@ Inherited: `set_base_direction`, `show`, `hide` and the rest of the [common feat
 
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
-| Native control | `GtkScrolledWindow`, set to expand both ways | `NSScrollView` without a background; scroll bars show when needed and hide when idle | `SW_SCROLL_AREA`: a viewport over the child, with a drawn scroll bar <!-- PROD: confirm the 300-pixel height it is made with --> |
-| Looks or behaves differently | — <!-- PROD: confirm --> | The content sits in a flipped holder at least as large as the visible area. | The mouse wheel scrolls and the drawn thumb drags. |
+| Native control | `GtkScrolledWindow`, set to expand both ways | `NSScrollView` without a background; scroll bars show when needed and hide when idle | `SW_SCROLL_AREA`: a viewport over the child, with a drawn scroll bar. It is made 300 pixels tall, which is its natural height, so give it room. |
+| Looks or behaves differently | — | The content sits in a flipped holder at least as large as the visible area. | The mouse wheel scrolls and the drawn thumb drags. |
 
 ## Design guidance
 

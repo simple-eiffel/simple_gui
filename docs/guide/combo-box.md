@@ -69,7 +69,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkEntry`, read as a combo box, whose arrow opens a popover of the options | `NSComboBox`, completing typed text from the options | `SW_COMBO`, editable |
-| Looks or behaves differently | About 12 characters wide by default. Return commits even when the text is unchanged. <!-- PROD: confirm --> | Fires only when the committed text differs from the last one. | Return and picking an option commit; leaving the box does not yet. <!-- PROD: confirm --> |
+| Looks or behaves differently | About 12 characters wide by default. | — | — |
 
 ## Design guidance
 

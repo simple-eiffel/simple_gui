@@ -340,7 +340,7 @@ feature {NONE} -- Menus and toolbars
 			l_row.extend (l_export)
 			l_row.extend (l_split)
 			shoot ("menu-button", "Menu button", 300, 80, l_row)
-			shoot ("menus", "Menus", 300, 80, create {GUI_LABEL}.make ("The menu bar is at the top of the screen."))
+			shoot ("menus", "Menus", 360, 80, create {GUI_LABEL}.make ("The menu bar is at the top of the screen."))
 			shoot ("dialogs", "Dialogs", 300, 80, create {GUI_BUTTON}.make ("Open..."))
 		end
 

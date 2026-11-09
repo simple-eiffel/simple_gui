@@ -74,7 +74,7 @@ Inherited: `set_accessible_label`, `set_context_menu` and the rest of the [commo
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkColumnView` over a `GtkTreeListModel` | `NSOutlineView` with columns and a header; column 1 holds the outline | `SW_TREE_TABLE`: `SW_TREE`'s rows with `SW_DATA_GRID`'s columns |
-| Looks or behaves differently | — <!-- PROD: confirm --> | Columns resize but cannot be reordered; alternating row colors. | Column 1 is the tree itself (indent, arrows, label); the header names the columns. |
+| Looks or behaves differently | Column 1 holds the triangle and the label; the other columns are labels. | Columns resize but cannot be reordered; alternating row colors. | Column 1 is the tree itself (indent, arrows, label); the header names the columns. |
 
 ## Design guidance
 
@@ -82,7 +82,7 @@ Inherited: `set_accessible_label`, `set_context_menu` and the rest of the [commo
 - Put the name of each item in column 1, and details in the others. Keep detail columns short (numbers, dates, sizes).
 - Fill the cells right after `add_root` or `add_child`, using `last_node`.
 - A tree table has no sort header. If users must sort, a flat [table](table.md) may serve them better.
-- Column numbers in `cell` and `set_cell` follow the order of the titles you gave, whatever the window's direction. <!-- PROD: confirm the columns mirror right to left on each platform -->
+- Column numbers in `cell` and `set_cell` follow the order of the titles you gave, whatever the window's direction. Right to left, the columns mirror on Linux and macOS; the Windows tree table does not mirror them, and column 1 stays at the left.
 
 ## Gallery
 

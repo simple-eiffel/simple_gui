@@ -116,8 +116,8 @@ The rest are the [common features](widget.md).
 |---|---|---|---|
 | Native control | `GtkDrawingArea`, which paints the image at 1/`scale` | an `NSView` that draws the image, tagged sRGB, over the window background | `SW_CANVAS`, which shows the image 1:1 |
 | `scale` | the surface's scale, fractional under Wayland's fractional scaling | the window's backing scale (1.0 or 2.0) | the canvas's device scale |
-| Motion (`kind` 3) | every move over the canvas, with `button` 0 | only while a button is held, with that button | — <!-- PROD: confirm --> |
-| Looks or behaves differently | Only the primary button's presses are reported. | While the user drags a window edge, the last picture stays at its own size, anchored at the top left, and one resize event arrives when the drag ends. The asked-for size is a preference: the canvas gives way first, so the window keeps its size. | Keys that type nothing report only the arrows, Home, End, Page Up, Page Down, Delete and F1 to F12. |
+| Motion (`kind` 3) | every move over the canvas, with `button` 0 | only while a button is held, with that button | every move over the canvas, with `button` 0 |
+| Looks or behaves differently | Hears every mouse button: primary, middle and secondary. | While the user drags a window edge, the last picture stays at its own size, anchored at the top left, and one resize event arrives when the drag ends. The asked-for size is a preference: the canvas gives way first, so the window keeps its size. | Only the primary button's presses and releases are reported. Keys that type nothing report only the arrows, Home, End, Page Up, Page Down, Delete and F1 to F12. |
 
 ## Design guidance
 

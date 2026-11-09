@@ -96,7 +96,7 @@ Positions are 1-based characters, counted as `STRING_32` counts them, and a rang
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkTextView` with tags, in a scrolled window | `NSTextView` with attributes, in a scroll view | `GUI_SW_RICH_TEXT_AREA`, an `SW_TEXT_BOX` with a style per character, drawn as `SW_MARK`s |
-| Looks or behaves differently | — | The text view takes no pictures. | Keeps and reads back each range's point size, but does not draw it yet: the text shows at one size. |
+| Looks or behaves differently | — | The text view takes no pictures. | Bold, italic and size are real glyphs; color and underline are drawn over them. |
 
 ## Design guidance
 

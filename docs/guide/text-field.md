@@ -73,7 +73,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkEntry` | `NSTextField` | `SW_TEXT_BOX`, single line |
-| Looks or behaves differently | — | — | — <!-- PROD: confirm --> |
+| Looks or behaves differently | — | — | — |
 
 ## Design guidance
 

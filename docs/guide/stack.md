@@ -73,7 +73,7 @@ Inherited: `set_base_direction`, `show`, `hide` and the rest of the [common feat
 
 **Layout is always by containers.** simple_gui has no absolute positions, no frames and no fixed coordinates, except inside a [canvas](canvas.md). Fonts, translations and right-to-left text all change sizes, and containers adjust to them. Nest stacks and [grids](grid.md) to build any layout: a row inside a column, a grid inside a row.
 
-**Margins.** A stack keeps a margin around its children on the leading, trailing, top and bottom sides: 12 logical pixels on Linux and macOS. The margins are leading and trailing, not left and right, so they mirror under right to left. There is no feature to change them. <!-- PROD: confirm Windows; SW_COLUMN is made with padding 0 -->
+**Margins.** A stack keeps a margin around its children on the leading, trailing, top and bottom sides: 12 logical pixels on every platform. The margins are leading and trailing, not left and right, so they mirror under right to left. There is no feature to change them. On Windows the margin is padding on the column or row, scaled with the desktop, and the gaps between children scale the same way. A stack's `x`, `y`, `width` and `height` leave the margin out.
 
 **Spacing.** `spacing` is the gap between neighboring children along the stack, 6 logical pixels unless you call `set_spacing`.
 

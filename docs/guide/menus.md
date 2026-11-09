@@ -116,7 +116,7 @@ On macOS, About and Quit are not in Help and File: they are at the top and botto
 | Edit items | act on the focused widget's text actions; no shortcut is shown, since text fields take Ctrl+Z, X, C, V and A themselves | go through the responder chain; an item without a shortcut gets the standard one (Command-Z, Shift-Command-Z, Command-X, C, V, A) | act on the focused widget |
 | Menus the program does not add | none | the application menu (Services, Hide, Hide Others, Show All) and a Window menu (Minimize, Zoom, Enter Full Screen, Bring All to Front), which stays after the program's menus and before Help | none |
 | Context menu | a `GtkPopoverMenu` where the secondary click lands | the view's `NSMenu`, on a right-click, a Control-click or a two-finger click | replaces the widget's own right-click menu |
-| Looks or behaves differently | A separator starts a new section. The bar is hidden while there are no menus. | The menu bar belongs to the application, not a window. | — <!-- PROD: confirm --> |
+| Looks or behaves differently | A separator starts a new section. The bar is hidden while there are no menus. | The menu bar belongs to the application, not a window. | Each window draws its own bar at the top, left out while there are no menus. A separator is a drawn line. An Edit item the focused widget cannot act on is grayed. |
 
 ## Design guidance
 

@@ -89,7 +89,7 @@ The buttons are ordinary [buttons](button.md): `enable`, `disable`, `set_text` a
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | a horizontal `GtkBox` with the `toolbar` style class, above the content | an `NSToolbar` in the title bar; each button is the view of an `NSToolbarItem` | a row of real buttons above the content, known to screen readers as a toolbar |
-| Separator | a vertical `GtkSeparator` | a thin line item (NSToolbar has drawn no separator of its own since macOS 11), left out of the accessibility tree | — <!-- PROD: confirm --> |
+| Separator | a vertical `GtkSeparator` | a thin line item (NSToolbar has drawn no separator of its own since macOS 11), left out of the accessibility tree | a vertical `SW_SEPARATOR`, an etched line in a slot 9 pixels wide |
 | Looks or behaves differently | | Users cannot customize it. When the window is narrow, items move to the overflow menu. The toolbar adds to the title bar, so the content keeps the size the program asked for. | |
 
 ## Design guidance

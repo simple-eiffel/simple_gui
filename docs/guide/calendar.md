@@ -65,7 +65,7 @@ Inherited: `set_accessible_label`, `set_tooltip`, `enable`, `disable` and the re
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkCalendar` | `NSDatePicker` in its calendar style, dates only, without a border | `SW_CALENDAR` |
-| Looks or behaves differently | — <!-- PROD: confirm --> | — <!-- PROD: confirm --> | Today wears a ring; days outside the month are muted but can be picked. |
+| Looks or behaves differently | Keeps its natural size, aligned to the start. | — | Today wears a ring; days outside the month are muted but can be picked. |
 
 ## Design guidance
 

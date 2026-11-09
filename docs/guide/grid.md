@@ -75,7 +75,7 @@ Inherited: `set_base_direction`, `show`, `hide` and the rest of the [common feat
 
 **Columns and stretching.** Columns take their natural widths, and the spare width is left at the end. `set_stretching_column` gives the spare width to one column; `set_homogeneous_columns (True)` makes all columns equal and shares the spare width among them. A plain grid keeps its columns at their natural width.
 
-**Margins and spacing.** On macOS a grid keeps a 12-pixel margin on its leading, trailing, top and bottom sides, as a stack does; on Linux the grid itself has none, and a grid inside a stack gets the stack's. <!-- PROD: confirm Windows --> The gaps between cells are `row_spacing` and `column_spacing` (6 and 12 by default).
+**Margins and spacing.** A grid keeps a margin of 12 logical pixels on its leading, trailing, top and bottom sides on every platform, as a stack does. On Windows the margin is padding on the grid, scaled with the desktop; on Linux it is widget margins. A grid's `x`, `y`, `width` and `height` leave the margin out. The gaps between cells are `row_spacing` and `column_spacing` (6 and 12 by default).
 
 **Right to left.** Column 1 is the leading column: on the left in a left-to-right window, on the right under `Direction_right_to_left`. Put captions in column 1 and they stay before their fields in either direction.
 

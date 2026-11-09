@@ -66,7 +66,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkSpinButton`, numbers only, no decimals | An `NSTextField` with an `NSStepper` beside it, in one view | `SW_NUMBER_BOX`, drawn |
-| Looks or behaves differently | Page Up and Page Down move ten steps. | The number is right-aligned and always left to right. The field is wide enough for the range's longest number. The stepper does not wrap from the maximum to the minimum. | — <!-- PROD: confirm --> |
+| Looks or behaves differently | Page Up and Page Down move ten steps. | The number is right-aligned and always left to right. The field is wide enough for the range's longest number. The stepper does not wrap from the maximum to the minimum. | A minus button on the left and a plus button on the right, with the number centered between them. The mouse wheel steps it. The value stops at the minimum and maximum and does not wrap. |
 
 ## Design guidance
 

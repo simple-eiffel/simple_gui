@@ -74,7 +74,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkSearchEntry` | `NSSearchField` | `GUI_SW_SEARCH_FIELD`, an `SW_TEXT_BOX` with a clear button |
-| Looks or behaves differently | Return fires `search_actions` even when the field is empty. <!-- PROD: confirm --> | The search look and a clear button. Return with text fires `search_actions`; the clear button fires `change_actions`. | The hint is "Search" until `set_placeholder`; Return fires even when empty. <!-- PROD: confirm --> |
+| Looks or behaves differently | Return fires `search_actions` even when the field is empty. | The search look and a clear button. Return with text fires `search_actions`; the clear button fires `change_actions`. | The hint is "Search" until `set_placeholder`; Return fires even when the field is empty. |
 
 ## Design guidance
 

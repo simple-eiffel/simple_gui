@@ -64,7 +64,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkButton` | `NSButton`, push style | `SW_BUTTON`, drawn |
-| Looks or behaves differently | Keeps its natural width, aligned to the start. | Inside a `GUI_TOOLBAR` the button becomes the view of an `NSToolbarItem`, and the item's label follows `set_text`. | — <!-- PROD: confirm --> |
+| Looks or behaves differently | Keeps its natural width, aligned to the start. | Inside a `GUI_TOOLBAR` the button becomes the view of an `NSToolbarItem`, and the item's label follows `set_text`. | In a column it keeps its natural width, aligned to the start; in a row it fills the row's height. |
 
 ## Design guidance
 

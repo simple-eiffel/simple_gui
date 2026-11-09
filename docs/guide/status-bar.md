@@ -71,7 +71,7 @@ Inherited: `set_accessible_label`, `show`, `hide` and the rest of the [common fe
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | A `GtkLabel` with the status role, in a strip below the content under a separator (`GtkStatusbar` is deprecated since GTK 4.10) | A label in the window's bottom bar: the content border on the bottom edge, as Finder's windows have | `SW_STATUS_BAR`: a strip below the content; the text is its left message |
-| Looks or behaves differently | — <!-- PROD: confirm --> | Small secondary text, 24 pixels tall; the program's content ends above the bar. The text ends in "…" when it does not fit. | Mono text on the theme's variant surface, with a hairline above. |
+| Looks or behaves differently | Plain text, left aligned, with 8 pixels of margin at the sides and 3 above and below. | Small secondary text, 24 pixels tall; the program's content ends above the bar. The text ends in "…" when it does not fit. | Mono text on the theme's variant surface, with a hairline above. |
 
 ## Design guidance
 

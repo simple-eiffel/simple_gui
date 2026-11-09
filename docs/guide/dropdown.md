@@ -70,7 +70,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkDropDown` over a `GtkStringList` | `NSPopUpButton` | `SW_COMBO`, read-only, so a click anywhere opens the menu |
-| Looks or behaves differently | Keeps its natural width, aligned to the start. | Duplicate texts are kept (items are added through the button's menu). | — <!-- PROD: confirm --> |
+| Looks or behaves differently | Keeps its natural width, aligned to the start. | Duplicate texts are kept (items are added through the button's menu). | In a column it is as wide as the column. |
 
 ## Design guidance
 

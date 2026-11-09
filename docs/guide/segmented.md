@@ -75,7 +75,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkToggleButton`s joined in a box with the `linked` style | `NSSegmentedControl`, select one | `SW_SEGMENTED`, drawn |
-| Looks or behaves differently | Aligned to the start. | Each segment is as wide as its text. | — <!-- PROD: confirm --> |
+| Looks or behaves differently | Aligned to the start. | Each segment is as wide as its text. | Each segment is as wide as its text plus 26 pixels, and the control is 32 pixels tall. |
 
 ## Design guidance
 
