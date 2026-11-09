@@ -115,16 +115,124 @@ feature -- User actions
 			selected: a_list.selected_index = a_row
 		end
 
-	choose_option (a_dropdown: GUI_DROPDOWN; a_row: INTEGER)
-			-- Choose a row as a user would (fires selection).
+	choose_option (a_chooser: GUI_CHOOSER; a_row: INTEGER)
+			-- Choose a dropdown's row, a radio or a segment as a user would (fires selection
+			-- when it is another one).
 		require
 			has_application: has_application
-			valid: 1 <= a_row and a_row <= a_dropdown.count
+			valid: 1 <= a_row and a_row <= a_chooser.count
 		do
-			backend.test_choose (a_dropdown.id, a_row)
+			backend.test_choose (a_chooser.id, a_row)
 			settle
 		ensure
-			selected: a_dropdown.selected_index = a_row
+			selected: a_chooser.selected_index = a_row
+		end
+
+	set_slider (a_slider: GUI_SLIDER; a_value: INTEGER)
+			-- Drag the knob to `a_value' as a user would (fires change on a change).
+		require
+			has_application: has_application
+			in_range: a_slider.minimum <= a_value and a_value <= a_slider.maximum
+		do
+			backend.test_slide (a_slider.id, a_value)
+			settle
+		ensure
+			set: a_slider.value = a_value
+		end
+
+	flip_switch (a_switch: GUI_SWITCH)
+			-- Click the switch as a user would (fires toggled).
+		require
+			has_application: has_application
+		do
+			backend.test_click (a_switch.id)
+			settle
+		ensure
+			flipped: a_switch.is_on /= old a_switch.is_on
+		end
+
+	set_date (a_picker: GUI_DATE_PICKER; y, m, d: INTEGER)
+			-- Enter a date as a user would (fires change on a change).
+		require
+			has_application: has_application
+			valid: a_picker.is_valid_date (y, m, d)
+		do
+			backend.test_set_date (a_picker.id, y * 10000 + m * 100 + d)
+			settle
+		ensure
+			set: a_picker.year = y and a_picker.month = m and a_picker.day = d
+		end
+
+	set_time (a_picker: GUI_TIME_PICKER; h, m: INTEGER)
+			-- Enter a time as a user would (fires change on a change).
+		require
+			has_application: has_application
+			valid_hour: 0 <= h and h <= 23
+			valid_minute: 0 <= m and m <= 59
+		do
+			backend.test_set_date (a_picker.id, h * 60 + m)
+			settle
+		ensure
+			set: a_picker.hour = h and a_picker.minute = m
+		end
+
+	set_color (a_chooser: GUI_COLOR_CHOOSER; a_color: NATURAL_32)
+			-- Choose a color as a user would (fires change on a change).
+		require
+			has_application: has_application
+			rgb: a_color <= 0xFFFFFF
+		do
+			backend.test_set_color (a_chooser.id, a_color.to_integer_32)
+			settle
+		ensure
+			set: a_chooser.color = a_color
+		end
+
+	type_combo (a_combo: GUI_COMBO_BOX; a_text: READABLE_STRING_GENERAL)
+			-- Type `a_text' and press Return, as a user would (fires change on a change).
+		require
+			has_application: has_application
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_text)
+			backend.test_type_combo (a_combo.id, l_c.item)
+			settle
+		ensure
+			set: a_combo.text.same_string_general (a_text)
+		end
+
+	pick_combo_option (a_combo: GUI_COMBO_BOX; i: INTEGER)
+			-- Pick option `i' from the list, as a user would (fires change on a change).
+		require
+			has_application: has_application
+			valid: 1 <= i and i <= a_combo.count
+		do
+			backend.test_choose (a_combo.id, i)
+			settle
+		ensure
+			set: a_combo.text.same_string (a_combo.i_th (i))
+		end
+
+	toggle_expander (an_expander: GUI_EXPANDER)
+			-- Click the expander's title as a user would (fires toggled).
+		require
+			has_application: has_application
+		do
+			backend.test_toggle_expander (an_expander.id)
+			settle
+		ensure
+			flipped: an_expander.is_expanded /= old an_expander.is_expanded
+		end
+
+	cancel_dialogs_after (a_ms: INTEGER)
+			-- Cancel each dialog `a_ms' milliseconds after it opens (0: never), so tests of
+			-- GUI_DIALOGS run unattended.
+		require
+			has_application: has_application
+			not_negative: a_ms >= 0
+		do
+			backend.test_auto_cancel_dialogs (a_ms)
 		end
 
 	enter_number (a_spin: GUI_SPIN_BOX; a_value: INTEGER)
@@ -228,13 +336,16 @@ feature -- User actions
 feature -- Evidence
 
 	snapshot (a_window: GUI_WINDOW; a_path: PATH): BOOLEAN
-			-- Render `a_window' to a PNG at `a_path'.
+			-- Render `a_window' to a PNG at `a_path', after letting the loop settle: a
+			-- change made just before (a label set, rows added) is laid out first, since GTK
+			-- draws nothing for a widget whose layout is still pending.
 		require
 			has_application: has_application
 			open: not a_window.is_closed
 		local
 			l_c: C_STRING
 		do
+			settle
 			l_c := backend.to_c (a_path.name)
 			Result := backend.snapshot (a_window.id, l_c.item)
 		end

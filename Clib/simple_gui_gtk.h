@@ -28,7 +28,7 @@ __attribute__((weak)) int sg_q[SG_QCAP][5] = {{0}};
 __attribute__((weak)) int sg_qh = 0;
 __attribute__((weak)) int sg_qt = 0;
 __attribute__((weak)) GtkWidget *sg_w[SG_MAX] = {0};
-__attribute__((weak)) int sg_kind[SG_MAX] = {0};      /* 1 window 2 stack 3 grid 4 label 5 button 6 field 7 list 8 canvas (9 check box, 10 text area, 11 tabs; 13 table, 14 tree; 15 dropdown, 16 spin box, 17 progress bar, 18 toolbar, 19 status bar) */
+__attribute__((weak)) int sg_kind[SG_MAX] = {0};      /* 1 window 2 stack 3 grid 4 label 5 button 6 field 7 list 8 canvas (9 check box, 10 text area, 11 tabs; 13 table, 14 tree; 15 dropdown, 16 spin box, 17 progress bar, 18 toolbar, 19 status bar; 20 radio group, 21 segmented, 22 slider, 23 switch, 24 date, 25 time, 26 color, 27 scroll area, 28 image, 29 separator, 30 group box, 31 expander, 32 combo box, 33 tree table) */
 __attribute__((weak)) int sg_n = 1;                   /* id 0 is "none" */
 __attribute__((weak)) int sg_quiet = 0;               /* >0 while a programmatic change runs */
 __attribute__((weak)) GThread *sg_gui_thread = NULL;
@@ -1077,7 +1077,7 @@ static int sg_is_visible(int id) { return gtk_widget_get_visible(sg_w[id]) ? 1 :
 static void sg_set_direction(int id, int d) {
     GtkTextDirection l_dir = d == 1 ? GTK_TEXT_DIR_LTR : d == 2 ? GTK_TEXT_DIR_RTL : GTK_TEXT_DIR_NONE;
     gtk_widget_set_direction(sg_w[id], l_dir);
-    if (sg_kind[id] == 7 || sg_kind[id] == 13 || sg_kind[id] == 14) {
+    if (sg_kind[id] == 7 || sg_kind[id] == 13 || sg_kind[id] == 14 || sg_kind[id] == 33) {
         g_object_set_data(G_OBJECT(sg_w[id]), "sg-dir", GINT_TO_POINTER((int) l_dir + 1));
         sg_direction_tree(sg_w[id], l_dir);
     }
@@ -1559,6 +1559,16 @@ static int sg_direction_of(int id) {
 __attribute__((weak)) int sg_dialog_done = 0;
 __attribute__((weak)) char *sg_dialog_path = NULL;
 __attribute__((weak)) int sg_dialog_choice = -1;
+__attribute__((weak)) int sg_auto_cancel_ms = 0;   /* tests: cancel each dialog this long after it opens */
+
+static gboolean sg_cancel_now(gpointer c) { g_cancellable_cancel(G_CANCELLABLE(c)); return G_SOURCE_REMOVE; }
+/* A cancellable for one dialog; with auto-cancel on, a timer cancels it (the timer holds a reference). */
+static GCancellable *sg_dialog_cancellable(void) {
+    GCancellable *c = g_cancellable_new();
+    if (sg_auto_cancel_ms > 0) g_timeout_add_full(G_PRIORITY_DEFAULT, (guint) sg_auto_cancel_ms, sg_cancel_now, g_object_ref(c), g_object_unref);
+    return c;
+}
+static void sg_test_auto_cancel_dialogs(int ms) { sg_auto_cancel_ms = ms > 0 ? ms : 0; }
 
 static void sg_open_done(GObject *src, GAsyncResult *res, gpointer d) {
     GFile *f = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(src), res, NULL);
@@ -1593,9 +1603,13 @@ static const char *sg_open_file(int win, const char *title, int save, const char
     }
     gtk_file_dialog_set_modal(dlg, TRUE);
     sg_dialog_done = 0;
-    if (save) gtk_file_dialog_save(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, NULL, sg_save_done, NULL);
-    else gtk_file_dialog_open(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, NULL, sg_open_done, NULL);
-    sg_wait_dialog();
+    {
+        GCancellable *c = sg_dialog_cancellable();
+        if (save) gtk_file_dialog_save(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_save_done, NULL);
+        else gtk_file_dialog_open(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_open_done, NULL);
+        sg_wait_dialog();
+        g_object_unref(c);
+    }
     g_object_unref(dlg);
     return sg_dialog_path;
 }
@@ -1613,11 +1627,623 @@ static int sg_message(int win, const char *title, const char *text, int confirm)
     gtk_alert_dialog_set_cancel_button(dlg, 0);
     gtk_alert_dialog_set_default_button(dlg, confirm ? 1 : 0);
     sg_dialog_done = 0; sg_dialog_choice = -1;
-    gtk_alert_dialog_choose(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, NULL, sg_alert_done, NULL);
-    sg_wait_dialog();
+    {
+        GCancellable *c = sg_dialog_cancellable();
+        gtk_alert_dialog_choose(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_alert_done, NULL);
+        sg_wait_dialog();
+        g_object_unref(c);
+    }
     g_object_unref(dlg);
     return confirm ? (sg_dialog_choice == 1 ? 1 : 0) : 1;
 }
+
+/* ---------- 1h: radio group (20) and segmented control (21) - event 4, a = choice;
+   slider (22) - 2, a = value, on every move; switch (23) - 12, a = 1 on; date (24) - 2,
+   a = y*10000 + m*100 + d; time (25) - 2, a = h*60 + m; color (26) - 2, a = 0xRRGGBB;
+   scroll area (27); image (28); separator (29); group box (30); expander (31) - 12,
+   a = 1 open; editable combo (32) - 2 on a commit; tree table (33) - the tree's 4 and 15.
+   Every setter is quiet; the sg_test_ hooks act as a user and emit. ---------- */
+
+/* Radio group and segmented control: a box of grouped buttons, each carrying the group's id
+   ("sg-id") and its 1-based place ("sg-index"); the box answers for the group. */
+static void sg_on_choice(GtkWidget *b, gpointer d) {
+    gboolean on;
+    (void) d;
+    on = GTK_IS_CHECK_BUTTON(b) ? gtk_check_button_get_active(GTK_CHECK_BUTTON(b))
+                                : gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(b));
+    if (on && !sg_quiet) sg_push(4, sg_id_of(b), GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-index")), 0);
+}
+static int sg_choices(int horizontal, int segmented) {
+    GtkWidget *box = g_object_new(GTK_TYPE_BOX,
+        "orientation", (horizontal || segmented) ? GTK_ORIENTATION_HORIZONTAL : GTK_ORIENTATION_VERTICAL,
+        "spacing", segmented ? 0 : 4, "accessible-role", GTK_ACCESSIBLE_ROLE_RADIO_GROUP, NULL);
+    if (segmented) gtk_widget_add_css_class(box, "linked");
+    gtk_widget_set_halign(box, GTK_ALIGN_START);
+    return sg_reg(box, segmented ? 21 : 20);
+}
+static int sg_radio_group(int horizontal) { return sg_choices(horizontal, 0); }
+static int sg_segmented(void) { return sg_choices(1, 1); }
+static int sg_choice_count(int id) {
+    int n = 0; GtkWidget *c;
+    for (c = gtk_widget_get_first_child(sg_w[id]); c; c = gtk_widget_get_next_sibling(c)) n++;
+    return n;
+}
+static GtkWidget *sg_choice_at(int id, int i) {
+    GtkWidget *c; int n = 1;
+    for (c = gtk_widget_get_first_child(sg_w[id]); c; c = gtk_widget_get_next_sibling(c), n++) if (n == i) return c;
+    return NULL;
+}
+static void sg_choice_set(GtkWidget *b, gboolean on) {
+    if (GTK_IS_CHECK_BUTTON(b)) gtk_check_button_set_active(GTK_CHECK_BUTTON(b), on);
+    else gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(b), on);
+}
+static void sg_choices_extend(int id, const char *t) {
+    GtkWidget *first = gtk_widget_get_first_child(sg_w[id]), *b;
+    int n = sg_choice_count(id) + 1;
+    if (sg_kind[id] == 21) {
+        b = g_object_new(GTK_TYPE_TOGGLE_BUTTON, "label", t, "accessible-role", GTK_ACCESSIBLE_ROLE_RADIO, NULL);
+        if (first) gtk_toggle_button_set_group(GTK_TOGGLE_BUTTON(b), GTK_TOGGLE_BUTTON(first));
+        g_signal_connect(b, "toggled", G_CALLBACK(sg_on_choice), NULL);
+    } else {
+        /* a radio from the start: the first button has no group yet and would read as a check box */
+        b = g_object_new(GTK_TYPE_CHECK_BUTTON, "label", t, "accessible-role", GTK_ACCESSIBLE_ROLE_RADIO, NULL);
+        if (first) gtk_check_button_set_group(GTK_CHECK_BUTTON(b), GTK_CHECK_BUTTON(first));
+        g_signal_connect(b, "toggled", G_CALLBACK(sg_on_choice), NULL);
+    }
+    g_object_set_data(G_OBJECT(b), "sg-id", GINT_TO_POINTER(id));
+    g_object_set_data(G_OBJECT(b), "sg-index", GINT_TO_POINTER(n));
+    gtk_box_append(GTK_BOX(sg_w[id]), b);
+    if (n == 1) { sg_quiet++; sg_choice_set(b, TRUE); sg_quiet--; }   /* the first is the choice */
+}
+static void sg_choices_wipe_out(int id) {
+    GtkWidget *c;
+    sg_quiet++;
+    while ((c = gtk_widget_get_first_child(sg_w[id]))) gtk_box_remove(GTK_BOX(sg_w[id]), c);
+    sg_quiet--;
+}
+static void sg_choices_select(int id, int i) {
+    GtkWidget *b = sg_choice_at(id, i);
+    sg_quiet++; if (b) sg_choice_set(b, TRUE); sg_quiet--;
+}
+static int sg_choices_selected(int id) {
+    GtkWidget *c; int n = 1;
+    for (c = gtk_widget_get_first_child(sg_w[id]); c; c = gtk_widget_get_next_sibling(c), n++) {
+        gboolean on = GTK_IS_CHECK_BUTTON(c) ? gtk_check_button_get_active(GTK_CHECK_BUTTON(c))
+                                             : gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(c));
+        if (on) return n;
+    }
+    return 0;
+}
+
+/* Slider */
+static void sg_on_slider(GtkRange *r, gpointer d) {
+    (void) d;
+    if (!sg_quiet) sg_push(2, sg_id_of(r), (int) gtk_range_get_value(r), 0);
+}
+static int sg_slider(int lo, int hi) {
+    GtkWidget *s = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, lo, hi, 1);
+    int id = sg_reg(s, 22);
+    gtk_scale_set_digits(GTK_SCALE(s), 0);
+    gtk_scale_set_draw_value(GTK_SCALE(s), TRUE);
+    gtk_range_set_round_digits(GTK_RANGE(s), 0);
+    gtk_widget_set_hexpand(s, TRUE);
+    sg_quiet++; gtk_range_set_value(GTK_RANGE(s), lo); sg_quiet--;
+    g_signal_connect(s, "value-changed", G_CALLBACK(sg_on_slider), NULL);
+    return id;
+}
+static void sg_slider_set_value(int id, int v) { sg_quiet++; gtk_range_set_value(GTK_RANGE(sg_w[id]), v); sg_quiet--; }
+static int sg_slider_value(int id) { return (int) (gtk_range_get_value(GTK_RANGE(sg_w[id])) + 0.5); }
+static void sg_slider_set_step(int id, int step) { gtk_range_set_increments(GTK_RANGE(sg_w[id]), step, step * 10.0); }
+
+/* Switch */
+static void sg_on_switch(GObject *o, GParamSpec *p, gpointer d) {
+    (void) p; (void) d;
+    if (!sg_quiet) sg_push(12, sg_id_of(o), gtk_switch_get_active(GTK_SWITCH(o)) ? 1 : 0, 0);
+}
+static int sg_switch(void) {
+    GtkWidget *s = gtk_switch_new();
+    int id = sg_reg(s, 23);
+    gtk_widget_set_halign(s, GTK_ALIGN_START);
+    gtk_widget_set_valign(s, GTK_ALIGN_CENTER);
+    g_signal_connect(s, "notify::active", G_CALLBACK(sg_on_switch), NULL);
+    return id;
+}
+static void sg_switch_set(int id, int on) { sg_quiet++; gtk_switch_set_active(GTK_SWITCH(sg_w[id]), on ? TRUE : FALSE); sg_quiet--; }
+static int sg_switch_is_on(int id) { return gtk_switch_get_active(GTK_SWITCH(sg_w[id])) ? 1 : 0; }
+
+/* Date picker: a menu button showing the date (ISO, 2026-12-25) whose popover holds a
+   GtkCalendar; the value lives on the button as y*10000 + m*100 + d ("sg-date"). */
+static void sg_date_show(int id) {
+    int v = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-date"));
+    char text[16];
+    snprintf(text, sizeof text, "%04d-%02d-%02d", v / 10000, (v / 100) % 100, v % 100);
+    gtk_menu_button_set_label(GTK_MENU_BUTTON(sg_w[id]), text);
+}
+static void sg_date_store(int id, int y, int m, int d) {
+    GtkCalendar *cal = g_object_get_data(G_OBJECT(sg_w[id]), "sg-calendar");
+    GDateTime *dt = g_date_time_new_local(y, m, d, 0, 0, 0);
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-date", GINT_TO_POINTER(y * 10000 + m * 100 + d));
+    sg_date_show(id);
+    if (dt) { sg_quiet++; gtk_calendar_select_day(cal, dt); sg_quiet--; g_date_time_unref(dt); }
+}
+static void sg_on_day(GtkCalendar *cal, gpointer d) {
+    int id = GPOINTER_TO_INT(d), v;
+    GDateTime *dt;
+    if (sg_quiet) return;
+    dt = gtk_calendar_get_date(cal);
+    v = g_date_time_get_year(dt) * 10000 + g_date_time_get_month(dt) * 100 + g_date_time_get_day_of_month(dt);
+    g_date_time_unref(dt);
+    if (v == GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-date"))) return;
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-date", GINT_TO_POINTER(v));
+    sg_date_show(id);
+    gtk_menu_button_popdown(GTK_MENU_BUTTON(sg_w[id]));
+    sg_push(2, id, v, 0);
+}
+static int sg_date_picker(int y, int m, int d) {
+    GtkWidget *b = gtk_menu_button_new(), *pop = gtk_popover_new(), *cal = gtk_calendar_new();
+    int id = sg_reg(b, 24);
+    gtk_popover_set_child(GTK_POPOVER(pop), cal);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(b), pop);
+    gtk_widget_set_halign(b, GTK_ALIGN_START);
+    g_object_set_data(G_OBJECT(b), "sg-calendar", cal);
+    g_signal_connect(cal, "day-selected", G_CALLBACK(sg_on_day), GINT_TO_POINTER(id));
+    sg_date_store(id, y, m, d);
+    return id;
+}
+static void sg_date_set(int id, int y, int m, int d) { sg_date_store(id, y, m, d); }
+static int sg_date_value(int id) { return GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-date")); }
+
+/* Time picker: hour and minute spin buttons (wrapping, two digits) side by side. */
+static gboolean sg_two_digits(GtkSpinButton *s, gpointer d) {
+    char text[8];
+    (void) d;
+    snprintf(text, sizeof text, "%02d", gtk_spin_button_get_value_as_int(s));
+    gtk_editable_set_text(GTK_EDITABLE(s), text);
+    return TRUE;
+}
+static int sg_time_value(int id) {
+    GtkWidget *h = gtk_widget_get_first_child(sg_w[id]);
+    GtkWidget *m = gtk_widget_get_last_child(sg_w[id]);
+    return gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(h)) * 60 + gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(m));
+}
+static void sg_on_time(GtkSpinButton *s, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    (void) s;
+    if (!sg_quiet) sg_push(2, id, sg_time_value(id), 0);
+}
+static GtkWidget *sg_time_part(int top, int id, const char *name) {
+    GtkWidget *s = gtk_spin_button_new_with_range(0, top, 1);
+    gtk_spin_button_set_wrap(GTK_SPIN_BUTTON(s), TRUE);
+    gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(s), TRUE);
+    gtk_editable_set_width_chars(GTK_EDITABLE(s), 2);
+    g_signal_connect(s, "output", G_CALLBACK(sg_two_digits), NULL);
+    g_signal_connect(s, "value-changed", G_CALLBACK(sg_on_time), GINT_TO_POINTER(id));
+    gtk_accessible_update_property(GTK_ACCESSIBLE(s), GTK_ACCESSIBLE_PROPERTY_LABEL, name, -1);
+    return s;
+}
+static int sg_time_picker(int h, int m) {
+    GtkWidget *box = g_object_new(GTK_TYPE_BOX, "orientation", GTK_ORIENTATION_HORIZONTAL, "spacing", 2,
+                                  "accessible-role", GTK_ACCESSIBLE_ROLE_GROUP, NULL);
+    int id = sg_reg(box, 25);
+    GtkWidget *hs = sg_time_part(23, id, "Hour"), *ms = sg_time_part(59, id, "Minute");
+    gtk_box_append(GTK_BOX(box), hs);
+    gtk_box_append(GTK_BOX(box), gtk_label_new(":"));
+    gtk_box_append(GTK_BOX(box), ms);
+    gtk_widget_set_halign(box, GTK_ALIGN_START);
+    sg_quiet++;
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(hs), h);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(ms), m);
+    sg_quiet--;
+    return id;
+}
+static void sg_time_set(int id, int h, int m) {
+    sg_quiet++;
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(gtk_widget_get_first_child(sg_w[id])), h);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(gtk_widget_get_last_child(sg_w[id])), m);
+    sg_quiet--;
+}
+
+/* Color chooser: GtkColorDialogButton; the value is 0xRRGGBB. */
+static int sg_rgb_of(const GdkRGBA *c) {
+    return ((int) (c->red * 255 + 0.5) << 16) | ((int) (c->green * 255 + 0.5) << 8) | (int) (c->blue * 255 + 0.5);
+}
+static void sg_on_color(GObject *o, GParamSpec *p, gpointer d) {
+    (void) p; (void) d;
+    if (!sg_quiet) sg_push(2, sg_id_of(o), sg_rgb_of(gtk_color_dialog_button_get_rgba(GTK_COLOR_DIALOG_BUTTON(o))), 0);
+}
+static void sg_color_put(int id, int rgb) {
+    GdkRGBA c = { ((rgb >> 16) & 255) / 255.0f, ((rgb >> 8) & 255) / 255.0f, (rgb & 255) / 255.0f, 1.0f };
+    gtk_color_dialog_button_set_rgba(GTK_COLOR_DIALOG_BUTTON(sg_w[id]), &c);
+}
+static int sg_color_chooser(int rgb) {
+    GtkWidget *b = gtk_color_dialog_button_new(gtk_color_dialog_new());   /* takes the dialog */
+    int id = sg_reg(b, 26);
+    gtk_widget_set_halign(b, GTK_ALIGN_START);
+    sg_quiet++; sg_color_put(id, rgb); sg_quiet--;
+    g_signal_connect(b, "notify::rgba", G_CALLBACK(sg_on_color), NULL);
+    return id;
+}
+static void sg_color_set(int id, int rgb) { sg_quiet++; sg_color_put(id, rgb); sg_quiet--; }
+static int sg_color_value(int id) { return sg_rgb_of(gtk_color_dialog_button_get_rgba(GTK_COLOR_DIALOG_BUTTON(sg_w[id]))); }
+
+/* Scroll area, group box, expander: one child each (sg_single_set_content). */
+static int sg_scroll_area(void) {
+    GtkWidget *s = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(s, TRUE); gtk_widget_set_hexpand(s, TRUE);
+    return sg_reg(s, 27);
+}
+/* A group box reads as a group named by its title (a GtkFrame's title is a child label, so
+   the frame itself would have no name). */
+static void sg_group_box_name(GtkWidget *f, const char *title) {
+    g_object_set_data_full(G_OBJECT(f), "sg-a11y", g_strdup(title), g_free);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(f), GTK_ACCESSIBLE_PROPERTY_LABEL, title, -1);
+}
+static int sg_group_box(const char *title) {
+    GtkWidget *f = g_object_new(GTK_TYPE_FRAME, "label", title, "accessible-role", GTK_ACCESSIBLE_ROLE_GROUP, NULL);
+    sg_group_box_name(f, title);
+    return sg_reg(f, 30);
+}
+static void sg_on_expander(GObject *o, GParamSpec *p, gpointer d) {
+    (void) p; (void) d;
+    if (!sg_quiet) sg_push(12, sg_id_of(o), gtk_expander_get_expanded(GTK_EXPANDER(o)) ? 1 : 0, 0);
+}
+static int sg_expander(const char *title) {
+    GtkWidget *e = gtk_expander_new(title);
+    int id = sg_reg(e, 31);
+    sg_group_box_name(e, title);   /* read as a button named by its title, as on macOS */
+    g_signal_connect(e, "notify::expanded", G_CALLBACK(sg_on_expander), NULL);
+    return id;
+}
+static void sg_expander_set_expanded(int id, int on) { sg_quiet++; gtk_expander_set_expanded(GTK_EXPANDER(sg_w[id]), on ? TRUE : FALSE); sg_quiet--; }
+static int sg_expander_is_expanded(int id) { return gtk_expander_get_expanded(GTK_EXPANDER(sg_w[id])) ? 1 : 0; }
+static void sg_single_set_content(int id, int child) {
+    switch (sg_kind[id]) {
+    case 27: gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sg_w[id]), sg_w[child]); break;
+    case 30: gtk_frame_set_child(GTK_FRAME(sg_w[id]), sg_w[child]); break;
+    case 31: gtk_expander_set_child(GTK_EXPANDER(sg_w[id]), sg_w[child]); break;
+    default: break;
+    }
+}
+
+/* Image: a GtkPicture scaled down to fit, never enlarged. The loaders answer 0 when the
+   file or bytes are not a picture. */
+static int sg_image(void) {
+    GtkWidget *p = gtk_picture_new();
+    gtk_picture_set_can_shrink(GTK_PICTURE(p), TRUE);
+    gtk_picture_set_content_fit(GTK_PICTURE(p), GTK_CONTENT_FIT_SCALE_DOWN);
+    return sg_reg(p, 28);
+}
+static int sg_image_set_file(int id, const char *path) {
+    GdkTexture *t = gdk_texture_new_from_filename(path, NULL);
+    if (!t) return 0;
+    gtk_picture_set_paintable(GTK_PICTURE(sg_w[id]), GDK_PAINTABLE(t));
+    g_object_unref(t);
+    return 1;
+}
+static int sg_image_set_bytes(int id, const unsigned char *data, int count) {
+    GBytes *b = g_bytes_new(data, (gsize) count);
+    GdkTexture *t = gdk_texture_new_from_bytes(b, NULL);
+    g_bytes_unref(b);
+    if (!t) return 0;
+    gtk_picture_set_paintable(GTK_PICTURE(sg_w[id]), GDK_PAINTABLE(t));
+    g_object_unref(t);
+    return 1;
+}
+
+/* Separator */
+static int sg_separator(int vertical) {
+    return sg_reg(gtk_separator_new(vertical ? GTK_ORIENTATION_VERTICAL : GTK_ORIENTATION_HORIZONTAL), 29);
+}
+
+/* Editable combo: an entry (read as a combo box) whose arrow opens a popover of the options.
+   A commit - Return, leaving the box with changed text, or picking an option - sends 2. */
+static void sg_combo_commit(int id) {
+    const char *now = gtk_editable_get_text(GTK_EDITABLE(sg_w[id]));
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-committed", g_strdup(now), g_free);
+    if (!sg_quiet) sg_push(2, id, 0, 0);
+}
+static void sg_on_combo_activate(GtkEntry *e, gpointer d) { (void) e; sg_combo_commit(GPOINTER_TO_INT(d)); }
+static void sg_on_combo_leave(GtkEventControllerFocus *f, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    const char *was = g_object_get_data(G_OBJECT(sg_w[id]), "sg-committed");
+    (void) f;
+    if (g_strcmp0(was ? was : "", gtk_editable_get_text(GTK_EDITABLE(sg_w[id])))) sg_combo_commit(id);
+}
+static void sg_on_combo_pick(GtkListBox *l, GtkListBoxRow *r, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    (void) l;
+    sg_quiet++;
+    gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), gtk_label_get_text(GTK_LABEL(gtk_list_box_row_get_child(r))));
+    sg_quiet--;
+    gtk_popover_popdown(GTK_POPOVER(g_object_get_data(G_OBJECT(sg_w[id]), "sg-popover")));
+    sg_combo_commit(id);
+}
+static void sg_on_combo_arrow(GtkEntry *e, GtkEntryIconPosition pos, gpointer d) {
+    (void) e; (void) pos;
+    gtk_popover_popup(GTK_POPOVER(g_object_get_data(G_OBJECT(sg_w[GPOINTER_TO_INT(d)]), "sg-popover")));
+}
+static int sg_combo_box(void) {
+    GtkWidget *e = g_object_new(GTK_TYPE_ENTRY, "accessible-role", GTK_ACCESSIBLE_ROLE_COMBO_BOX, NULL);
+    GtkWidget *pop = gtk_popover_new(), *list = gtk_list_box_new();
+    GtkEventController *focus = gtk_event_controller_focus_new();
+    int id = sg_reg(e, 32);
+    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(e), GTK_ENTRY_ICON_SECONDARY, "pan-down-symbolic");
+    gtk_editable_set_width_chars(GTK_EDITABLE(e), 12);   /* room for a word in a row of controls */
+    gtk_popover_set_child(GTK_POPOVER(pop), list);
+    gtk_widget_set_parent(pop, e);
+    gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
+    gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(list), TRUE);
+    g_object_set_data(G_OBJECT(e), "sg-popover", pop);
+    g_object_set_data(G_OBJECT(e), "sg-options", list);
+    g_object_set_data_full(G_OBJECT(e), "sg-committed", g_strdup(""), g_free);
+    g_signal_connect(e, "activate", G_CALLBACK(sg_on_combo_activate), GINT_TO_POINTER(id));
+    g_signal_connect(e, "icon-press", G_CALLBACK(sg_on_combo_arrow), GINT_TO_POINTER(id));
+    g_signal_connect(list, "row-activated", G_CALLBACK(sg_on_combo_pick), GINT_TO_POINTER(id));
+    g_signal_connect(focus, "leave", G_CALLBACK(sg_on_combo_leave), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(e, focus);
+    return id;
+}
+static void sg_combo_extend(int id, const char *t) {
+    GtkWidget *row = gtk_label_new(t);
+    gtk_label_set_xalign(GTK_LABEL(row), 0.0);
+    gtk_widget_set_margin_start(row, 6); gtk_widget_set_margin_end(row, 6);
+    gtk_list_box_append(GTK_LIST_BOX(g_object_get_data(G_OBJECT(sg_w[id]), "sg-options")), row);
+}
+static void sg_combo_set_text(int id, const char *t) {
+    sg_quiet++;
+    gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), t);
+    sg_quiet--;
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-committed", g_strdup(t), g_free);
+}
+static const char *sg_combo_text(int id) { return gtk_editable_get_text(GTK_EDITABLE(sg_w[id])); }
+/* As a user: type the text and press Return (2). */
+static void sg_test_type_combo(int id, const char *t) {
+    gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), t);
+    sg_combo_commit(id);
+}
+/* As a user: open the options and pick option `i' (2). */
+static void sg_test_pick_combo(int id, int i) {
+    GtkListBox *l = GTK_LIST_BOX(g_object_get_data(G_OBJECT(sg_w[id]), "sg-options"));
+    GtkListBoxRow *r = gtk_list_box_get_row_at_index(l, i - 1);
+    if (r) sg_on_combo_pick(l, r, GINT_TO_POINTER(id));
+}
+
+/* Tree table: the tree's model (nodes, expanders, selection; the same sg_tree_ calls work on
+   it) shown by a GtkColumnView, so it reads as a tree-grid with column headers like the
+   table. Each node keeps its cells ("sg-cells", column 1 first) and, while bound, the label
+   showing each one ("sg-label-<column>"), so a changed cell shows at once. */
+static void sg_tt_cell_setup(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
+    GtkWidget *l = gtk_label_new(NULL);
+    (void) fa; (void) d;
+    gtk_label_set_xalign(GTK_LABEL(l), 0.0);
+    gtk_list_item_set_child(it, l);
+}
+static const char *sg_tt_cell(GObject *o, int col) {
+    GPtrArray *cells = g_object_get_data(o, "sg-cells");
+    const char *s = (cells && (guint) col <= cells->len) ? g_ptr_array_index(cells, col - 1) : NULL;
+    if (s && *s) return s;
+    return col == 1 ? gtk_string_object_get_string(GTK_STRING_OBJECT(o)) : "";
+}
+static void sg_tt_label_key(char *key, size_t n, int col) { snprintf(key, n, "sg-label-%d", col); }
+static void sg_tt_cell_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
+    GtkTreeListRow *r = GTK_TREE_LIST_ROW(gtk_list_item_get_item(it));
+    GObject *o = gtk_tree_list_row_get_item(r);
+    int col = GPOINTER_TO_INT(d);
+    char key[24];
+    (void) fa;
+    gtk_label_set_text(GTK_LABEL(gtk_list_item_get_child(it)), sg_tt_cell(o, col));
+    sg_follow_view_direction(gtk_list_item_get_child(it));
+    sg_tt_label_key(key, sizeof key, col);
+    g_object_set_data(o, key, gtk_list_item_get_child(it));
+    g_object_unref(o);
+}
+static void sg_tt_cell_unbind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
+    GtkTreeListRow *r = GTK_TREE_LIST_ROW(gtk_list_item_get_item(it));
+    GObject *o = r ? gtk_tree_list_row_get_item(r) : NULL;
+    char key[24];
+    (void) fa;
+    if (!o) return;
+    sg_tt_label_key(key, sizeof key, GPOINTER_TO_INT(d));
+    if (g_object_get_data(o, key) == gtk_list_item_get_child(it)) g_object_set_data(o, key, NULL);
+    g_object_unref(o);
+}
+static void sg_tt_first_bind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
+    GtkTreeListRow *r = GTK_TREE_LIST_ROW(gtk_list_item_get_item(it));
+    GtkWidget *x = gtk_list_item_get_child(it);
+    GObject *o = gtk_tree_list_row_get_item(r);
+    sg_tree_bind(fa, it, d);   /* the expander, its row's "expanded" watch, column 1's text */
+    gtk_label_set_text(GTK_LABEL(gtk_tree_expander_get_child(GTK_TREE_EXPANDER(x))), sg_tt_cell(o, 1));
+    g_object_set_data(o, "sg-label-1", gtk_tree_expander_get_child(GTK_TREE_EXPANDER(x)));
+    g_object_unref(o);
+}
+static void sg_tt_first_unbind(GtkSignalListItemFactory *fa, GtkListItem *it, gpointer d) {
+    GtkTreeListRow *r = GTK_TREE_LIST_ROW(gtk_list_item_get_item(it));
+    GObject *o = r ? gtk_tree_list_row_get_item(r) : NULL;
+    if (o) { g_object_set_data(o, "sg-label-1", NULL); g_object_unref(o); }
+    sg_tree_unbind(fa, it, d);
+}
+static int sg_tree_table(const char *titles) {
+    GListStore *roots = g_list_store_new(GTK_TYPE_STRING_OBJECT);
+    GtkTreeListModel *m = gtk_tree_list_model_new(G_LIST_MODEL(roots), FALSE, FALSE, sg_tree_children, NULL, NULL);
+    GtkSingleSelection *s = gtk_single_selection_new(G_LIST_MODEL(m));
+    GtkWidget *v, *scroll = gtk_scrolled_window_new();
+    GPtrArray *nodes = g_ptr_array_new();
+    gchar **t = g_strsplit(titles, "\x1f", -1);
+    int id, i;
+    gtk_single_selection_set_autoselect(s, FALSE);
+    gtk_single_selection_set_can_unselect(s, TRUE);
+    v = gtk_column_view_new(GTK_SELECTION_MODEL(s));
+    gtk_column_view_set_show_column_separators(GTK_COLUMN_VIEW(v), TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), v);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    id = sg_reg(scroll, 33);
+    for (i = 0; t[i]; i++) {
+        GtkListItemFactory *f = gtk_signal_list_item_factory_new();
+        GtkColumnViewColumn *c;
+        if (i == 0) {
+            g_signal_connect(f, "setup", G_CALLBACK(sg_tree_setup), NULL);
+            g_signal_connect(f, "bind", G_CALLBACK(sg_tt_first_bind), GINT_TO_POINTER(id));
+            g_signal_connect(f, "unbind", G_CALLBACK(sg_tt_first_unbind), NULL);
+        } else {
+            g_signal_connect(f, "setup", G_CALLBACK(sg_tt_cell_setup), NULL);
+            g_signal_connect(f, "bind", G_CALLBACK(sg_tt_cell_bind), GINT_TO_POINTER(i + 1));
+            g_signal_connect(f, "unbind", G_CALLBACK(sg_tt_cell_unbind), GINT_TO_POINTER(i + 1));
+        }
+        c = gtk_column_view_column_new(t[i], f);   /* takes the factory */
+        gtk_column_view_column_set_resizable(c, TRUE);
+        if (i == 0) gtk_column_view_column_set_expand(c, TRUE);
+        gtk_column_view_append_column(GTK_COLUMN_VIEW(v), c);
+        g_object_unref(c);
+    }
+    g_strfreev(t);
+    g_signal_connect(s, "selection-changed", G_CALLBACK(sg_on_tree_selection), GINT_TO_POINTER(id));
+    g_object_set_data(G_OBJECT(scroll), "sg-view", v);
+    g_object_set_data_full(G_OBJECT(scroll), "sg-roots", g_object_ref(roots), g_object_unref);
+    g_object_set_data(G_OBJECT(scroll), "sg-tree-model", m);
+    g_object_set_data(G_OBJECT(scroll), "sg-tree-selection", s);
+    g_object_set_data_full(G_OBJECT(scroll), "sg-tree-nodes", nodes, (GDestroyNotify) g_ptr_array_unref);
+    return id;
+}
+/* Add node `node' under `parent' (0: a root) with column 1's text; set other cells after. */
+static void sg_tree_table_add(int id, int node, int parent, const char *text) {
+    GPtrArray *nodes = g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-nodes");
+    GPtrArray *cells = g_ptr_array_new_with_free_func(g_free);
+    sg_tree_add(id, node, parent, text);
+    g_ptr_array_add(cells, g_strdup(text));
+    g_object_set_data_full(G_OBJECT(g_ptr_array_index(nodes, node - 1)), "sg-cells", cells, (GDestroyNotify) g_ptr_array_unref);
+}
+static void sg_tree_table_set_cell(int id, int node, int col, const char *text) {
+    GPtrArray *nodes = g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-nodes");
+    GObject *o;
+    GPtrArray *cells;
+    GtkWidget *shown;
+    char key[24];
+    if (node < 1 || (guint) node > nodes->len || col < 1) return;
+    o = G_OBJECT(g_ptr_array_index(nodes, node - 1));
+    cells = g_object_get_data(o, "sg-cells");
+    if (!cells) {
+        cells = g_ptr_array_new_with_free_func(g_free);
+        g_object_set_data_full(o, "sg-cells", cells, (GDestroyNotify) g_ptr_array_unref);
+    }
+    while (cells->len < (guint) col) g_ptr_array_add(cells, g_strdup(""));
+    g_free(g_ptr_array_index(cells, col - 1));
+    g_ptr_array_index(cells, col - 1) = g_strdup(text);
+    sg_tt_label_key(key, sizeof key, col);
+    shown = g_object_get_data(o, key);
+    if (shown) gtk_label_set_text(GTK_LABEL(shown), text);
+}
+static const char *sg_tree_table_cell(int id, int node, int col) {
+    GPtrArray *nodes = g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-nodes");
+    if (node < 1 || (guint) node > nodes->len) return "";
+    return sg_tt_cell(G_OBJECT(g_ptr_array_index(nodes, node - 1)), col);
+}
+
+/* Tooltips */
+static void sg_set_tooltip(int id, const char *t) { gtk_widget_set_tooltip_text(sg_w[id], (t && *t) ? t : NULL); }
+static const char *sg_tooltip(int id) { const char *t = gtk_widget_get_tooltip_text(sg_w[id]); return t ? t : ""; }
+
+/* As a user: set a value control (2 or 12 follow from the control's own signal). */
+static void sg_test_set_value(int id, int v) {
+    switch (sg_kind[id]) {
+    case 16: gtk_spin_button_set_value(GTK_SPIN_BUTTON(sg_w[id]), v); break;
+    case 22: gtk_range_set_value(GTK_RANGE(sg_w[id]), v); break;
+    /* A date, a time or a color is one user change: set quietly, then report once. (A time
+       is two spin buttons; setting both would report twice.) */
+    case 24: if (sg_date_value(id) != v) { sg_date_set(id, v / 10000, (v / 100) % 100, v % 100); sg_push(2, id, v, 0); } break;
+    case 25: if (sg_time_value(id) != v) { sg_time_set(id, v / 60, v % 60); sg_push(2, id, v, 0); } break;
+    case 26: if (sg_color_value(id) != v) { sg_quiet++; sg_color_put(id, v); sg_quiet--; sg_push(2, id, v, 0); } break;
+    default: break;
+    }
+}
+
+/* Dialogs: save with a suggested name, choose a folder, and ask yes / no / cancel. */
+static void sg_folder_done(GObject *src, GAsyncResult *res, gpointer d) {
+    GFile *f = gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(src), res, NULL);
+    (void) d;
+    g_free(sg_dialog_path); sg_dialog_path = NULL;
+    if (f) { sg_dialog_path = g_file_get_path(f); g_object_unref(f); }
+    sg_dialog_done = 1;
+}
+static const char *sg_choose_folder(int win, const char *title) {
+    GtkFileDialog *dlg = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dlg, title);
+    gtk_file_dialog_set_modal(dlg, TRUE);
+    sg_dialog_done = 0;
+    {
+        GCancellable *c = sg_dialog_cancellable();
+        gtk_file_dialog_select_folder(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_folder_done, NULL);
+        sg_wait_dialog();
+        g_object_unref(c);
+    }
+    g_object_unref(dlg);
+    return sg_dialog_path;
+}
+static const char *sg_save_file_named(int win, const char *title, const char *extensions, const char *name) {
+    GtkFileDialog *dlg = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dlg, title);
+    if (name && *name) gtk_file_dialog_set_initial_name(dlg, name);
+    if (extensions && *extensions) {
+        GtkFileFilter *f = gtk_file_filter_new();
+        GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+        gchar **ext = g_strsplit(extensions, ";", -1);
+        int i;
+        gtk_file_filter_set_name(f, extensions);
+        for (i = 0; ext[i]; i++) if (*ext[i]) { gchar *pat = g_strdup_printf("*.%s", ext[i]); gtk_file_filter_add_pattern(f, pat); g_free(pat); }
+        g_strfreev(ext);
+        g_list_store_append(filters, f);
+        gtk_file_dialog_set_filters(dlg, G_LIST_MODEL(filters));
+        g_object_unref(filters); g_object_unref(f);
+    }
+    gtk_file_dialog_set_modal(dlg, TRUE);
+    sg_dialog_done = 0;
+    {
+        GCancellable *c = sg_dialog_cancellable();
+        gtk_file_dialog_save(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_save_done, NULL);
+        sg_wait_dialog();
+        g_object_unref(c);
+    }
+    g_object_unref(dlg);
+    return sg_dialog_path;
+}
+/* 1 yes, 2 no, 0 cancel (Escape or closing the dialog). */
+static int sg_ask(int win, const char *title, const char *text) {
+    GtkAlertDialog *dlg = gtk_alert_dialog_new("%s", title);
+    const char *buttons[] = {"Cancel", "No", "Yes", NULL};
+    gtk_alert_dialog_set_detail(dlg, text);
+    gtk_alert_dialog_set_buttons(dlg, buttons);
+    gtk_alert_dialog_set_cancel_button(dlg, 0);
+    gtk_alert_dialog_set_default_button(dlg, 2);
+    sg_dialog_done = 0; sg_dialog_choice = -1;
+    {
+        GCancellable *c = sg_dialog_cancellable();
+        gtk_alert_dialog_choose(dlg, win > 0 ? GTK_WINDOW(sg_w[win]) : NULL, c, sg_alert_done, NULL);
+        sg_wait_dialog();
+        g_object_unref(c);
+    }
+    g_object_unref(dlg);
+    return sg_dialog_choice == 2 ? 1 : sg_dialog_choice == 1 ? 2 : 0;
+}
+
+
+/* ---------- 1h, the API's remaining calls ---------- */
+
+static void sg_group_box_set_title(int id, const char *t) { gtk_frame_set_label(GTK_FRAME(sg_w[id]), t); sg_group_box_name(sg_w[id], t); }
+static void sg_expander_set_title(int id, const char *t) { gtk_expander_set_label(GTK_EXPANDER(sg_w[id]), t); sg_group_box_name(sg_w[id], t); }
+static void sg_combo_wipe_out(int id) {
+    GtkListBox *l = GTK_LIST_BOX(g_object_get_data(G_OBJECT(sg_w[id]), "sg-options"));
+    gtk_list_box_remove_all(l);
+}
+static void sg_scroll_area_scroll_to(int id, int x, int y) {
+    GtkScrolledWindow *s = GTK_SCROLLED_WINDOW(sg_w[id]);
+    gtk_adjustment_set_value(gtk_scrolled_window_get_hadjustment(s), x);
+    gtk_adjustment_set_value(gtk_scrolled_window_get_vadjustment(s), y);
+}
+/* A date picker's value is y*10000 + m*100 + d; a time picker's h*60 + m. */
+static void sg_date_or_time_set(int id, int v) {
+    if (sg_kind[id] == 25) sg_time_set(id, v / 60, v % 60);
+    else sg_date_set(id, v / 10000, (v / 100) % 100, v % 100);
+}
+static int sg_date_or_time_value(int id) { return sg_kind[id] == 25 ? sg_time_value(id) : sg_date_value(id); }
 
 /* ---------- appearance ---------- */
 
@@ -1635,6 +2261,8 @@ static void sg_set_dark(int on) { g_object_set(gtk_settings_get_default(), "gtk-
 /* A user's click is the "clicked" signal; gtk_widget_activate would emit it only after a 250 ms press animation. */
 static void sg_test_click(int id) {
     if (sg_kind[id] == 9) gtk_check_button_set_active(GTK_CHECK_BUTTON(sg_w[id]), !gtk_check_button_get_active(GTK_CHECK_BUTTON(sg_w[id])));
+    else if (sg_kind[id] == 23) gtk_switch_set_active(GTK_SWITCH(sg_w[id]), !gtk_switch_get_active(GTK_SWITCH(sg_w[id])));
+    else if (sg_kind[id] == 31) gtk_expander_set_expanded(GTK_EXPANDER(sg_w[id]), !gtk_expander_get_expanded(GTK_EXPANDER(sg_w[id])));
     else g_signal_emit_by_name(sg_w[id], "clicked");
 }
 static void sg_test_type(int id, const char *t) {   /* emits, like a user */
@@ -1643,7 +2271,9 @@ static void sg_test_type(int id, const char *t) {   /* emits, like a user */
     else gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), t);
 }
 static void sg_test_choose(int id, int row) {
-    if (sg_kind[id] == 14) { sg_test_choose_node(id, row); return; }   /* a tree node, by its number */
+    if (sg_kind[id] == 14 || sg_kind[id] == 33) { sg_test_choose_node(id, row); return; }   /* a tree node, by its number */
+    if (sg_kind[id] == 20 || sg_kind[id] == 21) { GtkWidget *b = sg_choice_at(id, row); if (b) sg_choice_set(b, TRUE); return; }   /* a click on the choice */
+    if (sg_kind[id] == 32) { sg_test_pick_combo(id, row); return; }   /* an option picked */
     if (sg_kind[id] == 13) { gtk_selection_model_select_item(sg_table_model(id), (guint) (row - 1), TRUE); return; }   /* a table row, as a click */
     if (sg_kind[id] == 11) { gtk_notebook_set_current_page(GTK_NOTEBOOK(sg_w[id]), row - 1); return; }   /* a click on the tab */
     if (sg_kind[id] == 15) { gtk_drop_down_set_selected(GTK_DROP_DOWN(sg_w[id]), (guint) (row - 1)); return; }   /* a pick from the popup */
@@ -1726,7 +2356,7 @@ static int sg_snapshot(int id, const char *path) {
     GdkPaintable *p; GtkSnapshot *s; GskRenderNode *n; GdkTexture *t;
     double k = sg_scale(id);   /* device pixels, as the screen shows it (2x at 200%) */
     graphene_rect_t vp;
-    if (W <= 0 || H <= 0) return 0;
+    if (W <= 0 || H <= 0) { g_warning("simple_gui snapshot: widget %d has no size yet (%d x %d)", id, W, H); return 0; }
     if (backdrop) {
         gint64 until = g_get_monotonic_time() + 100 * 1000;
         gtk_widget_unset_state_flags(w, GTK_STATE_FLAG_BACKDROP);
@@ -1741,15 +2371,17 @@ static int sg_snapshot(int id, const char *path) {
     gtk_snapshot_scale(s, (float) k, (float) k);   /* GSK redraws text and lines at that scale */
     gdk_paintable_snapshot(p, GDK_SNAPSHOT(s), W, H);
     n = gtk_snapshot_free_to_node(s);
-    if (!n) { g_object_unref(p); return 0; }
+    if (!n) { g_warning("simple_gui snapshot: widget %d drew nothing", id); g_object_unref(p); return 0; }
     graphene_rect_init(&vp, 0, 0, (float) (W * k), (float) (H * k));
     t = gsk_renderer_render_texture(gtk_native_get_renderer(GTK_NATIVE(w)), n, &vp);
     ok = gdk_texture_save_to_png(t, path) ? 1 : 0;
+    if (!ok) g_warning("simple_gui snapshot: could not write %s", path);
     g_object_unref(t); gsk_render_node_unref(n); g_object_unref(p);
     if (backdrop && (!GTK_IS_WINDOW(w) || !gtk_window_is_active(GTK_WINDOW(w)))) gtk_widget_set_state_flags(w, GTK_STATE_FLAG_BACKDROP, FALSE);
     return ok;
 }
-static const char *sg_role(int id) { return sg_role_nick(sg_w[id]); }
+/* The tree table answers with its column view (a tree-grid), not the scroll window around it. */
+static const char *sg_role(int id) { return sg_role_nick(sg_kind[id] == 33 ? sg_a11y_target(id) : sg_w[id]); }
 
 /* Drive the loop until the queue stays empty for one turn, or `ms' pass (tests). */
 static void sg_pump_until_idle(int ms) {

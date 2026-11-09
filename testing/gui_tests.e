@@ -1179,6 +1179,377 @@ feature -- More controls (1g)
 			Result.show
 		end
 
+feature -- Standard controls (1h)
+
+	test_radio_group_and_segmented_choose
+			-- The first choice is selected silently; select_row is silent; a user's choice of
+			-- another fires once with its number.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_radios: GUI_RADIO_GROUP
+			l_segments: GUI_SEGMENTED
+			l_got: INTEGER
+		do
+			create l_window.make ("Choosers", 360, 200)
+			create l_stack.make_vertical
+			create l_radios.make
+			create l_segments.make
+			across <<"Small", "Medium", "Large">> as ic loop
+				l_radios.extend (ic)
+				l_segments.extend (ic)
+			end
+			l_stack.extend (l_radios)
+			l_stack.extend (l_segments)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("radio first", l_radios.selected_index = 1 and l_radios.selected_text.same_string ("Small"))
+			assert ("segment first", l_segments.selected_index = 1)
+			l_radios.select_row (2)
+			l_segments.select_row (2)
+			assert ("selected", l_radios.selected_index = 2 and l_segments.selected_index = 2)
+			assert ("silent", l_radios.selection_actions.fire_count = 0 and l_segments.selection_actions.fire_count = 0)
+			l_radios.selection_actions.extend (agent (a_row: INTEGER; a_cell: CELL [INTEGER]) do a_cell.put (a_row) end (?, last_choice))
+			driver.choose_option (l_radios, 3)
+			assert ("radio emitted", l_radios.selection_actions.fire_count = 1 and last_choice.item = 3)
+			driver.choose_option (l_segments, 3)
+			assert ("segment emitted", l_segments.selection_actions.fire_count = 1 and l_segments.selected_index = 3)
+			driver.choose_option (l_segments, 3)
+			assert ("same again is silent", l_segments.selection_actions.fire_count = 1)
+			l_got := l_radios.count
+			assert ("count", l_got = 3)
+			l_window.close
+		end
+
+	test_slider_and_switch
+			-- set_value and set_on are silent; a user's drag and flip fire once each.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_slider: GUI_SLIDER
+			l_switch: GUI_SWITCH
+		do
+			create l_window.make ("Slider", 360, 160)
+			create l_stack.make_vertical
+			create l_slider.make (0, 100)
+			create l_switch.make
+			l_stack.extend (l_slider)
+			l_stack.extend (l_switch)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("at minimum", l_slider.value = 0 and not l_switch.is_on)
+			l_slider.set_value (40)
+			l_switch.set_on (True)
+			assert ("set silently", l_slider.value = 40 and l_switch.is_on
+				and l_slider.change_actions.fire_count = 0 and l_switch.toggle_actions.fire_count = 0)
+			driver.set_slider (l_slider, 70)
+			assert ("slid", l_slider.change_actions.fire_count = 1)
+			driver.flip_switch (l_switch)
+			assert ("flipped off", not l_switch.is_on and l_switch.toggle_actions.fire_count = 1)
+			l_slider.set_step (10)
+			assert ("step", l_slider.step = 10)
+			l_window.close
+		end
+
+	test_date_time_and_color_round_trip
+			-- Setting from code is silent and reads back; a user's entry fires once.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_date: GUI_DATE_PICKER
+			l_time: GUI_TIME_PICKER
+			l_color: GUI_COLOR_CHOOSER
+		do
+			create l_window.make ("Date", 420, 180)
+			create l_stack.make_vertical
+			create l_date.make
+			create l_time.make
+			create l_color.make
+			l_stack.extend (l_date)
+			l_stack.extend (l_time)
+			l_stack.extend (l_color)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("valid today", l_date.is_valid_date (l_date.year, l_date.month, l_date.day))
+			assert ("leap day", l_date.is_valid_date (2028, 2, 29) and not l_date.is_valid_date (2027, 2, 29))
+			l_date.set_date (2026, 11, 9)
+			l_time.set_time (9, 30)
+			l_color.set_color (0x3366CC)
+			assert ("date", l_date.year = 2026 and l_date.month = 11 and l_date.day = 9)
+			assert ("time", l_time.hour = 9 and l_time.minute = 30)
+			assert ("color", l_color.color = 0x3366CC)
+			assert ("silent", l_date.change_actions.fire_count = 0 and l_time.change_actions.fire_count = 0
+				and l_color.change_actions.fire_count = 0)
+			driver.set_date (l_date, 2026, 12, 25)
+			driver.set_time (l_time, 17, 5)
+			driver.set_color (l_color, 0xFF8800)
+			assert ("emitted", l_date.change_actions.fire_count = 1 and l_time.change_actions.fire_count = 1
+				and l_color.change_actions.fire_count = 1)
+			l_window.close
+		end
+
+	test_combo_box_commits
+			-- set_text is silent; typing then Return, and picking an option, each fire once.
+		local
+			l_window: GUI_WINDOW
+			l_combo: GUI_COMBO_BOX
+		do
+			create l_window.make ("Combo", 300, 120)
+			create l_combo.make
+			l_combo.extend ("en")
+			l_combo.extend ("fr")
+			l_window.set_content (l_combo)
+			l_window.show
+			settle_window
+			l_combo.set_text ("de")
+			assert ("set silently", l_combo.text.same_string ("de") and l_combo.change_actions.fire_count = 0)
+			driver.type_combo (l_combo, "es")
+			assert ("typed", l_combo.change_actions.fire_count = 1)
+			driver.pick_combo_option (l_combo, 2)
+			assert ("picked", l_combo.text.same_string ("fr") and l_combo.change_actions.fire_count = 2)
+			assert ("options", l_combo.count = 2 and l_combo.i_th (1).same_string ("en"))
+			l_window.close
+		end
+
+	test_containers_hold_their_content
+			-- A scroll area, a group box and an expander each hold one widget; the expander
+			-- starts collapsed, expand and collapse are silent, and a user's click fires.
+		local
+			l_window: GUI_WINDOW
+			l_stack, l_long: GUI_STACK
+			l_scroll: GUI_SCROLL_AREA
+			l_box: GUI_GROUP_BOX
+			l_expander: GUI_EXPANDER
+			l_inside, l_detail: GUI_LABEL
+			i: INTEGER
+		do
+			create l_window.make ("Containers", 360, 360)
+			create l_stack.make_vertical
+			create l_box.make ("Output")
+			create l_inside.make ("Inside the box")
+			l_box.set_content (l_inside)
+			create l_expander.make ("Advanced")
+			create l_detail.make ("Hidden detail")
+			l_expander.set_content (l_detail)
+			create l_scroll.make
+			create l_long.make_vertical
+			from i := 1 until i > 40 loop
+				l_long.extend (create {GUI_LABEL}.make ("Row " + i.out))
+				i := i + 1
+			end
+			l_scroll.set_content (l_long)
+			l_stack.extend (l_box)
+			l_stack.extend (l_expander)
+			l_stack.extend (l_scroll)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("box holds", l_box.content = l_inside and l_inside.parent = l_box)
+			assert ("scroll holds", l_scroll.content = l_long)
+			assert ("collapsed", not l_expander.is_expanded)
+			l_expander.expand
+			assert ("expanded silently", l_expander.is_expanded and l_expander.toggle_actions.fire_count = 0)
+			l_expander.collapse
+			driver.toggle_expander (l_expander)
+			assert ("user expanded", l_expander.is_expanded and l_expander.toggle_actions.fire_count = 1)
+			l_scroll.scroll_to (0, 200)
+			assert ("box label", l_box.accessible_label.same_string ("Output"))
+			l_window.close
+		end
+
+	test_image_separator_and_tooltip
+			-- PNG bytes load; a missing file does not; a separator and a tooltip round trip.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_image, l_missing: GUI_IMAGE
+			l_line: GUI_SEPARATOR
+			l_button: GUI_BUTTON
+		do
+			create l_window.make ("Image", 300, 200)
+			create l_stack.make_vertical
+			create l_image.make_from_png (one_pixel_png)
+			create l_missing.make_from_file (create {PATH}.make_from_string ("no_such_picture.png"))
+			create l_line.make_horizontal
+			create l_button.make ("Save")
+			l_button.set_tooltip ("Save the transcript")
+			l_stack.extend (l_image)
+			l_stack.extend (l_line)
+			l_stack.extend (l_button)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("png loaded", l_image.is_loaded)
+			assert ("missing file", not l_missing.is_loaded)
+			assert ("across", not l_line.is_vertical)
+			assert ("tooltip", l_button.tooltip.same_string ("Save the transcript"))
+			assert ("image role", l_image.accessible_role.same_string ("img"))
+			assert ("separator role", l_line.accessible_role.same_string ("separator"))
+			l_button.set_tooltip ("")
+			assert ("tooltip removed", l_button.tooltip.is_empty)
+			l_window.close
+		end
+
+	test_tree_table_cells
+			-- Nodes as in a tree, with cells in the other columns.
+		local
+			l_window: GUI_WINDOW
+			l_table: GUI_TREE_TABLE
+			l_folder: INTEGER
+		do
+			create l_window.make ("Tree table", 420, 220)
+			create l_table.make (<<"Name", "Size", "Kind">>)
+			l_table.add_root ("Documents")
+			l_folder := l_table.last_node
+			l_table.set_cell (l_folder, 3, "Folder")
+			l_table.add_child (l_folder, "notes.txt")
+			l_table.set_cell (l_table.last_node, 2, "4 KB")
+			l_table.set_cell (l_table.last_node, 3, "Plain text")
+			l_table.expand (l_folder)
+			l_window.set_content (l_table)
+			l_window.show
+			settle_window
+			assert ("columns", l_table.column_count = 3 and l_table.column_title (2).same_string ("Size"))
+			assert ("cells", l_table.cell (2, 2).same_string ("4 KB") and l_table.cell (1, 2).is_empty)
+			assert ("node text is column 1", l_table.cell (2, 1).same_string ("notes.txt"))
+			assert ("tree grid", l_table.accessible_role.same_string ("tree-grid"))
+			l_table.set_cell (2, 1, "notes.md")
+			assert ("renamed", l_table.node_text (2).same_string ("notes.md"))
+			l_window.close
+		end
+
+	test_dialogs_cancel_unattended
+			-- Each 1h dialog answers "cancelled" when the test driver cancels it.
+		local
+			l_window: GUI_WINDOW
+			l_dialogs: GUI_DIALOGS
+		do
+			create l_window.make ("Dialogs", 300, 120)
+			l_window.show
+			settle_window
+			create l_dialogs
+			driver.cancel_dialogs_after (300)
+			assert ("save cancelled", l_dialogs.save_file_named ("Save", <<"txt">>, "notes.txt") = Void)
+			assert ("folder cancelled", l_dialogs.choose_folder ("Folder") = Void)
+			assert ("ask cancelled", l_dialogs.ask ("Save changes?", "Your edits will be lost.") = l_dialogs.Answer_cancel)
+			driver.cancel_dialogs_after (0)
+			l_window.close
+		end
+
+	test_window_of_1h_controls_describes_roles
+			-- Each new control is in the assistive tree under the shared role names.
+		local
+			l_window: GUI_WINDOW
+			l_tree: STRING_32
+		do
+			l_window := controls_1h_window
+			settle_window
+			l_tree := driver.describe_accessibility (l_window)
+			print (indented (l_tree))
+			assert ("radio", l_tree.has_substring ("radio: Small"))
+			assert ("slider", l_tree.has_substring ("slider:"))
+			assert ("switch", l_tree.has_substring ("switch:"))
+			assert ("date", l_tree.has_substring ("spin-button:"))
+			assert ("combo", l_tree.has_substring ("combo-box:"))
+			assert ("group", l_tree.has_substring ("group: Output"))
+			assert ("expander", l_tree.has_substring ("button: Advanced"))
+			assert ("color", l_tree.has_substring ("button:"))
+			l_window.close
+		end
+
+	test_window_of_1h_controls_snapshot
+		local
+			l_window: GUI_WINDOW
+		do
+			l_window := controls_1h_window
+			settle_window
+			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_1h_controls.png")))
+			l_window.close
+		end
+
+	controls_1h_window: GUI_WINDOW
+			-- A window with the 1h controls, shown.
+		local
+			l_stack, l_row: GUI_STACK
+			l_radios: GUI_RADIO_GROUP
+			l_segments: GUI_SEGMENTED
+			l_slider: GUI_SLIDER
+			l_switch: GUI_SWITCH
+			l_date: GUI_DATE_PICKER
+			l_time: GUI_TIME_PICKER
+			l_color: GUI_COLOR_CHOOSER
+			l_combo: GUI_COMBO_BOX
+			l_box: GUI_GROUP_BOX
+			l_expander: GUI_EXPANDER
+		do
+			create Result.make ("Standard controls", 560, 420)
+			create l_stack.make_vertical
+			create l_radios.make_horizontal
+			across <<"Small", "Medium", "Large">> as ic loop l_radios.extend (ic) end
+			create l_segments.make
+			across <<"Day", "Week", "Month">> as ic loop l_segments.extend (ic) end
+			create l_slider.make (0, 100)
+			l_slider.set_value (60)
+			l_slider.set_accessible_label ("Volume")
+			create l_row.make_horizontal
+			create l_switch.make
+			l_switch.set_on (True)
+			l_switch.set_accessible_label ("Captions")
+			create l_date.make
+			l_date.set_date (2026, 11, 9)
+			create l_time.make
+			l_time.set_time (9, 30)
+			create l_color.make
+			l_color.set_color (0x3366CC)
+			create l_combo.make
+			l_combo.extend ("English")
+			l_combo.extend ("French")
+			l_combo.set_text ("English")
+			l_row.extend (l_switch)
+			l_row.extend (l_date)
+			l_row.extend (l_time)
+			l_row.extend (l_color)
+			l_row.extend (l_combo)
+			create l_box.make ("Output")
+			l_box.set_content (create {GUI_LABEL}.make ("Captions go to the transcript."))
+			create l_expander.make ("Advanced")
+			l_expander.set_content (create {GUI_LABEL}.make ("Beam size: 5"))
+			l_expander.expand
+			l_stack.extend (l_radios)
+			l_stack.extend (l_segments)
+			l_stack.extend (l_slider)
+			l_stack.extend (l_row)
+			l_stack.extend (create {GUI_SEPARATOR}.make_horizontal)
+			l_stack.extend (l_box)
+			l_stack.extend (l_expander)
+			Result.set_content (l_stack)
+			Result.show
+		end
+
+	Hex_digits: STRING = "0123456789abcdef"
+
+	last_choice: CELL [INTEGER]
+		once
+			create Result.put (0)
+		end
+
+	one_pixel_png: MANAGED_POINTER
+			-- A valid 1 x 1 PNG (70 bytes).
+		local
+			l_hex: STRING
+			i: INTEGER
+		do
+			l_hex := "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da636460f85f0f0002870180eb47ba920000000049454e44ae426082"
+			create Result.make (l_hex.count // 2)
+			from i := 1 until i > l_hex.count loop
+				Result.put_natural_8 (((Hex_digits.index_of (l_hex [i], 1) - 1) * 16 + Hex_digits.index_of (l_hex [i + 1], 1) - 1).to_natural_8, (i - 1) // 2)
+				i := i + 2
+			end
+		end
+
 feature -- Lazy tables (1f)
 
 	test_a_row_source_asks_only_for_rows_in_view
