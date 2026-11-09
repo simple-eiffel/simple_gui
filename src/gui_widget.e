@@ -222,6 +222,14 @@ feature {GUI_WIDGET} -- Containment
 			inherited: not has_own_direction implies base_direction = a_direction
 		end
 
+feature {GUI_TEST_DRIVER} -- Accessibility
+
+	refresh_description
+			-- Give the backend what assistive tools should read under this widget, when that
+			-- lives in Eiffel (a drawn view's hosted tree); most widgets have nothing to give.
+		do
+		end
+
 feature {GUI_APPLICATION} -- Events
 
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)

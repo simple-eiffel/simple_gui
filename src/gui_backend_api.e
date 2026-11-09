@@ -12,6 +12,12 @@ note
 		| 10 appearance (a = 1 dark) | 11 wake | 12 toggled (a = 1 checked)
 		| 13 page changed (a = page, 1-based) | 14 header clicked (a = column) | 15 expansion
 		(a = node, b = 1 open) | 16 rows wanted (a = first, b = last) | 17 closed (a popover the user dismissed).
+		A drawn view (1i): 18 pointer (a = x, b = y, c = kind + button * 16 + modifiers * 256;
+		kind 1 press, 2 release, 3 move, 4 leave, 5 double, 6 triple; button 1 primary,
+		2 secondary, 3 middle) | 19 wheel (a, b, c = delta, 120 a notch, positive away from the
+		user) | 20 key (a = GDK keyval, b = 1 down, c = modifiers * 256) | 21 character
+		(a = code point) | 22 focus (a = 1 in) | 23 timers (a = 0 tick, 1 fast tick, 2 dwell
+		with b = serial).
 		Text areas report text changed (2) like fields; spin boxes report it with a = the
 		new value; dropdowns report selection (4).
 
@@ -925,6 +931,36 @@ feature -- Common widget state
 		deferred
 		end
 
+	drawn (a_width, a_height: INTEGER): INTEGER
+			-- A drawn view (1i) of the preferred logical size: a canvas with the whole input a hosted simple_widgets window needs (events 18 to 23).
+		deferred
+		end
+
+	drawn_present (an_id: INTEGER; a_surface: POINTER; a_width, a_height: INTEGER)
+			-- Show the top-left `a_width' by `a_height' device pixels of the Cairo image surface `a_surface' (copied).
+		deferred
+		end
+
+	drawn_set_cursor (an_id, a_kind: INTEGER)
+			-- The pointer shape over the view: 0 arrow, 1 I-beam, 2 hand, 3 size west-east, 4 size north-south, 5 cross, 6 wait.
+		deferred
+		end
+
+	drawn_set_ticks (an_id, a_tick_ms, a_fast_ms: INTEGER)
+			-- Event 23 with a = 0 every `a_tick_ms', and with a = 1 every `a_fast_ms' (0: off).
+		deferred
+		end
+
+	drawn_arm_dwell (an_id, a_ms, a_serial: INTEGER)
+			-- Event 23 with a = 2 and b = `a_serial', once, `a_ms' from now.
+		deferred
+		end
+
+	drawn_set_description (an_id: INTEGER; a_text: POINTER)
+			-- The hosted window's accessibility tree, for `describe_accessibility' under the view's group.
+		deferred
+		end
+
 	set_tooltip (an_id: INTEGER; a_text: POINTER)
 			-- Short help on hover; empty removes it.
 		deferred
@@ -1217,6 +1253,11 @@ feature -- Test driver
 
 	test_rate (an_id, a_value: INTEGER)
 			-- Click star `a_value' as a user would (emits text changed on a change).
+		deferred
+		end
+
+	test_drawn_event (an_id, a_type, a_a, a_b, a_c: INTEGER)
+			-- Put a drawn view's event (18 to 23) on the queue, as the view would.
 		deferred
 		end
 

@@ -249,6 +249,15 @@ int sga_confirm_with_check(int a_window, const char *a_title, const char *a_text
 const char *sga_choose_font(int a_window, const char *a_title, const char *a_family, double a_points, int a_bold, int a_italic);   /* "family\x1fpoints\x1fbold\x1fitalic" */
 void sga_show_about(const char *a_name, const char *a_version, const char *a_copyright, const char *a_comments);
 
+/* 1i: the drawn-widget view (events 18 to 23) */
+int sga_drawn(int a_width, int a_height);
+void sga_drawn_present(int a_id, void *a_cairo_surface, int a_width, int a_height);   /* the top-left device pixels */
+void sga_drawn_set_cursor(int a_id, int a_kind);   /* 0 arrow, 1 I-beam, 2 hand, 3 size W-E, 4 size N-S, 5 cross, 6 wait */
+void sga_drawn_set_ticks(int a_id, int a_tick_ms, int a_fast_ms);   /* 0: off */
+void sga_drawn_arm_dwell(int a_id, int a_ms, int a_serial);
+void sga_drawn_set_description(int a_id, const char *a_text);
+void sga_test_drawn_event(int a_id, int a_type, int a, int b, int c);
+
 /* Appearance */
 int sga_is_dark(void);
 void sga_set_dark(int a_on);
