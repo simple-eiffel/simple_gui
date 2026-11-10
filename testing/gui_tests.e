@@ -1994,6 +1994,58 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_feedback_spinner_info_bar_toast_notify
+			-- 1o: a spinner starts and stops; an info bar's actions fire their numbers and its
+			-- close hides it; a toast shows and its action runs once; a desktop notification is
+			-- sent (a test cannot click it).
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_spinner: GUI_SPINNER
+			l_bar, l_ok, l_warn, l_err: GUI_INFO_BAR
+			l_retry, l_pressed, l_closed, l_undone: CELL [INTEGER]
+		do
+			create l_pressed.put (0)
+			create l_closed.put (0)
+			create l_undone.put (0)
+			create l_window.make ("Feedback", 460, 320)
+			create l_stack.make_vertical
+			create l_spinner.make
+			create l_bar.make ({GUI_INFO_BAR}.Kind_info, "A new version is ready.")
+			create l_retry.put (l_bar.add_action ("Update"))
+			l_bar.set_closable (True)
+			l_bar.action_actions.extend (agent (n: INTEGER; c: CELL [INTEGER]) do c.put (n) end (?, l_pressed))
+			l_bar.closed_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_closed))
+			create l_ok.make ({GUI_INFO_BAR}.Kind_success, "Saved.")
+			create l_warn.make ({GUI_INFO_BAR}.Kind_warning, "The disk is nearly full.")
+			create l_err.make ({GUI_INFO_BAR}.Kind_error, "The file could not be read.")
+			l_stack.extend (l_bar)
+			l_stack.extend (l_ok)
+			l_stack.extend (l_warn)
+			l_stack.extend (l_err)
+			l_stack.extend (l_spinner)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_spinner.start
+			assert ("spinning", l_spinner.is_spinning)
+			driver.press_info_bar (l_bar, l_retry.item)
+			assert ("action number", l_pressed.item = l_retry.item)
+			l_window.show_toast_with_action ("Note deleted", "Undo", agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_undone))
+			assert ("toast shows: " + driver.toast_shown (l_window).to_string_8, driver.toast_shown (l_window).same_string ("Note deleted"))
+			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_1o_feedback.png")))
+			driver.press_toast (l_window)
+			driver.press_toast (l_window)
+			assert ("undo once", l_undone.item = 1)
+			driver.press_info_bar (l_bar, 0)
+			assert ("closed and hidden", l_closed.item = 1 and not l_bar.is_shown)
+			l_spinner.stop
+			assert ("stopped", not l_spinner.is_spinning)
+			app.notify ("simple_gui", "A test notification")
+			assert ("sent", app.last_notification.same_string ("simple_gui%NA test notification"))
+			l_window.close
+		end
+
 	test_every_icon_shows_on_a_button
 			-- 1n: each name in the vocabulary shows on a button and reads back; clearing removes it.
 		local

@@ -29,6 +29,9 @@ feature -- Lifecycle and loop
 			-- theme were sized at 100% on a 150% display and grew when a later theme came.
 		do
 			desktop.become_dpi_aware
+			if not from_c (a_name).is_empty then
+				app_title.put (from_c (a_name))
+			end
 			Result := True
 		end
 
@@ -1282,6 +1285,165 @@ feature -- Controls
 				end
 			end
 			Result := c_text (l_shown)
+		end
+
+	spinner: INTEGER
+			-- 1o: an SW_SPINNER, turned on the windows' fast tick while it spins.
+		local
+			l_s: SW_SPINNER
+		do
+			create l_s.make (20.0)
+			Result := register (l_s)
+		end
+
+	spinner_set (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_SPINNER} widget (an_id) as al_s then
+				al_s.set_spinning (a_on)
+				if a_on then
+					spinning.force (an_id, an_id)
+				else
+					spinning.remove (an_id)
+				end
+				pace_fast_timer
+				changed
+			end
+		end
+
+	info_bar (a_kind: INTEGER; a_message: POINTER): INTEGER
+			-- An SW_INFO_BAR: the kind's mark, the message, a row of action buttons, and a close
+			-- button hidden until it is closable.
+		local
+			l_bar: SW_INFO_BAR
+			l_label: SW_LABEL
+			l_actions: SW_ROW
+			l_close: SW_BUTTON
+		do
+			create l_bar.make (a_kind.max (1).min (4))
+			create l_label.make_ui (from_c (a_message))
+			create l_actions.make
+			create l_close.make ("", Void)
+			l_close.set_glyph ({SW_PAINTER}.Glyph_close)
+			l_close.set_kind ({SW_BUTTON}.Kind_quiet)
+			l_close.set_visible (False)
+			l_bar.put (l_label)
+			l_bar.put (l_actions)
+			l_bar.put (l_close)
+			Result := register (l_bar)
+			l_close.set_on_click (agent push (26, Result, 0, 0, 0))
+			info_bars.force ([l_label, l_actions, l_close], Result)
+		end
+
+	info_bar_set (an_id, a_kind: INTEGER; a_message: POINTER)
+		do
+			if attached {SW_INFO_BAR} widget (an_id) as al_bar and then attached info_bars.item (an_id) as al_parts then
+				al_bar.set_kind (a_kind.max (1).min (4))
+				al_parts.label.set_text (from_c (a_message))
+				changed
+			end
+		end
+
+	info_bar_add_action (an_id: INTEGER; a_text: POINTER; a_number: INTEGER)
+		local
+			l_b: SW_BUTTON
+		do
+			if attached info_bars.item (an_id) as al_parts then
+				create l_b.make (from_c (a_text), agent push (26, an_id, a_number, 0, 0))
+				l_b.set_kind ({SW_BUTTON}.Kind_quiet)
+				al_parts.actions.put (l_b)
+				changed
+			end
+		end
+
+	info_bar_set_closable (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached info_bars.item (an_id) as al_parts then
+				al_parts.close.set_visible (a_on)
+				changed
+			end
+		end
+
+	window_show_toast (a_window: INTEGER; a_message, an_action_text: POINTER; a_toast_id: INTEGER)
+			-- SW_WINDOW's notices; an action pushes event 27.
+		local
+			l_action: STRING_32
+		do
+			if attached windows.item (a_window) as al_w then
+				l_action := from_c (an_action_text)
+				if a_toast_id > 0 and not l_action.is_empty then
+					al_w.toast_with_action (from_c (a_message), 1, l_action, agent push (27, a_window, a_toast_id, 0, 0))
+				else
+					al_w.toast (from_c (a_message), 1)
+				end
+				if al_w.is_window_open then
+					al_w.request_render
+				end
+			end
+		end
+
+	notify (a_title, a_body: POINTER; a_notification_id: INTEGER)
+			-- A balloon from the program's notification-area icon (made on the first notice);
+			-- simple_shell reports a click on it, which becomes event 28.
+		local
+			l_title, l_body: STRING_32
+		do
+			if not attached notify_tray.item then
+				notify_tray.put (create {SHELL_TRAY}.make (app_title.item.head ({SHELL_TRAY}.Tooltip_maximum)))
+			end
+			if attached notify_tray.item as al_tray and then al_tray.is_installed then
+				l_title := from_c (a_title).head ({SHELL_TRAY}.Title_maximum)
+				l_body := from_c (a_body).head ({SHELL_TRAY}.Body_maximum)
+				if not l_title.is_empty then
+					al_tray.balloon (l_title, l_body)
+					last_notification_id := a_notification_id
+				end
+			end
+		end
+
+	test_info_bar_press (an_id, a_number: INTEGER)
+		local
+			l_i: INTEGER
+		do
+			if attached info_bars.item (an_id) as al_parts then
+				if a_number = 0 then
+					al_parts.close.perform_click
+				else
+					across al_parts.actions.children as ic loop
+						l_i := l_i + 1
+						if l_i = a_number then
+							ic.perform_click
+						end
+					end
+				end
+				changed
+			end
+		end
+
+	test_toast_shown (a_window: INTEGER): POINTER
+		do
+			if attached windows.item (a_window) as al_w and then not al_w.toasts.is_empty then
+				Result := c_text (al_w.toasts.last.txt)
+			else
+				Result := c_text ({STRING_32} "")
+			end
+		end
+
+	test_toast_press (a_window: INTEGER)
+			-- What a click on the notice's action does: the notice goes, the action runs.
+		local
+			l_toast: detachable TUPLE [txt: STRING_32; tkind: INTEGER; life: INTEGER; act_label: STRING_32; act: detachable PROCEDURE]
+		do
+			if attached windows.item (a_window) as al_w then
+				across al_w.toasts as ic loop
+					if ic.act /= Void then
+						l_toast := ic
+					end
+				end
+				if attached l_toast as al_t and then attached al_t.act as al_act then
+					al_w.toasts.prune_all (al_t)
+					al_act.call
+				end
+			end
 		end
 
 	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
@@ -2879,6 +3041,9 @@ feature {NONE} -- Drawn views (1i)
 			if not busy_buttons.is_empty then
 				l_ms := Busy_pace_ms
 			end
+			if not spinning.is_empty then
+				l_ms := Spin_pace_ms
+			end
 			across drawn_timers as ic loop
 				if ic.fast_ms > 0 and then (l_ms = 0 or else ic.fast_ms < l_ms) then
 					l_ms := ic.fast_ms
@@ -2915,6 +3080,9 @@ feature {NONE} -- Drawn views (1i)
 				if not busy_buttons.is_empty and then attached open_window as al_w and then al_w.is_window_open then
 					al_w.request_render
 				end
+				render_spinning
+			elseif a_type = {SHELL_TRAY}.Event_click and then a_x = {SHELL_TRAY}.Click_balloon and then last_notification_id > 0 then
+				push (28, 0, last_notification_id, 0, 0)
 			end
 		end
 
@@ -3253,6 +3421,48 @@ feature {NONE} -- Icons, badges and busy buttons (1n)
 			across widget_badges as ic loop
 				if attached widget (@ic.key) as al_w and then window_of (al_w) = a_w then
 					a_w.set_widget_badge (al_w, ic)
+				end
+			end
+		end
+
+feature {NONE} -- Feedback (1o)
+
+	spinning: HASH_TABLE [INTEGER, INTEGER]
+			-- The spinners turning now.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	info_bars: HASH_TABLE [TUPLE [label: SW_LABEL; actions: SW_ROW; close: SW_BUTTON], INTEGER]
+			-- Each info bar's parts, by its id.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	notify_tray: CELL [detachable SHELL_TRAY]
+			-- The icon desktop notices come from, once one was sent.
+		once ("OBJECT")
+			create Result.put (Void)
+		end
+
+	app_title: CELL [STRING_32]
+			-- The application's name (`init'), the tray icon's tooltip.
+		once ("OBJECT")
+			create Result.put ({STRING_32} "simple_gui")
+		end
+
+	last_notification_id: INTEGER
+			-- The id of the notice the balloon shows now; a click on it reports this.
+
+	Spin_pace_ms: INTEGER = 80
+			-- How often a spinner turns.
+
+	render_spinning
+			-- A frame for each window with a spinner turning in it.
+		do
+			across spinning as ic loop
+				if attached widget (@ic.key) as al_s and then attached window_of (al_s) as al_w and then al_w.is_window_open then
+					al_w.request_render
 				end
 			end
 		end

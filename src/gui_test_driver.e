@@ -424,6 +424,33 @@ feature -- User actions
 			Result := backend.from_c (backend.test_badge_shown (a_widget.id))
 		end
 
+	press_info_bar (a_bar: GUI_INFO_BAR; a_number: INTEGER)
+			-- Press action `a_number' of `a_bar' (0: its close button) as a user would.
+		require
+			has_application: has_application
+		do
+			backend.test_info_bar_press (a_bar.id, a_number)
+			settle
+		end
+
+	toast_shown (a_window: GUI_WINDOW): STRING_32
+			-- The toast showing in `a_window' now; empty for none.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_toast_shown (a_window.id))
+		end
+
+	press_toast (a_window: GUI_WINDOW)
+			-- Press the action of the toast showing in `a_window', as a user would.
+		require
+			has_application: has_application
+		do
+			backend.test_toast_press (a_window.id)
+			settle
+		end
+
 	pill_tip (a_widget: GUI_WIDGET): STRING_32
 			-- The tip `a_widget''s reference pill shows now; empty when it shows none.
 		require

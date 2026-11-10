@@ -1013,6 +1013,59 @@ feature -- Common widget state
 		deferred
 		end
 
+	spinner: INTEGER
+			-- 1o: a busy wheel, not turning.
+		deferred
+		end
+
+	spinner_set (an_id: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	info_bar (a_kind: INTEGER; a_message: POINTER): INTEGER
+			-- An inline banner: 1 info, 2 success, 3 warning, 4 error. Event 26 (a = action
+			-- number, 0 for close).
+		deferred
+		end
+
+	info_bar_set (an_id, a_kind: INTEGER; a_message: POINTER)
+		deferred
+		end
+
+	info_bar_add_action (an_id: INTEGER; a_text: POINTER; a_number: INTEGER)
+		deferred
+		end
+
+	info_bar_set_closable (an_id: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	window_show_toast (a_window: INTEGER; a_message, an_action_text: POINTER; a_toast_id: INTEGER)
+			-- A toast at the bottom of `a_window'; with action text, a button sending event 27
+			-- (id = window, a = `a_toast_id').
+		deferred
+		end
+
+	notify (a_title, a_body: POINTER; a_notification_id: INTEGER)
+			-- A desktop notification; when `a_notification_id' > 0, a click sends event 28 (a = it).
+		deferred
+		end
+
+	test_info_bar_press (an_id, a_number: INTEGER)
+			-- As the user pressing action `a_number' (0: close).
+		deferred
+		end
+
+	test_toast_shown (a_window: INTEGER): POINTER
+			-- The message of the toast showing in `a_window' now; "" for none.
+		deferred
+		end
+
+	test_toast_press (a_window: INTEGER)
+			-- As the user pressing the action of the toast showing in `a_window'.
+		deferred
+		end
+
 	button_set_icon (an_id: INTEGER; a_name: POINTER)
 			-- 1n: icon `a_name' (GUI_ICON's vocabulary) before the button's text; "" removes it.
 		deferred

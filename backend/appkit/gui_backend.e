@@ -1000,6 +1000,61 @@ feature -- Common widget state
 		alias "sga_test_press_shortcut($a_window, (const char *) $a_shortcut);"
 		end
 
+	spinner: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_spinner();"
+		end
+
+	spinner_set (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_spinner_set($an_id, $a_on ? 1 : 0);"
+		end
+
+	info_bar (a_kind: INTEGER; a_message: POINTER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_info_bar($a_kind, (const char *) $a_message);"
+		end
+
+	info_bar_set (an_id, a_kind: INTEGER; a_message: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_info_bar_set($an_id, $a_kind, (const char *) $a_message);"
+		end
+
+	info_bar_add_action (an_id: INTEGER; a_text: POINTER; a_number: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_info_bar_add_action($an_id, (const char *) $a_text, $a_number);"
+		end
+
+	info_bar_set_closable (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_info_bar_set_closable($an_id, $a_on ? 1 : 0);"
+		end
+
+	window_show_toast (a_window: INTEGER; a_message, an_action_text: POINTER; a_toast_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_window_show_toast($a_window, (const char *) $a_message, (const char *) $an_action_text, $a_toast_id);"
+		end
+
+	notify (a_title, a_body: POINTER; a_notification_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_notify((const char *) $a_title, (const char *) $a_body, $a_notification_id);"
+		end
+
+	test_info_bar_press (an_id, a_number: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_info_bar_press($an_id, $a_number);"
+		end
+
+	test_toast_shown (a_window: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_test_toast_shown($a_window);"
+		end
+
+	test_toast_press (a_window: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_toast_press($a_window);"
+		end
+
 	button_set_icon (an_id: INTEGER; a_name: POINTER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_button_set_icon($an_id, (const char *) $a_name);"

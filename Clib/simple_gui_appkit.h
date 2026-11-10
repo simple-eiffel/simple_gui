@@ -277,6 +277,18 @@ void sga_list_scroll_to_row(int a_id, int a_row);
 void sga_table_scroll_to_row(int a_id, int a_row);
 void sga_test_press_shortcut(int a_window, const char *a_shortcut);
 
+/* 1o: feedback and messages */
+int sga_spinner(void);
+void sga_spinner_set(int a_id, int a_on);
+int sga_info_bar(int a_kind, const char *a_message);   /* 1 info, 2 success, 3 warning, 4 error; event 26 */
+void sga_info_bar_set(int a_id, int a_kind, const char *a_message);
+void sga_info_bar_add_action(int a_id, const char *a_text, int a_number);
+void sga_info_bar_set_closable(int a_id, int a_on);
+void sga_window_show_toast(int a_window, const char *a_message, const char *an_action_text, int a_toast_id);   /* event 27 */
+void sga_notify(const char *a_title, const char *a_body, int a_notification_id);   /* event 28; bundled programs only */
+void sga_test_info_bar_press(int a_id, int a_number);
+const char *sga_test_toast_shown(int a_window);
+void sga_test_toast_press(int a_window);
 /* 1n: icons, styles, badges, busy */
 void sga_button_set_icon(int a_id, const char *a_name);   /* GUI_ICON's names; "" removes */
 void sga_button_set_style(int a_id, int a_style);   /* 0 normal, 1 suggested, 2 destructive, 3 flat, 4 pill */
