@@ -109,6 +109,23 @@ feature {GUI_SW_WINDOW} -- Events
 			events.extend ([a_type, an_id, a_a, a_b, a_c])
 		end
 
+feature {GUI_SW_WINDOW} -- Widget numbers (1u)
+
+	id_of_widget (a_widget: SW_WIDGET): INTEGER
+			-- `a_widget''s simple_gui id, 0 when it is not one of ours.
+		local
+			i: INTEGER
+		do
+			from i := 1 until i > items.count or Result > 0 loop
+				if items.i_th (i) = a_widget then
+					Result := i
+				end
+				i := i + 1
+			end
+		ensure
+			in_range: 0 <= Result and Result <= items.count
+		end
+
 feature -- Windows and containers
 
 	window (a_title: POINTER; a_width, a_height: INTEGER): INTEGER
@@ -2998,6 +3015,141 @@ feature -- Controls
 			end
 		end
 
+	dialog (a_title: POINTER): INTEGER
+			-- 1u: a sheet's content, built when shown.
+		local
+			l_d: GUI_SW_DIALOG
+		do
+			create l_d.make (from_c (a_title))
+			Result := register (l_d)
+			l_d.set_on_press (agent dialog_pressed (Result, ?))
+		end
+
+	dialog_set_content (a_dialog, a_widget: INTEGER)
+		do
+			if attached {GUI_SW_DIALOG} widget (a_dialog) as al_d and then attached widget (a_widget) as al_c then
+				al_d.set_content (al_c)
+			end
+		end
+
+	dialog_add_button (a_dialog: INTEGER; a_text: POINTER; a_role: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_DIALOG} widget (a_dialog) as al_d then
+				Result := al_d.add_button (from_c (a_text), a_role.max (1).min (4))
+			end
+		end
+
+	dialog_set_button_enabled (a_dialog, n: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {GUI_SW_DIALOG} widget (a_dialog) as al_d and then 1 <= n and then n <= al_d.button_count then
+				al_d.set_button_enabled (n, a_on)
+				changed
+			end
+		end
+
+	dialog_present (a_dialog, a_parent_window: INTEGER; an_app_modal: BOOLEAN)
+			-- A centered sheet in the parent window; with none, in the application's open window.
+		local
+			l_win: detachable GUI_SW_WINDOW
+		do
+			if attached {GUI_SW_DIALOG} widget (a_dialog) as al_d then
+				if a_parent_window > 0 and then attached windows.item (a_parent_window) as al_p and then al_p.is_window_open then
+					l_win := al_p
+				else
+					l_win := open_window
+				end
+				if attached l_win as al_w and then al_w.is_window_open then
+					al_w.present_dialog (al_d)
+					changed
+				end
+			end
+		end
+
+	dialog_pump (a_dialog: INTEGER)
+			-- Nothing on Windows: the sheet is drawn by the window's own loop.
+		do
+		end
+
+	dialog_close (a_dialog: INTEGER)
+		do
+			if attached {GUI_SW_DIALOG} widget (a_dialog) as al_d and then attached al_d.host as al_h then
+				al_h.dismiss_dialog (al_d)
+				changed
+			end
+		end
+
+	dialog_is_shown (a_dialog: INTEGER): BOOLEAN
+		do
+			Result := attached {GUI_SW_DIALOG} widget (a_dialog) as al_d and then attached al_d.host as al_h
+				and then al_h.is_dialog_up (al_d)
+		end
+
+	help_show_tip (a_widget: INTEGER; a_text: POINTER)
+			-- A note under the widget for about 6 seconds.
+		do
+			if attached widget (a_widget) as al_w and then attached window_of (al_w) as al_win and then al_win.is_window_open then
+				al_win.show_help_tip (from_c (a_text), al_w.x, al_w.y + al_w.height)
+				help_tip_window := al_win
+				help_tip_due := clock.milliseconds + Help_tip_ms
+				changed
+			end
+		end
+
+	test_press_dialog_button (a_dialog, n: INTEGER)
+			-- As a click on the button.
+		do
+			if attached {GUI_SW_DIALOG} widget (a_dialog) as al_d and then dialog_is_shown (a_dialog) then
+				al_d.press (n)
+			end
+		end
+
+	test_dialog_key (a_dialog, a_key: INTEGER)
+			-- 1 Return (the default button), 2 Escape and 3 the close box (Cancel).
+		do
+			if attached {GUI_SW_DIALOG} widget (a_dialog) as al_d and then dialog_is_shown (a_dialog) then
+				if a_key = 1 then
+					al_d.press_role (1)
+				elseif a_key = 2 or a_key = 3 then
+					al_d.press_role (2)
+				end
+			end
+		end
+
+	test_press_dialog_button_later (a_dialog, n, a_ms: INTEGER)
+		do
+			later_presses.extend ([a_dialog, n, clock.milliseconds + a_ms.max (1)])
+		end
+
+	test_dialog_button_order (a_dialog: INTEGER): POINTER
+		local
+			l_order: STRING_32
+		do
+			create l_order.make_empty
+			if attached {GUI_SW_DIALOG} widget (a_dialog) as al_d then
+				l_order := al_d.shown_order
+			end
+			Result := c_text (l_order)
+		end
+
+	test_press_help (a_window: INTEGER)
+			-- As F1 in the window.
+		do
+			if attached windows.item (a_window) as al_w then
+				al_w.press_help
+			end
+		end
+
+	test_help_tip_shown: POINTER
+		local
+			l_text: STRING_32
+		do
+			create l_text.make_empty
+			if attached help_tip_window as al_win then
+				l_text := al_win.help_tip_showing
+			end
+			Result := c_text (l_text)
+		end
+
 	tabs_set_position (a_tabs, a_position: INTEGER)
 			-- 1t: SW_TABS' strip placement (the same numbers).
 		do
@@ -4690,6 +4842,72 @@ feature {NONE} -- Drawn views (1i)
 			]"
 		end
 
+feature {NONE} -- Dialogs and help tips (1u)
+
+	Help_tip_ms: INTEGER = 6000
+			-- How long a help tip stays.
+
+	dialog_pressed (a_dialog, n: INTEGER)
+			-- The user pressed button `n': 48.
+		do
+			push (48, a_dialog, n, 0, 0)
+		end
+
+	later_presses: ARRAYED_LIST [TUPLE [dialog, n: INTEGER; due: INTEGER_64]]
+			-- Tests: presses due later.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	help_tip_window: detachable GUI_SW_WINDOW
+			-- The window the last help tip was shown in.
+
+	help_tip_due: INTEGER_64
+			-- When it comes down (0: none up).
+
+	ms_to_next_deadline: INTEGER_64
+			-- Milliseconds until the soonest later press or tip expiry, a large number if none.
+		local
+			l_now: INTEGER_64
+		do
+			Result := {INTEGER_64} 1_000_000
+			l_now := clock.milliseconds
+			across later_presses as ic loop
+				Result := Result.min (ic.due - l_now)
+			end
+			if help_tip_due > 0 then
+				Result := Result.min (help_tip_due - l_now)
+			end
+		end
+
+	fire_due_dialog_deadlines
+			-- Presses a test asked for, and the help tip's end.
+		local
+			l_now: INTEGER_64
+			l_due: ARRAYED_LIST [TUPLE [dialog, n: INTEGER; due: INTEGER_64]]
+		do
+			l_now := clock.milliseconds
+			if not later_presses.is_empty then
+				create l_due.make (0)
+				across later_presses as ic loop
+					if l_now >= ic.due then
+						l_due.extend (ic)
+					end
+				end
+				across l_due as ic loop
+					later_presses.prune_all (ic)
+					test_press_dialog_button (ic.dialog, ic.n)
+				end
+			end
+			if help_tip_due > 0 and then l_now >= help_tip_due then
+				help_tip_due := 0
+				if attached help_tip_window as al_win then
+					al_win.hide_help_tip
+					changed
+				end
+			end
+		end
+
 feature {NONE} -- Timers, shortcuts and full screen (1m)
 
 	gui_timers: HASH_TABLE [TUPLE [ms: INTEGER; repeat: BOOLEAN; due: INTEGER_64], INTEGER]
@@ -4708,6 +4926,7 @@ feature {NONE} -- Timers, shortcuts and full screen (1m)
 			across gui_timers as ic loop
 				l_soonest := l_soonest.min (ic.due - l_now)
 			end
+			l_soonest := l_soonest.min (ms_to_next_deadline)
 			Result := l_soonest.max (0).min (1_000_000).to_integer_32
 		ensure
 			non_negative: Result >= 0
@@ -4719,6 +4938,7 @@ feature {NONE} -- Timers, shortcuts and full screen (1m)
 			l_now: INTEGER_64
 			l_done: ARRAYED_LIST [INTEGER]
 		do
+			fire_due_dialog_deadlines
 			if not gui_timers.is_empty then
 				l_now := clock.milliseconds
 				create l_done.make (0)
