@@ -588,6 +588,25 @@ feature -- User actions
 			settle
 		end
 
+	drag_out_carries (a_source: GUI_WIDGET): STRING_32
+			-- What a drag out of `a_source' would give another program now: the text, a line
+			-- feed, then the paths one per line; empty for nothing.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_drag_out (a_source.id))
+		end
+
+	end_drag_out (a_source: GUI_WIDGET; a_how: INTEGER)
+			-- End a drag out of `a_source' as another program would (`a_how' as in event 34).
+		require
+			has_application: has_application
+		do
+			backend.test_drag_out_ended (a_source.id, a_how)
+			settle
+		end
+
 	is_accepting (a_target: GUI_WIDGET): BOOLEAN
 			-- Does `a_target' show that it takes the pebble in flight?
 		require

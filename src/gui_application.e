@@ -332,6 +332,10 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 					if attached widgets.item (l_id) as al_target then
 						al_target.take_outside_drop (l_a)
 					end
+				when 34 then
+					if attached widgets.item (l_id) as al_source then
+						al_source.end_drag_out (l_a)
+					end
 				when 24 then
 					if attached timers.item (l_a) as al_timer then
 						al_timer.fire

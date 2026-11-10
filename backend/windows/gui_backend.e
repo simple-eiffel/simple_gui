@@ -1853,6 +1853,42 @@ feature -- Controls
 			end
 		end
 
+	widget_set_drag_out (an_id: INTEGER; a_text, a_paths: POINTER)
+			-- 1q-c: kept here; the drag itself is OLE DoDragDrop through simple_shell.
+		local
+			l_text, l_paths: STRING_32
+		do
+			l_text := from_c (a_text)
+			l_paths := from_c (a_paths)
+			if l_text.is_empty and l_paths.is_empty then
+				drag_out_data.remove (an_id)
+			else
+				drag_out_data.force ([l_text, l_paths], an_id)
+			end
+		end
+
+	test_drag_out (an_id: INTEGER): POINTER
+		do
+			if attached drag_out_data.item (an_id) as al_d then
+				Result := c_text (al_d.text + {STRING_32} "%N" + al_d.paths)
+			else
+				Result := c_text ({STRING_32} "")
+			end
+		end
+
+	test_drag_out_ended (an_id, a_how: INTEGER)
+		do
+			if drag_out_data.has (an_id) then
+				push (34, an_id, a_how, 0, 0)
+			end
+		end
+
+	drag_out_data: HASH_TABLE [TUPLE [text, paths: STRING_32], INTEGER]
+			-- What a drag out of each widget carries: text, and paths newline-separated.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
 	takes_outside: HASH_TABLE [INTEGER, INTEGER]
 			-- What each widget takes from other programs: 1 files, 2 text.
 		once ("OBJECT")

@@ -1225,6 +1225,24 @@ feature -- Common widget state
 		deferred
 		end
 
+	widget_set_drag_out (an_id: INTEGER; a_text, a_paths: POINTER)
+			-- 1q-c: a drag out of `an_id' carries `a_text' and the newline-separated `a_paths'
+			-- (both empty: no drag out). Copy both; they are freed after the call.
+		deferred
+		end
+
+	test_drag_out (an_id: INTEGER): POINTER
+			-- What a drag out of `an_id' would carry now: the text, a line feed, then the paths
+			-- one per line; empty when it carries nothing.
+		deferred
+		end
+
+	test_drag_out_ended (an_id, a_how: INTEGER)
+			-- As a drag out of `an_id' ending in another program with `a_how' (event 34);
+			-- nothing unless `an_id' has something to drag out.
+		deferred
+		end
+
 	take_dropped_paths (an_id: INTEGER): POINTER
 			-- 1q-b: the files dropped on `an_id' (event 33, a = 1), newline-separated; taken once.
 		deferred

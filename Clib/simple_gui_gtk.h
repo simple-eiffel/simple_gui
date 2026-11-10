@@ -4697,28 +4697,100 @@ static void sg_pick_on_secondary(GtkGestureClick *g, int n, double x, double y, 
     g_object_set_data(G_OBJECT(src), "sg-pick-at-y", GINT_TO_POINTER((int) y));
 }
 
-/* --- drag mode --- */
+/* 1q-c: what a drag out of the widget carries ("sg-drag-text", "sg-drag-paths" newline-separated),
+   kept current by the program. A drop on one of our own widgets sets sg_drag_inside, so the drag's
+   end pushes 34 (source, a = 1 copied, 0 refused) only for a drag that left for another program. */
+__attribute__((weak)) int sg_drag_inside = 0, sg_drag_canceled = 0;
+static const char *sg_drag_str(int id, const char *key) {
+    const char *s = sg_w[id] ? g_object_get_data(G_OBJECT(sg_w[id]), key) : NULL;
+    return s ? s : "";
+}
+static int sg_has_drag_out(int id) { return *sg_drag_str(id, "sg-drag-text") || *sg_drag_str(id, "sg-drag-paths"); }
+static GdkContentProvider *sg_drag_out_content(int id) {
+    const char *t = sg_drag_str(id, "sg-drag-text"), *p = sg_drag_str(id, "sg-drag-paths");
+    GdkContentProvider *parts[2];
+    int n = 0;
+    if (*p) {
+        GSList *files = NULL;
+        char **lines = g_strsplit(p, "\n", -1), **it;
+        for (it = lines; *it; it++) if (**it) files = g_slist_append(files, g_file_new_for_path(*it));
+        g_strfreev(lines);
+        if (files) {
+            parts[n++] = gdk_content_provider_new_typed(GDK_TYPE_FILE_LIST, files);
+            g_slist_free_full(files, g_object_unref);
+        }
+    }
+    if (*t) parts[n++] = gdk_content_provider_new_typed(G_TYPE_STRING, t);
+    if (n == 0) return NULL;
+    if (n == 1) return parts[0];
+    return gdk_content_provider_new_union(parts, 2);
+}
+
+/* --- drag mode (and 1q-c drags out: one GtkDragSource serves both) --- */
 static GdkContentProvider *sg_pick_on_prepare(GtkDragSource *s, double x, double y, gpointer d) {
-    int id = GPOINTER_TO_INT(d);
+    int id = GPOINTER_TO_INT(d), pick;
     GtkWidget *src = sg_w[id];
     (void) s;
-    if (!src || !GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-src"))
-        || GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-mode")) != 1) return NULL;
-    sg_pick_start(id, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-row")) ? sg_pick_row_at(id, x, y) : 0, 1);
-    sg_pick_window = GTK_WIDGET(gtk_widget_get_root(src));
+    if (!src) return NULL;
+    pick = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-src"))
+        && GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-mode")) == 1;
+    if (!pick && !sg_has_drag_out(id)) return NULL;
+    sg_drag_inside = 0; sg_drag_canceled = 0;
+    if (pick) {
+        sg_pick_start(id, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-row")) ? sg_pick_row_at(id, x, y) : 0, 1);
+        sg_pick_window = GTK_WIDGET(gtk_widget_get_root(src));
+    }
+    /* With data to drag out, the drag carries it: our own targets take the pebble while the
+       pick is on and ignore the content; another program gets the data. */
+    if (sg_has_drag_out(id)) return sg_drag_out_content(id);
     return gdk_content_provider_new_typed(G_TYPE_STRING, "sg-pebble");
 }
 static void sg_pick_on_drag_begin(GtkDragSource *s, GdkDrag *drag, gpointer d) {
     (void) s; (void) d;
     sg_pick_drag = drag;
 }
+static gboolean sg_drag_on_cancel(GtkDragSource *s, GdkDrag *drag, GdkDragCancelReason r, gpointer d) {
+    (void) s; (void) drag; (void) r; (void) d;
+    sg_drag_canceled = 1;
+    return FALSE;
+}
 static void sg_pick_on_drag_end(GtkDragSource *s, GdkDrag *drag, gboolean del, gpointer d) {
-    (void) s; (void) drag; (void) del; (void) d;
+    int id = GPOINTER_TO_INT(d);
+    (void) s; (void) drag;
     if (sg_pick_on && sg_pick_mode == 1) {   /* not taken by one of our targets */
         sg_push(32, sg_pick_source, 0, 0);
         sg_pick_clear();
     }
+    if (!sg_drag_inside && sg_has_drag_out(id)) sg_push(34, id, sg_drag_canceled ? 0 : (del ? 2 : 1), 0);
 }
+static void sg_drag_source_hook(int id) {
+    GtkWidget *w = sg_w[id];
+    GtkDragSource *s;
+    if (g_object_get_data(G_OBJECT(w), "sg-drag-hooked")) return;
+    s = gtk_drag_source_new();
+    gtk_drag_source_set_actions(s, GDK_ACTION_COPY);
+    g_signal_connect(s, "prepare", G_CALLBACK(sg_pick_on_prepare), GINT_TO_POINTER(id));
+    g_signal_connect(s, "drag-begin", G_CALLBACK(sg_pick_on_drag_begin), NULL);
+    g_signal_connect(s, "drag-cancel", G_CALLBACK(sg_drag_on_cancel), NULL);
+    g_signal_connect(s, "drag-end", G_CALLBACK(sg_pick_on_drag_end), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(sg_pick_widget(id), GTK_EVENT_CONTROLLER(s));
+    g_object_set_data(G_OBJECT(w), "sg-drag-hooked", GINT_TO_POINTER(1));
+}
+static void sg_widget_set_drag_out(int id, const char *text, const char *paths) {
+    GtkWidget *w = sg_w[id];
+    if (!w) return;
+    g_object_set_data_full(G_OBJECT(w), "sg-drag-text", g_strdup(text), g_free);
+    g_object_set_data_full(G_OBJECT(w), "sg-drag-paths", g_strdup(paths), g_free);
+    if (*text || *paths) sg_drag_source_hook(id);
+}
+/* What a drag out of `id' would carry now: text, a line feed, the paths; "" for nothing. */
+static const char *sg_test_drag_out(int id) {
+    if (!sg_has_drag_out(id)) return "";
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-drag-shown",
+        g_strconcat(sg_drag_str(id, "sg-drag-text"), "\n", sg_drag_str(id, "sg-drag-paths"), NULL), g_free);
+    return g_object_get_data(G_OBJECT(sg_w[id]), "sg-drag-shown");
+}
+static void sg_test_drag_out_ended(int id, int how) { if (sg_has_drag_out(id)) sg_push(34, id, how, 0); }
 /* 1q-b: what the widget takes from other programs ("sg-take-files", "sg-take-text"); a string
    that arrives while one of our picks is on is the pick's token, otherwise outside text. */
 static int sg_takes(int id, const char *what) { return sg_w[id] && GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), what)); }
@@ -4769,6 +4841,7 @@ static void sg_pick_on_leave(GtkDropTarget *t, gpointer d) {
 static gboolean sg_pick_on_drop(GtkDropTarget *t, const GValue *v, double x, double y, gpointer d) {
     int id = GPOINTER_TO_INT(d);
     (void) t;
+    sg_drag_inside = 1;
     gtk_widget_remove_css_class(sg_pick_widget(id), "sg-drop-hover");
     if (sg_pick_on) {
         if (!sg_pick_ok[id]) return FALSE;
@@ -4804,13 +4877,8 @@ static void sg_widget_set_pick(int id, int mode, int is_source, int by_row) {
     g_object_set_data(G_OBJECT(w), "sg-pick-src", GINT_TO_POINTER(is_source));
     g_object_set_data(G_OBJECT(w), "sg-pick-row", GINT_TO_POINTER(by_row));
     if (is_source && !g_object_get_data(G_OBJECT(w), "sg-pick-hooked")) {
-        GtkDragSource *s = gtk_drag_source_new();
         GtkGesture *g = gtk_gesture_click_new();
-        gtk_drag_source_set_actions(s, GDK_ACTION_COPY);
-        g_signal_connect(s, "prepare", G_CALLBACK(sg_pick_on_prepare), GINT_TO_POINTER(id));
-        g_signal_connect(s, "drag-begin", G_CALLBACK(sg_pick_on_drag_begin), NULL);
-        g_signal_connect(s, "drag-end", G_CALLBACK(sg_pick_on_drag_end), NULL);
-        gtk_widget_add_controller(e, GTK_EVENT_CONTROLLER(s));
+        sg_drag_source_hook(id);
         gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(g), GDK_BUTTON_SECONDARY);
         gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(g), GTK_PHASE_CAPTURE);
         g_signal_connect(g, "pressed", G_CALLBACK(sg_pick_on_secondary), GINT_TO_POINTER(id));

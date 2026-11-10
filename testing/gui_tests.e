@@ -2205,6 +2205,46 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_dragged_out_to_other_programs
+			-- 1q-c: a drag out carries the data the program keeps current; Void carries nothing;
+			-- the end of a drag reaches the source's actions only while it has data.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_both, l_text: GUI_LABEL
+			l_a, l_b: PATH
+			l_how: CELL [INTEGER]
+		do
+			create l_how.put (-1)
+			create l_window.make ("Dragged out", 360, 200)
+			create l_stack.make_vertical
+			create l_both.make ("Text and files")
+			create l_text.make ("Text only")
+			l_stack.extend (l_both)
+			l_stack.extend (l_text)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			create l_a.make_from_string ("notes.txt")
+			create l_b.make_from_string ("sermon.md")
+			l_both.set_drag_out (create {GUI_DRAG_DATA}.make ("Romans 8:28", <<l_a, l_b>>))
+			l_text.set_drag_out (create {GUI_DRAG_DATA}.make_text ("John 3:16"))
+			l_both.drag_out_ended_actions.extend (agent (a_how: INTEGER; a_cell: CELL [INTEGER]) do a_cell.put (a_how) end (?, l_how))
+			assert ("both: " + driver.drag_out_carries (l_both).out,
+				driver.drag_out_carries (l_both).same_string ({STRING_32} "Romans 8:28%N" + l_a.name + "%N" + l_b.name))
+			assert ("text: " + driver.drag_out_carries (l_text).out, driver.drag_out_carries (l_text).same_string ("John 3:16%N"))
+			driver.end_drag_out (l_both, l_both.Drag_copied)
+			assert ("copied: " + l_how.item.out, l_how.item = l_both.Drag_copied)
+			l_text.set_drag_out (create {GUI_DRAG_DATA}.make_files (<<l_b>>))
+			assert ("files now: " + driver.drag_out_carries (l_text).out, driver.drag_out_carries (l_text).same_string ({STRING_32} "%N" + l_b.name))
+			l_both.set_drag_out (Void)
+			assert ("nothing", driver.drag_out_carries (l_both).is_empty and l_both.drag_out = Void)
+			l_how.put (-1)
+			driver.end_drag_out (l_both, l_both.Drag_refused)
+			assert ("no data, no end", l_how.item = -1)
+			l_window.close
+		end
+
 	test_files_and_text_dropped_in
 			-- 1q-b: files and text another program drops reach the actions that take them; a
 			-- widget that takes only files ignores text, and one that takes nothing ignores both.

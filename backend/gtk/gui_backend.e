@@ -854,6 +854,22 @@ feature -- Controls
 		alias "sg_pick_cancel();"
 		end
 
+	widget_set_drag_out (an_id: INTEGER; a_text, a_paths: POINTER)
+			-- 1q-c.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_widget_set_drag_out($an_id, (const char *) $a_text, (const char *) $a_paths);"
+		end
+
+	test_drag_out (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_test_drag_out($an_id);"
+		end
+
+	test_drag_out_ended (an_id, a_how: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_drag_out_ended($an_id, $a_how);"
+		end
+
 	take_dropped_paths (an_id: INTEGER): POINTER
 			-- 1q-b: kept until the next drop.
 		external "C inline use %"simple_gui_gtk.h%""
