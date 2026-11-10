@@ -620,6 +620,102 @@ feature -- Windows and containers
 		alias "return (EIF_POINTER) sg_test_help_tip_shown();"
 		end
 
+	grid_view: INTEGER
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_grid_view_new();"
+		end
+
+	grid_view_extend (an_id: INTEGER; a_title, a_picture, an_icon: POINTER)
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_view_extend($an_id, (const char *) $a_title, (const char *) $a_picture, (const char *) $an_icon);"
+		end
+
+	grid_view_set_subtitle (an_id, i: INTEGER; a_text: POINTER)
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_view_set_subtitle($an_id, $i, (const char *) $a_text);"
+		end
+
+	grid_view_remove (an_id, i: INTEGER)
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_view_remove($an_id, $i);"
+		end
+
+	grid_view_wipe_out (an_id: INTEGER)
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_view_wipe_out($an_id);"
+		end
+
+	grid_view_set_item_size (an_id, a_width, a_height: INTEGER)
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_view_set_item_size($an_id, $a_width, $a_height);"
+		end
+
+	grid_view_set_spacing (an_id, a_spacing: INTEGER)
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_view_set_spacing($an_id, $a_spacing);"
+		end
+
+	grid_view_set_multiple (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_view_set_multiple($an_id, $a_on);"
+		end
+
+	grid_view_select (an_id, i: INTEGER; an_extend: BOOLEAN)
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_view_select($an_id, $i, $an_extend);"
+		end
+
+	grid_view_selected_count (an_id: INTEGER): INTEGER
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_grid_view_selected_count($an_id);"
+		end
+
+	grid_view_selected_at (an_id, k: INTEGER): INTEGER
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_grid_view_selected_at($an_id, $k);"
+		end
+
+	grid_view_scroll_to (an_id, i: INTEGER)
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_view_scroll_to($an_id, $i);"
+		end
+
+	grid_view_set_filter (an_id: INTEGER; a_text: POINTER)
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_grid_view_set_filter($an_id, (const char *) $a_text);"
+		end
+
+	grid_view_shown_count (an_id: INTEGER): INTEGER
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_grid_view_shown_count($an_id);"
+		end
+
+	test_activate_item (an_id, i: INTEGER)
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_activate_item($an_id, $i);"
+		end
+
+	test_item_picture_ready (an_id, i: INTEGER): BOOLEAN
+			-- 1v-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_item_picture_ready($an_id, $i);"
+		end
+
 	splitter (a_vertical: BOOLEAN): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_splitter($a_vertical ? 1 : 0);"
