@@ -5692,6 +5692,29 @@ static int sg_grid_pos_of(int id, int item) {   /* the shown position of an item
     return r;
 }
 typedef struct { int id; char *path; } SgGridLoad;
+/* Every cell under `w' showing `path' takes texture `tex'. */
+static void sg_grid_show_loaded(GtkWidget *w, const char *path, GdkTexture *tex) {
+    GtkWidget *c;
+    const char *p = g_object_get_data(G_OBJECT(w), "sg-pic-path");
+    if (p && strcmp(p, path) == 0) {
+        GtkWidget *pic = g_object_get_data(G_OBJECT(w), "sg-pic"), *img = g_object_get_data(G_OBJECT(w), "sg-icon");
+        if (pic) { gtk_picture_set_paintable(GTK_PICTURE(pic), GDK_PAINTABLE(tex)); gtk_widget_set_visible(pic, TRUE); }
+        if (img) gtk_widget_set_visible(img, FALSE);
+        return;
+    }
+    for (c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) sg_grid_show_loaded(c, path, tex);
+}
+/* Does a cell under `w' showing `path' show its picture? */
+static int sg_grid_cell_shows(GtkWidget *w, const char *path) {
+    GtkWidget *c;
+    const char *p = g_object_get_data(G_OBJECT(w), "sg-pic-path");
+    if (p && strcmp(p, path) == 0) {
+        GtkWidget *pic = g_object_get_data(G_OBJECT(w), "sg-pic");
+        return pic && gtk_widget_get_visible(pic) && gtk_picture_get_paintable(GTK_PICTURE(pic)) != NULL;
+    }
+    for (c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) if (sg_grid_cell_shows(c, path)) return 1;
+    return 0;
+}
 static void sg_grid_load_thread(GTask *task, gpointer src, gpointer data, GCancellable *c) {
     SgGridLoad *l = data;
     GError *e = NULL;
@@ -5714,11 +5737,10 @@ static void sg_grid_load_done(GObject *src, GAsyncResult *res, gpointer data) {
             g_object_unref(pb);
         }
         g_hash_table_insert(sg_grid_textures(l->id), g_strdup(l->path), tex);
-        for (i = 0; i < n; i++) {   /* the items showing this picture rebind */
-            char *p = sg_row_field(gtk_string_list_get_string(GTK_STRING_LIST(all), i), 2);
-            if (strcmp(p, l->path) == 0) g_list_model_items_changed(all, i, 1, 1);
-            g_free(p);
-        }
+        /* GTK does not rebind an item whose object is unchanged, so the cells showing this
+           picture take it here; cells bound later find it in the cache */
+        sg_grid_show_loaded(GTK_WIDGET(sg_grid_view(l->id)), l->path, tex);
+        (void) all; (void) i; (void) n;
     } else if (tex) g_object_unref(tex);
     g_free(l->path); g_free(l);
 }
@@ -5772,6 +5794,7 @@ static void sg_grid_bind(GtkSignalListItemFactory *f, GtkListItem *it, gpointer 
     gtk_widget_set_visible(g_object_get_data(G_OBJECT(box), "sg-sub"), *sub != 0);
     gtk_picture_set_paintable(GTK_PICTURE(pic), tex ? GDK_PAINTABLE(tex) : NULL);
     gtk_widget_set_visible(pic, tex != NULL);
+    g_object_set_data_full(G_OBJECT(box), "sg-pic-path", g_strdup(path), g_free);   /* for a load that finishes later */
     if (*path && !tex) sg_grid_want_picture(id, path);
     gtk_image_set_from_icon_name(GTK_IMAGE(img), *icon ? sg_icon_gtk(icon) : (*path ? "image-x-generic-symbolic" : "text-x-generic-symbolic"));
     gtk_widget_set_visible(img, tex == NULL);
@@ -5843,6 +5866,7 @@ static int sg_grid_view_new(void) {
     gtk_widget_set_vexpand(scroll, TRUE);
     gtk_widget_set_hexpand(scroll, TRUE);
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 140);
+    sg_natural_rows(scroll);   /* as tall as its rows want, up to 400, as lists and tables are */
     g_object_set_data_full(G_OBJECT(scroll), "sg-grid-items", items, g_object_unref);
     g_object_set_data_full(G_OBJECT(scroll), "sg-grid-filtered", fl, g_object_unref);
     g_object_set_data(G_OBJECT(scroll), "sg-grid-view", v);
@@ -5954,7 +5978,8 @@ static int sg_test_item_picture_ready(int id, int i) {
     int r;
     if (i < 1 || (guint) i > g_list_model_get_n_items(G_LIST_MODEL(items))) return 0;
     path = sg_row_field(gtk_string_list_get_string(items, (guint) i - 1), 2);
-    r = *path && g_hash_table_lookup(sg_grid_textures(id), path) != NULL;
+    /* loaded, and a cell shows it (not only in the cache) */
+    r = *path && g_hash_table_lookup(sg_grid_textures(id), path) != NULL && sg_grid_cell_shows(GTK_WIDGET(sg_grid_view(id)), path);
     g_free(path);
     return r;
 }
