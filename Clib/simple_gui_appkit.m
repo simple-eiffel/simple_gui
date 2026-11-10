@@ -294,14 +294,15 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 /* 1p: Up, Down, Return and Escape go to the field's suggestion list while it shows. */
 - (BOOL)control:(NSControl *)c textView:(NSTextView *)tv doCommandBySelector:(SEL)a_command
 {
-	if (sga_suggest_key(sga_id_of(c), a_command)) return YES;
-	/* 1p-b: Escape on a field (with no list to close) sends 55; a search field still clears */
+	(void)tv;
+	/* 1p-b: Escape on a field closes its suggestion list and sends 55, in one press as on
+	   GTK and Windows; a search field and a combo box keep their own Escape */
 	if (a_command == @selector(cancelOperation:) && [c isKindOfClass:[NSTextField class]] && ![c isKindOfClass:[NSSearchField class]] && ![c isKindOfClass:[NSComboBox class]]) {
-		(void)tv;
+		sga_suggest_end(sga_id_of(c));
 		if (!s_suppress) { sga_push(55, sga_id_of(c), 0, 0, 0); sga_wake(); }
 		return YES;
 	}
-	return NO;
+	return sga_suggest_key(sga_id_of(c), a_command);
 }
 - (void)textDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
 - (NSMutableArray *)rowsOf:(NSTableView *)t { return rows[[NSValue valueWithNonretainedObject:t]]; }
