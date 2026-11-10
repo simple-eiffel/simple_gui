@@ -1041,6 +1041,22 @@ feature -- Common widget state
 		alias "sga_test_drop_text($an_id, (const char *) $a_text);"
 		end
 
+	widget_set_drag_out (an_id: INTEGER; a_text, a_paths: POINTER)
+			-- 1q-c: copies both; both empty: no drag out.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_widget_set_drag_out($an_id, (const char *) $a_text, (const char *) $a_paths);"
+		end
+
+	test_drag_out (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_test_drag_out($an_id);"
+		end
+
+	test_drag_out_ended (an_id, a_how: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_drag_out_ended($an_id, $a_how);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

@@ -288,6 +288,9 @@ const char *sga_take_dropped_paths(int a_id);
 const char *sga_take_dropped_text(int a_id);
 void sga_test_drop_files(int a_id, const char *a_paths);
 void sga_test_drop_text(int a_id, const char *a_text);
+void sga_widget_set_drag_out(int a_id, const char *a_text, const char *a_paths);
+const char *sga_test_drag_out(int a_id);
+void sga_test_drag_out_ended(int a_id, int a_how);
 void sga_test_cancel_pick(void);
 int sga_test_is_accepting(int a_target);
 /* 1p: forms */
