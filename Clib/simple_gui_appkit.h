@@ -284,6 +284,10 @@ void sga_pick_targets(int a_source, const int *a_ids, int a_count, const char *a
 void sga_pick_cancel(void);
 void sga_test_pick(int a_source, int a_row);
 void sga_test_drop(int a_target, int a_row);
+const char *sga_take_dropped_paths(int a_id);
+const char *sga_take_dropped_text(int a_id);
+void sga_test_drop_files(int a_id, const char *a_paths);
+void sga_test_drop_text(int a_id, const char *a_text);
 void sga_test_cancel_pick(void);
 int sga_test_is_accepting(int a_target);
 /* 1p: forms */

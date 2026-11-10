@@ -1020,6 +1020,27 @@ feature -- Common widget state
 		alias "sga_pick_cancel();"
 		end
 
+	take_dropped_paths (an_id: INTEGER): POINTER
+			-- 1q-b: kept until the next drop.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_take_dropped_paths($an_id);"
+		end
+
+	take_dropped_text (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_take_dropped_text($an_id);"
+		end
+
+	test_drop_files (an_id: INTEGER; a_paths: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_drop_files($an_id, (const char *) $a_paths);"
+		end
+
+	test_drop_text (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_drop_text($an_id, (const char *) $a_text);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

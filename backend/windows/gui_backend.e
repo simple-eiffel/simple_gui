@@ -1791,11 +1791,99 @@ feature -- Controls
 		end
 
 	widget_set_drop_target (an_id: INTEGER; an_internal, a_files, a_text: BOOLEAN)
-			-- The widget takes the pick token only while Eiffel has named it (`pick_ok').
+			-- The widget takes the pick token only while Eiffel has named it (`pick_ok'); files
+			-- from Explorer arrive through SW's files hook (1q-b). Text from other programs is
+			-- kept as a capability here; receiving it needs OLE drag and drop in simple_shell,
+			-- which 1q-c brings with dragging out.
 		do
-			if an_internal and then attached widget (an_id) as al_w then
-				al_w.set_drop_hooks (agent pick_accepts (an_id, ?, ?, ?), agent pick_received (an_id, ?, ?, ?))
+			if attached widget (an_id) as al_w then
+				if an_internal then
+					al_w.set_drop_hooks (agent pick_accepts (an_id, ?, ?, ?), agent pick_received (an_id, ?, ?, ?))
+				end
+				if a_files then
+					al_w.set_files_hook (agent outside_files (an_id, ?))
+				else
+					al_w.set_files_hook (Void)
+				end
 			end
+			if a_files then
+				takes_outside.force (1 | (takes_outside.item (an_id) & 2), an_id)
+			else
+				takes_outside.force (takes_outside.item (an_id) & 2, an_id)
+			end
+			if a_text then
+				takes_outside.force (takes_outside.item (an_id) | 2, an_id)
+			else
+				takes_outside.force (takes_outside.item (an_id) & 1, an_id)
+			end
+		end
+
+	take_dropped_paths (an_id: INTEGER): POINTER
+			-- 1q-b: kept until the next drop.
+		do
+			if attached dropped_paths.item (an_id) as al_p then
+				Result := c_text (al_p)
+			else
+				Result := c_text ({STRING_32} "")
+			end
+		end
+
+	take_dropped_text (an_id: INTEGER): POINTER
+		do
+			if attached dropped_text.item (an_id) as al_t then
+				Result := c_text (al_t)
+			else
+				Result := c_text ({STRING_32} "")
+			end
+		end
+
+	test_drop_files (an_id: INTEGER; a_paths: POINTER)
+		do
+			if takes_outside.item (an_id) & 1 /= 0 then
+				dropped_paths.force (from_c (a_paths), an_id)
+				push (33, an_id, 1, 0, 0)
+			end
+		end
+
+	test_drop_text (an_id: INTEGER; a_text: POINTER)
+		do
+			if takes_outside.item (an_id) & 2 /= 0 then
+				dropped_text.force (from_c (a_text), an_id)
+				push (33, an_id, 2, 0, 0)
+			end
+		end
+
+	takes_outside: HASH_TABLE [INTEGER, INTEGER]
+			-- What each widget takes from other programs: 1 files, 2 text.
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	dropped_paths: HASH_TABLE [STRING_32, INTEGER]
+			-- The files dropped on each widget last, newline-separated.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	dropped_text: HASH_TABLE [STRING_32, INTEGER]
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	outside_files (an_id: INTEGER; a_paths: ARRAYED_LIST [STRING_32])
+			-- Files from Explorer landed on widget `an_id' (SW's files hook).
+		local
+			l_joined: STRING_32
+		do
+			create l_joined.make (64)
+			across a_paths as ic loop
+				if not l_joined.is_empty then
+					l_joined.append_character ('%N')
+				end
+				l_joined.append (ic)
+			end
+			dropped_paths.force (l_joined, an_id)
+			push (33, an_id, 1, 0, 0)
 		end
 
 	pick_targets (a_source: INTEGER; a_ids: POINTER; a_count: INTEGER; a_labels: POINTER)

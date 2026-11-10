@@ -536,6 +536,7 @@ int sga_window(const char *a_title, int a_width, int a_height)
 	[w setTitle:sga_string(a_title)];
 	[w setCollectionBehavior:NSWindowCollectionBehaviorFullScreenPrimary];   /* the green button, and Window > Enter Full Screen */
 	[w setContentView:[[SGAContent alloc] initWithFrame:NSMakeRect(0, 0, a_width, a_height)]];
+	[[w contentView] registerForDraggedTypes:@[NSPasteboardTypeFileURL, NSPasteboardTypeString]];   /* 1q-b */
 	[w setDelegate:s_target];
 	return sga_keep(w);
 }
@@ -3588,13 +3589,112 @@ void sga_widget_set_pick(int a_id, int a_mode, int a_is_source, int a_by_row)
 	sga_pick_watch_start();
 }
 
+/* 1q-b: files and text other programs drop. Each window's content view is the dragging
+   destination (an ancestor of every widget); it walks up from the view under the pointer
+   to the first widget that takes the kind on the pasteboard, lights it while hovering, and
+   on the drop keeps the paths (newline-separated) or the text for `take_dropped_*', then
+   sends 33 (a = 1 files, 2 text). An editable field takes dragged text itself, natively. */
+static NSMutableSet<NSNumber *> *s_file_targets, *s_text_targets;
+static NSMutableDictionary<NSNumber *, NSString *> *s_dropped_paths, *s_dropped_text;
+static int s_drag_hover;
+
 void sga_widget_set_drop_target(int a_id, int an_internal, int a_files, int a_text)
 {
-	(void)a_files; (void)a_text;   /* files and text from other programs: 1q-b */
 	if (!s_drop_targets) s_drop_targets = [NSMutableSet set];
+	if (!s_file_targets) { s_file_targets = [NSMutableSet set]; s_text_targets = [NSMutableSet set]; }
 	if (an_internal) [s_drop_targets addObject:@(a_id)]; else [s_drop_targets removeObject:@(a_id)];
+	if (a_files) [s_file_targets addObject:@(a_id)]; else [s_file_targets removeObject:@(a_id)];
+	if (a_text) [s_text_targets addObject:@(a_id)]; else [s_text_targets removeObject:@(a_id)];
 	sga_pick_watch_start();
 }
+
+static NSArray<NSURL *> *sga_drag_files(NSPasteboard *pb)
+{
+	return [pb readObjectsForClasses:@[[NSURL class]] options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}] ?: @[];
+}
+
+/* The widget that takes this drag at window point `p', and the kind it takes (1 or 2). */
+static int sga_drag_target(NSWindow *w, NSPoint p, NSPasteboard *pb, int *a_kind)
+{
+	BOOL l_files = [sga_drag_files(pb) count] > 0;
+	BOOL l_text = !l_files && [pb stringForType:NSPasteboardTypeString] != nil;
+	NSView *v = [[[w contentView] superview] hitTest:p];
+	*a_kind = 0;
+	while (v) {
+		int l_id = sga_id_of(v);
+		if (l_id) {
+			if (l_files && [s_file_targets containsObject:@(l_id)]) { *a_kind = 1; return l_id; }
+			if (l_text && [s_text_targets containsObject:@(l_id)]) { *a_kind = 2; return l_id; }
+		}
+		v = [v superview];
+	}
+	return 0;
+}
+
+static void sga_drag_light(int a_id)
+{
+	if (a_id == s_drag_hover) return;
+	NSView *v = s_drag_hover ? sga_get(s_drag_hover) : nil;
+	if ([v isKindOfClass:[NSView class]] && ![s_pick_targets containsObject:@(s_drag_hover)]) [[v layer] setBorderWidth:0];
+	s_drag_hover = a_id;
+	v = a_id ? sga_get(a_id) : nil;
+	if ([v isKindOfClass:[NSView class]]) {
+		[v setWantsLayer:YES];
+		[[v layer] setBorderColor:[[NSColor systemGreenColor] CGColor]];
+		[[v layer] setBorderWidth:2];
+	}
+}
+
+static void sga_drop_files(int a_id, NSString *a_joined)
+{
+	if (!s_dropped_paths) s_dropped_paths = [NSMutableDictionary dictionary];
+	s_dropped_paths[@(a_id)] = a_joined;
+	sga_push(33, a_id, 1, 0, 0);
+	sga_wake();
+}
+
+static void sga_drop_text(int a_id, NSString *a_text)
+{
+	if (!s_dropped_text) s_dropped_text = [NSMutableDictionary dictionary];
+	s_dropped_text[@(a_id)] = a_text;
+	sga_push(33, a_id, 2, 0, 0);
+	sga_wake();
+}
+
+@implementation SGAContent (SGADropIn)
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)a_info
+{
+	int l_kind;
+	int l_id = sga_drag_target([self window], [a_info draggingLocation], [a_info draggingPasteboard], &l_kind);
+	sga_drag_light(l_id);
+	return l_id ? NSDragOperationCopy : NSDragOperationNone;
+}
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)a_info { return [self draggingUpdated:a_info]; }
+- (void)draggingExited:(id<NSDraggingInfo>)a_info { (void)a_info; sga_drag_light(0); }
+- (void)draggingEnded:(id<NSDraggingInfo>)a_info { (void)a_info; sga_drag_light(0); }
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)a_info
+{
+	int l_kind;
+	NSPasteboard *pb = [a_info draggingPasteboard];
+	int l_id = sga_drag_target([self window], [a_info draggingLocation], pb, &l_kind);
+	sga_drag_light(0);
+	if (l_kind == 1) {
+		NSMutableArray *l_paths = [NSMutableArray array];
+		for (NSURL *u in sga_drag_files(pb)) [l_paths addObject:[u path]];
+		sga_drop_files(l_id, [l_paths componentsJoinedByString:@"\n"]);
+	}
+	else if (l_kind == 2) sga_drop_text(l_id, [pb stringForType:NSPasteboardTypeString]);
+	return l_kind != 0;
+}
+@end
+
+const char *sga_take_dropped_paths(int a_id) { return sga_return(Kind_path, s_dropped_paths[@(a_id)] ?: @""); }
+const char *sga_take_dropped_text(int a_id) { return sga_return(Kind_area, s_dropped_text[@(a_id)] ?: @""); }
+
+/* As another program: files (newline-separated) or text dropped on `a_id'; nothing unless
+   it takes that kind. */
+void sga_test_drop_files(int a_id, const char *a_paths) { if ([s_file_targets containsObject:@(a_id)]) sga_drop_files(a_id, sga_string(a_paths)); }
+void sga_test_drop_text(int a_id, const char *a_text) { if ([s_text_targets containsObject:@(a_id)]) sga_drop_text(a_id, sga_string(a_text)); }
 
 @interface SGAPickMenuTarget : NSObject
 @end

@@ -548,6 +548,38 @@ feature -- User actions
 			settle
 		end
 
+	drop_files (a_target: GUI_WIDGET; a_paths: ITERABLE [PATH])
+			-- Drop files on `a_target' as another program's drag would.
+		require
+			has_application: has_application
+		local
+			l_joined: STRING_32
+			l_c: C_STRING
+		do
+			create l_joined.make_empty
+			across a_paths as ic loop
+				if not l_joined.is_empty then
+					l_joined.append_character ('%N')
+				end
+				l_joined.append (ic.name)
+			end
+			l_c := backend.to_c (l_joined)
+			backend.test_drop_files (a_target.id, l_c.item)
+			settle
+		end
+
+	drop_text (a_target: GUI_WIDGET; a_text: READABLE_STRING_GENERAL)
+			-- Drop text on `a_target' as another program's drag would.
+		require
+			has_application: has_application
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_text)
+			backend.test_drop_text (a_target.id, l_c.item)
+			settle
+		end
+
 	cancel_pick
 		require
 			has_application: has_application
