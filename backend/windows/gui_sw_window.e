@@ -72,6 +72,8 @@ feature -- Operation
 					eat_char := False
 				elseif a_type = 4 and then key_taken (a_x) then
 					do_nothing
+				elseif a_type = 4 and then address_bar_key_taken (a_x) then
+					do_nothing
 				else
 					if a_type = 4 then
 						eat_char := False
@@ -214,6 +216,57 @@ feature {NONE} -- Keys of dialogs and help (1u)
 				l_top := al_up
 			end
 			Result := l_top = root
+		end
+
+	address_bar_key_taken (a_vk: INTEGER): BOOLEAN
+			-- 1p-b. Does this key-down belong to the address bar: Ctrl+L, Alt+D or F4 on a path
+			-- control's part asks to type the path (54); Tab, or Right at the end of the text,
+			-- takes the highlighted suggestion; Escape in a single-line field with no
+			-- suggestions showing is reported (55), and then goes on as before.
+		local
+			l_keys: SW_KEYS
+			l_control: detachable GUI_SW_PATH_CONTROL
+			l_up: detachable SW_WIDGET
+			l_id: INTEGER
+		do
+			create l_keys
+			if attached focused as al_f then
+				from
+					l_up := al_f
+				until
+					l_up = Void or l_control /= Void
+				loop
+					if attached {GUI_SW_PATH_CONTROL} l_up as al_c then
+						l_control := al_c
+					end
+					if attached l_up as al_u then
+						l_up := al_u.parent
+					end
+				end
+				if attached l_control and then l_control.has_chevrons
+					and then ((a_vk = 76 and l_keys.control_down) or (a_vk = 68 and l_keys.alt_down) or a_vk = 115)
+				then
+					l_control.press_space
+					eat_char := True
+					Result := True
+				elseif attached {SW_TEXT_BOX} al_f as al_t and then al_t.is_single_line then
+					l_id := backend.id_of_widget (al_t)
+					if l_id > 0 then
+						if suggestions_for = al_t then
+							if suggestion_at > 0 and then (a_vk = 9
+								or (a_vk = 39 and al_t.caret = al_t.text.count and not al_t.has_selection))
+							then
+								choose_suggestion (suggestion_at)
+								request_render
+								eat_char := True
+								Result := True
+							end
+						elseif a_vk = 27 then
+							backend.report_field_escape (l_id)
+						end
+					end
+				end
+			end
 		end
 
 	key_taken (a_vk: INTEGER): BOOLEAN

@@ -462,6 +462,34 @@ feature -- Windows and containers
 		deferred
 		end
 
+	path_control_set_chevrons (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1p-b: each separator a clickable chevron (53, a = the part before it), with one
+			-- after the last part too; a click on the empty space after the last part sends 54.
+		deferred
+		end
+
+	path_control_set_root_icon (an_id: INTEGER; a_name: POINTER)
+		deferred
+		end
+
+	widget_focus (an_id: INTEGER)
+			-- 1p-b: the keyboard focus to widget `an_id', from code.
+		deferred
+		end
+
+	test_press_chevron (an_id, a_part: INTEGER)
+		deferred
+		end
+
+	test_press_path_space (an_id: INTEGER)
+		deferred
+		end
+
+	test_field_escape (an_id: INTEGER)
+			-- As Escape in a text field: 55.
+		deferred
+		end
+
 	dialog (a_title: POINTER): INTEGER
 			-- 1u: a modal dialog, not shown.
 		deferred

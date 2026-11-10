@@ -2266,6 +2266,75 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_file_field_address_bar
+			-- 1p-b: breadcrumbs at rest; a chevron lists the subfolders and choosing one goes
+			-- there; the empty space turns them into the typed path with suggestions; Escape puts
+			-- the old path back; a bad path stays typed, marked invalid.
+		local
+			l_window: GUI_WINDOW
+			l_field: GUI_FILE_FIELD
+			l_root, l_sep: STRING_32
+			l_dir: DIRECTORY
+			l_changes: CELL [INTEGER]
+			l_has_b: BOOLEAN
+		do
+			create l_changes.put (0)
+			if {PLATFORM}.is_windows then l_sep := {STRING_32} "\" else l_sep := {STRING_32} "/" end
+			l_root := temporary_folder ("address_bar_test")
+			across <<"alpha", "beta", "gamma">> as ic loop
+				create l_dir.make (l_root + l_sep + ic)
+				if not l_dir.exists then l_dir.create_dir end
+			end
+			create l_window.make ("Address bar", 640, 160)
+			create l_field.make_folder ("Folder")
+			l_field.set_breadcrumbs (True)
+			l_field.change_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_changes))
+			l_window.set_content (l_field)
+			l_window.show
+			settle_window
+			l_field.set_path (create {PATH}.make_from_string (l_root + l_sep + "alpha"))
+			settle_window
+			assert ("breadcrumbs at rest", l_field.breadcrumbs.is_shown and not l_field.field.is_shown)
+			assert ("the last part: " + l_field.breadcrumbs.part (l_field.breadcrumbs.part_count).out,
+				l_field.breadcrumbs.part (l_field.breadcrumbs.part_count).same_string ("alpha"))
+			driver.press_chevron (l_field.breadcrumbs, l_field.breadcrumbs.part_count - 1)
+			assert ("the folder buttons", attached l_field.folder_choices as al_c and then al_c.count = 3 and then al_c [2].text.same_string ("beta"))
+			assert ("nothing chosen yet", l_changes.item = 0)
+			if attached l_field.folder_choices as al_c then
+				driver.perform_click (al_c [2])
+			end
+			assert ("went to beta: " + l_field.field.text.out, l_field.field.text.ends_with ("beta") and l_changes.item = 1)
+			driver.press_path_space (l_field.breadcrumbs)
+			assert ("typing", l_field.field.is_shown and not l_field.breadcrumbs.is_shown)
+			driver.type_text (l_field.field, l_root + l_sep + "g")
+			across l_field.field.suggestions as ic loop
+				if ic.has_substring ("gamma") then l_has_b := True end
+			end
+			assert ("suggests gamma: " + l_field.field.suggestions.count.out, l_has_b)
+			driver.press_escape (l_field.field)
+			assert ("Escape: beta again, as breadcrumbs", l_field.breadcrumbs.is_shown and l_field.field.text.ends_with ("beta"))
+			driver.press_path_space (l_field.breadcrumbs)
+			driver.type_text (l_field.field, l_root + l_sep + "nowhere")
+			driver.leave_field (l_field.field)
+			assert ("a bad path stays typed and invalid", l_field.field.is_shown and not l_field.field.is_valid)
+			l_window.close
+		end
+
+	temporary_folder (a_name: STRING): STRING_32
+			-- A folder `a_name' in the system's temporary folder.
+		local
+			l_env: EXECUTION_ENVIRONMENT
+			l_dir: DIRECTORY
+		do
+			create l_env
+			if attached l_env.item ("TEMP") as al_t then Result := al_t
+			elseif attached l_env.item ("TMPDIR") as al_t then Result := al_t
+			else Result := {STRING_32} "/tmp" end
+			if {PLATFORM}.is_windows then Result := Result + "\" + a_name else Result := Result + "/" + a_name end
+			create l_dir.make (Result)
+			if not l_dir.exists then l_dir.recursive_create_dir end
+		end
+
 	test_rating_set_silently_and_user_emits
 		local
 			l_window: GUI_WINDOW

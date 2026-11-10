@@ -1353,9 +1353,23 @@ static int sg_dd_is_choice(int id, guint pos);
 static guint sg_dd_pos_of_choice(int id, int choice);
 static int sg_dd_choice_of_pos(int id, guint pos);
 
+static gboolean sg_on_field_escape(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
+    GtkWidget *pop;
+    (void) k; (void) code; (void) m;
+    pop = sg_w[GPOINTER_TO_INT(d)] ? g_object_get_data(G_OBJECT(sg_w[GPOINTER_TO_INT(d)]), "sg-suggest-pop") : NULL;
+    /* 1p-b: with suggestions showing, Escape only closes them; otherwise it is the field's (55) */
+    if (key == GDK_KEY_Escape && !(pop && gtk_widget_get_visible(pop))) sg_push(55, GPOINTER_TO_INT(d), 0, 0);
+    return FALSE;
+}
 static int sg_field(void) {
     GtkWidget *e = gtk_entry_new();
     int id = sg_reg(e, 6);
+    {
+        GtkEventController *k = gtk_event_controller_key_new();
+        gtk_event_controller_set_propagation_phase(k, GTK_PHASE_CAPTURE);
+        g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_field_escape), GINT_TO_POINTER(id));
+        gtk_widget_add_controller(e, k);
+    }
     g_signal_connect(e, "changed", G_CALLBACK(sg_on_changed), NULL);
     g_signal_connect(e, "activate", G_CALLBACK(sg_on_activate), NULL);
     sg_field_hook_leave(e, id);
@@ -4440,6 +4454,14 @@ static void sg_on_path_part(GtkButton *b, gpointer d) {
     (void) d;
     sg_push(4, sg_id_of(b), GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-index")), 0);
 }
+static void sg_path_render(int id);
+static void sg_path_clear(GtkWidget *box) {   /* the parts go; an anchored popover stays */
+    GtkWidget *c, *next;
+    for (c = gtk_widget_get_first_child(box); c; c = next) {
+        next = gtk_widget_get_next_sibling(c);
+        if (!GTK_IS_POPOVER(c)) gtk_box_remove(GTK_BOX(box), c);
+    }
+}
 static int sg_path_control(void) {
     GtkWidget *box = g_object_new(GTK_TYPE_BOX, "orientation", GTK_ORIENTATION_HORIZONTAL, "spacing", 0,
                                   "accessible-role", GTK_ACCESSIBLE_ROLE_NAVIGATION, NULL);
@@ -4454,7 +4476,7 @@ static void sg_path_control_set(int id, const char *path) {
     gchar **pieces;
     guint i;
     int n = 0;
-    while ((c = gtk_widget_get_first_child(box))) gtk_box_remove(GTK_BOX(box), c);
+    sg_path_clear(box);
     g_ptr_array_set_size(parts, 0);
     if (path[0] == '/') g_ptr_array_add(parts, g_strdup("/"));
     pieces = g_strsplit_set(path, "/\\", -1);
@@ -4470,6 +4492,7 @@ static void sg_path_control_set(int id, const char *path) {
         gtk_box_append(GTK_BOX(box), b);
     }
     g_object_set_data_full(G_OBJECT(box), "sg-path", g_strdup(path), g_free);
+    sg_path_render(id);
 }
 /* 1t: any parts, joined by U+001F, shown as they are. */
 static void sg_path_control_set_parts(int id, const char *joined) {
@@ -4477,7 +4500,7 @@ static void sg_path_control_set_parts(int id, const char *joined) {
     GPtrArray *parts = sg_path_parts(id);
     gchar **pieces = g_strsplit(joined, "\x1f", -1);
     guint i;
-    while ((c = gtk_widget_get_first_child(box))) gtk_box_remove(GTK_BOX(box), c);
+    sg_path_clear(box);
     g_ptr_array_set_size(parts, 0);
     for (i = 0; pieces[i]; i++) g_ptr_array_add(parts, g_strdup(pieces[i]));
     g_strfreev(pieces);
@@ -4491,12 +4514,101 @@ static void sg_path_control_set_parts(int id, const char *joined) {
         gtk_box_append(GTK_BOX(box), b);
     }
     g_object_set_data(G_OBJECT(box), "sg-path", NULL);
+    sg_path_render(id);
 }
 static void sg_test_choose_path_part(int id, int part) {
     GtkWidget *c;
     for (c = gtk_widget_get_first_child(sg_w[id]); c; c = gtk_widget_get_next_sibling(c))
         if (GTK_IS_BUTTON(c) && GPOINTER_TO_INT(g_object_get_data(G_OBJECT(c), "sg-index")) == part) { g_signal_emit_by_name(c, "clicked"); return; }
 }
+static const char *sg_icon_gtk(const char *name);
+
+/* ---------- 1p-b: chevrons, a root icon and the empty space. With chevrons on, the control
+   is rebuilt as: [icon] part > part > ... part > [empty space]; each ">" is a flat button
+   sending 53 (the part before it), and a click on the trailing space (or Ctrl+L, Alt+D, F4
+   with the control focused) sends 54. ---------- */
+static void sg_on_path_chevron(GtkButton *b, gpointer d) {
+    (void) d;
+    sg_push(53, sg_id_of(b), GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-chevron-part")), 0);
+}
+static void sg_on_path_space(GtkGestureClick *g, int n, double x, double y, gpointer d) {
+    (void) g; (void) n; (void) x; (void) y;
+    sg_push(54, GPOINTER_TO_INT(d), 0, 0);
+}
+static gboolean sg_on_path_keys(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
+    (void) k; (void) code;
+    if (key == GDK_KEY_F4 || ((m & GDK_CONTROL_MASK) && (key == GDK_KEY_l || key == GDK_KEY_L))
+        || ((m & GDK_ALT_MASK) && (key == GDK_KEY_d || key == GDK_KEY_D))) { sg_push(54, GPOINTER_TO_INT(d), 0, 0); return TRUE; }
+    return FALSE;
+}
+static void sg_path_render(int id) {
+    GtkWidget *box = sg_w[id], *c;
+    GPtrArray *parts = sg_path_parts(id);
+    const char *icon = g_object_get_data(G_OBJECT(box), "sg-root-icon");
+    int chevrons = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(box), "sg-chevrons"));
+    guint i;
+    if (!chevrons && !(icon && *icon)) return;   /* the plain look stays as built */
+    {   /* the parts go; a popover anchored here (the chevron's list) stays attached */
+        GtkWidget *next;
+        for (c = gtk_widget_get_first_child(box); c; c = next) {
+            next = gtk_widget_get_next_sibling(c);
+            if (!GTK_IS_POPOVER(c)) gtk_box_remove(GTK_BOX(box), c);
+        }
+    }
+    if (icon && *icon) gtk_box_append(GTK_BOX(box), gtk_image_new_from_icon_name(sg_icon_gtk(icon)));
+    for (i = 0; i < parts->len; i++) {
+        GtkWidget *b = g_object_new(GTK_TYPE_BUTTON, "label", (const char *) g_ptr_array_index(parts, i),
+                                    "has-frame", FALSE, "accessible-role", GTK_ACCESSIBLE_ROLE_LINK, NULL);
+        g_object_set_data(G_OBJECT(b), "sg-id", GINT_TO_POINTER(id));
+        g_object_set_data(G_OBJECT(b), "sg-index", GINT_TO_POINTER((int) i + 1));
+        g_signal_connect(b, "clicked", G_CALLBACK(sg_on_path_part), NULL);
+        gtk_box_append(GTK_BOX(box), b);
+        if (chevrons) {
+            GtkWidget *ch = gtk_button_new_with_label("\xe2\x80\xba");
+            char name[160];
+            gtk_button_set_has_frame(GTK_BUTTON(ch), FALSE);
+            g_object_set_data(G_OBJECT(ch), "sg-id", GINT_TO_POINTER(id));
+            g_object_set_data(G_OBJECT(ch), "sg-chevron-part", GINT_TO_POINTER((int) i + 1));
+            g_snprintf(name, sizeof name, "Folders in %s", (const char *) g_ptr_array_index(parts, i));
+            gtk_accessible_update_property(GTK_ACCESSIBLE(ch), GTK_ACCESSIBLE_PROPERTY_LABEL, name, -1);
+            g_signal_connect(ch, "clicked", G_CALLBACK(sg_on_path_chevron), NULL);
+            gtk_box_append(GTK_BOX(box), ch);
+        } else if (i + 1 < parts->len) gtk_box_append(GTK_BOX(box), gtk_label_new("\xe2\x80\xba"));
+    }
+    if (chevrons) {
+        GtkWidget *space = gtk_label_new("");
+        GtkGesture *g = gtk_gesture_click_new();
+        gtk_widget_set_hexpand(space, TRUE);
+        g_signal_connect(g, "pressed", G_CALLBACK(sg_on_path_space), GINT_TO_POINTER(id));
+        gtk_widget_add_controller(space, GTK_EVENT_CONTROLLER(g));
+        gtk_box_append(GTK_BOX(box), space);
+    }
+}
+static void sg_path_control_set_chevrons(int id, int on) {
+    GtkWidget *box = sg_w[id];
+    g_object_set_data(G_OBJECT(box), "sg-chevrons", GINT_TO_POINTER(on ? 1 : 0));
+    gtk_widget_set_halign(box, on ? GTK_ALIGN_FILL : GTK_ALIGN_START);
+    gtk_widget_set_hexpand(box, on);
+    if (on && !g_object_get_data(G_OBJECT(box), "sg-path-keys")) {
+        GtkEventController *k = gtk_event_controller_key_new();
+        g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_path_keys), GINT_TO_POINTER(id));
+        gtk_widget_add_controller(box, k);
+        g_object_set_data(G_OBJECT(box), "sg-path-keys", GINT_TO_POINTER(1));
+    }
+    sg_path_render(id);
+}
+static void sg_path_control_set_root_icon(int id, const char *name) {
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-root-icon", g_strdup(name), g_free);
+    sg_path_render(id);
+}
+static void sg_test_press_chevron(int id, int part) {
+    GtkWidget *c;
+    for (c = gtk_widget_get_first_child(sg_w[id]); c; c = gtk_widget_get_next_sibling(c))
+        if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(c), "sg-chevron-part")) == part) { g_signal_emit_by_name(c, "clicked"); return; }
+}
+static void sg_test_press_path_space(int id) { sg_push(54, id, 0, 0); }
+static void sg_test_field_escape(int id) { sg_push(55, id, 0, 0); }
+static void sg_widget_focus(int id) { if (sg_w[id]) gtk_widget_grab_focus(sg_w[id]); }
 static int sg_path_control_count(int id) { return (int) sg_path_parts(id)->len; }
 static const char *sg_path_control_part(int id, int i) {
     return (i >= 1 && (guint) i <= sg_path_parts(id)->len) ? g_ptr_array_index(sg_path_parts(id), i - 1) : "";
@@ -5580,6 +5692,29 @@ static int sg_grid_pos_of(int id, int item) {   /* the shown position of an item
     return r;
 }
 typedef struct { int id; char *path; } SgGridLoad;
+/* Every cell under `w' showing `path' takes texture `tex'. */
+static void sg_grid_show_loaded(GtkWidget *w, const char *path, GdkTexture *tex) {
+    GtkWidget *c;
+    const char *p = g_object_get_data(G_OBJECT(w), "sg-pic-path");
+    if (p && strcmp(p, path) == 0) {
+        GtkWidget *pic = g_object_get_data(G_OBJECT(w), "sg-pic"), *img = g_object_get_data(G_OBJECT(w), "sg-icon");
+        if (pic) { gtk_picture_set_paintable(GTK_PICTURE(pic), GDK_PAINTABLE(tex)); gtk_widget_set_visible(pic, TRUE); }
+        if (img) gtk_widget_set_visible(img, FALSE);
+        return;
+    }
+    for (c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) sg_grid_show_loaded(c, path, tex);
+}
+/* Does a cell under `w' showing `path' show its picture? */
+static int sg_grid_cell_shows(GtkWidget *w, const char *path) {
+    GtkWidget *c;
+    const char *p = g_object_get_data(G_OBJECT(w), "sg-pic-path");
+    if (p && strcmp(p, path) == 0) {
+        GtkWidget *pic = g_object_get_data(G_OBJECT(w), "sg-pic");
+        return pic && gtk_widget_get_visible(pic) && gtk_picture_get_paintable(GTK_PICTURE(pic)) != NULL;
+    }
+    for (c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) if (sg_grid_cell_shows(c, path)) return 1;
+    return 0;
+}
 static void sg_grid_load_thread(GTask *task, gpointer src, gpointer data, GCancellable *c) {
     SgGridLoad *l = data;
     GError *e = NULL;
@@ -5602,11 +5737,10 @@ static void sg_grid_load_done(GObject *src, GAsyncResult *res, gpointer data) {
             g_object_unref(pb);
         }
         g_hash_table_insert(sg_grid_textures(l->id), g_strdup(l->path), tex);
-        for (i = 0; i < n; i++) {   /* the items showing this picture rebind */
-            char *p = sg_row_field(gtk_string_list_get_string(GTK_STRING_LIST(all), i), 2);
-            if (strcmp(p, l->path) == 0) g_list_model_items_changed(all, i, 1, 1);
-            g_free(p);
-        }
+        /* GTK does not rebind an item whose object is unchanged, so the cells showing this
+           picture take it here; cells bound later find it in the cache */
+        sg_grid_show_loaded(GTK_WIDGET(sg_grid_view(l->id)), l->path, tex);
+        (void) all; (void) i; (void) n;
     } else if (tex) g_object_unref(tex);
     g_free(l->path); g_free(l);
 }
@@ -5660,6 +5794,7 @@ static void sg_grid_bind(GtkSignalListItemFactory *f, GtkListItem *it, gpointer 
     gtk_widget_set_visible(g_object_get_data(G_OBJECT(box), "sg-sub"), *sub != 0);
     gtk_picture_set_paintable(GTK_PICTURE(pic), tex ? GDK_PAINTABLE(tex) : NULL);
     gtk_widget_set_visible(pic, tex != NULL);
+    g_object_set_data_full(G_OBJECT(box), "sg-pic-path", g_strdup(path), g_free);   /* for a load that finishes later */
     if (*path && !tex) sg_grid_want_picture(id, path);
     gtk_image_set_from_icon_name(GTK_IMAGE(img), *icon ? sg_icon_gtk(icon) : (*path ? "image-x-generic-symbolic" : "text-x-generic-symbolic"));
     gtk_widget_set_visible(img, tex == NULL);
@@ -5731,6 +5866,7 @@ static int sg_grid_view_new(void) {
     gtk_widget_set_vexpand(scroll, TRUE);
     gtk_widget_set_hexpand(scroll, TRUE);
     gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 140);
+    sg_natural_rows(scroll);   /* as tall as its rows want, up to 400, as lists and tables are */
     g_object_set_data_full(G_OBJECT(scroll), "sg-grid-items", items, g_object_unref);
     g_object_set_data_full(G_OBJECT(scroll), "sg-grid-filtered", fl, g_object_unref);
     g_object_set_data(G_OBJECT(scroll), "sg-grid-view", v);
@@ -5842,7 +5978,8 @@ static int sg_test_item_picture_ready(int id, int i) {
     int r;
     if (i < 1 || (guint) i > g_list_model_get_n_items(G_LIST_MODEL(items))) return 0;
     path = sg_row_field(gtk_string_list_get_string(items, (guint) i - 1), 2);
-    r = *path && g_hash_table_lookup(sg_grid_textures(id), path) != NULL;
+    /* loaded, and a cell shows it (not only in the cache) */
+    r = *path && g_hash_table_lookup(sg_grid_textures(id), path) != NULL && sg_grid_cell_shows(GTK_WIDGET(sg_grid_view(id)), path);
     g_free(path);
     return r;
 }
@@ -6377,6 +6514,12 @@ static gboolean sg_on_suggest_key(GtkEventControllerKey *k, guint keyval, guint 
         return TRUE;
     }
     if ((keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter) && r) { sg_suggest_choose(id, at + 1); return TRUE; }
+    /* 1p-b: Tab, or Right with the caret at the end, completes to the highlighted row */
+    if (r && (keyval == GDK_KEY_Tab || (keyval == GDK_KEY_Right
+        && gtk_editable_get_position(GTK_EDITABLE(sg_w[id])) == (int) g_utf8_strlen(gtk_editable_get_text(GTK_EDITABLE(sg_w[id])), -1)))) {
+        sg_suggest_choose(id, at + 1);
+        return TRUE;
+    }
     if (keyval == GDK_KEY_Escape) { gtk_popover_popdown(GTK_POPOVER(pop)); return TRUE; }
     return FALSE;
 }
@@ -6384,8 +6527,17 @@ static void sg_field_set_suggestions(int id, const char *joined) {
     GtkWidget *e = sg_w[id], *pop = g_object_get_data(G_OBJECT(e), "sg-suggest-pop"), *list;
     gchar **items;
     int i;
+    if (!joined || !*joined) {
+        /* no suggestions: the popover goes, so a field that hides or dies holds none */
+        if (pop) {
+            gtk_popover_popdown(GTK_POPOVER(pop));
+            gtk_widget_unparent(pop);
+            g_object_set_data(G_OBJECT(e), "sg-suggest-pop", NULL);
+            g_object_set_data(G_OBJECT(e), "sg-suggest-list", NULL);
+        }
+        return;
+    }
     if (!pop) {
-        GtkEventController *k = gtk_event_controller_key_new();
         pop = gtk_popover_new();
         list = gtk_list_box_new();
         gtk_popover_set_autohide(GTK_POPOVER(pop), FALSE);
@@ -6396,9 +6548,13 @@ static void sg_field_set_suggestions(int id, const char *joined) {
         gtk_popover_set_child(GTK_POPOVER(pop), list);
         gtk_widget_set_parent(pop, e);
         g_signal_connect(list, "row-activated", G_CALLBACK(sg_on_suggest_row), GINT_TO_POINTER(id));
-        gtk_event_controller_set_propagation_phase(k, GTK_PHASE_CAPTURE);
-        g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_suggest_key), GINT_TO_POINTER(id));
-        gtk_widget_add_controller(e, k);
+        if (!g_object_get_data(G_OBJECT(e), "sg-suggest-keys")) {   /* the keys once per field */
+            GtkEventController *k = gtk_event_controller_key_new();
+            gtk_event_controller_set_propagation_phase(k, GTK_PHASE_CAPTURE);
+            g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_suggest_key), GINT_TO_POINTER(id));
+            gtk_widget_add_controller(e, k);
+            g_object_set_data(G_OBJECT(e), "sg-suggest-keys", GINT_TO_POINTER(1));
+        }
         g_object_set_data(G_OBJECT(e), "sg-suggest-pop", pop);
         g_object_set_data(G_OBJECT(e), "sg-suggest-list", list);
     }

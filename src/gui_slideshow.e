@@ -179,6 +179,7 @@ feature {NONE} -- Implementation
 		do
 			l_n := pages.count
 			create l_dot.make ({STRING_32} "%/8226/")
+			l_dot.set_style (l_dot.Style_flat)
 			l_dot.set_accessible_label ("Item " + l_n.out)
 			l_dot.click_actions.extend (agent move_by_user (l_n))
 			dots.extend (l_dot)

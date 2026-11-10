@@ -716,6 +716,42 @@ feature -- Windows and containers
 		alias "return sg_test_item_picture_ready($an_id, $i);"
 		end
 
+	path_control_set_chevrons (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1p-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_path_control_set_chevrons($an_id, $a_on);"
+		end
+
+	path_control_set_root_icon (an_id: INTEGER; a_name: POINTER)
+			-- 1p-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_path_control_set_root_icon($an_id, (const char *) $a_name);"
+		end
+
+	widget_focus (an_id: INTEGER)
+			-- 1p-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_widget_focus($an_id);"
+		end
+
+	test_press_chevron (an_id, a_part: INTEGER)
+			-- 1p-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_press_chevron($an_id, $a_part);"
+		end
+
+	test_press_path_space (an_id: INTEGER)
+			-- 1p-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_press_path_space($an_id);"
+		end
+
+	test_field_escape (an_id: INTEGER)
+			-- 1p-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_field_escape($an_id);"
+		end
+
 	splitter (a_vertical: BOOLEAN): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_splitter($a_vertical ? 1 : 0);"

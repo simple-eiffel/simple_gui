@@ -486,3 +486,11 @@ void sga_grid_view_set_filter(int a_id, const char *a_text);
 int sga_grid_view_shown_count(int a_id);
 void sga_test_activate_item(int a_id, int i);
 int sga_test_item_picture_ready(int a_id, int i);
+
+/* 1p-b: the address-bar file field */
+void sga_path_control_set_chevrons(int a_id, int a_on);
+void sga_path_control_set_root_icon(int a_id, const char *a_name);
+void sga_test_press_chevron(int a_id, int a_part);
+void sga_test_press_path_space(int a_id);
+void sga_widget_focus(int a_id);
+void sga_test_field_escape(int a_id);

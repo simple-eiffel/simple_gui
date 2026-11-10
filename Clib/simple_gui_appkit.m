@@ -295,6 +295,13 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 - (BOOL)control:(NSControl *)c textView:(NSTextView *)tv doCommandBySelector:(SEL)a_command
 {
 	(void)tv;
+	/* 1p-b: Escape on a field closes its suggestion list and sends 55, in one press as on
+	   GTK and Windows; a search field and a combo box keep their own Escape */
+	if (a_command == @selector(cancelOperation:) && [c isKindOfClass:[NSTextField class]] && ![c isKindOfClass:[NSSearchField class]] && ![c isKindOfClass:[NSComboBox class]]) {
+		sga_suggest_end(sga_id_of(c));
+		if (!s_suppress) { sga_push(55, sga_id_of(c), 0, 0, 0); sga_wake(); }
+		return YES;
+	}
 	return sga_suggest_key(sga_id_of(c), a_command);
 }
 - (void)textDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
@@ -618,11 +625,13 @@ void sga_window_set_content(int a_window, int a_child)
 		if ([v contentHuggingPriorityForOrientation:o] >= NSLayoutPriorityWindowSizeStayPut)
 			[v setContentHuggingPriority:NSLayoutPriorityWindowSizeStayPut - 1 forOrientation:o];
 	[l_content addSubview:v];
-	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:l_content.bottomAnchor constant:-l_content->bottom_bar];
+	/* a group box as the whole content keeps the containers' 12 from the window's edges */
+	CGFloat m = [v isKindOfClass:[NSBox class]] ? 12 : 0;
+	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:l_content.bottomAnchor constant:-l_content->bottom_bar - m];
 	[NSLayoutConstraint activateConstraints:@[
-		[v.leadingAnchor constraintEqualToAnchor:l_content.leadingAnchor],
-		[v.trailingAnchor constraintEqualToAnchor:l_content.trailingAnchor],
-		[v.topAnchor constraintEqualToAnchor:l_content.topAnchor],
+		[v.leadingAnchor constraintEqualToAnchor:l_content.leadingAnchor constant:m],
+		[v.trailingAnchor constraintEqualToAnchor:l_content.trailingAnchor constant:-m],
+		[v.topAnchor constraintEqualToAnchor:l_content.topAnchor constant:m],
 		l_bottom]];
 	if (!s_content_bottom) s_content_bottom = [NSMutableDictionary dictionary];
 	s_content_bottom[@(a_window)] = l_bottom;
@@ -1155,6 +1164,10 @@ void sga_splitter_set_pane(int a_splitter, int a_pane, int a_child)
 	NSView *l_holder = [s arrangedSubviews][(NSUInteger)(a_pane - 1)];
 	NSView *v = sga_get(a_child);
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	/* as a window's content: a lone label in a pane must not pull the window to its height */
+	for (NSInteger o = 0; o < 2; o++)
+		if ([v contentHuggingPriorityForOrientation:o] >= NSLayoutPriorityWindowSizeStayPut)
+			[v setContentHuggingPriority:NSLayoutPriorityWindowSizeStayPut - 1 forOrientation:o];
 	[l_holder addSubview:v];
 	[NSLayoutConstraint activateConstraints:@[
 		[v.leadingAnchor constraintEqualToAnchor:l_holder.leadingAnchor], [v.trailingAnchor constraintEqualToAnchor:l_holder.trailingAnchor],
@@ -2879,7 +2892,36 @@ int sga_group_box(const char *a_title)
 	return sga_keep(b);
 }
 
-void sga_group_box_set_title(int a_id, const char *a_title) { [(NSBox *)sga_get(a_id) setTitle:sga_string(a_title)]; }
+/* An NSBox places its content view by frame and does not size itself from that view's
+   constraints, so a box given no height by its container (a window's whole content, say)
+   came out as tall as its content alone, its title drawn over it. The child is pinned to
+   the box itself instead, by the insets the box's own layout gives (title, border and
+   content margins, measured on a sample frame), plus 4. */
+static void sga_group_box_pin(NSBox *b)
+{
+	NSView *c = [b contentView];
+	NSView *v = [[c subviews] firstObject];
+	if (!v) return;
+	NSRect l_was = [b frame];
+	[b setFrame:NSMakeRect(0, 0, 400, 400)];
+	NSRect f = [c frame];   /* in the box's (unflipped) coordinates */
+	[b setFrame:l_was];
+	CGFloat l_top = 400 - NSMaxY(f), l_bottom = NSMinY(f), l_start = NSMinX(f), l_end = 400 - NSMaxX(f);
+	for (NSLayoutConstraint *k in [[b constraints] copy]) if ([[k identifier] isEqualToString:@"sga_group_pin"]) [k setActive:NO];
+	NSArray<NSLayoutConstraint *> *l_pins = @[
+		[v.leadingAnchor constraintEqualToAnchor:b.leadingAnchor constant:l_start + 4],
+		[v.trailingAnchor constraintEqualToAnchor:b.trailingAnchor constant:-(l_end + 4)],
+		[v.topAnchor constraintEqualToAnchor:b.topAnchor constant:l_top + 4],
+		/* the box may be taller than its content (a window or stack gives it room) */
+		[v.bottomAnchor constraintLessThanOrEqualToAnchor:b.bottomAnchor constant:-(l_bottom + 4)]];
+	NSLayoutConstraint *l_snug = [v.bottomAnchor constraintEqualToAnchor:b.bottomAnchor constant:-(l_bottom + 4)];
+	[l_snug setPriority:NSLayoutPriorityDefaultLow];
+	l_pins = [l_pins arrayByAddingObject:l_snug];
+	for (NSLayoutConstraint *k in l_pins) [k setIdentifier:@"sga_group_pin"];
+	[NSLayoutConstraint activateConstraints:l_pins];
+}
+
+void sga_group_box_set_title(int a_id, const char *a_title) { NSBox *b = sga_get(a_id); [b setTitle:sga_string(a_title)]; sga_group_box_pin(b); }
 
 void sga_group_box_set_content(int a_id, int a_child)
 {
@@ -2889,11 +2931,7 @@ void sga_group_box_set_content(int a_id, int a_child)
 	for (NSView *l_old in [[c subviews] copy]) [l_old removeFromSuperview];
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
 	[c addSubview:v];
-	[NSLayoutConstraint activateConstraints:@[
-		[v.leadingAnchor constraintEqualToAnchor:c.leadingAnchor constant:4],
-		[v.trailingAnchor constraintEqualToAnchor:c.trailingAnchor constant:-4],
-		[v.topAnchor constraintEqualToAnchor:c.topAnchor constant:4],
-		[v.bottomAnchor constraintEqualToAnchor:c.bottomAnchor constant:-4]]];
+	sga_group_box_pin(b);
 }
 
 /* An expander: a disclosure triangle with a title, and the content it shows or hides
@@ -3340,10 +3378,86 @@ void sga_test_type_tokens(int a_id, const char *a_text)
 }
 
 /* A path control: an NSPathControl, standard style. A click on a part sends selection (4,
-   a = the part, 1 = the root). The control does not navigate; the program does. */
+   a = the part, 1 = the root). The control does not navigate; the program does.
+   1p-b: with chevrons on, the standard style's own "›" after each part is a button (53,
+   a = the part before it), and one more "›" is drawn after the last part. A click on the
+   empty space after them, or Command+L with the control focused, sends 54. */
 @interface SGAPathControl : NSPathControl
+{
+@public
+	BOOL chevrons;
+	NSString *root_icon;
+}
 @end
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+/* Each part's rectangle (its "›" included, at its trailing end), in the control's bounds. */
+static NSArray<NSValue *> *sga_path_part_rects(NSPathControl *c)
+{
+	NSPathCell *l_cell = [c cell];
+	NSMutableArray *a = [NSMutableArray array];
+	for (NSPathComponentCell *k in [l_cell pathComponentCells]) [a addObject:[NSValue valueWithRect:[l_cell rectOfPathComponentCell:k withFrame:[c bounds] inView:c]]];
+	return a;
+}
+#pragma clang diagnostic pop
+
+static const CGFloat Path_chevron = 14;   /* the width of a "›" and its gaps */
+
+/* Where `x' falls: the part (> 0), the "›" after part k (-k), or the empty space (0). */
+static NSInteger sga_path_hit(SGAPathControl *c, CGFloat x)
+{
+	NSArray<NSValue *> *r = sga_path_part_rects(c);
+	NSUInteger n = [r count];
+	for (NSUInteger k = 0; k < n; k++) {
+		NSRect f = [r[k] rectValue];
+		if (x >= NSMinX(f) && x < NSMaxX(f)) return (k + 1 < n && x >= NSMaxX(f) - Path_chevron) ? -(NSInteger)(k + 1) : (NSInteger)(k + 1);
+	}
+	CGFloat l_end = n ? NSMaxX([r[n - 1] rectValue]) : 0;
+	if (x >= l_end && x < l_end + Path_chevron) return -(NSInteger)MAX(n, (NSUInteger)1);
+	return 0;
+}
+
 @implementation SGAPathControl
+- (BOOL)acceptsFirstResponder { return chevrons || [super acceptsFirstResponder]; }
+- (void)mouseDown:(NSEvent *)e
+{
+	if (!chevrons) { [super mouseDown:e]; return; }
+	NSInteger h = sga_path_hit(self, [self convertPoint:[e locationInWindow] fromView:nil].x);
+	if (h > 0) [super mouseDown:e];
+	else if (!s_suppress) { sga_push(h < 0 ? 53 : 54, sga_id_of(self), h < 0 ? (int)-h : 0, 0, 0); sga_wake(); }
+}
+- (BOOL)performKeyEquivalent:(NSEvent *)e
+{
+	NSEventModifierFlags m = [e modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask;
+	if (chevrons && [[self window] firstResponder] == self && m == NSEventModifierFlagCommand && [[e charactersIgnoringModifiers] isEqualToString:@"l"]) {
+		sga_push(54, sga_id_of(self), 0, 0, 0); sga_wake();
+		return YES;
+	}
+	return [super performKeyEquivalent:e];
+}
+- (void)keyDown:(NSEvent *)e
+{
+	if (chevrons && [e keyCode] == 118) { sga_push(54, sga_id_of(self), 0, 0, 0); sga_wake(); return; }   /* F4 */
+	[super keyDown:e];
+}
+- (void)drawRect:(NSRect)a_dirty
+{
+	[super drawRect:a_dirty];
+	if (!chevrons) return;
+	/* the "›" after the last part, as the standard style draws the others */
+	NSArray<NSValue *> *r = sga_path_part_rects(self);
+	CGFloat x = [r count] ? NSMaxX([[r lastObject] rectValue]) : 0;
+	NSDictionary *a = @{NSFontAttributeName: [self font] ?: [NSFont systemFontOfSize:0], NSForegroundColorAttributeName: [NSColor secondaryLabelColor]};
+	NSSize z = [@"›" sizeWithAttributes:a];
+	[@"›" drawAtPoint:NSMakePoint(x - 2, NSMidY([self bounds]) - z.height / 2) withAttributes:a];
+}
+- (NSSize)intrinsicContentSize
+{
+	NSSize z = [super intrinsicContentSize];
+	if (chevrons && z.width != NSViewNoIntrinsicMetric) z.width += Path_chevron;
+	return z;
+}
 - (void)picked:(id)a_sender
 {
 	(void)a_sender;
@@ -3363,7 +3477,29 @@ int sga_path_control(void)
 	return sga_keep(p);
 }
 
-void sga_path_control_set(int a_id, const char *a_path) { [(NSPathControl *)sga_get(a_id) setURL:[NSURL fileURLWithPath:sga_string(a_path)]]; }
+static NSString *sga_symbol_of(NSString *a_name);
+/* 1p-b: the root icon in front of part 1 (an SF Symbol for a GUI_ICON name). */
+static void sga_path_apply_root(SGAPathControl *c)
+{
+	NSArray<NSPathControlItem *> *l_items = [c pathItems];
+	if (![l_items count] || ![c->root_icon length]) return;
+	NSImage *i = [[NSImage imageWithSystemSymbolName:sga_symbol_of(c->root_icon) accessibilityDescription:nil]
+		imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:[NSFont smallSystemFontSize] weight:NSFontWeightRegular]];
+	if (i) {
+		/* centered in a square the size of a path's folder icons: the cell squeezes other shapes */
+		NSSize z = [i size];
+		CGFloat k = 13 / MAX(z.width, z.height);
+		NSSize l_fit = NSMakeSize(z.width * k, z.height * k);
+		NSImage *q = [NSImage imageWithSize:NSMakeSize(16, 16) flipped:NO drawingHandler:^BOOL(NSRect a_rect) {
+			[i drawInRect:NSMakeRect((NSWidth(a_rect) - l_fit.width) / 2, (NSHeight(a_rect) - l_fit.height) / 2, l_fit.width, l_fit.height)];
+			return YES;
+		}];
+		[q setTemplate:YES];
+		[l_items[0] setImage:q];
+	}
+	[c setNeedsDisplay:YES];
+}
+void sga_path_control_set(int a_id, const char *a_path) { [(NSPathControl *)sga_get(a_id) setURL:[NSURL fileURLWithPath:sga_string(a_path)]]; sga_path_apply_root(sga_get(a_id)); }
 /* 1t: breadcrumbs for anything: one item per part, titled exactly (separated by 0x1F). */
 void sga_path_control_set_parts(int a_id, const char *a_parts)
 {
@@ -3375,7 +3511,31 @@ void sga_path_control_set_parts(int a_id, const char *a_parts)
 		[l_items addObject:i];
 	}
 	[(NSPathControl *)sga_get(a_id) setPathItems:l_items];
+	sga_path_apply_root(sga_get(a_id));
 }
+
+void sga_path_control_set_chevrons(int a_id, int a_on)
+{
+	SGAPathControl *c = sga_get(a_id);
+	c->chevrons = a_on != 0;
+	[c invalidateIntrinsicContentSize];
+	[c setNeedsDisplay:YES];
+}
+
+void sga_path_control_set_root_icon(int a_id, const char *a_name)
+{
+	SGAPathControl *c = sga_get(a_id);
+	NSString *l_old = c->root_icon;
+	c->root_icon = sga_string(a_name);
+	if ([c->root_icon length]) sga_path_apply_root(c);
+	else if ([l_old length] && [[c pathItems] count]) {
+		/* back to the part's own image: a path's folder icon, or none */
+		if ([c URL]) [c setURL:[c URL]]; else [[c pathItems][0] setImage:nil];
+	}
+}
+
+void sga_test_press_chevron(int a_id, int a_part) { sga_push(53, a_id, a_part, 0, 0); sga_wake(); }
+void sga_test_press_path_space(int a_id) { sga_push(54, a_id, 0, 0, 0); sga_wake(); }
 int sga_path_control_count(int a_id) { return (int)[[(NSPathControl *)sga_get(a_id) pathItems] count]; }
 const char *sga_path_control_part(int a_id, int i) { return sga_return(Kind_label, [[(NSPathControl *)sga_get(a_id) pathItems][(NSUInteger)(i - 1)] title]); }
 
@@ -4581,6 +4741,15 @@ static BOOL sga_suggest_key(int a_id, SEL a_command)
 	if (a_command == @selector(moveDown:)) { [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)MIN(r + 1, n - 1)] byExtendingSelection:NO]; [t scrollRowToVisible:[t selectedRow]]; return YES; }
 	if (a_command == @selector(moveUp:)) { [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)MAX(r - 1, 0)] byExtendingSelection:NO]; [t scrollRowToVisible:[t selectedRow]]; return YES; }
 	if (a_command == @selector(insertNewline:) && r >= 0) { sga_suggest_pick((int)r + 1); return YES; }
+	/* 1p-b: Tab, or Right with the caret at the end, completes to the highlighted suggestion */
+	if (r >= 0 && (a_command == @selector(insertTab:) || a_command == @selector(moveRight:))) {
+		NSTextField *f = sga_get(a_id);
+		NSText *l_editor = [f currentEditor];
+		if (a_command == @selector(insertTab:) || (l_editor && [l_editor selectedRange].location == [[f stringValue] length] && [l_editor selectedRange].length == 0)) {
+			sga_suggest_pick((int)r + 1);
+			return YES;
+		}
+	}
 	if (a_command == @selector(cancelOperation:)) { sga_suggest_hide(); return YES; }
 	return NO;
 }
@@ -8501,6 +8670,9 @@ const char *sga_test_help_tip_shown(void) { return sga_return(Kind_label, [s_hel
 	NSMutableArray<SGAGridItem *> *items;
 	NSArray<NSNumber *> *shown;   /* model items (from 0) shown, nil all */
 	NSString *filter;
+	/* model items selected while the grid has no window: an NSCollectionView that has
+	   not loaded its items yet drops a selection, so it is applied on joining a window */
+	NSMutableSet<NSNumber *> *pending;
 }
 @end
 
@@ -8517,7 +8689,15 @@ static void sga_grid_load(SGAGridView *g, SGAGridItem *it);
 }
 @end
 
+static void sga_grid_apply_pending(SGAGridView *g);
 @implementation SGAGridView
+- (void)viewDidMoveToWindow
+{
+	[super viewDidMoveToWindow];
+	/* after the window has laid the grid out, when it has items to select */
+	__weak SGAGridView *w = self;
+	if ([self window] && pending) dispatch_async(dispatch_get_main_queue(), ^{ SGAGridView *g = w; if (g && [g window] && g->pending) sga_grid_apply_pending(g); });
+}
 - (void)tellSelection
 {
 	NSIndexPath *p = [[[self selectionIndexPaths] allObjects] sortedArrayUsingSelector:@selector(compare:)].firstObject;
@@ -8582,7 +8762,14 @@ static void sga_grid_load(SGAGridView *g, SGAGridItem *it)
 			it->loading = NO;
 			NSUInteger m = l_g ? [l_g->items indexOfObjectIdenticalTo:it] : NSNotFound;
 			NSInteger v = m == NSNotFound ? -1 : sga_grid_view_index(l_g, (NSInteger)m);
-			if (v >= 0) { s_suppress++; [l_g reloadItemsAtIndexPaths:[NSSet setWithObject:[NSIndexPath indexPathForItem:v inSection:0]]]; s_suppress--; }
+			if (v >= 0) {
+				/* reloading an item deselects it: keep the selection */
+				NSSet<NSIndexPath *> *l_selected = [l_g selectionIndexPaths];
+				s_suppress++;
+				[l_g reloadItemsAtIndexPaths:[NSSet setWithObject:[NSIndexPath indexPathForItem:v inSection:0]]];
+				[l_g setSelectionIndexPaths:l_selected];
+				s_suppress--;
+			}
 		});
 	});
 }
@@ -8697,10 +8884,32 @@ void sga_grid_view_set_spacing(int a_id, int s)
 void sga_grid_view_set_multiple(int a_id, int a_on) { SGAGridView *g = sga_grid_of(a_id); if (g) [g setAllowsMultipleSelection:a_on != 0]; }
 
 /* Quiet: item `i' selected (added to the selection when `an_extend'); 0 clears. */
+static void sga_grid_apply_pending(SGAGridView *g)
+{
+	NSMutableSet<NSIndexPath *> *l_paths = [NSMutableSet set];
+	for (NSNumber *k in g->pending) { NSInteger v = sga_grid_view_index(g, [k integerValue]); if (v >= 0) [l_paths addObject:[NSIndexPath indexPathForItem:v inSection:0]]; }
+	g->pending = nil;
+	s_suppress++;
+	[g reloadData];
+	[g layoutSubtreeIfNeeded];
+	[g setSelectionIndexPaths:l_paths];
+	s_suppress--;
+}
+
 void sga_grid_view_select(int a_id, int i, int an_extend)
 {
 	SGAGridView *g = sga_grid_of(a_id);
 	if (!g) return;
+	if (![g window]) {
+		if (!an_extend || !g->pending) {
+			NSMutableSet<NSNumber *> *l_old = g->pending;
+			g->pending = [NSMutableSet set];
+			if (an_extend) for (NSIndexPath *p in [g selectionIndexPaths]) [g->pending addObject:@(sga_grid_model(g, [p item]))];
+			(void)l_old;
+		}
+		if (i >= 1 && sga_grid_view_index(g, i - 1) >= 0) [g->pending addObject:@(i - 1)];
+		return;
+	}
 	NSMutableSet<NSIndexPath *> *s = an_extend ? [[g selectionIndexPaths] mutableCopy] : [NSMutableSet set];
 	NSInteger v = i >= 1 ? sga_grid_view_index(g, i - 1) : -1;
 	if (v >= 0) [s addObject:[NSIndexPath indexPathForItem:v inSection:0]];
@@ -8711,6 +8920,7 @@ void sga_grid_view_select(int a_id, int i, int an_extend)
 
 static NSArray<NSNumber *> *sga_grid_selected_models(SGAGridView *g)
 {
+	if (g->pending) return [[g->pending allObjects] sortedArrayUsingSelector:@selector(compare:)];
 	NSMutableArray<NSNumber *> *r = [NSMutableArray array];
 	for (NSIndexPath *p in [g selectionIndexPaths]) [r addObject:@(sga_grid_model(g, [p item]) + 1)];
 	[r sortUsingSelector:@selector(compare:)];
@@ -8748,4 +8958,31 @@ static void sga_grid_user_select(int a_id, int i, BOOL an_extend)
 	[g tellSelection];
 }
 void sga_test_activate_item(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); NSInteger v = g && i >= 1 ? sga_grid_view_index(g, i - 1) : -1; if (v >= 0) [g openAt:v]; }
-int sga_test_item_picture_ready(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); return g && i >= 1 && i <= (int)[g->items count] && g->items[(NSUInteger)i - 1]->image ? 1 : 0; }
+/* Item `i''s picture is loaded and, when its cell is on screen, that cell shows it. */
+int sga_test_item_picture_ready(int a_id, int i)
+{
+	SGAGridView *g = sga_grid_of(a_id);
+	if (!g || i < 1 || i > (int)[g->items count]) return 0;
+	SGAGridItem *it = g->items[(NSUInteger)i - 1];
+	if (!it->image) return 0;
+	NSInteger v = sga_grid_view_index(g, i - 1);
+	SGAGridCell *c = v >= 0 ? (SGAGridCell *)[g itemAtIndexPath:[NSIndexPath indexPathForItem:v inSection:0]] : nil;
+	return !c || [c->picture_view image] == it->image ? 1 : 0;
+}
+
+/* ------------------------------------------------------------------ 1p-b: focus and Escape */
+
+/* The keyboard focus to widget `a_id', from code. */
+void sga_widget_focus(int a_id)
+{
+	NSView *v = sga_core(a_id);
+	if ([v window]) [[v window] makeFirstResponder:v];
+}
+
+/* As the user pressing Escape in field `a_id': the suggestion list closes if it shows, else 55. */
+void sga_test_field_escape(int a_id)
+{
+	NSControl *f = sga_get(a_id);
+	if ([[f window] firstResponder] != [f currentEditor] || ![f currentEditor]) [[f window] makeFirstResponder:f];
+	[s_target control:f textView:(NSTextView *)[f currentEditor] doCommandBySelector:@selector(cancelOperation:)];
+}
