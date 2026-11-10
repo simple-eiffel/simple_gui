@@ -294,8 +294,14 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 /* 1p: Up, Down, Return and Escape go to the field's suggestion list while it shows. */
 - (BOOL)control:(NSControl *)c textView:(NSTextView *)tv doCommandBySelector:(SEL)a_command
 {
-	(void)tv;
-	return sga_suggest_key(sga_id_of(c), a_command);
+	if (sga_suggest_key(sga_id_of(c), a_command)) return YES;
+	/* 1p-b: Escape on a field (with no list to close) sends 55; a search field still clears */
+	if (a_command == @selector(cancelOperation:) && [c isKindOfClass:[NSTextField class]] && ![c isKindOfClass:[NSSearchField class]] && ![c isKindOfClass:[NSComboBox class]]) {
+		(void)tv;
+		if (!s_suppress) { sga_push(55, sga_id_of(c), 0, 0, 0); sga_wake(); }
+		return YES;
+	}
+	return NO;
 }
 - (void)textDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
 - (NSMutableArray *)rowsOf:(NSTableView *)t { return rows[[NSValue valueWithNonretainedObject:t]]; }
@@ -3340,10 +3346,86 @@ void sga_test_type_tokens(int a_id, const char *a_text)
 }
 
 /* A path control: an NSPathControl, standard style. A click on a part sends selection (4,
-   a = the part, 1 = the root). The control does not navigate; the program does. */
+   a = the part, 1 = the root). The control does not navigate; the program does.
+   1p-b: with chevrons on, the standard style's own "›" after each part is a button (53,
+   a = the part before it), and one more "›" is drawn after the last part. A click on the
+   empty space after them, or Command+L with the control focused, sends 54. */
 @interface SGAPathControl : NSPathControl
+{
+@public
+	BOOL chevrons;
+	NSString *root_icon;
+}
 @end
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+/* Each part's rectangle (its "›" included, at its trailing end), in the control's bounds. */
+static NSArray<NSValue *> *sga_path_part_rects(NSPathControl *c)
+{
+	NSPathCell *l_cell = [c cell];
+	NSMutableArray *a = [NSMutableArray array];
+	for (NSPathComponentCell *k in [l_cell pathComponentCells]) [a addObject:[NSValue valueWithRect:[l_cell rectOfPathComponentCell:k withFrame:[c bounds] inView:c]]];
+	return a;
+}
+#pragma clang diagnostic pop
+
+static const CGFloat Path_chevron = 14;   /* the width of a "›" and its gaps */
+
+/* Where `x' falls: the part (> 0), the "›" after part k (-k), or the empty space (0). */
+static NSInteger sga_path_hit(SGAPathControl *c, CGFloat x)
+{
+	NSArray<NSValue *> *r = sga_path_part_rects(c);
+	NSUInteger n = [r count];
+	for (NSUInteger k = 0; k < n; k++) {
+		NSRect f = [r[k] rectValue];
+		if (x >= NSMinX(f) && x < NSMaxX(f)) return (k + 1 < n && x >= NSMaxX(f) - Path_chevron) ? -(NSInteger)(k + 1) : (NSInteger)(k + 1);
+	}
+	CGFloat l_end = n ? NSMaxX([r[n - 1] rectValue]) : 0;
+	if (x >= l_end && x < l_end + Path_chevron) return -(NSInteger)MAX(n, (NSUInteger)1);
+	return 0;
+}
+
 @implementation SGAPathControl
+- (BOOL)acceptsFirstResponder { return chevrons || [super acceptsFirstResponder]; }
+- (void)mouseDown:(NSEvent *)e
+{
+	if (!chevrons) { [super mouseDown:e]; return; }
+	NSInteger h = sga_path_hit(self, [self convertPoint:[e locationInWindow] fromView:nil].x);
+	if (h > 0) [super mouseDown:e];
+	else if (!s_suppress) { sga_push(h < 0 ? 53 : 54, sga_id_of(self), h < 0 ? (int)-h : 0, 0, 0); sga_wake(); }
+}
+- (BOOL)performKeyEquivalent:(NSEvent *)e
+{
+	NSEventModifierFlags m = [e modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask;
+	if (chevrons && [[self window] firstResponder] == self && m == NSEventModifierFlagCommand && [[e charactersIgnoringModifiers] isEqualToString:@"l"]) {
+		sga_push(54, sga_id_of(self), 0, 0, 0); sga_wake();
+		return YES;
+	}
+	return [super performKeyEquivalent:e];
+}
+- (void)keyDown:(NSEvent *)e
+{
+	if (chevrons && [e keyCode] == 118) { sga_push(54, sga_id_of(self), 0, 0, 0); sga_wake(); return; }   /* F4 */
+	[super keyDown:e];
+}
+- (void)drawRect:(NSRect)a_dirty
+{
+	[super drawRect:a_dirty];
+	if (!chevrons) return;
+	/* the "›" after the last part, as the standard style draws the others */
+	NSArray<NSValue *> *r = sga_path_part_rects(self);
+	CGFloat x = [r count] ? NSMaxX([[r lastObject] rectValue]) : 0;
+	NSDictionary *a = @{NSFontAttributeName: [self font] ?: [NSFont systemFontOfSize:0], NSForegroundColorAttributeName: [NSColor secondaryLabelColor]};
+	NSSize z = [@"›" sizeWithAttributes:a];
+	[@"›" drawAtPoint:NSMakePoint(x - 2, NSMidY([self bounds]) - z.height / 2) withAttributes:a];
+}
+- (NSSize)intrinsicContentSize
+{
+	NSSize z = [super intrinsicContentSize];
+	if (chevrons && z.width != NSViewNoIntrinsicMetric) z.width += Path_chevron;
+	return z;
+}
 - (void)picked:(id)a_sender
 {
 	(void)a_sender;
@@ -3363,7 +3445,29 @@ int sga_path_control(void)
 	return sga_keep(p);
 }
 
-void sga_path_control_set(int a_id, const char *a_path) { [(NSPathControl *)sga_get(a_id) setURL:[NSURL fileURLWithPath:sga_string(a_path)]]; }
+static NSString *sga_symbol_of(NSString *a_name);
+/* 1p-b: the root icon in front of part 1 (an SF Symbol for a GUI_ICON name). */
+static void sga_path_apply_root(SGAPathControl *c)
+{
+	NSArray<NSPathControlItem *> *l_items = [c pathItems];
+	if (![l_items count] || ![c->root_icon length]) return;
+	NSImage *i = [[NSImage imageWithSystemSymbolName:sga_symbol_of(c->root_icon) accessibilityDescription:nil]
+		imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:[NSFont smallSystemFontSize] weight:NSFontWeightRegular]];
+	if (i) {
+		/* centered in a square the size of a path's folder icons: the cell squeezes other shapes */
+		NSSize z = [i size];
+		CGFloat k = 13 / MAX(z.width, z.height);
+		NSSize l_fit = NSMakeSize(z.width * k, z.height * k);
+		NSImage *q = [NSImage imageWithSize:NSMakeSize(16, 16) flipped:NO drawingHandler:^BOOL(NSRect a_rect) {
+			[i drawInRect:NSMakeRect((NSWidth(a_rect) - l_fit.width) / 2, (NSHeight(a_rect) - l_fit.height) / 2, l_fit.width, l_fit.height)];
+			return YES;
+		}];
+		[q setTemplate:YES];
+		[l_items[0] setImage:q];
+	}
+	[c setNeedsDisplay:YES];
+}
+void sga_path_control_set(int a_id, const char *a_path) { [(NSPathControl *)sga_get(a_id) setURL:[NSURL fileURLWithPath:sga_string(a_path)]]; sga_path_apply_root(sga_get(a_id)); }
 /* 1t: breadcrumbs for anything: one item per part, titled exactly (separated by 0x1F). */
 void sga_path_control_set_parts(int a_id, const char *a_parts)
 {
@@ -3375,7 +3479,31 @@ void sga_path_control_set_parts(int a_id, const char *a_parts)
 		[l_items addObject:i];
 	}
 	[(NSPathControl *)sga_get(a_id) setPathItems:l_items];
+	sga_path_apply_root(sga_get(a_id));
 }
+
+void sga_path_control_set_chevrons(int a_id, int a_on)
+{
+	SGAPathControl *c = sga_get(a_id);
+	c->chevrons = a_on != 0;
+	[c invalidateIntrinsicContentSize];
+	[c setNeedsDisplay:YES];
+}
+
+void sga_path_control_set_root_icon(int a_id, const char *a_name)
+{
+	SGAPathControl *c = sga_get(a_id);
+	NSString *l_old = c->root_icon;
+	c->root_icon = sga_string(a_name);
+	if ([c->root_icon length]) sga_path_apply_root(c);
+	else if ([l_old length] && [[c pathItems] count]) {
+		/* back to the part's own image: a path's folder icon, or none */
+		if ([c URL]) [c setURL:[c URL]]; else [[c pathItems][0] setImage:nil];
+	}
+}
+
+void sga_test_press_chevron(int a_id, int a_part) { sga_push(53, a_id, a_part, 0, 0); sga_wake(); }
+void sga_test_press_path_space(int a_id) { sga_push(54, a_id, 0, 0, 0); sga_wake(); }
 int sga_path_control_count(int a_id) { return (int)[[(NSPathControl *)sga_get(a_id) pathItems] count]; }
 const char *sga_path_control_part(int a_id, int i) { return sga_return(Kind_label, [[(NSPathControl *)sga_get(a_id) pathItems][(NSUInteger)(i - 1)] title]); }
 
@@ -4581,6 +4709,15 @@ static BOOL sga_suggest_key(int a_id, SEL a_command)
 	if (a_command == @selector(moveDown:)) { [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)MIN(r + 1, n - 1)] byExtendingSelection:NO]; [t scrollRowToVisible:[t selectedRow]]; return YES; }
 	if (a_command == @selector(moveUp:)) { [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)MAX(r - 1, 0)] byExtendingSelection:NO]; [t scrollRowToVisible:[t selectedRow]]; return YES; }
 	if (a_command == @selector(insertNewline:) && r >= 0) { sga_suggest_pick((int)r + 1); return YES; }
+	/* 1p-b: Tab, or Right with the caret at the end, completes to the highlighted suggestion */
+	if (r >= 0 && (a_command == @selector(insertTab:) || a_command == @selector(moveRight:))) {
+		NSTextField *f = sga_get(a_id);
+		NSText *l_editor = [f currentEditor];
+		if (a_command == @selector(insertTab:) || (l_editor && [l_editor selectedRange].location == [[f stringValue] length] && [l_editor selectedRange].length == 0)) {
+			sga_suggest_pick((int)r + 1);
+			return YES;
+		}
+	}
 	if (a_command == @selector(cancelOperation:)) { sga_suggest_hide(); return YES; }
 	return NO;
 }
@@ -8749,3 +8886,20 @@ static void sga_grid_user_select(int a_id, int i, BOOL an_extend)
 }
 void sga_test_activate_item(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); NSInteger v = g && i >= 1 ? sga_grid_view_index(g, i - 1) : -1; if (v >= 0) [g openAt:v]; }
 int sga_test_item_picture_ready(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); return g && i >= 1 && i <= (int)[g->items count] && g->items[(NSUInteger)i - 1]->image ? 1 : 0; }
+
+/* ------------------------------------------------------------------ 1p-b: focus and Escape */
+
+/* The keyboard focus to widget `a_id', from code. */
+void sga_widget_focus(int a_id)
+{
+	NSView *v = sga_core(a_id);
+	if ([v window]) [[v window] makeFirstResponder:v];
+}
+
+/* As the user pressing Escape in field `a_id': the suggestion list closes if it shows, else 55. */
+void sga_test_field_escape(int a_id)
+{
+	NSControl *f = sga_get(a_id);
+	if ([[f window] firstResponder] != [f currentEditor] || ![f currentEditor]) [[f window] makeFirstResponder:f];
+	[s_target control:f textView:(NSTextView *)[f currentEditor] doCommandBySelector:@selector(cancelOperation:)];
+}
