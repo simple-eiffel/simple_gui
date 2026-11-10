@@ -2547,6 +2547,201 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_list_rich_rows
+			-- 1s: rich rows check and close; the user's acts fire, code is quiet; plain rows
+			-- sit beside them; a reorder keeps the rows' parts.
+		local
+			l_window: GUI_WINDOW
+			l_list: GUI_LIST
+			l_row: GUI_LIST_ROW
+			l_told: ARRAYED_LIST [STRING]
+		do
+			create l_told.make (4)
+			create l_window.make ("Rich rows", 360, 320)
+			create l_list.make
+			create l_row.make ("Write the sermon")
+			l_row.set_subtitle ("Due Friday")
+			l_row.set_checkable (True)
+			l_row.set_badge (3)
+			l_list.extend_rich (l_row)
+			create l_row.make ("Call the printer")
+			l_row.set_checkable (True)
+			l_row.set_checked (True)
+			l_row.set_closable (True)
+			l_list.extend_rich (l_row)
+			l_list.extend ("A plain row")
+			l_list.row_check_actions.extend (agent (r: INTEGER; c: BOOLEAN; t: ARRAYED_LIST [STRING]) do t.extend ("check " + r.out + ":" + c.out) end (?, ?, l_told))
+			l_list.row_close_actions.extend (agent (r: INTEGER; s: STRING_32; t: ARRAYED_LIST [STRING]) do t.extend ("close " + r.out + ":" + s.to_string_8) end (?, ?, l_told))
+			l_window.set_content (l_list)
+			l_window.show
+			settle_window
+			assert ("three rows, titles", l_list.count = 3 and l_list.i_th (1).same_string ("Write the sermon") and l_list.i_th (3).same_string ("A plain row"))
+			assert ("checks shown", not driver.row_check_shown (l_list, 1) and driver.row_check_shown (l_list, 2))
+			l_list.set_row_checked (1, True)
+			assert ("checked quietly", l_list.is_row_checked (1) and driver.row_check_shown (l_list, 1) and l_told.is_empty)
+			driver.check_row (l_list, 1)
+			assert ("the user unchecked it", not l_list.is_row_checked (1) and not driver.row_check_shown (l_list, 1)
+				and l_told.count = 1 and l_told [1].same_string ("check 1:False"))
+			driver.close_row (l_list, 2)
+			assert ("the user closed row 2", l_list.count = 2 and l_list.i_th (2).same_string ("A plain row")
+				and l_told.count = 2 and l_told [2].same_string ("close 2:Call the printer"))
+			l_list.move_row (1, 2)
+			assert ("a move keeps the parts", l_list.row (2).subtitle.same_string ("Due Friday") and l_list.row (2).badge = 3)
+			l_list.remove_row (1)
+			assert ("removed quietly", l_list.count = 1 and l_told.count = 2)
+			l_window.close
+		end
+
+	test_list_filters_and_sorts
+			-- 1s: a filter shows the matching rows by the list's own numbers and deselects a
+			-- hidden selection (with its event); a search field drives it; sorting keeps the
+			-- selection with its row; sorted-on-extend places new rows.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_list: GUI_LIST
+			l_search: GUI_SEARCH_FIELD
+			l_selected: CELL [INTEGER]
+		do
+			create l_selected.put (-1)
+			create l_window.make ("Filter", 360, 360)
+			create l_stack.make_vertical
+			create l_search.make
+			create l_list.make
+			across <<"Numbers", "Genesis", "exodus", "Leviticus", "Deuteronomy">> as ic loop l_list.extend (ic) end
+			l_list.selection_actions.extend (agent (r: INTEGER; c: CELL [INTEGER]) do c.put (r) end (?, l_selected))
+			l_stack.extend (l_search)
+			l_stack.extend (l_list)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			driver.choose_row (l_list, 2)
+			l_selected.put (-1)
+			l_list.set_filter ("US")
+			settle_window
+			assert ("two match, any case: " + l_list.shown_count.out, l_list.shown_count = 2)
+			assert ("Genesis hidden, so deselected with the event", l_list.selected_index = 0 and l_selected.item = 0)
+			l_list.set_filter ("")
+			settle_window
+			assert ("all again, nothing reselected", l_list.shown_count = 5 and l_list.selected_index = 0)
+			l_list.filter_with (l_search)
+			driver.type_text (l_search, "eut")
+			settle_window
+			assert ("the search drives it", l_list.shown_count = 1 and l_list.filter_text.same_string ("eut"))
+			driver.type_text (l_search, "")
+			settle_window
+			l_list.select_row (1)
+			l_list.sort (True)
+			assert ("sorted", l_list.is_in_order (True) and l_list.i_th (1).same_string ("Deuteronomy") and l_list.i_th (3).same_string ("Genesis"))
+			assert ("Numbers still selected: " + l_list.selected_index.out, l_list.selected_index = 5)
+			l_list.sort (False)
+			assert ("descending", l_list.i_th (1).same_string ("Numbers"))
+			l_list.set_sort_on_extend (True, True)
+			l_list.extend ("Joshua")
+			assert ("placed in order", l_list.is_in_order (True) and l_list.i_th (4).same_string ("Joshua"))
+			l_window.close
+		end
+
+	test_table_cells_edit
+			-- 1s: text, check and choice cells edit; a validator refuses with a note that the
+			-- next edit clears; Escape changes nothing; a lazy table passes its edits on.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_table, l_lazy: GUI_TABLE
+			l_told: ARRAYED_LIST [STRING]
+		do
+			create l_told.make (4)
+			create l_window.make ("Edit cells", 520, 400)
+			create l_stack.make_vertical
+			create l_table.make (<<"Book", "Chapters", "Read", "Testament">>)
+			l_table.extend_row (<<"Genesis", "50", "0", "Old">>)
+			l_table.extend_row (<<"Mark", "16", "1", "New">>)
+			l_table.set_column_editor (2, l_table.Edit_text)
+			l_table.set_column_editor (3, l_table.Edit_check)
+			l_table.set_column_choices (4, <<"Old", "New">>)
+			l_table.set_cell_validator (2, agent (r: INTEGER; t: STRING_32): detachable STRING_32
+				do
+					if not t.is_integer then Result := {STRING_32} "A whole number, please" end
+				end)
+			l_table.cell_edit_actions.extend (agent (r, c: INTEGER; s: STRING_32; t: ARRAYED_LIST [STRING]) do t.extend (r.out + "," + c.out + "=" + s.to_string_8) end (?, ?, ?, l_told))
+			create l_lazy.make (<<"Verse">>)
+			l_lazy.set_row_source (100, agent (r: INTEGER): ARRAY [READABLE_STRING_GENERAL] do Result := <<"Verse " + r.out>> end)
+			l_lazy.set_column_editor (1, l_lazy.Edit_text)
+			l_lazy.cell_edit_actions.extend (agent (r, c: INTEGER; s: STRING_32; t: ARRAYED_LIST [STRING]) do t.extend ("lazy " + r.out + "=" + s.to_string_8) end (?, ?, ?, l_told))
+			l_stack.extend (l_table)
+			l_stack.extend (l_lazy)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("editors", l_table.column_editor (1) = l_table.Edit_none and l_table.column_editor (4) = l_table.Edit_choice)
+			driver.edit_cell (l_table, 1, 2, "51")
+			assert ("text kept: " + driver.cell_shown (l_table, 1, 2).out, l_table.cell (1, 2).same_string ("51")
+				and driver.cell_shown (l_table, 1, 2).same_string ("51") and l_told.count = 1 and l_told [1].same_string ("1,2=51"))
+			driver.edit_cell (l_table, 2, 2, "sixteen")
+			assert ("refused: " + driver.cell_shown (l_table, 2, 2).out, l_table.cell (2, 2).same_string ("16")
+				and driver.cell_shown (l_table, 2, 2).same_string ("16") and l_told.count = 1)
+			assert ("the note: " + driver.cell_note (l_table).out, driver.cell_note (l_table).same_string ("A whole number, please"))
+			driver.edit_cell (l_table, 1, 3, "1")
+			assert ("check committed", l_table.cell (1, 3).same_string ("1") and l_told.count = 2 and l_told [2].same_string ("1,3=1"))
+			assert ("the next edit cleared the note", driver.cell_note (l_table).is_empty)
+			driver.edit_cell (l_table, 1, 4, "New")
+			assert ("choice committed", l_table.cell (1, 4).same_string ("New") and l_told.count = 3)
+			driver.cancel_edit (l_table, 2, 2)
+			assert ("Escape: nothing", l_table.cell (2, 2).same_string ("16") and l_told.count = 3)
+			driver.edit_cell (l_lazy, 7, 1, "In the beginning")
+			assert ("lazy passes it on", l_told.count = 4 and l_told [4].same_string ("lazy 7=In the beginning"))
+			l_window.close
+		end
+
+	test_table_filters
+			-- 1s: a held table filters in the backend (all columns, or some); a lazy table's
+			-- filter asks the row source; row numbers stay the table's.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_table, l_lazy: GUI_TABLE
+		do
+			create l_window.make ("Filter tables", 520, 420)
+			create l_stack.make_vertical
+			create l_table.make (<<"Book", "Testament">>)
+			l_table.extend_row (<<"Genesis", "Old">>)
+			l_table.extend_row (<<"Mark", "New">>)
+			l_table.extend_row (<<"Numbers", "Old">>)
+			l_table.extend_row (<<"Romans", "New">>)
+			create l_lazy.make (<<"Number">>)
+			l_lazy.set_row_source (1000, agent (r: INTEGER): ARRAY [READABLE_STRING_GENERAL] do Result := <<"n" + r.out>> end)
+			l_stack.extend (l_table)
+			l_stack.extend (l_lazy)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_table.set_filter ("new")
+			settle_window
+			assert ("two new: " + l_table.shown_count.out, l_table.shown_count = 2)
+			l_table.set_filter ("m")
+			settle_window
+			assert ("m anywhere: " + l_table.shown_count.out, l_table.shown_count = 3)
+			l_table.set_filter_columns (<<2>>)
+			settle_window
+			assert ("m in Testament only: " + l_table.shown_count.out, l_table.shown_count = 0)
+			l_table.set_filter ("")
+			settle_window
+			assert ("all again", l_table.shown_count = 4)
+			driver.choose_table_row (l_table, 4)
+			assert ("model row numbers", l_table.selected_row = 4)
+			l_lazy.set_filter ("99")
+			settle_window
+			assert ("lazy: 99, 199 .. 999 and 990 .. 998: " + l_lazy.shown_count.out, l_lazy.shown_count = 19)
+			l_lazy.set_shown_rows (<<5, 6>>)
+			settle_window
+			assert ("the program's own rows", l_lazy.shown_count = 2)
+			l_lazy.set_filter ("")
+			settle_window
+			assert ("lazy all again", l_lazy.shown_count = 1000)
+			l_window.close
+		end
+
 	test_drops_find_rows_by_place
 			-- 1q-c: a drop finds the row under the pointer: a list's row, a tree's node, a
 			-- token field's token (by its chip's place, not only its height).
