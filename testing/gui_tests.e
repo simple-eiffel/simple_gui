@@ -2205,6 +2205,50 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_list_rows_reorder
+			-- 1q-c: a reorderable list's row picked and dropped on another row moves there and
+			-- the list tells from and to; below the rows is the end; another list never lights
+			-- for it; a list that stops being reorderable lifts nothing.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_list, l_other: GUI_LIST
+			l_moves: ARRAYED_LIST [STRING]
+		do
+			create l_moves.make (2)
+			create l_window.make ("Reorder", 360, 300)
+			create l_stack.make_vertical
+			create l_list.make
+			across <<"Genesis", "Exodus", "Leviticus", "Numbers">> as ic loop l_list.extend (ic) end
+			create l_other.make
+			l_other.extend ("Elsewhere")
+			l_other.set_reorderable (True)
+			l_list.set_reorderable (True)
+			l_list.reorder_actions.extend (agent (f, t: INTEGER; m: ARRAYED_LIST [STRING]) do m.extend (f.out + ">" + t.out) end (?, ?, l_moves))
+			l_stack.extend (l_list)
+			l_stack.extend (l_other)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			driver.pick (l_list, 1)
+			assert ("its own list lights", driver.is_accepting (l_list))
+			assert ("another list does not", not driver.is_accepting (l_other))
+			driver.drop (l_list, 3)
+			assert ("moved: " + l_list.i_th (1).out + "," + l_list.i_th (2).out + "," + l_list.i_th (3).out,
+				l_list.i_th (1).same_string ("Exodus") and l_list.i_th (2).same_string ("Leviticus")
+				and l_list.i_th (3).same_string ("Genesis") and l_list.i_th (4).same_string ("Numbers"))
+			assert ("told 1>3", l_moves.count = 1 and l_moves [1].same_string ("1>3"))
+			assert ("the moved row is selected", l_list.selected_index = 3)
+			driver.pick (l_list, 1)
+			driver.drop (l_list, 0)
+			assert ("below the rows is the end", l_list.i_th (4).same_string ("Exodus") and l_moves [2].same_string ("1>4"))
+			l_list.set_reorderable (False)
+			driver.pick (l_list, 2)
+			assert ("not reorderable: nothing lifted", not driver.is_accepting (l_list))
+			driver.cancel_pick
+			l_window.close
+		end
+
 	test_dragged_out_to_other_programs
 			-- 1q-c: a drag out carries the data the program keeps current; Void carries nothing;
 			-- the end of a drag reaches the source's actions only while it has data.

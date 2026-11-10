@@ -105,6 +105,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_pick_and_drop_typed, "pick_and_drop_typed")
 				run_test (agent t.test_files_and_text_dropped_in, "files_and_text_dropped_in")
 				run_test (agent t.test_dragged_out_to_other_programs, "dragged_out_to_other_programs")
+				run_test (agent t.test_list_rows_reorder, "list_rows_reorder")
 				run_test (agent t.test_password_field_reveals_and_hides, "password_field_reveals_and_hides")
 				run_test (agent t.test_validation_kinds_and_live_check, "validation_kinds_and_live_check")
 				run_test (agent t.test_autocomplete_suggests_and_fills, "autocomplete_suggests_and_fills")
