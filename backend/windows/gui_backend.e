@@ -2710,7 +2710,84 @@ feature -- Controls
 			create l_p.make_path
 			Result := register (l_p)
 			l_p.set_on_part (agent report_row (Result, ?))
+			l_p.set_on_chevron (agent report_chevron (Result, ?))
+			l_p.set_on_space (agent report_path_space (Result))
 		end
+
+	path_control_set_chevrons (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1p-b.
+		do
+			if attached {GUI_SW_PATH_CONTROL} widget (an_id) as al_p then
+				al_p.set_chevrons (a_on)
+				changed
+			end
+		end
+
+	path_control_set_root_icon (an_id: INTEGER; a_name: POINTER)
+			-- 1p-b: the named icon drawn before part 1; empty for none.
+		local
+			l_name: STRING_32
+		do
+			l_name := from_c (a_name)
+			if attached {GUI_SW_PATH_CONTROL} widget (an_id) as al_p then
+				if l_name.is_empty then
+					al_p.set_root_icon (l_name, 0)
+				else
+					al_p.set_root_icon (l_name, glyph_of (l_name))
+				end
+				changed
+			end
+		end
+
+	widget_focus (an_id: INTEGER)
+			-- 1p-b: the keyboard focus to the widget, from code (a click's focus path).
+		do
+			test_focus (an_id)
+		end
+
+	test_press_chevron (an_id, a_part: INTEGER)
+		do
+			if attached {GUI_SW_PATH_CONTROL} widget (an_id) as al_p and then al_p.has_chevrons
+				and then a_part >= 1 and then a_part <= al_p.parts.count
+			then
+				al_p.press_chevron (a_part)
+				changed
+			end
+		end
+
+	test_press_path_space (an_id: INTEGER)
+		do
+			if attached {GUI_SW_PATH_CONTROL} widget (an_id) as al_p and then al_p.has_chevrons then
+				al_p.press_space
+				changed
+			end
+		end
+
+	test_field_escape (an_id: INTEGER)
+			-- As Escape in the field with no suggestion list showing: 55 (a showing list is
+			-- closed by the key itself, in GUI_SW_WINDOW).
+		do
+			report_field_escape (an_id)
+		end
+
+feature {GUI_SW_WINDOW} -- Address-bar events (1p-b)
+
+	report_chevron (an_id, a_part: INTEGER)
+		do
+			push (53, an_id, a_part, 0, 0)
+		end
+
+	report_path_space (an_id: INTEGER)
+		do
+			push (54, an_id, 0, 0, 0)
+		end
+
+	report_field_escape (an_id: INTEGER)
+		do
+			push (55, an_id, 0, 0, 0)
+		end
+
+feature -- Path controls, continued
 
 	path_control_set (an_id: INTEGER; a_path: POINTER)
 		do
