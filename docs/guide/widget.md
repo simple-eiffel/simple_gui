@@ -60,9 +60,18 @@ The button starts dimmed and comes on with the first edit in the field. Resting 
 
 Badges are described in [Icons and badges](icons-and-badges.md).
 
+Every widget can also take part in drags and drops. These features are described on their own pages:
+
+| Feature | What it does |
+|---|---|
+| `set_pebble (a_pebble)`, `set_pebble_function (a_function)`, `set_pick_mode (a_mode)` | Make the widget a source for [pick and drop](pick-and-drop.md): what is carried, and how the user picks it up. |
+| `drop_actions`, `last_drop_row` | Make the widget a target for pebbles of the types its actions take, in [pick and drop](pick-and-drop.md). |
+| `file_drop_actions`, `text_drop_actions` | Run when another program drops files or text on the widget. See [Drag and drop between programs](drag-and-drop-between-programs.md). |
+| `set_drag_out (a_data)`, `drag_out_ended_actions` | Let the user drag text or files out of the widget into other programs. See [Drag and drop between programs](drag-and-drop-between-programs.md). |
+
 Every command requires `is_gui_thread`: call it only from the GUI processor, never from a worker (a worker uses `GUI_APPLICATION.mailbox`).
 
-**Events:** none of these features fires an event. `enable`, `disable`, `show`, `hide`, `set_tooltip` and the rest change the widget silently, as every setter in simple_gui does; only the user's actions fire a control's actions.
+**Events:** none of the features in the first table fires an event. `enable`, `disable`, `show`, `hide`, `set_tooltip` and the rest change the widget silently, as every setter in simple_gui does; only the user's actions fire a control's actions. The drag and drop features above run their own actions when the user drops something; their pages say when.
 
 **Accessibility:** every widget has an accessible label. It is the widget's visible text (a button's caption, a check box's caption, a label's text) unless the program sets one. Controls without visible text (fields, sliders, spin boxes, switches, choosers, images) need `set_accessible_label`. A placeholder is never the label. Use `set_accessible_description` for longer help that a sighted user would get from the surrounding text.
 

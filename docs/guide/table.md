@@ -127,6 +127,7 @@ The second program opens a table of 100,000 numbers and their squares. Only the 
 | `is_sort_ascending` | Does the indicator point up? |
 | `selection_actions` | `GUI_ACTIONS [TUPLE [row: INTEGER]]`: run when the user changes the selection, with the first selected row (0: none). |
 | `header_actions` | `GUI_ACTIONS [TUPLE [column: INTEGER; ascending: BOOLEAN]]`: run when the user clicks a column's header, with the direction to sort in. |
+| `set_row_pebble_function (a_function)` | Lets each row carry a pebble for [pick and drop](pick-and-drop.md); a drop on the table sets `last_drop_row` to the row it landed on (0: empty space). |
 
 Inherited: `set_accessible_label`, `set_context_menu` and the rest of the [common features](widget.md).
 

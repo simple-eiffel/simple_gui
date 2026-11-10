@@ -1,6 +1,6 @@
 # Slider
 
-`GUI_SLIDER` holds a whole number in a range, which the user chooses by dragging a knob. Use a slider when an approximate value is fine and the user judges it by watching the effect, such as volume, zoom or brightness. When the exact value matters, use a [spin box](spin-box.md).
+`GUI_SLIDER` holds a whole number in a range, which the user chooses by dragging a knob. Use a slider when an approximate value is fine and the user judges it by watching the effect, such as volume, zoom or brightness. When the exact value matters, use a [spin box](spin-box.md). To choose a span between two values, use a [range slider](range-slider.md).
 
 ## Example
 

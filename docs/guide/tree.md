@@ -70,6 +70,11 @@ A window opens with two top-level nodes, **Law** (expanded, showing Genesis and 
 | `select_node (n)` | Selects node `n` (0: none), expanding its ancestors so it can be seen; no event. Requires `n = 0` or `is_node (n)`. Ensures `selected_node = n`. |
 | `selection_actions` | `GUI_ACTIONS [TUPLE [node: INTEGER]]`: run when the user selects a node (0: none). |
 | `expansion_actions` | `GUI_ACTIONS [TUPLE [node: INTEGER; is_open: BOOLEAN]]`: run when the user expands or collapses a node. |
+| `children_of (n)` | A new list of `n`'s children in order; for 0, the top-level nodes. Requires `n = 0` or `is_node (n)`. |
+| `is_ancestor (a, n)` | Is `a` above `n`? Requires `is_node (a)` and `is_node (n)`. |
+| `move_node (n, a_parent, a_position)` | Moves node `n`, with its subtree, under `a_parent` (0: the top level), without an event. See [Reordering](reordering.md). |
+| `set_reorderable (a_on)`, `is_reorderable`, `move_actions` | Let the user move nodes by dragging. See [Reordering](reordering.md). |
+| `set_row_pebble_function (a_function)` | Lets each node carry a pebble for [pick and drop](pick-and-drop.md); the function is given the node number, and a drop on the tree sets `last_drop_row` to the node it landed on (0: empty space). |
 
 Inherited: `set_accessible_label`, `set_context_menu` and the rest of the [common features](widget.md).
 
@@ -77,6 +82,8 @@ Inherited: `set_accessible_label`, `set_context_menu` and the rest of the [commo
 - `selection_actions` fires with the node's number when the user selects a node, or 0 when the selection is cleared.
 - `expansion_actions` fires with the node and `True` when the user expands it, `False` when the user collapses it.
 - `add_root`, `add_child`, `expand`, `collapse` and `select_node` fire nothing. `expand`, `collapse` and `select_node` ensure their actions' `fire_count` is unchanged, and the ancestors that `select_node` opens fire no `expansion_actions` either.
+
+**Moving nodes, and pick and drop.** A tree can let the user move nodes by dragging: a node dropped on another becomes its last child, with its subtree. See [Reordering](reordering.md). Nodes can also be sources and targets for [pick and drop](pick-and-drop.md), and a tree can take files and text from other programs: see [Drag and drop between programs](drag-and-drop-between-programs.md).
 
 **Accessibility:** the role is `tree`, and each shown node is a `tree-item` read by its text. Give the tree `set_accessible_label` with what it holds ("Books", "Folders").
 

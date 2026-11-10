@@ -57,9 +57,24 @@ The window shows a dropdown reading "English" (the first `extend` selected it, w
 | `selected_text` | The selected choice's text, or empty when nothing is selected. |
 | `select_row (i)` | Selects choice `i`, without an event. Requires `1 <= i and i <= count`; ensures `selected_index = i`. |
 | `wipe_out` | Removes every choice. Ensures `count = 0` and `selected_index = 0`. |
+| `add_group_header (a_text)` | Adds a header over the choices that follow, as HTML's `optgroup` does. It is not a choice. Requires `is_gui_thread`. Ensures `count = old count`. |
+| `add_separator` | Adds a line between groups of choices. It is not a choice. Requires `is_gui_thread`. Ensures `count = old count`. |
 | `selection_actions` | Agents run when the user chooses another choice, with `row: INTEGER`. |
 
 Every creation procedure requires `is_gui_thread` and `has_application`; every command requires `is_gui_thread`. See also [common features](widget.md).
+
+**Groups:** headers and separators are added in order among the choices, so build the dropdown top to bottom: a header, its choices, a separator, the next header, its choices.
+
+```eiffel
+	dropdown.add_group_header ("Local")
+	dropdown.extend ("Whisper")
+	dropdown.extend ("Vosk")
+	dropdown.add_separator
+	dropdown.add_group_header ("Cloud")
+	dropdown.extend ("Speechmatics")
+```
+
+This dropdown has `count = 3`: `i_th (3)` is "Speechmatics", and the headers and the separator have no numbers. The user cannot choose a header or a separator. Choices are still numbered from 1 in the order they were added, which is the number `selection_actions` and `select_row` use.
 
 **Events:** `selection_actions` run with the 1-based row each time the user chooses a different choice. Choosing the one already selected is not a choice and fires nothing. `extend` and `select_row` never fire `selection_actions`; their contracts ensure `selection_actions.fire_count = old selection_actions.fire_count`.
 
@@ -70,7 +85,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkDropDown` over a `GtkStringList` | `NSPopUpButton` | `SW_COMBO`, read-only, so a click anywhere opens the menu |
-| Looks or behaves differently | Keeps its natural width, aligned to the start. | Duplicate texts are kept (items are added through the button's menu). | In a column it is as wide as the column. |
+| Looks or behaves differently | Keeps its natural width, aligned to the start. A group header is drawn in the heading style and a separator as a thin line; neither can be selected. | Duplicate texts are kept (items are added through the button's menu). A group header is a section header on macOS 14 and later, and a dimmed item on earlier versions; a separator is a menu separator. | In a column it is as wide as the column. Headers and separators are rows in the popup that are shown but never chosen. |
 
 ## Design guidance
 
@@ -78,6 +93,7 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 - Put a [label](label.md) before it and give it `set_accessible_label` with the same words.
 - Keep it at its natural width rather than stretching it across the window.
 - Order the choices so the user can find one: alphabetically, by size, or most used first.
+- With more than about a dozen choices that fall into clear kinds, add group headers (`add_group_header`) and separators; keep each group short.
 - Do not use a dropdown for commands (that is a [menu button](menu-button.md)) or for on/off (that is a [switch](switch.md) or [check box](check-box.md)).
 
 ## Gallery

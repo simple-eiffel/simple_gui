@@ -1,6 +1,6 @@
 # Date picker
 
-`GUI_DATE_PICKER` is a calendar date that the user types or steps, in the Gregorian calendar. Use it when the user knows the date and wants to enter it in little room. To pick a day by looking at a month, use a [calendar](calendar.md), which has the same features and events. For a time of day, use a [time picker](time-picker.md).
+`GUI_DATE_PICKER` is a calendar date that the user types or steps, in the Gregorian calendar. Use it when the user knows the date and wants to enter it in little room. To pick a day by looking at a month, use a [calendar](calendar.md), which has the same features and events. For a time of day, use a [time picker](time-picker.md). For a date and a time together, use a [date and time picker](date-time-picker.md); for a month alone, a [month picker](month-picker.md).
 
 ## Example
 

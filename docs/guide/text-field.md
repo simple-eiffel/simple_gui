@@ -61,10 +61,14 @@ The window shows an empty field with the gray hint "Your name". As you type, `ch
 | `change_actions` | Agents run after each user edit. |
 | `activate_actions` | Agents run when the user presses Enter. |
 | `change_count` | How many change events the field has received. |
+| `set_validation (a_kind)`, `set_validator (a_check)`, `set_validate_live (a_on)`, `validate`, `is_valid`, `validation_message`, `validation_actions` | Check the text and show what is wrong. See [Validation and suggestions](validation-and-suggestions.md). |
+| `set_suggestions (a_choices)`, `set_suggester (a_suggester)`, `suggestions` | Suggest completions in a list under the field as the user types. See [Validation and suggestions](validation-and-suggestions.md). |
 
 Every creation procedure requires `is_gui_thread` and `has_application`; every command requires `is_gui_thread`. See also [common features](widget.md).
 
 **Events:** `change_actions` run, with no arguments, after each edit the user makes (each keystroke, paste or cut). `activate_actions` run, with no arguments, when the user presses Enter (keypad Enter counts as Return on every platform). `set_text` never fires `change_actions`; its contract ensures `change_count = old change_count`.
+
+**Validation and suggestions.** A field can check its text against a kind (required, email, web address, phone, number) or your own rule, show the platform's error look with a message under the field, and offer suggestions as the user types. Checks run on Enter, on leaving the field, or on every edit if you turn that on. All of it is on the [Validation and suggestions](validation-and-suggestions.md) page. For a field that hides its characters, see the [password field](password-field.md); for a path with a **Choose...** button, the [file field](file-field.md). A field can also take files and text dropped from other programs: see [Drag and drop between programs](drag-and-drop-between-programs.md).
 
 **Accessibility:** the role is `text-box`. A field has no visible text of its own, so give it `set_accessible_label`. The placeholder is not a label: it disappears as soon as the user types, and screen readers do not use it as the name.
 
