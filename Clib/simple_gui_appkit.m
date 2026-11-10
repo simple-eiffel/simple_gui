@@ -3620,6 +3620,21 @@ static NSEvent *sga_pick_watch(NSEvent *e)
 			s_press_source = (k && [k intValue] % 4 == 1) || l_out ? l_id : 0;
 			s_press_row = [k intValue] / 4 || (l_out && [sga_core(l_id) isKindOfClass:[NSTableView class]]) ? l_row : 0;
 			s_press_point = p;
+			/* A list, a tree or a control tracks the mouse itself once pressed, and its loop
+			   keeps the moves from this monitor. So look ahead without taking: a release first
+			   is an ordinary click (the press goes on to the view); a move past 4 points picks
+			   or drags out, and the view never sees the press. */
+			id l_core = s_press_source ? sga_core(s_press_source) : nil;
+			if ([l_core isKindOfClass:[NSTableView class]] || [l_core isKindOfClass:[NSControl class]]) {
+				for (;;) {
+					NSEvent *n = [NSApp nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp
+						untilDate:[NSDate distantFuture] inMode:NSEventTrackingRunLoopMode dequeue:NO];
+					if (!n || [n type] == NSEventTypeLeftMouseUp) break;
+					[NSApp nextEventMatchingMask:NSEventMaskLeftMouseDragged untilDate:[NSDate distantPast] inMode:NSEventTrackingRunLoopMode dequeue:YES];
+					NSPoint q = [n locationInWindow];
+					if (hypot(q.x - p.x, q.y - p.y) > 4) return sga_pick_watch(n) ? e : nil;
+				}
+			}
 		} else if (t == NSEventTypeLeftMouseDragged && s_press_source && hypot(p.x - s_press_point.x, p.y - s_press_point.y) > 4) {
 			int l_source = s_press_source;
 			NSNumber *k = s_pick_sources[@(l_source)];
