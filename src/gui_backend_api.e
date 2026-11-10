@@ -161,6 +161,74 @@ feature -- Windows and containers
 		deferred
 		end
 
+	dock (a_center: INTEGER): INTEGER
+			-- 1r-a: a dock around widget `a_center', with no panels.
+		deferred
+		end
+
+	dock_add (a_dock, a_content, a_side: INTEGER; a_key, a_title: POINTER)
+			-- A panel showing widget `a_content', last on `a_side' (1 left, 2 right, 3 top,
+			-- 4 bottom); its index is one more than the panels already added.
+		deferred
+		end
+
+	dock_move (a_dock, an_index, a_side, a_position: INTEGER)
+			-- Panel `an_index' to `a_position' (from 1) on `a_side'.
+		deferred
+		end
+
+	dock_remove (a_dock, an_index: INTEGER)
+			-- Panel `an_index' out of the dock; the indices after it move down one.
+		deferred
+		end
+
+	dock_set_title (a_dock, an_index: INTEGER; a_title: POINTER)
+		deferred
+		end
+
+	dock_set_tabbed (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	dock_activate (a_dock, an_index: INTEGER)
+			-- Show panel `an_index' on its tabbed side; no event.
+		deferred
+		end
+
+	dock_set_size (a_dock, a_side, a_size: INTEGER)
+			-- The side's depth in logical units, as far as `Min_center' allows; no event.
+		deferred
+		end
+
+	dock_size (a_dock, a_side: INTEGER): INTEGER
+		deferred
+		end
+
+	dock_collapse (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+			-- Fold the side to a strip naming its panels, or open it at the size it had; no event.
+		deferred
+		end
+
+	dock_show_panel (a_dock, an_index: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	test_drag_dock_edge (a_dock, a_side, a_size: INTEGER)
+			-- As the user dragging the side's edge to `a_size': 35.
+		deferred
+		end
+
+	test_press_dock_strip (a_dock, an_index: INTEGER)
+			-- As the user pressing panel `an_index''s name in its collapsed side's strip: the side
+			-- opens showing it (36 with b = 0, and 37 when the side is tabbed).
+		deferred
+		end
+
+	test_click_dock_tab (a_dock, an_index: INTEGER)
+			-- As the user clicking panel `an_index''s tab: 37.
+		deferred
+		end
+
 	splitter (a_vertical: BOOLEAN): INTEGER
 			-- Two panes and a divider: side by side, or stacked when `a_vertical'. When it grows,
 			-- the first pane keeps its size.
