@@ -45,6 +45,7 @@ feature {NONE} -- Initialization
 				shoot_rich_lists_and_tables
 				shoot_navigation
 				shoot_dialog_and_help
+				shoot_collections_and_preferences
 				print ("guide gallery: " + saved.out + " pictures in " + folder.name.to_string_8 + "%N")
 			else
 				print ("guide gallery: no display%N")
@@ -813,6 +814,67 @@ feature {NONE} -- Moving things (1q)
 			driver.focus (l_name)
 			driver.press_help (l_window)
 			save ("context-help", l_window)
+		end
+
+feature {NONE} -- Collections and preferences (1v)
+
+	shoot_collections_and_preferences
+			-- 1v: a grid view of pictures and icons with one selected, a slideshow on its
+			-- second item, and a preferences window.
+		local
+			l_grid: GUI_GRID_VIEW
+			l_show: GUI_SLIDESHOW
+			l_prefs: GUI_PREFERENCES
+			l_file: PATH
+			l_f: RAW_FILE
+			l_dir: STRING_32
+			l_env: EXECUTION_ENVIRONMENT
+			i: INTEGER
+		do
+			create l_grid.make
+			across <<"button", "calendar", "canvas">> as ic loop
+				l_grid.extend_picture (ic.as_upper.substring (1, 1) + ic.substring (2, ic.count), folder.extended (ic + ".png"))
+			end
+			l_grid.extend_icon ("Documents", "folder")
+			l_grid.extend_icon ("Mail", "mail")
+			l_grid.extend_icon ("Notes", "document")
+			l_grid.set_item_subtitle (4, "12 files")
+			l_grid.select_item (2)
+			from i := 1 until i > 20 loop
+				app.process_events (30)
+				i := i + 1
+			end
+			shoot ("grid-view", "Pictures", 460, 300, l_grid)
+			create l_show.make
+			across <<"slider", "rating", "spinner">> as ic loop
+				l_show.extend_item (create {GUI_IMAGE}.make_from_file (folder.extended (ic + ".png")))
+			end
+			l_show.set_wraps (True)
+			l_show.show_item (2)
+			shoot ("slideshow", "Tour", 420, 260, l_show)
+			create l_env
+			if attached l_env.item ("TMPDIR") as al_t then l_dir := al_t
+			elseif attached l_env.item ("TEMP") as al_t then l_dir := al_t
+			else l_dir := {STRING_32} "/tmp" end
+			create l_file.make_from_string (l_dir)
+			l_file := l_file.extended ("simple_gui_gallery_preferences.json")
+			create l_f.make_with_path (l_file)
+			if l_f.exists then l_f.delete end
+			create l_prefs.make_in_file (l_file)
+			l_prefs.set_section ("General")
+			l_prefs.add_boolean ("reopen", "Open the last file at start", True)
+			l_prefs.add_integer ("recent", "Recent files to list", 10, 0, 30)
+			l_prefs.add_choice ("theme", "Appearance", <<"System", "Light", "Dark">>, "System")
+			l_prefs.set_section ("Editor")
+			l_prefs.add_font ("font", "Font", create {GUI_FONT_CHOICE}.make ("Menlo", 12, False, False))
+			l_prefs.add_color ("accent", "Highlight", 0xFFD54F)
+			l_prefs.set_section ("Files")
+			l_prefs.add_path ("projects", "Projects folder", Void)
+			l_prefs.show_window (Void)
+			if attached l_prefs.window as al_w then
+				save ("preferences", al_w)
+			end
+			if l_f.exists then l_f.delete end
 		end
 
 feature {NONE} -- Implementation
