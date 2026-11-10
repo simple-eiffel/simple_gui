@@ -392,6 +392,76 @@ feature -- Windows and containers
 		deferred
 		end
 
+	grid_view: INTEGER
+			-- 1v-a: items in a flowing grid of cells (120 by 120 until set).
+		deferred
+		end
+
+	grid_view_extend (an_id: INTEGER; a_title, a_picture, an_icon: POINTER)
+			-- An item at the end; `a_picture' a file path and `an_icon' a GUI_ICON name, empty for none.
+		deferred
+		end
+
+	grid_view_set_subtitle (an_id, i: INTEGER; a_text: POINTER)
+		deferred
+		end
+
+	grid_view_remove (an_id, i: INTEGER)
+		deferred
+		end
+
+	grid_view_wipe_out (an_id: INTEGER)
+		deferred
+		end
+
+	grid_view_set_item_size (an_id, a_width, a_height: INTEGER)
+		deferred
+		end
+
+	grid_view_set_spacing (an_id, a_spacing: INTEGER)
+		deferred
+		end
+
+	grid_view_set_multiple (an_id: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	grid_view_select (an_id, i: INTEGER; an_extend: BOOLEAN)
+			-- Quiet; 0 clears.
+		deferred
+		end
+
+	grid_view_selected_count (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	grid_view_selected_at (an_id, k: INTEGER): INTEGER
+			-- The `k'th selected item, in order.
+		deferred
+		end
+
+	grid_view_scroll_to (an_id, i: INTEGER)
+		deferred
+		end
+
+	grid_view_set_filter (an_id: INTEGER; a_text: POINTER)
+		deferred
+		end
+
+	grid_view_shown_count (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	test_activate_item (an_id, i: INTEGER)
+			-- As a double click on item `i': 51.
+		deferred
+		end
+
+	test_item_picture_ready (an_id, i: INTEGER): BOOLEAN
+			-- Has item `i''s picture been loaded and shown?
+		deferred
+		end
+
 	path_control_set_chevrons (an_id: INTEGER; a_on: BOOLEAN)
 			-- 1p-b: each separator a clickable chevron (53, a = the part before it), with one
 			-- after the last part too; a click on the empty space after the last part sends 54.
