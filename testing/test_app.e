@@ -120,6 +120,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_preferences_window, "preferences_window")
 				run_test (agent t.test_grid_view_items, "grid_view_items")
 				run_test (agent t.test_slideshow_moves, "slideshow_moves")
+				run_test (agent t.test_file_field_address_bar, "file_field_address_bar")
 				run_test (agent t.test_dialog_buttons_and_keys, "dialog_buttons_and_keys")
 				run_test (agent t.test_dialog_run_modal, "dialog_run_modal")
 				run_test (agent t.test_context_help, "context_help")

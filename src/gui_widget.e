@@ -252,6 +252,14 @@ feature -- Reference pill (1l)
 			set: help_topic.same_string_general (a_topic)
 		end
 
+	focus
+			-- Give this widget the keyboard focus.
+		require
+			gui_thread: is_gui_thread
+		do
+			backend.widget_focus (id)
+		end
+
 	set_pill_corner (a_corner: INTEGER)
 		require
 			gui_thread: is_gui_thread
