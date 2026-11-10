@@ -2306,7 +2306,7 @@ feature -- Forms (1p)
 			settle_window
 			assert ("empty", l_file.path = Void)
 			l_file.set_path (create {PATH}.make_from_string ("/tmp/notes.txt"))
-			assert ("shows the path", attached l_file.path as al_path and then al_path.name.same_string ("/tmp/notes.txt"))
+			assert ("shows the path", attached l_file.path as al_path and then al_path.name.same_string ((create {PATH}.make_from_string ("/tmp/notes.txt")).name))
 			assert ("silent", l_file.change_actions.fire_count = 0)
 			driver.cancel_dialogs_after (300)
 			l_file.choose

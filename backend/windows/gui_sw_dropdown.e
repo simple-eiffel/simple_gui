@@ -46,10 +46,30 @@ feature -- Element change
 			set: on_pick = a_action
 		end
 
+	menu_rows: ARRAYED_LIST [TUPLE [kind: INTEGER; text: STRING_32; choice: INTEGER]]
+			-- The popup's rows in order: choices (kind 0, by their number), group headers (1) and
+			-- separators (2), which are not choices (simple_gui 1p).
+		attribute
+			create Result.make (4)
+		end
+
+	add_header (a_text: READABLE_STRING_GENERAL)
+			-- A group header in the popup: shown, never chosen, not counted.
+		do
+			menu_rows.extend ([1, a_text.to_string_32, 0])
+		end
+
+	add_separator_row
+			-- A line in the popup, not counted.
+		do
+			menu_rows.extend ([2, {STRING_32} "", 0])
+		end
+
 	extend_option (a_text: READABLE_STRING_GENERAL)
 			-- Add an option; the first becomes the selection, without a report.
 		do
 			add_option (a_text)
+			menu_rows.extend ([0, a_text.to_string_32, options.count])
 			if options.count = 1 then
 				select_quietly (1)
 			end
@@ -61,6 +81,7 @@ feature -- Element change
 	clear_options
 		do
 			options.wipe_out
+			menu_rows.wipe_out
 			selected_index := 0
 			set_text ("")
 		ensure
@@ -100,17 +121,18 @@ feature -- Input
 			-- Anywhere on the box opens the options: the text cannot be edited.
 		local
 			l_menu: SW_MENU
-			i: INTEGER
 		do
 			if is_enabled and then not options.is_empty then
 				create l_menu.make
-				from
-					i := 1
-				until
-					i > options.count
-				loop
-					l_menu.add_item (options.i_th (i), "", True, agent pick (i))
-					i := i + 1
+				across menu_rows as ic loop
+					inspect ic.kind
+					when 1 then
+						l_menu.add_item (ic.text, "", False, Void)
+					when 2 then
+						l_menu.add_separator
+					else
+						l_menu.add_item (ic.text, "", True, agent pick (ic.choice))
+					end
 				end
 				pending_menu := l_menu
 				Result := True
