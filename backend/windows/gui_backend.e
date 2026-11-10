@@ -2194,7 +2194,10 @@ feature -- Controls
 
 	test_extend_list_selection (an_id, a_row: INTEGER)
 		do
-			if attached {SW_TEXT_LIST} widget (an_id) as al_l and then al_l.is_multiple
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g and then al_g.is_multiple and then al_g.is_shown (a_row) then
+				al_g.press_item (a_row, True)
+				changed
+			elseif attached {SW_TEXT_LIST} widget (an_id) as al_l and then al_l.is_multiple
 				and then a_row >= 1 and then a_row <= al_l.row_count
 			then
 				al_l.extend_selection (a_row)
@@ -3381,6 +3384,142 @@ feature -- Controls
 			create Result.make_from_array (l_list.to_array)
 		end
 
+	grid_view: INTEGER
+			-- 1v-a: SW_GRID_VIEW, a drawn grid; 50 is the user's selection, 51 an activation.
+		local
+			l_g: SW_GRID_VIEW
+		do
+			create l_g.make (240.0)
+			Result := register (l_g)
+			l_g.set_on_select (agent (an_id, i: INTEGER) do push (50, an_id, i, 0, 0) end (Result, ?))
+			l_g.set_on_activate (agent (an_id, i: INTEGER) do push (51, an_id, i, 0, 0) end (Result, ?))
+		end
+
+	grid_view_extend (an_id: INTEGER; a_title, a_picture, an_icon: POINTER)
+		local
+			i: INTEGER
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g then
+				al_g.extend (from_c (a_title))
+				i := al_g.count
+				if not from_c (a_picture).is_empty then
+					al_g.set_item_picture (i, from_c (a_picture))
+				end
+				al_g.set_item_icon (i, from_c (an_icon))
+				changed
+			end
+		end
+
+	grid_view_set_subtitle (an_id, i: INTEGER; a_text: POINTER)
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g and then i >= 1 and then i <= al_g.count then
+				al_g.set_item_subtitle (i, from_c (a_text))
+				changed
+			end
+		end
+
+	grid_view_remove (an_id, i: INTEGER)
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g and then i >= 1 and then i <= al_g.count then
+				al_g.remove_item (i)
+				changed
+			end
+		end
+
+	grid_view_wipe_out (an_id: INTEGER)
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g then
+				al_g.wipe_out
+				changed
+			end
+		end
+
+	grid_view_set_item_size (an_id, a_width, a_height: INTEGER)
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g and then a_width > 0 and then a_height > 0 then
+				al_g.set_item_size (a_width, a_height)
+				changed
+			end
+		end
+
+	grid_view_set_spacing (an_id, a_spacing: INTEGER)
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g and then a_spacing >= 0 then
+				al_g.set_spacing (a_spacing)
+				changed
+			end
+		end
+
+	grid_view_set_multiple (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g then
+				al_g.set_multiple (a_on)
+				changed
+			end
+		end
+
+	grid_view_select (an_id, i: INTEGER; an_extend: BOOLEAN)
+			-- Quiet; 0 clears.
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g and then i >= 0 and then i <= al_g.count then
+				al_g.select_item_quietly (i, an_extend)
+				changed
+			end
+		end
+
+	grid_view_selected_count (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g then
+				Result := al_g.selected_count
+			end
+		end
+
+	grid_view_selected_at (an_id, k: INTEGER): INTEGER
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g and then k >= 1 and then k <= al_g.selected_count then
+				Result := al_g.selected_at (k)
+			end
+		end
+
+	grid_view_scroll_to (an_id, i: INTEGER)
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g and then i >= 1 and then i <= al_g.count then
+				al_g.scroll_to_item (i)
+				changed
+			end
+		end
+
+	grid_view_set_filter (an_id: INTEGER; a_text: POINTER)
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g then
+				al_g.set_filter_text (from_c (a_text))
+				changed
+			end
+		end
+
+	grid_view_shown_count (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g then
+				Result := al_g.shown_count
+			end
+		end
+
+	test_activate_item (an_id, i: INTEGER)
+			-- As the user double-clicking an item: selected, then activated (51).
+		do
+			if attached {SW_GRID_VIEW} widget (an_id) as al_g and then al_g.is_shown (i) then
+				al_g.activate_by_user (i)
+				changed
+			end
+		end
+
+	test_item_picture_ready (an_id, i: INTEGER): BOOLEAN
+			-- Is the item's picture decoded and drawn? (The frame decodes one a heartbeat.)
+		do
+			Result := attached {SW_GRID_VIEW} widget (an_id) as al_g and then i >= 1 and then i <= al_g.count
+				and then al_g.is_picture_ready (i)
+		end
+
 	list_extend (an_id: INTEGER; a_text: POINTER)
 		do
 			if attached {SW_TEXT_LIST} widget (an_id) as al_l then
@@ -4393,6 +4532,8 @@ feature -- Test doors (act on the widget as a user would)
 		do
 			if attached {SW_TEXT_LIST} widget (an_id) as al_l and then a_row >= 1 and then a_row <= al_l.count then
 				al_l.select_row (a_row)
+			elseif attached {SW_GRID_VIEW} widget (an_id) as al_gv and then al_gv.is_shown (a_row) then
+				al_gv.press_item (a_row, False)
 			elseif attached {GUI_SW_PATH_CONTROL} widget (an_id) as al_p and then a_row >= 1 and then a_row <= al_p.parts.count then
 				al_p.press_part (a_row)
 			elseif attached {SW_SIDEBAR} widget (an_id) as al_side and then a_row >= 1 and then a_row <= al_side.page_count then
