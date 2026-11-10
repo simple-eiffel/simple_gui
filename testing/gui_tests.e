@@ -2364,6 +2364,104 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_dock_sides_tabs_sizes_and_collapse
+			-- 1r-a: panels dock on four sides in order; a side's depth is set and read back; a
+			-- tabbed side shows one panel, the user's tab click choosing it (37); an edge drag
+			-- (35) and a strip press (36) fire `layout_actions'; code fires nothing.
+		local
+			l_window: GUI_WINDOW
+			l_dock: GUI_DOCK
+			l_files, l_outline, l_search, l_output, l_props, l_tools: GUI_DOCK_PANEL
+			l_changes: CELL [INTEGER]
+		do
+			create l_changes.put (0)
+			create l_window.make ("Dock", 1000, 700)
+			create l_dock.make (create {GUI_LABEL}.make ("The document"))
+			create l_files.make ("files", "Files", create {GUI_LABEL}.make ("files"))
+			create l_outline.make ("outline", "Outline", create {GUI_LABEL}.make ("outline"))
+			create l_search.make ("search", "Search", create {GUI_LABEL}.make ("search"))
+			create l_output.make ("output", "Output", create {GUI_LABEL}.make ("output"))
+			create l_props.make ("props", "Properties", create {GUI_LABEL}.make ("props"))
+			create l_tools.make ("tools", "Tools", create {GUI_LABEL}.make ("tools"))
+			l_dock.add_panel (l_files, l_dock.Side_left)
+			l_dock.add_panel (l_outline, l_dock.Side_left)
+			l_dock.add_panel (l_search, l_dock.Side_bottom)
+			l_dock.add_panel (l_output, l_dock.Side_bottom)
+			l_dock.add_panel (l_props, l_dock.Side_right)
+			l_dock.add_panel (l_tools, l_dock.Side_top)
+			l_dock.set_tabbed (l_dock.Side_bottom, True)
+			l_dock.layout_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_changes))
+			l_window.set_content (l_dock)
+			l_window.show
+			settle_window
+			assert ("left in order", l_dock.panels_on (l_dock.Side_left).count = 2 and l_dock.panels_on (l_dock.Side_left).first = l_files)
+			assert ("keys", l_dock.panel_by_key ("props") = l_props and l_dock.index_of (l_props) = 5)
+			l_dock.set_side_size (l_dock.Side_left, 230)
+			settle_window
+			assert ("left is 230: " + l_dock.side_size (l_dock.Side_left).out, (l_dock.side_size (l_dock.Side_left) - 230).abs <= 2)
+			assert ("bottom shows the first tab", l_dock.active_panel (l_dock.Side_bottom) = l_search)
+			l_dock.activate_panel (l_output)
+			assert ("code chose Output, quietly", l_dock.active_panel (l_dock.Side_bottom) = l_output and l_changes.item = 0)
+			driver.click_dock_tab (l_dock, l_search)
+			assert ("the user chose Search", l_dock.active_panel (l_dock.Side_bottom) = l_search and l_changes.item = 1)
+			driver.drag_dock_edge (l_dock, l_dock.Side_right, 260)
+			assert ("the user's drag: " + l_dock.side_size (l_dock.Side_right).out, l_changes.item = 2 and (l_dock.side_size (l_dock.Side_right) - 260).abs <= 2)
+			l_dock.collapse_side (l_dock.Side_left)
+			assert ("collapsed, quietly", l_dock.is_collapsed (l_dock.Side_left) and l_changes.item = 2)
+			driver.press_dock_strip (l_dock, l_outline)
+			assert ("the strip opened it", not l_dock.is_collapsed (l_dock.Side_left) and l_changes.item = 3)
+			assert ("at the size it had: " + l_dock.side_size (l_dock.Side_left).out, (l_dock.side_size (l_dock.Side_left) - 230).abs <= 2)
+			l_dock.move_panel (l_outline, l_dock.Side_top)
+			assert ("moved, same index", l_outline.side = l_dock.Side_top and l_dock.index_of (l_outline) = 2
+				and l_dock.panels_on (l_dock.Side_top).last = l_outline and l_dock.panels_on (l_dock.Side_left).count = 1)
+			l_window.close
+		end
+
+	test_dock_layout_round_trip
+			-- 1r-a: `layout' then changes then `restore_layout' gives the arrangement back; a
+			-- layout naming an unknown panel changes nothing.
+		local
+			l_window: GUI_WINDOW
+			l_dock: GUI_DOCK
+			l_a, l_b, l_c: GUI_DOCK_PANEL
+			l_saved, l_bad: STRING_32
+		do
+			create l_window.make ("Layouts", 900, 640)
+			create l_dock.make (create {GUI_LABEL}.make ("center"))
+			create l_a.make ("a", "A", create {GUI_LABEL}.make ("a"))
+			create l_b.make ("b", "B", create {GUI_LABEL}.make ("b"))
+			create l_c.make ("c", "C", create {GUI_LABEL}.make ("c"))
+			l_dock.add_panel (l_a, l_dock.Side_left)
+			l_dock.add_panel (l_b, l_dock.Side_left)
+			l_dock.add_panel (l_c, l_dock.Side_bottom)
+			l_window.set_content (l_dock)
+			l_window.show
+			settle_window
+			l_dock.set_side_size (l_dock.Side_left, 210)
+			l_dock.set_tabbed (l_dock.Side_left, True)
+			l_dock.activate_panel (l_b)
+			settle_window
+			l_saved := l_dock.layout
+			l_dock.move_panel (l_a, l_dock.Side_right)
+			l_dock.set_tabbed (l_dock.Side_left, False)
+			l_c.hide
+			l_dock.collapse_side (l_dock.Side_bottom)
+			l_dock.set_side_size (l_dock.Side_left, 300)
+			settle_window
+			assert ("restored", l_dock.restore_layout (l_saved))
+			settle_window
+			assert ("a back on the left, first", l_a.side = l_dock.Side_left and l_dock.panels_on (l_dock.Side_left).first = l_a)
+			assert ("tabs and the active one", l_dock.is_tabbed (l_dock.Side_left) and l_dock.active_panel (l_dock.Side_left) = l_b)
+			assert ("c shown, bottom open", l_c.is_visible and not l_dock.is_collapsed (l_dock.Side_bottom))
+			assert ("left 210: " + l_dock.side_size (l_dock.Side_left).out, (l_dock.side_size (l_dock.Side_left) - 210).abs <= 2)
+			l_bad := l_saved.twin
+			l_bad.append ("panel 1%T1%Tnobody%N")
+			l_dock.move_panel (l_a, l_dock.Side_right)
+			assert ("an unknown panel: refused", not l_dock.restore_layout (l_bad))
+			assert ("and nothing changed", l_a.side = l_dock.Side_right)
+			l_window.close
+		end
+
 	test_dragged_out_to_other_programs
 			-- 1q-c: a drag out carries the data the program keeps current; Void carries nothing;
 			-- the end of a drag reaches the source's actions only while it has data.

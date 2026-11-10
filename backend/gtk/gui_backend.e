@@ -134,6 +134,90 @@ feature -- Windows and containers
 		alias "sg_grid_set_spacing($a_grid, $a_row_gap, $a_column_gap);"
 		end
 
+	dock (a_center: INTEGER): INTEGER
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_dock($a_center);"
+		end
+
+	dock_add (a_dock, a_content, a_side: INTEGER; a_key, a_title: POINTER)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_add($a_dock, $a_content, $a_side, (const char *) $a_key, (const char *) $a_title);"
+		end
+
+	dock_move (a_dock, an_index, a_side, a_position: INTEGER)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_move($a_dock, $an_index, $a_side, $a_position);"
+		end
+
+	dock_remove (a_dock, an_index: INTEGER)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_remove($a_dock, $an_index);"
+		end
+
+	dock_set_title (a_dock, an_index: INTEGER; a_title: POINTER)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_set_title($a_dock, $an_index, (const char *) $a_title);"
+		end
+
+	dock_set_tabbed (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_set_tabbed($a_dock, $a_side, $a_on);"
+		end
+
+	dock_activate (a_dock, an_index: INTEGER)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_activate($a_dock, $an_index);"
+		end
+
+	dock_set_size (a_dock, a_side, a_size: INTEGER)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_set_size($a_dock, $a_side, $a_size);"
+		end
+
+	dock_size (a_dock, a_side: INTEGER): INTEGER
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_dock_size($a_dock, $a_side);"
+		end
+
+	dock_collapse (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_collapse($a_dock, $a_side, $a_on);"
+		end
+
+	dock_show_panel (a_dock, an_index: INTEGER; a_on: BOOLEAN)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_show_panel($a_dock, $an_index, $a_on);"
+		end
+
+	test_drag_dock_edge (a_dock, a_side, a_size: INTEGER)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_drag_dock_edge($a_dock, $a_side, $a_size);"
+		end
+
+	test_press_dock_strip (a_dock, an_index: INTEGER)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_press_dock_strip($a_dock, $an_index);"
+		end
+
+	test_click_dock_tab (a_dock, an_index: INTEGER)
+			-- 1r-a.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_click_dock_tab($a_dock, $an_index);"
+		end
+
 	splitter (a_vertical: BOOLEAN): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_splitter($a_vertical ? 1 : 0);"
