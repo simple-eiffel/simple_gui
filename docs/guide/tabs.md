@@ -57,6 +57,7 @@ A window opens with three tabs, **General**, **Appearance** and **Updates**, wit
 | `set_page_badge (i, a_text)` | Shows `a_text` as a badge on tab `i`; an empty text removes it. Requires 1 <= `i` <= `count` and `a_text.count <= 8`. See [Icons and badges](icons-and-badges.md). |
 | `page_changed_actions` | `GUI_ACTIONS [TUPLE [page: INTEGER]]`: run when the user chooses another page. |
 | `children`, `count`, `has (a_widget)` | The pages, in order (from `GUI_CONTAINER`). |
+| `set_tab_position (a_position)`, `tab_position` | Where the tabs are: `Tabs_top` (the default), `Tabs_bottom`, `Tabs_left`, `Tabs_right`, or `Tabs_none`: no strip, so the pages switch only from code, a page stack (the [wizard](wizard.md) uses one). No event. |
 
 Inherited: `set_base_direction`, `set_tooltip` and the rest of the [common features](widget.md).
 
@@ -69,6 +70,7 @@ Inherited: `set_base_direction`, `set_tooltip` and the rest of the [common featu
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkNotebook`, scrollable when the tabs do not fit | `NSTabView`; each page sits in a holder view the tab view sizes | `SW_TABS`: a drawn tab bar over one page |
+| Side tabs | `GtkNotebook`'s own tab position; no tabs: `show_tabs` off | Bottom: `NSTabView`'s bottom tabs. Left and right: a source-list table of the titles beside a tabless `NSTabView` (AppKit's rotated side tabs look dated). None: no tabs and no border | `SW_TABS` draws a column of tabs on the left or right, a strip at the bottom, or none; Up and Down move along a column |
 | Looks or behaves differently | The notebook is as large as its largest page needs. Under right to left GTK mirrors the tabs itself. | The tab view is held at least as large as its largest page needs. Under right to left the backend keeps the tabs in reverse order itself, since `NSTabView` follows only the application's language. | The height follows the selected page. When the tabs do not fit, the strip scrolls with a chevron. The bar mirrors under right to left. |
 
 ## Design guidance
@@ -84,3 +86,4 @@ Inherited: `set_base_direction`, `set_tooltip` and the rest of the [common featu
 | Linux | macOS | Windows |
 |---|---|---|
 | ![tabs on Linux](images/linux/tabs.png) | ![tabs on macOS](images/macos/tabs.png) | ![tabs on Windows](images/windows/tabs.png) |
+| ![tabs on the left on Linux](images/linux/tabs-left.png) | ![tabs on the left on macOS](images/macos/tabs-left.png) | ![tabs on the left on Windows](images/windows/tabs-left.png) |

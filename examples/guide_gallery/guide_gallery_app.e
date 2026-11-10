@@ -42,6 +42,8 @@ feature {NONE} -- Initialization
 				shoot_icons_and_feedback
 				shoot_moving
 				shoot_docking
+				shoot_rich_lists_and_tables
+				shoot_navigation
 				print ("guide gallery: " + saved.out + " pictures in " + folder.name.to_string_8 + "%N")
 			else
 				print ("guide gallery: no display%N")
@@ -670,6 +672,100 @@ feature {NONE} -- Moving things (1q)
 			l_dock.set_side_size (l_dock.Side_right, 160)
 			l_dock.set_side_size (l_dock.Side_bottom, 110)
 			save ("docking", l_window)
+		end
+
+	shoot_rich_lists_and_tables
+			-- 1s: rich list rows, and a table with a text, a check and a choice column whose
+			-- last edit was refused.
+		local
+			l_list: GUI_LIST
+			l_row: GUI_LIST_ROW
+			l_table: GUI_TABLE
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+		do
+			create l_list.make
+			l_list.set_accessible_label ("Tasks")
+			create l_row.make ("Write the sermon")
+			l_row.set_subtitle ("Due Friday")
+			l_row.set_checkable (True)
+			l_row.set_badge (3)
+			l_list.extend_rich (l_row)
+			create l_row.make ("Call the printer")
+			l_row.set_subtitle ("Bulletins for Sunday")
+			l_row.set_checkable (True)
+			l_row.set_checked (True)
+			l_row.set_closable (True)
+			l_list.extend_rich (l_row)
+			create l_row.make ("Order the books")
+			l_row.set_subtitle ("Twelve copies")
+			l_row.set_checkable (True)
+			l_row.set_closable (True)
+			l_list.extend_rich (l_row)
+			create l_stack.make_vertical
+			l_stack.extend_stretching (l_list)
+			shoot ("list-rich", "Tasks", 320, 220, l_stack)
+			create l_table.make (<<"Book", "Chapters", "Read", "Testament">>)
+			l_table.extend_row (<<"Genesis", "50", "1", "Old">>)
+			l_table.extend_row (<<"Mark", "16", "0", "New">>)
+			l_table.extend_row (<<"Romans", "16", "1", "New">>)
+			l_table.set_column_editor (2, l_table.Edit_text)
+			l_table.set_column_editor (3, l_table.Edit_check)
+			l_table.set_column_choices (4, <<"Old", "New">>)
+			l_table.set_cell_validator (2, agent (r: INTEGER; t: STRING_32): detachable STRING_32
+				do
+					if not t.is_integer then Result := {STRING_32} "A whole number, please" end
+				end)
+			create l_window.make ("Books", 440, 220)
+			l_window.set_content (l_table)
+			l_window.show
+			settle
+			driver.edit_cell (l_table, 3, 2, "sixteen")
+			save ("table-editing", l_window)
+		end
+
+	shoot_navigation
+			-- 1t: tabs on the left, a sidebar, a wizard on its second step, pagination,
+			-- breadcrumbs of any parts.
+		local
+			l_tabs: GUI_TABS
+			l_side: GUI_SIDEBAR
+			l_wizard: GUI_WIZARD
+			l_pages: GUI_PAGINATION
+			l_crumbs: GUI_PATH_CONTROL
+			l_window: GUI_WINDOW
+		do
+			create l_tabs.make
+			l_tabs.extend (create {GUI_LABEL}.make ("General settings"), "General")
+			l_tabs.extend (create {GUI_LABEL}.make ("Advanced settings"), "Advanced")
+			l_tabs.extend (create {GUI_LABEL}.make ("Accounts"), "Accounts")
+			l_tabs.set_tab_position (l_tabs.Tabs_left)
+			shoot ("tabs-left", "Tabs on the left", 380, 180, l_tabs)
+			create l_side.make
+			l_side.add_heading ("Library")
+			l_side.extend (create {GUI_LABEL}.make ("Every book in the library"), "Books")
+			l_side.extend (create {GUI_LABEL}.make ("Everyone who wrote them"), "Authors")
+			l_side.add_heading ("Settings")
+			l_side.extend (create {GUI_LABEL}.make ("Your name and email"), "Account")
+			l_side.set_page_icon (1, "folder")
+			l_side.set_page_badge (2, "12")
+			l_side.set_collapsible (True)
+			shoot ("sidebar", "Settings", 480, 260, l_side)
+			create l_wizard.make
+			l_wizard.extend_step (create {GUI_LABEL}.make ("Welcome. This takes a minute."), "Welcome")
+			l_wizard.extend_step (create {GUI_TEXT_FIELD}.make, "Your name")
+			l_wizard.extend_step (create {GUI_LABEL}.make ("Press Finish to sign up."), "Confirm")
+			l_wizard.go_to_step (2)
+			shoot ("wizard", "Sign up", 420, 220, l_wizard)
+			create l_pages.make
+			l_pages.set_page_count (20)
+			l_pages.set_page (10)
+			create l_window.make ("Results", 420, 80)
+			l_window.set_content (l_pages)
+			save ("pagination", l_window)
+			create l_crumbs.make
+			l_crumbs.set_parts (<<"Library", "Old Testament", "Genesis">>)
+			shoot ("path-control-parts", "Breadcrumbs", 420, 80, l_crumbs)
 		end
 
 feature {NONE} -- Implementation
