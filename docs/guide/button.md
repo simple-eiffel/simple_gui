@@ -52,8 +52,15 @@ The window shows a **Count** button and the label "Not clicked yet". Each click 
 | `set_text (a_text)` | Changes the caption. Ensures `text` is `a_text`. |
 | `click_actions` | Agents run when the user presses the button. |
 | `accessible_label` | The caption, unless the program set another with `set_accessible_label`. |
+| `icon` | The icon name shown before the caption, or `Void` for none. |
+| `set_icon (a_name)` | Shows icon `a_name` before the caption, or alone when the caption is empty. Requires `(create {GUI_ICON}).is_known (a_name)`. |
+| `clear_icon` | Removes the icon. Ensures `icon = Void`. |
+| `style` | The style now, `Style_normal` to `Style_pill`. |
+| `set_style (a_style)` | Sets the style: `Style_normal`, `Style_suggested`, `Style_destructive`, `Style_flat` or `Style_pill`. |
+| `is_busy` | Is the spinner showing? |
+| `set_busy (a_on)` | `True` shows a spinner and takes no presses; `False` enables the button again. |
 
-Every creation procedure requires `is_gui_thread` and `has_application`; every command requires `is_gui_thread`. To dim the button use `disable`; see [common features](widget.md).
+Every creation procedure requires `is_gui_thread` and `has_application`; every command requires `is_gui_thread`. To dim the button use `disable`; see [common features](widget.md). Icons, styles, the busy state and badges are described in [Icons and badges](icons-and-badges.md).
 
 **Events:** `click_actions` runs, with no arguments, each time the user presses the button. Code that changes the button (`set_text`, `disable`) fires nothing.
 

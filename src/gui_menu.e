@@ -202,6 +202,19 @@ feature -- Element change
 			add_edit_item (Role_select_all, "Select All")
 		end
 
+	set_item_icon (an_item_id: INTEGER; a_name: READABLE_STRING_GENERAL)
+			-- Show icon `a_name' beside item `an_item_id' (where the platform shows menu icons).
+		require
+			gui_thread: is_gui_thread
+			in_this_menu: has_item (an_item_id)
+			known: (create {GUI_ICON}).is_known (a_name)
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_name)
+			backend.menu_set_item_icon (an_item_id, l_c.item)
+		end
+
 	add_pills_item
 			-- "Show Reference Pills" (primary+shift+P), which shows or hides the application's
 			-- reference pills (1l); put it in a View or Help menu.

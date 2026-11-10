@@ -8,6 +8,7 @@
    - the wake is a main-queue block, so it also lands inside modal loops. */
 #import <Cocoa/Cocoa.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <UserNotifications/UserNotifications.h>
 #include <cairo.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -452,9 +453,12 @@ static void sga_pill_place(SGAPill *p)
 }
 
 /* Pills whose widget joined a window since: placed now (window shown, content set). */
+static void sga_badges_sync(void);   /* 1n */
+
 static void sga_pills_sync(void)
 {
 	for (SGAPill *p in [s_pills allValues]) if (![p superview]) sga_pill_place(p);
+	sga_badges_sync();
 }
 
 void sga_pill_set(int a_id, const char *a_code, const char *a_tip, int a_corner)
@@ -739,12 +743,13 @@ static void sga_place(SGASlot *a_slot, int a_alignment)
 	[NSLayoutConstraint activateConstraints:a_slot->placing];
 }
 
-/* Buttons (a dropdown and a split button too), spin boxes and segmented controls keep their natural width
+/* Buttons (a dropdown and a split button too), spin boxes, segmented controls and spinners keep their natural width
    (GTK: halign START); everything else fills. */
 static int sga_default_alignment(NSView *a_child)
 {
 	return [a_child isKindOfClass:[NSButton class]] || [a_child isKindOfClass:NSClassFromString(@"SGASpin")]
-		|| [a_child isKindOfClass:[NSSegmentedControl class]] || [a_child isKindOfClass:[NSComboButton class]] ? 1 : 0;
+		|| [a_child isKindOfClass:[NSSegmentedControl class]] || [a_child isKindOfClass:[NSComboButton class]]
+		|| ([a_child isKindOfClass:[NSProgressIndicator class]] && [(NSProgressIndicator *)a_child style] == NSProgressIndicatorStyleSpinning) ? 1 : 0;
 }
 
 void sga_stack_extend(int a_stack, int a_child, int a_stretch)
@@ -3573,6 +3578,443 @@ void sga_test_pick(int a_source, int a_row)
 void sga_test_drop(int a_target, int a_row) { if (s_pick_state == 2) sga_pick_drop_at(a_target, a_row); }
 void sga_test_cancel_pick(void) { if (s_pick_state) { sga_pick_end(); sga_push(32, 0, 0, 0, 0); } }
 int sga_test_is_accepting(int a_target) { return s_pick_state == 2 && [s_pick_targets containsObject:@(a_target)] ? 1 : 0; }
+
+/* ----------------------------------------------------------------- common */
+
+void sga_set_enabled(int a_id, int a_on)
+{
+	id o = sga_core(a_id);
+	if ([o isKindOfClass:[SGASpin class]]) {
+		[((SGASpin *)o)->field setEnabled:a_on != 0];
+		[((SGASpin *)o)->stepper setEnabled:a_on != 0];
+	}
+	if ([o isKindOfClass:[SGARadioGroup class]]) for (NSButton *b in [(SGARadioGroup *)o arrangedSubviews]) [b setEnabled:a_on != 0];
+	if ([o isKindOfClass:[SGAExpander class]]) {
+		[((SGAExpander *)o)->triangle setEnabled:a_on != 0];
+		[((SGAExpander *)o)->title setEnabled:a_on != 0];
+	}
+	if ([o isKindOfClass:[NSControl class]]) [(NSControl *)o setEnabled:a_on != 0];
+	[[s_toolbar_item objectForKey:o] setEnabled:a_on != 0];
+}
+
+/* ---------------------------------------------- 1o: feedback and messages */
+
+/* A spinner: AppKit's spinning progress indicator, hidden while it does not turn. */
+int sga_spinner(void)
+{
+	NSProgressIndicator *p = [[NSProgressIndicator alloc] init];
+	[p setStyle:NSProgressIndicatorStyleSpinning];
+	[p setControlSize:NSControlSizeSmall];
+	[p setDisplayedWhenStopped:NO];
+	return sga_keep(p);
+}
+
+void sga_spinner_set(int a_id, int a_on)
+{
+	NSProgressIndicator *p = sga_get(a_id);
+	if (a_on) [p startAnimation:nil]; else [p stopAnimation:nil];
+}
+
+/* An info bar: a tinted rounded box with the kind's symbol, the message, the program's
+   action buttons and, when closable, a close button. An action sends event 26 (a = its
+   number), the close button 26 with a = 0 (the shared class hides the bar). */
+@interface SGAInfoBar : NSBox
+{
+@public
+	NSImageView *icon;
+	NSTextField *message;
+	NSStackView *row;
+	NSButton *close;
+}
+@end
+@implementation SGAInfoBar
+- (void)pressed:(NSButton *)b { if (!s_suppress) sga_push(26, sga_id_of(self), (int)[b tag], 0, 0); }
+@end
+
+static void sga_info_bar_kind(SGAInfoBar *b, int a_kind)
+{
+	NSColor *c = a_kind == 2 ? [NSColor systemGreenColor] : a_kind == 3 ? [NSColor systemOrangeColor] : a_kind == 4 ? [NSColor systemRedColor] : [NSColor systemBlueColor];
+	NSString *s = a_kind == 2 ? @"checkmark.circle.fill" : a_kind == 3 ? @"exclamationmark.triangle.fill" : a_kind == 4 ? @"xmark.octagon.fill" : @"info.circle.fill";
+	[b setFillColor:[c colorWithAlphaComponent:0.15]];
+	[b setBorderColor:[c colorWithAlphaComponent:0.5]];
+	[b->icon setImage:[NSImage imageWithSystemSymbolName:s accessibilityDescription:nil]];
+	[b->icon setContentTintColor:c];
+}
+
+int sga_info_bar(int a_kind, const char *a_message)
+{
+	SGAInfoBar *b = [[SGAInfoBar alloc] init];
+	[b setBoxType:NSBoxCustom];
+	[b setCornerRadius:6];
+	[b setBorderWidth:1];
+	[b setTitlePosition:NSNoTitle];
+	[b setContentViewMargins:NSMakeSize(8, 6)];
+	b->icon = [[NSImageView alloc] init];
+	/* One line that truncates (a wrapping label with no width to wrap at pulls the window in). */
+	b->message = [NSTextField labelWithString:sga_string(a_message)];
+	[b->message setLineBreakMode:NSLineBreakByTruncatingTail];
+	[b->message setToolTip:sga_string(a_message)];
+	[b->message setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[b->message setContentHuggingPriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	b->close = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"xmark" accessibilityDescription:@"Close"] target:b action:@selector(pressed:)];
+	[b->close setBordered:NO];
+	[b->close setTag:0];
+	[b->close setHidden:YES];
+	b->row = [NSStackView stackViewWithViews:@[b->icon, b->message, b->close]];
+	[b->row setSpacing:8];
+	[b->row setTranslatesAutoresizingMaskIntoConstraints:NO];
+	/* The bar takes the width it is given: a stack view hugs its content above the window's
+	   own size, and would pull the window in to the bar's natural width. */
+	[b->row setHuggingPriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[b setContentHuggingPriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	NSView *c = [b contentView];
+	[c addSubview:b->row];
+	[NSLayoutConstraint activateConstraints:@[[b->row.leadingAnchor constraintEqualToAnchor:c.leadingAnchor], [b->row.trailingAnchor constraintEqualToAnchor:c.trailingAnchor],
+		[b->row.topAnchor constraintEqualToAnchor:c.topAnchor], [b->row.bottomAnchor constraintEqualToAnchor:c.bottomAnchor]]];
+	sga_info_bar_kind(b, a_kind);
+	[b setAccessibilityRole:NSAccessibilityGroupRole];
+	return sga_keep(b);
+}
+
+void sga_info_bar_set(int a_id, int a_kind, const char *a_message)
+{
+	SGAInfoBar *b = sga_get(a_id);
+	[b->message setStringValue:sga_string(a_message)];
+	[b->message setToolTip:sga_string(a_message)];
+	sga_info_bar_kind(b, a_kind);
+}
+
+void sga_info_bar_add_action(int a_id, const char *a_text, int a_number)
+{
+	SGAInfoBar *b = sga_get(a_id);
+	NSButton *x = [NSButton buttonWithTitle:sga_string(a_text) target:b action:@selector(pressed:)];
+	[x setTag:a_number];
+	[x setControlSize:NSControlSizeSmall];
+	[b->row insertArrangedSubview:x atIndex:[[b->row arrangedSubviews] count] - 1];
+}
+
+void sga_info_bar_set_closable(int a_id, int a_on) { [((SGAInfoBar *)sga_get(a_id))->close setHidden:a_on == 0]; }
+
+/* As a user: action `a_number' (0: close) pressed. */
+void sga_test_info_bar_press(int a_id, int a_number)
+{
+	SGAInfoBar *b = sga_get(a_id);
+	for (NSView *v in [b->row arrangedSubviews]) if ([v isKindOfClass:[NSButton class]] && [(NSButton *)v tag] == a_number && ![v isHidden]) { [(NSButton *)v performClick:nil]; return; }
+}
+
+/* A toast: a dark rounded bubble at the bottom of the window's content, over everything,
+   with the message and an optional action; it closes by itself after 4 seconds, or when
+   its action is pressed (event 27, id = window, a = the toast's id). One per window. */
+@interface SGAToast : NSView
+{
+@public
+	NSTextField *message;
+	NSButton *action;
+	int window_id, toast_id;
+	NSInteger serial;
+}
+@end
+@implementation SGAToast
+- (void)pressed:(id)a_sender
+{
+	(void)a_sender;
+	if ([self isHidden]) return;
+	[self setHidden:YES];
+	if (toast_id > 0) sga_push(27, window_id, toast_id, 0, 0);
+}
+@end
+
+static NSMutableDictionary<NSNumber *, SGAToast *> *s_toasts;
+
+void sga_window_show_toast(int a_window, const char *a_message, const char *an_action_text, int a_toast_id)
+{
+	NSWindow *w = sga_get(a_window);
+	NSView *c = [w contentView];
+	if (!s_toasts) s_toasts = [NSMutableDictionary dictionary];
+	SGAToast *t = s_toasts[@(a_window)];
+	if (!t) {
+		t = [[SGAToast alloc] init];
+		[t setWantsLayer:YES];
+		[[t layer] setCornerRadius:10];
+		[[t layer] setBackgroundColor:[[NSColor colorWithWhite:0.15 alpha:0.94] CGColor]];
+		[t setTranslatesAutoresizingMaskIntoConstraints:NO];
+		t->message = [NSTextField labelWithString:@""];
+		[t->message setTextColor:[NSColor whiteColor]];
+		t->action = [NSButton buttonWithTitle:@"" target:t action:@selector(pressed:)];
+		[t->action setBordered:NO];
+		[t->action setContentTintColor:[NSColor systemYellowColor]];
+		NSStackView *l_row = [NSStackView stackViewWithViews:@[t->message, t->action]];
+		[l_row setSpacing:16];
+		[l_row setTranslatesAutoresizingMaskIntoConstraints:NO];
+		[t addSubview:l_row];
+		[NSLayoutConstraint activateConstraints:@[[l_row.leadingAnchor constraintEqualToAnchor:t.leadingAnchor constant:14], [l_row.trailingAnchor constraintEqualToAnchor:t.trailingAnchor constant:-14],
+			[l_row.topAnchor constraintEqualToAnchor:t.topAnchor constant:8], [l_row.bottomAnchor constraintEqualToAnchor:t.bottomAnchor constant:-8]]];
+		t->window_id = a_window;
+		s_toasts[@(a_window)] = t;
+	}
+	if ([t superview] != c) {
+		[t removeFromSuperview];
+		[c addSubview:t positioned:NSWindowAbove relativeTo:nil];
+		[NSLayoutConstraint activateConstraints:@[[t.centerXAnchor constraintEqualToAnchor:c.centerXAnchor],
+			[t.bottomAnchor constraintEqualToAnchor:c.bottomAnchor constant:-16], [t.widthAnchor constraintLessThanOrEqualToAnchor:c.widthAnchor constant:-32]]];
+	}
+	[t->message setStringValue:sga_string(a_message)];
+	[t->action setTitle:sga_string(an_action_text)];
+	[t->action setHidden:strlen(an_action_text) == 0];
+	t->toast_id = a_toast_id;
+	[t setHidden:NO];
+	[c layoutSubtreeIfNeeded];
+	NSInteger l_serial = ++t->serial;
+	SGAToast *l_toast = t;
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+		if (l_toast->serial == l_serial) [l_toast setHidden:YES];
+	});
+}
+
+const char *sga_test_toast_shown(int a_window)
+{
+	SGAToast *t = s_toasts[@(a_window)];
+	return sga_return(Kind_label, t && ![t isHidden] && [t superview] ? [t->message stringValue] : @"");
+}
+
+void sga_test_toast_press(int a_window)
+{
+	SGAToast *t = s_toasts[@(a_window)];
+	if (t && ![t isHidden] && ![t->action isHidden]) [t->action performClick:nil];
+}
+
+/* A desktop notification through UNUserNotificationCenter; a click sends event 28 (a = its
+   id). AppKit allows it only to a bundled application (with a bundle identifier): a program
+   run straight from its executable, as the test runner is, posts nothing. */
+@interface SGANotifier : NSObject <UNUserNotificationCenterDelegate>
+@end
+@implementation SGANotifier
+- (void)userNotificationCenter:(UNUserNotificationCenter *)c didReceiveNotificationResponse:(UNNotificationResponse *)r withCompletionHandler:(void (^)(void))done
+{
+	(void)c;
+	NSNumber *l_id = [[[[r notification] request] content] userInfo][@"sga_id"];
+	if ([l_id intValue] > 0) { sga_push(28, 0, [l_id intValue], 0, 0); sga_wake(); }
+	done();
+}
+- (void)userNotificationCenter:(UNUserNotificationCenter *)c willPresentNotification:(UNNotification *)n withCompletionHandler:(void (^)(UNNotificationPresentationOptions))done
+{
+	(void)c; (void)n;
+	done(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList);
+}
+@end
+static SGANotifier *s_notifier;
+
+void sga_notify(const char *a_title, const char *a_body, int a_notification_id)
+{
+	if (![[NSBundle mainBundle] bundleIdentifier]) return;
+	UNUserNotificationCenter *c = [UNUserNotificationCenter currentNotificationCenter];
+	if (!s_notifier) {
+		s_notifier = [[SGANotifier alloc] init];
+		[c setDelegate:s_notifier];
+		[c requestAuthorizationWithOptions:UNAuthorizationOptionAlert | UNAuthorizationOptionSound completionHandler:^(BOOL g, NSError *e) { (void)g; (void)e; }];
+	}
+	UNMutableNotificationContent *k = [[UNMutableNotificationContent alloc] init];
+	[k setTitle:sga_string(a_title)];
+	[k setBody:sga_string(a_body)];
+	[k setUserInfo:@{@"sga_id": @(a_notification_id)}];
+	[c addNotificationRequest:[UNNotificationRequest requestWithIdentifier:[[NSUUID UUID] UUIDString] content:k trigger:nil] withCompletionHandler:nil];
+}
+
+/* ------------------------------------------- 1n: icons, styles, badges, busy */
+
+/* GUI_ICON's neutral names as SF Symbols. */
+static NSString *sga_symbol_of(NSString *a_name)
+{
+	static NSDictionary<NSString *, NSString *> *l_map;
+	if (!l_map) l_map = @{
+		@"add": @"plus", @"remove": @"minus", @"close": @"xmark", @"check": @"checkmark",
+		@"chevron-right": @"chevron.right", @"chevron-left": @"chevron.left", @"chevron-up": @"chevron.up", @"chevron-down": @"chevron.down",
+		@"back": @"chevron.backward", @"forward": @"chevron.forward", @"search": @"magnifyingglass", @"settings": @"gearshape",
+		@"delete": @"trash", @"edit": @"pencil", @"folder": @"folder", @"document": @"doc", @"open": @"folder.badge.plus",
+		@"save": @"square.and.arrow.down", @"copy": @"doc.on.doc", @"cut": @"scissors", @"paste": @"doc.on.clipboard",
+		@"undo": @"arrow.uturn.backward", @"redo": @"arrow.uturn.forward", @"refresh": @"arrow.clockwise",
+		@"play": @"play.fill", @"pause": @"pause.fill", @"stop": @"stop.fill", @"more": @"ellipsis", @"menu": @"line.3.horizontal",
+		@"info": @"info.circle", @"warning": @"exclamationmark.triangle", @"error": @"xmark.octagon", @"help": @"questionmark.circle",
+		@"star": @"star", @"picture": @"photo", @"home": @"house", @"user": @"person", @"mail": @"envelope",
+		@"calendar": @"calendar", @"clock": @"clock", @"lock": @"lock", @"bell": @"bell",
+		@"download": @"arrow.down.circle", @"upload": @"arrow.up.circle", @"print": @"printer",
+		@"filter": @"line.3.horizontal.decrease", @"sort": @"arrow.up.arrow.down"};
+	return l_map[a_name];
+}
+
+static NSImage *sga_icon_image(NSString *a_name)
+{
+	NSString *l_symbol = sga_symbol_of(a_name);
+	return l_symbol ? [NSImage imageWithSystemSymbolName:l_symbol accessibilityDescription:a_name] : nil;
+}
+
+static NSMutableDictionary<NSNumber *, NSString *> *s_button_icons;   /* button id -> icon name (kept while busy) */
+static NSMutableDictionary<NSNumber *, NSProgressIndicator *> *s_busy;
+
+static void sga_button_show_icon(int a_id)
+{
+	NSButton *b = sga_core(a_id);
+	NSString *l_name = s_button_icons[@(a_id)];
+	NSImage *i = [l_name length] && !s_busy[@(a_id)] ? sga_icon_image(l_name) : nil;
+	[b setImage:i];
+	[b setImagePosition:i ? ([[b title] length] ? NSImageLeading : NSImageOnly) : NSNoImage];
+}
+
+void sga_button_set_icon(int a_id, const char *a_name)
+{
+	if (!s_button_icons) s_button_icons = [NSMutableDictionary dictionary];
+	s_button_icons[@(a_id)] = sga_string(a_name);
+	sga_button_show_icon(a_id);
+}
+
+/* 0 normal, 1 suggested (the accent's tint), 2 destructive (red, and AppKit's destructive
+   flag), 3 flat (no border), 4 pill (the capsule inline bezel). */
+void sga_button_set_style(int a_id, int a_style)
+{
+	NSButton *b = sga_core(a_id);
+	[b setBordered:a_style != 3];
+	[b setBezelStyle:a_style == 4 ? NSBezelStyleInline : NSBezelStylePush];
+	[b setBezelColor:a_style == 1 ? [NSColor controlAccentColor] : a_style == 2 ? [NSColor systemRedColor] : nil];
+	[b setHasDestructiveAction:a_style == 2];
+	[b invalidateIntrinsicContentSize];
+}
+
+/* Busy: a small spinner where the icon was (the shared class disables the button). */
+void sga_button_set_busy(int a_id, int a_on)
+{
+	NSButton *b = sga_core(a_id);
+	if (!s_busy) s_busy = [NSMutableDictionary dictionary];
+	NSProgressIndicator *s = s_busy[@(a_id)];
+	if (a_on && !s) {
+		s = [[NSProgressIndicator alloc] init];
+		[s setStyle:NSProgressIndicatorStyleSpinning];
+		[s setControlSize:NSControlSizeSmall];
+		[s setTranslatesAutoresizingMaskIntoConstraints:NO];
+		[b addSubview:s];
+		[NSLayoutConstraint activateConstraints:@[[s.leadingAnchor constraintEqualToAnchor:b.leadingAnchor constant:8],
+			[s.centerYAnchor constraintEqualToAnchor:b.centerYAnchor], [s.widthAnchor constraintEqualToConstant:14], [s.heightAnchor constraintEqualToConstant:14]]];
+		[s startAnimation:nil];
+		s_busy[@(a_id)] = s;
+	} else if (!a_on && s) {
+		[s stopAnimation:nil];
+		[s removeFromSuperview];
+		[s_busy removeObjectForKey:@(a_id)];
+	}
+	sga_button_show_icon(a_id);
+	if (a_on && [[b title] length] && ![b image]) {
+		/* room for the spinner before the title */
+		[b setImage:[[NSImage alloc] initWithSize:NSMakeSize(16, 14)]];
+		[b setImagePosition:NSImageLeading];
+	}
+}
+
+const char *sga_test_button_icon(int a_id) { return sga_return(Kind_label, s_busy[@(a_id)] ? @"" : (s_button_icons[@(a_id)] ?: @"")); }
+
+static NSMenuItem *sga_find_numbered_anywhere(int a_id);
+void sga_menu_set_item_icon(int a_item_id, const char *a_name)
+{
+	NSMenuItem *i = sga_find_numbered_anywhere(a_item_id);
+	[i setImage:[sga_string(a_name) length] ? sga_icon_image(sga_string(a_name)) : nil];
+}
+
+/* Tabs: AppKit's tab view draws no item images and has no badges: a badge is added to the
+   tab's label, "News (5)". */
+static NSInteger sga_tab_item(NSTabView *t, int a_page);
+static NSMutableDictionary<NSValue *, NSString *> *s_tab_titles;   /* item -> its own label */
+
+/* AppKit's tab view draws no tab images, and an item given one loses its label: the icon is
+   recorded only (the tab keeps its text). */
+static NSMutableDictionary<NSValue *, NSString *> *s_tab_icons;
+
+void sga_tabs_set_page_icon(int a_tabs, int a_page, const char *a_name)
+{
+	NSTabView *t = sga_get(a_tabs);
+	if (!s_tab_icons) s_tab_icons = [NSMutableDictionary dictionary];
+	s_tab_icons[[NSValue valueWithNonretainedObject:[t tabViewItemAtIndex:sga_tab_item(t, a_page)]]] = sga_string(a_name);
+}
+
+void sga_tabs_set_page_badge(int a_tabs, int a_page, const char *a_text)
+{
+	NSTabView *t = sga_get(a_tabs);
+	NSTabViewItem *i = [t tabViewItemAtIndex:sga_tab_item(t, a_page)];
+	NSValue *k = [NSValue valueWithNonretainedObject:i];
+	if (!s_tab_titles) s_tab_titles = [NSMutableDictionary dictionary];
+	if (!s_tab_titles[k]) s_tab_titles[k] = [i label];
+	NSString *l_text = sga_string(a_text);
+	[i setLabel:[l_text length] ? [NSString stringWithFormat:@"%@ (%@)", s_tab_titles[k], l_text] : s_tab_titles[k]];
+}
+
+/* A badge: a small red bubble (the text) or dot at the widget's trailing top corner, over the
+   window's content, always shown; held by constraints as the pills are. */
+@interface SGABadge : NSTextField
+{
+@public
+	int target;
+	int kind;   /* 1 text, 2 dot */
+	NSArray<NSLayoutConstraint *> *placing;
+}
+@end
+@implementation SGABadge
+- (BOOL)isAccessibilityElement { return NO; }
+@end
+
+static NSMutableDictionary<NSNumber *, SGABadge *> *s_badges;
+
+static void sga_badge_place(SGABadge *b)
+{
+	NSView *t = s_margins[b->target][0] ? s_inner[b->target] : sga_get(b->target);
+	NSView *c = [[t window] contentView];
+	if (![t isKindOfClass:[NSView class]] || !c || ![t isDescendantOf:c]) return;
+	if ([b superview] != c) { [b removeFromSuperview]; [c addSubview:b positioned:NSWindowAbove relativeTo:nil]; }
+	if (b->placing) [NSLayoutConstraint deactivateConstraints:b->placing];
+	b->placing = @[[b.centerXAnchor constraintEqualToAnchor:t.trailingAnchor constant:-4], [b.centerYAnchor constraintEqualToAnchor:t.topAnchor constant:2]];
+	[NSLayoutConstraint activateConstraints:b->placing];
+}
+
+static void sga_badges_sync(void) { for (SGABadge *b in [s_badges allValues]) if (![b superview]) sga_badge_place(b); }
+
+void sga_widget_set_badge(int a_id, const char *a_text, int a_kind)
+{
+	if (!s_badges) s_badges = [NSMutableDictionary dictionary];
+	SGABadge *b = s_badges[@(a_id)];
+	if (a_kind == 0) {
+		if (b) { if (b->placing) [NSLayoutConstraint deactivateConstraints:b->placing]; [b removeFromSuperview]; [s_badges removeObjectForKey:@(a_id)]; }
+		return;
+	}
+	if (!b) {
+		b = [SGABadge labelWithString:@""];
+		[b setTranslatesAutoresizingMaskIntoConstraints:NO];
+		[b setFont:[NSFont boldSystemFontOfSize:[NSFont smallSystemFontSize] - 1]];
+		[b setTextColor:[NSColor whiteColor]];
+		[b setAlignment:NSTextAlignmentCenter];
+		[b setDrawsBackground:YES];
+		[b setBackgroundColor:[NSColor systemRedColor]];
+		[b setWantsLayer:YES];
+		[[b layer] setMasksToBounds:YES];
+		b->target = a_id;
+		s_badges[@(a_id)] = b;
+	}
+	b->kind = a_kind;
+	if (a_kind == 2) {
+		[b setStringValue:@""];
+		[[b layer] setCornerRadius:4];
+		[NSLayoutConstraint deactivateConstraints:[b constraints]];
+		[NSLayoutConstraint activateConstraints:@[[b.widthAnchor constraintEqualToConstant:8], [b.heightAnchor constraintEqualToConstant:8]]];
+	} else {
+		[b setStringValue:[NSString stringWithFormat:@" %@ ", sga_string(a_text)]];
+		[[b layer] setCornerRadius:7.5];
+		[NSLayoutConstraint deactivateConstraints:[b constraints]];
+		[NSLayoutConstraint activateConstraints:@[[b.heightAnchor constraintEqualToConstant:15], [b.widthAnchor constraintGreaterThanOrEqualToConstant:15]]];
+	}
+	sga_badge_place(b);
+}
+
+const char *sga_test_badge_shown(int a_id)
+{
+	SGABadge *b = s_badges[@(a_id)];
+	NSString *s = !b ? @"" : b->kind == 2 ? @"•" : [[b stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+	return sga_return(Kind_label, s);
+}
 
 /* ----------------------------------------------------------------- common */
 

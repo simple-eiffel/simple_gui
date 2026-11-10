@@ -36,6 +36,8 @@ feature {NONE} -- Initialization
 			create menu.make
 			create pills.make
 			create timers.make (4)
+			create notification_actions.make (2)
+			create last_notification.make_empty
 			create clipboard
 			create dialogs
 			create mailbox.make
@@ -133,6 +135,30 @@ feature -- Timers (1m)
 			timers.force (Result, Result.id)
 		ensure
 			active: Result.is_active and not Result.is_repeating
+		end
+
+feature -- Desktop notifications (1o)
+
+	last_notification: STRING_32
+			-- The title and body of the notification sent most recently, as "title%Nbody" (tests).
+
+	notify (a_title, a_body: READABLE_STRING_GENERAL)
+			-- Show a desktop notification (outside the program's windows).
+		require
+			gui_thread: is_gui_thread
+			titled: not a_title.is_empty
+		do
+			send_notification (a_title, a_body, 0)
+		end
+
+	notify_with_action (a_title, a_body: READABLE_STRING_GENERAL; an_action: PROCEDURE)
+			-- A desktop notification; `an_action' runs, on the GUI processor, if the user clicks it.
+		require
+			gui_thread: is_gui_thread
+			titled: not a_title.is_empty
+		do
+			notification_actions.extend (an_action)
+			send_notification (a_title, a_body, notification_actions.count)
 		end
 
 feature -- Pick and drop (1q)
@@ -292,6 +318,10 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 					appearance_changed_actions.call ([l_a = 1])
 				when 11 then
 					take_messages (mailbox)
+				when 28 then
+					if notification_actions.valid_index (l_a) then
+						notification_actions.i_th (l_a).call (Void)
+					end
 				when 30 then
 					begin_pick (l_id, l_a)
 				when 31 then
@@ -319,6 +349,21 @@ feature {GUI_TEST_DRIVER} -- Registry
 			-- Every widget, by id.
 
 feature {NONE} -- Implementation
+
+	notification_actions: ARRAYED_LIST [PROCEDURE]
+			-- Each clickable notification's action, by its id (from 1).
+
+	send_notification (a_title, a_body: READABLE_STRING_GENERAL; an_id: INTEGER)
+		local
+			l_t, l_b: C_STRING
+		do
+			create last_notification.make_from_string_general (a_title)
+			last_notification.append_character ('%N')
+			last_notification.append_string_general (a_body)
+			l_t := backend.to_c (a_title)
+			l_b := backend.to_c (a_body)
+			backend.notify (l_t.item, l_b.item, an_id)
+		end
 
 	begin_pick (a_source, a_row: INTEGER)
 			-- Event 30: lift the source's pebble and tell the backend which widgets take it

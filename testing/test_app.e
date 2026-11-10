@@ -103,6 +103,9 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_appearance_can_be_chosen, "appearance_can_be_chosen")
 				run_test (agent t.test_scrolling_into_view, "scrolling_into_view")
 				run_test (agent t.test_pick_and_drop_typed, "pick_and_drop_typed")
+				run_test (agent t.test_feedback_spinner_info_bar_toast_notify, "feedback_spinner_info_bar_toast_notify")
+				run_test (agent t.test_every_icon_shows_on_a_button, "every_icon_shows_on_a_button")
+				run_test (agent t.test_styles_badges_and_busy, "styles_badges_and_busy")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then

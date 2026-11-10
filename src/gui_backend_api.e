@@ -1013,6 +1013,103 @@ feature -- Common widget state
 		deferred
 		end
 
+	spinner: INTEGER
+			-- 1o: a busy wheel, not turning.
+		deferred
+		end
+
+	spinner_set (an_id: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	info_bar (a_kind: INTEGER; a_message: POINTER): INTEGER
+			-- An inline banner: 1 info, 2 success, 3 warning, 4 error. Event 26 (a = action
+			-- number, 0 for close).
+		deferred
+		end
+
+	info_bar_set (an_id, a_kind: INTEGER; a_message: POINTER)
+		deferred
+		end
+
+	info_bar_add_action (an_id: INTEGER; a_text: POINTER; a_number: INTEGER)
+		deferred
+		end
+
+	info_bar_set_closable (an_id: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	window_show_toast (a_window: INTEGER; a_message, an_action_text: POINTER; a_toast_id: INTEGER)
+			-- A toast at the bottom of `a_window'; with action text, a button sending event 27
+			-- (id = window, a = `a_toast_id').
+		deferred
+		end
+
+	notify (a_title, a_body: POINTER; a_notification_id: INTEGER)
+			-- A desktop notification; when `a_notification_id' > 0, a click sends event 28 (a = it).
+		deferred
+		end
+
+	test_info_bar_press (an_id, a_number: INTEGER)
+			-- As the user pressing action `a_number' (0: close).
+		deferred
+		end
+
+	test_toast_shown (a_window: INTEGER): POINTER
+			-- The message of the toast showing in `a_window' now; "" for none.
+		deferred
+		end
+
+	test_toast_press (a_window: INTEGER)
+			-- As the user pressing the action of the toast showing in `a_window'.
+		deferred
+		end
+
+	button_set_icon (an_id: INTEGER; a_name: POINTER)
+			-- 1n: icon `a_name' (GUI_ICON's vocabulary) before the button's text; "" removes it.
+		deferred
+		end
+
+	button_set_style (an_id, a_style: INTEGER)
+			-- 0 normal, 1 suggested, 2 destructive, 3 flat, 4 pill.
+		deferred
+		end
+
+	button_set_busy (an_id: INTEGER; a_on: BOOLEAN)
+			-- A spinner in place of the icon (the shared class disables the button).
+		deferred
+		end
+
+	menu_set_item_icon (an_item_id: INTEGER; a_name: POINTER)
+		deferred
+		end
+
+	tabs_set_page_icon (a_tabs, a_page: INTEGER; a_name: POINTER)
+		deferred
+		end
+
+	tabs_set_page_badge (a_tabs, a_page: INTEGER; a_text: POINTER)
+			-- "" removes it.
+		deferred
+		end
+
+	widget_set_badge (an_id: INTEGER; a_text: POINTER; a_kind: INTEGER)
+			-- 0 none, 1 the text in a small red bubble, 2 a dot; at the trailing top corner,
+			-- above everything in the window, always shown.
+		deferred
+		end
+
+	test_button_icon (an_id: INTEGER): POINTER
+			-- The icon name the button shows now; "" for none (tests).
+		deferred
+		end
+
+	test_badge_shown (an_id: INTEGER): POINTER
+			-- The badge widget `an_id' shows now: its text, a bullet for a dot, "" for none (tests).
+		deferred
+		end
+
 	widget_set_pick (an_id, a_mode: INTEGER; a_is_source, a_by_row: BOOLEAN)
 			-- 1q: whether a pick starts on `an_id' and how (1 drag, 2 click, 3 menu). A start pushes
 			-- event 30 (id = source, a = the row or node under the pointer when `a_by_row', else 0).

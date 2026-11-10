@@ -406,6 +406,51 @@ feature -- User actions
 			end
 		end
 
+	button_icon (a_button: GUI_BUTTON): STRING_32
+			-- The icon name `a_button' shows now; empty for none.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_button_icon (a_button.id))
+		end
+
+	badge_shown (a_widget: GUI_WIDGET): STRING_32
+			-- The badge `a_widget' shows now: its text, a bullet for a dot, empty for none.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_badge_shown (a_widget.id))
+		end
+
+	press_info_bar (a_bar: GUI_INFO_BAR; a_number: INTEGER)
+			-- Press action `a_number' of `a_bar' (0: its close button) as a user would.
+		require
+			has_application: has_application
+		do
+			backend.test_info_bar_press (a_bar.id, a_number)
+			settle
+		end
+
+	toast_shown (a_window: GUI_WINDOW): STRING_32
+			-- The toast showing in `a_window' now; empty for none.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_toast_shown (a_window.id))
+		end
+
+	press_toast (a_window: GUI_WINDOW)
+			-- Press the action of the toast showing in `a_window', as a user would.
+		require
+			has_application: has_application
+		do
+			backend.test_toast_press (a_window.id)
+			settle
+		end
+
 	pick (a_source: GUI_WIDGET; a_row: INTEGER)
 			-- Start a pick on `a_source' (row `a_row', 0 for the widget itself) as a user would.
 		require
