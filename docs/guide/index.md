@@ -81,6 +81,8 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 
 ## Dialogs
 - [Dialogs](dialogs.md): files, folders, messages, questions, text, fonts, About
+- [Custom dialog](custom-dialog.md): a modal dialog with any content and the platform's buttons
+- [Context help](context-help.md): F1 help about the focused control
 
 ## Drawing
 - [Canvas](canvas.md): your own drawing with Cairo, at the screen's scale
