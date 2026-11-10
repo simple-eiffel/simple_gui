@@ -261,6 +261,46 @@ feature -- Windows and containers
 		deferred
 		end
 
+	dock_set_panel_fields (a_dock, an_index: INTEGER; a_short_title, a_description, a_tab_tooltip: POINTER)
+			-- 1r-c: the panel's short title (its tab and strip name), accessible description and
+			-- tab tooltip; empty strings: not set.
+		deferred
+		end
+
+	dock_set_panel_pill (a_dock, an_index: INTEGER; a_code: POINTER)
+			-- 1r-c: a reference pill on the panel's title bar and tab (empty: none).
+		deferred
+		end
+
+	test_panel_tab_text (a_dock, an_index: INTEGER): POINTER
+			-- What a tab for the panel shows, whatever the side's mode.
+		deferred
+		end
+
+	test_panel_tab_tooltip (a_dock, an_index: INTEGER): POINTER
+			-- A tab's tooltip for the panel, whatever the side's mode.
+		deferred
+		end
+
+	splitter_set_collapsible (a_splitter, a_pane: INTEGER; a_on: BOOLEAN)
+			-- 1r-c.
+		deferred
+		end
+
+	splitter_collapse (a_splitter, a_pane: INTEGER; a_on: BOOLEAN)
+			-- Collapse pane `a_pane' (its room to the other, the position remembered) or open it.
+		deferred
+		end
+
+	splitter_is_collapsed (a_splitter, a_pane: INTEGER): BOOLEAN
+		deferred
+		end
+
+	test_toggle_splitter_pane (a_splitter, a_pane: INTEGER)
+			-- As the user pressing the divider's button for `a_pane': 42.
+		deferred
+		end
+
 	test_drag_dock_edge (a_dock, a_side, a_size: INTEGER)
 			-- As the user dragging the side's edge to `a_size': 35.
 		deferred

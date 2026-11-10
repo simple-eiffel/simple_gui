@@ -55,6 +55,42 @@ feature -- Access
 	is_floating: BOOLEAN
 			-- Is it in a window of its own (1r-b), keeping its side and place for redocking?
 
+	short_title: STRING_32
+			-- 1r-c: what its tab and auto-hide strip name show when not empty (else `title').
+		attribute
+			create Result.make_empty
+		end
+
+	description: STRING_32
+			-- Its accessible description, and its pill's tip.
+		attribute
+			create Result.make_empty
+		end
+
+	tab_tooltip: STRING_32
+			-- The tooltip on its tab and strip name when not empty (else `description').
+		attribute
+			create Result.make_empty
+		end
+
+	pill_code: STRING_32
+			-- Its reference pill (1l), on its title bar and tab; empty: none.
+		attribute
+			create Result.make_empty
+		end
+
+	tab_text: STRING_32
+			-- What a tab shows: `short_title', else `title'.
+		do
+			if short_title.is_empty then Result := title else Result := short_title end
+		end
+
+	tab_tip: STRING_32
+			-- A tab's tooltip: `tab_tooltip', else `description'.
+		do
+			if tab_tooltip.is_empty then Result := description else Result := tab_tooltip end
+		end
+
 feature -- Status
 
 	is_usable_key (a_key: READABLE_STRING_GENERAL): BOOLEAN
@@ -78,6 +114,53 @@ feature -- Element change
 			end
 		ensure
 			set: title.same_string_general (a_title)
+		end
+
+	set_short_title (a_text: READABLE_STRING_GENERAL)
+		require
+			gui_thread: is_gui_thread
+		do
+			create short_title.make_from_string_general (a_text)
+			tell_fields
+		ensure
+			set: short_title.same_string_general (a_text)
+		end
+
+	set_description (a_text: READABLE_STRING_GENERAL)
+		require
+			gui_thread: is_gui_thread
+		do
+			create description.make_from_string_general (a_text)
+			tell_fields
+		ensure
+			set: description.same_string_general (a_text)
+		end
+
+	set_tab_tooltip (a_text: READABLE_STRING_GENERAL)
+		require
+			gui_thread: is_gui_thread
+		do
+			create tab_tooltip.make_from_string_general (a_text)
+			tell_fields
+		ensure
+			set: tab_tooltip.same_string_general (a_text)
+		end
+
+	set_pill (a_code: READABLE_STRING_GENERAL)
+			-- Show reference pill `a_code' on the panel's title bar and tab (empty: none); its tip
+			-- is `description', and GUI_APPLICATION.show_pills shows and hides it with the rest.
+		require
+			gui_thread: is_gui_thread
+		local
+			l_c: C_STRING
+		do
+			create pill_code.make_from_string_general (a_code)
+			if attached dock as al_dock then
+				l_c := backend.to_c (a_code)
+				backend.dock_set_panel_pill (al_dock.id, al_dock.index_of (Current), l_c.item)
+			end
+		ensure
+			set: pill_code.same_string_general (a_code)
 		end
 
 	show
@@ -123,6 +206,21 @@ feature {GUI_DOCK} -- Docking
 			is_floating := a_on
 		ensure
 			set: is_floating = a_on
+		end
+
+feature {GUI_DOCK} -- Fields
+
+	tell_fields
+			-- The backend learns the short title, description and tab tooltip.
+		local
+			l_short, l_description, l_tip: C_STRING
+		do
+			if attached dock as al_dock then
+				l_short := backend.to_c (short_title)
+				l_description := backend.to_c (description)
+				l_tip := backend.to_c (tab_tooltip)
+				backend.dock_set_panel_fields (al_dock.id, al_dock.index_of (Current), l_short.item, l_description.item, l_tip.item)
+			end
 		end
 
 feature {NONE} -- Implementation

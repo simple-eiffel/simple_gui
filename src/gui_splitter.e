@@ -14,6 +14,9 @@ class
 
 inherit
 	GUI_CONTAINER
+		redefine
+			dispatch
+		end
 
 create
 	make_horizontal, make_vertical
@@ -107,6 +110,89 @@ feature -- Element change
 		do
 			backend.splitter_set_position (id, a_position)
 		end
+
+feature -- Collapsing panes (1r-c)
+
+	is_collapsible (a_pane: INTEGER): BOOLEAN
+			-- May pane `a_pane' (1 leading or top, 2 trailing or bottom) collapse?
+		require
+			pane: a_pane = 1 or a_pane = 2
+		do
+			Result := collapsible [a_pane]
+		end
+
+	set_collapsible (a_pane: INTEGER; a_on: BOOLEAN)
+			-- Let pane `a_pane' collapse (a button on the divider, a double click on it), or not.
+		require
+			gui_thread: is_gui_thread
+			pane: a_pane = 1 or a_pane = 2
+		do
+			collapsible [a_pane] := a_on
+			backend.splitter_set_collapsible (id, a_pane, a_on)
+		ensure
+			set: is_collapsible (a_pane) = a_on
+		end
+
+	is_pane_collapsed (a_pane: INTEGER): BOOLEAN
+		require
+			pane: a_pane = 1 or a_pane = 2
+		do
+			Result := backend.splitter_is_collapsed (id, a_pane)
+		end
+
+	collapse_pane (a_pane: INTEGER)
+			-- Give pane `a_pane''s room to the other, remembering `position'; no event.
+		require
+			gui_thread: is_gui_thread
+			pane: a_pane = 1 or a_pane = 2
+			collapsible: is_collapsible (a_pane)
+			other_open: not is_pane_collapsed (3 - a_pane)
+		do
+			backend.splitter_collapse (id, a_pane, True)
+		ensure
+			collapsed: is_pane_collapsed (a_pane)
+		end
+
+	expand_pane (a_pane: INTEGER)
+			-- Open pane `a_pane' again, the divider back where it was; no event.
+		require
+			gui_thread: is_gui_thread
+			pane: a_pane = 1 or a_pane = 2
+		do
+			backend.splitter_collapse (id, a_pane, False)
+		ensure
+			opened: not is_pane_collapsed (a_pane)
+		end
+
+	collapse_actions: GUI_ACTIONS [TUPLE [pane: INTEGER; is_collapsed: BOOLEAN]]
+			-- Run when the user collapses or expands a pane.
+		do
+			if attached collapse_actions_made as al_a then
+				Result := al_a
+			else
+				create Result.make
+				collapse_actions_made := Result
+			end
+		end
+
+feature {GUI_APPLICATION} -- Events
+
+	dispatch (a_type, a_a, a_b, a_c: INTEGER)
+			-- 42: a pane collapsed or expanded by the user (pane, 1 or 0).
+		do
+			if a_type = 42 and then (a_a = 1 or a_a = 2) and then attached collapse_actions_made as al_a then
+				al_a.call ([a_a, a_b = 1])
+			end
+		end
+
+feature {NONE} -- Collapsing
+
+	collapsible: ARRAY [BOOLEAN]
+		attribute
+			create Result.make_filled (False, 1, 2)
+		end
+
+	collapse_actions_made: detachable like collapse_actions
 
 invariant
 	at_most_two: count <= 2

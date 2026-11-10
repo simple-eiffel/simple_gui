@@ -164,6 +164,12 @@ feature -- Element change
 			if not a_panel.is_visible then
 				backend.dock_show_panel (id, panels.count, False)
 			end
+			if not (a_panel.short_title.is_empty and a_panel.description.is_empty and a_panel.tab_tooltip.is_empty) then
+				a_panel.tell_fields
+			end
+			if not a_panel.pill_code.is_empty then
+				a_panel.set_pill (a_panel.pill_code.twin)
+			end
 		ensure
 			docked: a_panel.dock = Current and a_panel.side = a_side
 			last_on_side: panels_on (a_side).last = a_panel
