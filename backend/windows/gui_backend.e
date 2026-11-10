@@ -6051,7 +6051,12 @@ feature {NONE} -- Implementation
 
 	pump_windowless (a_ms: INTEGER)
 			-- No window open: pump this thread in short slices so a processor's wake still
-			-- arrives (as event 11) within a slice, not after the whole `a_ms'.
+			-- arrives (as event 11) within a slice, not after the whole `a_ms'. A slice is never
+			-- shorter than a millisecond, because `SHELL_DESKTOP.pump_for' takes a positive
+			-- span: with `a_ms' 0 (a timer is due now) the waiting messages are still
+			-- dispatched and it returns almost at once.
+		require
+			non_negative: a_ms >= 0
 		local
 			i, l_slices: INTEGER
 			l_woke: BOOLEAN
@@ -6063,7 +6068,7 @@ feature {NONE} -- Implementation
 			until
 				i > l_slices or l_woke
 			loop
-				desktop.pump_for (a_ms.min (10))
+				desktop.pump_for (a_ms.min (10).max (1))
 				l_woke := drain.took_wake
 				i := i + 1
 			end
