@@ -301,6 +301,97 @@ feature -- Windows and containers
 		deferred
 		end
 
+	list_extend_rich (an_id: INTEGER; a_title, a_subtitle, an_icon: POINTER; a_badge, a_flags: INTEGER)
+			-- 1s: a rich row at the end; `a_flags': 1 checkable, 2 checked, 4 closable.
+		deferred
+		end
+
+	list_set_checked (an_id, a_row: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	list_is_checked (an_id, a_row: INTEGER): BOOLEAN
+			-- What row `a_row''s box shows.
+		deferred
+		end
+
+	list_remove (an_id, a_row: INTEGER)
+		deferred
+		end
+
+	list_reorder (an_id: INTEGER; an_order: POINTER)
+			-- The old rows (from 1) in their new order, joined by ","; the selection stays with its row.
+		deferred
+		end
+
+	list_set_filter (an_id: INTEGER; a_text: POINTER)
+		deferred
+		end
+
+	list_shown_count (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	table_set_column_editor (a_table, a_column, a_kind: INTEGER; a_choices: POINTER)
+			-- 1s: kind 0 none, 1 text, 2 check, 3 choice; choices joined by U+001F.
+		deferred
+		end
+
+	table_take_edit (a_table: INTEGER): POINTER
+			-- The committed text of the edit event 45 told of.
+		deferred
+		end
+
+	table_refuse_edit (a_table, a_row, a_column: INTEGER; a_message: POINTER)
+			-- Put the cell's old text back and show `a_message' under it until the next edit in the table.
+		deferred
+		end
+
+	table_set_filter (a_table: INTEGER; a_text: POINTER; a_columns_mask: INTEGER)
+			-- Held rows: bit 0 is column 1; 0: all columns.
+		deferred
+		end
+
+	table_set_shown_rows (a_table: INTEGER; a_rows: POINTER)
+			-- Lazy rows: the model rows to show, joined by ","; empty: all.
+		deferred
+		end
+
+	table_shown_count (a_table: INTEGER): INTEGER
+		deferred
+		end
+
+	test_check_row (an_id, a_row: INTEGER)
+			-- As the user pressing row `a_row''s check box: 43.
+		deferred
+		end
+
+	test_close_row (an_id, a_row: INTEGER)
+			-- As the user pressing row `a_row''s close button: the row goes, 44.
+		deferred
+		end
+
+	test_edit_cell (a_table, a_row, a_column: INTEGER; a_text: POINTER)
+			-- As the user editing the cell to `a_text' and committing (a check: "1" or "0";
+			-- a choice: the option's text): 45.
+		deferred
+		end
+
+	test_cancel_edit (a_table, a_row, a_column: INTEGER)
+			-- As the user starting an edit and pressing Escape: nothing changes, no event.
+		deferred
+		end
+
+	test_cell_text (a_table, a_row, a_column: INTEGER): POINTER
+			-- What the cell shows (model row).
+		deferred
+		end
+
+	test_cell_note (a_table: INTEGER): POINTER
+			-- The refusal note showing in the table; empty: none.
+		deferred
+		end
+
 	test_locate_row (an_id, a_row: INTEGER): INTEGER
 			-- The row a drop's locating finds at the middle of row `a_row''s place on screen: a
 			-- list's row, a tree's node number, a token field's token; 0 when it finds none.

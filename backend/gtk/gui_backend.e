@@ -332,6 +332,120 @@ feature -- Windows and containers
 		alias "return sg_test_locate_row($an_id, $a_row);"
 		end
 
+	list_extend_rich (an_id: INTEGER; a_title, a_subtitle, an_icon: POINTER; a_badge, a_flags: INTEGER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_list_extend_rich($an_id, (const char *) $a_title, (const char *) $a_subtitle, (const char *) $an_icon, $a_badge, $a_flags);"
+		end
+
+	list_set_checked (an_id, a_row: INTEGER; a_on: BOOLEAN)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_list_set_checked($an_id, $a_row, $a_on);"
+		end
+
+	list_is_checked (an_id, a_row: INTEGER): BOOLEAN
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_list_is_checked($an_id, $a_row);"
+		end
+
+	list_remove (an_id, a_row: INTEGER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_list_remove($an_id, $a_row);"
+		end
+
+	list_reorder (an_id: INTEGER; an_order: POINTER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_list_reorder($an_id, (const char *) $an_order);"
+		end
+
+	list_set_filter (an_id: INTEGER; a_text: POINTER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_list_set_filter($an_id, (const char *) $a_text);"
+		end
+
+	list_shown_count (an_id: INTEGER): INTEGER
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_list_shown_count($an_id);"
+		end
+
+	table_set_column_editor (a_table, a_column, a_kind: INTEGER; a_choices: POINTER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_table_set_column_editor($a_table, $a_column, $a_kind, (const char *) $a_choices);"
+		end
+
+	table_take_edit (a_table: INTEGER): POINTER
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_table_take_edit($a_table);"
+		end
+
+	table_refuse_edit (a_table, a_row, a_column: INTEGER; a_message: POINTER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_table_refuse_edit($a_table, $a_row, $a_column, (const char *) $a_message);"
+		end
+
+	table_set_filter (a_table: INTEGER; a_text: POINTER; a_columns_mask: INTEGER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_table_set_filter($a_table, (const char *) $a_text, $a_columns_mask);"
+		end
+
+	table_set_shown_rows (a_table: INTEGER; a_rows: POINTER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_table_set_shown_rows($a_table, (const char *) $a_rows);"
+		end
+
+	table_shown_count (a_table: INTEGER): INTEGER
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_table_shown_count($a_table);"
+		end
+
+	test_check_row (an_id, a_row: INTEGER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_check_row($an_id, $a_row);"
+		end
+
+	test_close_row (an_id, a_row: INTEGER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_close_row($an_id, $a_row);"
+		end
+
+	test_edit_cell (a_table, a_row, a_column: INTEGER; a_text: POINTER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_edit_cell($a_table, $a_row, $a_column, (const char *) $a_text);"
+		end
+
+	test_cancel_edit (a_table, a_row, a_column: INTEGER)
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_cancel_edit($a_table, $a_row, $a_column);"
+		end
+
+	test_cell_text (a_table, a_row, a_column: INTEGER): POINTER
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_test_cell_text($a_table, $a_row, $a_column);"
+		end
+
+	test_cell_note (a_table: INTEGER): POINTER
+			-- 1s.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_test_cell_note($a_table);"
+		end
+
 	splitter (a_vertical: BOOLEAN): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_splitter($a_vertical ? 1 : 0);"
