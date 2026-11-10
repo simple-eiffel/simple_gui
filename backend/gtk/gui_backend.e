@@ -530,6 +530,96 @@ feature -- Windows and containers
 		alias "return sg_test_page_shown($an_id);"
 		end
 
+	dialog (a_title: POINTER): INTEGER
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_dialog((const char *) $a_title);"
+		end
+
+	dialog_set_content (a_dialog, a_widget: INTEGER)
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dialog_set_content($a_dialog, $a_widget);"
+		end
+
+	dialog_add_button (a_dialog: INTEGER; a_text: POINTER; a_role: INTEGER): INTEGER
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_dialog_add_button($a_dialog, (const char *) $a_text, $a_role);"
+		end
+
+	dialog_set_button_enabled (a_dialog, n: INTEGER; a_on: BOOLEAN)
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dialog_set_button_enabled($a_dialog, $n, $a_on);"
+		end
+
+	dialog_present (a_dialog, a_parent_window: INTEGER; an_app_modal: BOOLEAN)
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dialog_present($a_dialog, $a_parent_window, $an_app_modal);"
+		end
+
+	dialog_pump (a_dialog: INTEGER)
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dialog_pump($a_dialog);"
+		end
+
+	dialog_close (a_dialog: INTEGER)
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dialog_close($a_dialog);"
+		end
+
+	dialog_is_shown (a_dialog: INTEGER): BOOLEAN
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_dialog_is_shown($a_dialog);"
+		end
+
+	help_show_tip (a_widget: INTEGER; a_text: POINTER)
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_help_show_tip($a_widget, (const char *) $a_text);"
+		end
+
+	test_press_dialog_button (a_dialog, n: INTEGER)
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_press_dialog_button($a_dialog, $n);"
+		end
+
+	test_dialog_key (a_dialog, a_key: INTEGER)
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_dialog_key($a_dialog, $a_key);"
+		end
+
+	test_press_dialog_button_later (a_dialog, n, a_ms: INTEGER)
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_press_dialog_button_later($a_dialog, $n, $a_ms);"
+		end
+
+	test_dialog_button_order (a_dialog: INTEGER): POINTER
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_test_dialog_button_order($a_dialog);"
+		end
+
+	test_press_help (a_window: INTEGER)
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_press_help($a_window);"
+		end
+
+	test_help_tip_shown: POINTER
+			-- 1u.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_test_help_tip_shown();"
+		end
+
 	splitter (a_vertical: BOOLEAN): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_splitter($a_vertical ? 1 : 0);"

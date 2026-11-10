@@ -1889,6 +1889,146 @@ feature -- The remaining controls (1j)
 			end
 		end
 
+	test_dialog_buttons_and_keys
+			-- 1u: the platform orders the buttons; Return presses the default, Escape and the
+			-- close box Cancel; can_close keeps it open; a disabled default ignores Return.
+		local
+			l_window: GUI_WINDOW
+			l_dialog: GUI_DIALOG
+			l_delete, l_cancel, l_save, l_later: INTEGER
+			l_may: CELL [BOOLEAN]
+			l_told: ARRAYED_LIST [INTEGER]
+			l_field: GUI_TEXT_FIELD
+		do
+			create l_may.put (False)
+			create l_told.make (4)
+			create l_window.make ("Owner", 420, 240)
+			l_window.show
+			settle_window
+			create l_dialog.make ("Save changes?")
+			create l_field.make
+			l_dialog.set_content (l_field)
+			l_delete := l_dialog.add_button ("Delete", l_dialog.Role_destructive)
+			l_cancel := l_dialog.add_button ("Cancel", l_dialog.Role_cancel)
+			l_save := l_dialog.add_button ("Save", l_dialog.Role_default)
+			l_later := l_dialog.add_button ("Later", l_dialog.Role_other)
+			l_dialog.set_can_close (agent (n: INTEGER; c: CELL [BOOLEAN]): BOOLEAN do Result := c.item end (?, l_may))
+			l_dialog.response_actions.extend (agent (n: INTEGER; t: ARRAYED_LIST [INTEGER]) do t.extend (n) end (?, l_told))
+			l_dialog.present (l_window)
+			settle_window
+			assert ("shown", l_dialog.is_shown)
+			if {PLATFORM}.is_windows then
+				assert ("Windows: destructive, default, other, Cancel: " + driver.dialog_button_order (l_dialog).out,
+					driver.dialog_button_order (l_dialog).same_string ("1,3,4,2"))
+			else
+				assert ("destructive apart, others, Cancel, default last: " + driver.dialog_button_order (l_dialog).out,
+					driver.dialog_button_order (l_dialog).same_string ("1,4,2,3"))
+			end
+			driver.press_dialog_key (l_dialog, 1)
+			assert ("can_close said no", l_dialog.is_shown and l_told.is_empty)
+			l_may.put (True)
+			l_dialog.set_button_enabled (l_save, False)
+			driver.press_dialog_key (l_dialog, 1)
+			assert ("a disabled default ignores Return", l_dialog.is_shown and l_told.is_empty)
+			l_dialog.set_button_enabled (l_save, True)
+			driver.press_dialog_key (l_dialog, 1)
+			assert ("Return saved", not l_dialog.is_shown and l_told.count = 1 and l_told [1] = l_save and l_dialog.last_button = l_save)
+			l_dialog.present (l_window)
+			settle_window
+			driver.press_dialog_key (l_dialog, 2)
+			assert ("Escape cancels", not l_dialog.is_shown and l_told.count = 2 and l_told [2] = l_cancel)
+			l_dialog.present (l_window)
+			settle_window
+			driver.press_dialog_key (l_dialog, 3)
+			assert ("the close box cancels", not l_dialog.is_shown and l_told.count = 3 and l_told [3] = l_cancel)
+			l_dialog.present (l_window)
+			settle_window
+			driver.press_dialog_button (l_dialog, l_later)
+			assert ("a click on Later", not l_dialog.is_shown and l_told.count = 4 and l_told [4] = l_later)
+			l_dialog.present (l_window)
+			settle_window
+			l_dialog.close_with (l_delete)
+			assert ("closed from code, quietly", not l_dialog.is_shown and l_told.count = 4 and l_dialog.last_button = l_delete)
+			l_window.close
+		end
+
+	test_dialog_run_modal
+			-- 1u: run_modal waits while events run and answers the button; a dialog whose only
+			-- action is destructive has no Return, and with no Cancel, Escape does nothing.
+		local
+			l_window: GUI_WINDOW
+			l_dialog, l_bare: GUI_DIALOG
+			l_ok, l_erase: INTEGER
+		do
+			create l_window.make ("Owner", 420, 240)
+			l_window.show
+			settle_window
+			create l_dialog.make ("Question")
+			l_dialog.set_content (create {GUI_LABEL}.make ("Go on?"))
+			l_ok := l_dialog.add_button ("OK", l_dialog.Role_default)
+			l_dialog.add_button ("Cancel", l_dialog.Role_cancel).do_nothing
+			driver.press_dialog_button_later (l_dialog, l_ok, 150)
+			assert ("run_modal answered OK", l_dialog.run_modal (l_window) = l_ok and not l_dialog.is_shown)
+			driver.press_dialog_button_later (l_dialog, l_ok, 150)
+			assert ("with no parent too", l_dialog.run_modal (Void) = l_ok)
+			create l_bare.make ("Erase?")
+			l_bare.set_content (create {GUI_LABEL}.make ("Erase everything?"))
+			l_erase := l_bare.add_button ("Erase", l_bare.Role_destructive)
+			l_bare.present (l_window)
+			settle_window
+			driver.press_dialog_key (l_bare, 1)
+			assert ("Return never presses a destructive button", l_bare.is_shown)
+			driver.press_dialog_key (l_bare, 2)
+			driver.press_dialog_key (l_bare, 3)
+			assert ("no Cancel: Escape and the close box do nothing", l_bare.is_shown)
+			driver.press_dialog_button (l_bare, l_erase)
+			assert ("only an answer closes it", not l_bare.is_shown and l_bare.last_button = l_erase)
+			l_window.close
+		end
+
+	test_context_help
+			-- 1u: F1 asks help_actions with the nearest topic up from the focused widget; with
+			-- no actions, a pill's tip shows.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_name, l_plain: GUI_TEXT_FIELD
+			l_asked: ARRAYED_LIST [STRING_32]
+			l_by: CELL [detachable GUI_WIDGET]
+		do
+			create l_asked.make (2)
+			create l_by.put (Void)
+			create l_window.make ("Help", 420, 200)
+			create l_stack.make_vertical
+			create l_name.make
+			create l_plain.make
+			l_name.set_help_topic ("names")
+			l_stack.set_help_topic ("the-form")
+			l_stack.extend (l_name)
+			l_stack.extend (l_plain)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			if not app.pills.has ("H1") then
+				app.pills.define ("H1", "The name field: who you are").do_nothing
+			end
+			l_plain.set_pill ("H1")
+			driver.focus (l_plain)
+			driver.press_help (l_window)
+			assert ("no actions: the pill's tip: " + driver.help_tip_shown.out, driver.help_tip_shown.has_substring ("who you are"))
+			app.help_actions.extend (agent (t: STRING_32; w: detachable GUI_WIDGET; a: ARRAYED_LIST [STRING_32]; c: CELL [detachable GUI_WIDGET])
+				do a.extend (t); c.put (w) end (?, ?, l_asked, l_by))
+			driver.focus (l_name)
+			driver.press_help (l_window)
+			assert ("its own topic", l_asked.count = 1 and l_asked [1].same_string ("names") and l_by.item = l_name)
+			driver.focus (l_plain)
+			driver.press_help (l_window)
+			assert ("the parent's topic", l_asked.count = 2 and l_asked [2].same_string ("the-form") and l_by.item = l_stack)
+			app.help_actions.wipe_out
+			l_plain.clear_pill
+			l_window.close
+		end
+
 	test_rating_set_silently_and_user_emits
 		local
 			l_window: GUI_WINDOW

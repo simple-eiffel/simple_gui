@@ -74,6 +74,15 @@ feature -- Access
 			-- Run for each worker message, on the GUI processor.
 
 	appearance_changed_actions: GUI_ACTIONS [TUPLE [dark: BOOLEAN]]
+
+	help_actions: GUI_ACTIONS [TUPLE [topic: STRING_32; widget: detachable GUI_WIDGET]]
+			-- 1u: run when the user asks for help (F1; Command+? on macOS), with the nearest
+			-- `help_topic' up from the focused widget and the widget that has it (empty and
+			-- Void: none; Void also when the user asked about the window itself). With none
+			-- set, a widget's reference pill tip shows instead.
+		attribute
+			create Result.make
+		end
 			-- Run when the system switches between light and dark.
 
 	pills: GUI_PILLS
@@ -322,6 +331,8 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 					if notification_actions.valid_index (l_a) then
 						notification_actions.i_th (l_a).call (Void)
 					end
+				when 49 then
+					answer_help (l_a)
 				when 30 then
 					begin_pick (l_id, l_a)
 				when 31 then
@@ -357,6 +368,39 @@ feature {GUI_TEST_DRIVER} -- Registry
 			-- Every widget, by id.
 
 feature {NONE} -- Implementation
+
+	answer_help (a_focused: INTEGER)
+			-- The user asked for help about widget `a_focused' (0: the window).
+		local
+			l_widget, l_topic_owner, l_pill_owner: detachable GUI_WIDGET
+			l_c: C_STRING
+		do
+			from
+				l_widget := widgets.item (a_focused)
+			until
+				l_widget = Void or else (l_topic_owner /= Void and l_pill_owner /= Void)
+			loop
+				if attached l_widget as al_w then
+					if l_topic_owner = Void and then not al_w.help_topic.is_empty then
+						l_topic_owner := al_w
+					end
+					if l_pill_owner = Void and then attached al_w.pill_code as al_code and then pills.has (al_code) then
+						l_pill_owner := al_w
+					end
+					l_widget := al_w.parent
+				end
+			end
+			if help_actions.count > 0 then
+				if attached l_topic_owner as al_owner then
+					help_actions.call ([al_owner.help_topic, al_owner])
+				else
+					help_actions.call ([create {STRING_32}.make_empty, Void])
+				end
+			elseif attached l_pill_owner as al_owner and then attached al_owner.pill_code as al_code then
+				l_c := backend.to_c (pills.item (al_code).tip)
+				backend.help_show_tip (al_owner.id, l_c.item)
+			end
+		end
 
 	notification_actions: ARRAYED_LIST [PROCEDURE]
 			-- Each clickable notification's action, by its id (from 1).
