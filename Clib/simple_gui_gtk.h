@@ -248,7 +248,27 @@ static void sg_pill_clear(int id) {
     if (t) g_object_set_data(G_OBJECT(t), "sg-pill-code", NULL);
     sg_pill_sync(id);
 }
-static void sg_pills_show(int on) { sg_pills_on = on; sg_pill_sync_all(); }
+__attribute__((weak)) GPtrArray *sg_dock_pills = NULL;   /* 1r-c: panels' pill labels, shown with the rest */
+static void sg_dock_pills_sync(void) {
+    guint i;
+    if (!sg_dock_pills) return;
+    for (i = 0; i < sg_dock_pills->len; i++) {
+        GtkWidget *l = g_ptr_array_index(sg_dock_pills, i);
+        gtk_widget_set_visible(l, sg_pills_on && *gtk_label_get_text(GTK_LABEL(l)));
+    }
+}
+static void sg_dock_pill_gone(gpointer data, GObject *dead) { (void) data; if (sg_dock_pills) g_ptr_array_remove(sg_dock_pills, dead); }
+static GtkWidget *sg_dock_pill_label(const char *code) {
+    GtkWidget *l = gtk_label_new(code ? code : "");
+    sg_pill_css();
+    gtk_widget_add_css_class(l, "sg-pill");
+    if (!sg_dock_pills) sg_dock_pills = g_ptr_array_new();
+    g_ptr_array_add(sg_dock_pills, l);
+    g_object_weak_ref(G_OBJECT(l), sg_dock_pill_gone, NULL);
+    gtk_widget_set_visible(l, sg_pills_on && code && *code);
+    return l;
+}
+static void sg_pills_show(int on) { sg_pills_on = on; sg_pill_sync_all(); sg_dock_pills_sync(); }
 static const char *sg_pill_tip_shown(int id) {
     GtkWidget *l = id > 0 && id < SG_MAX ? sg_pill_label[id] : NULL;
     const char *tip;
@@ -466,7 +486,7 @@ static int sg_coalesce5(int t, int id, int a, int b) {
     sg_q[last][3] = b;
     return 1;
 }
-typedef struct { GtkWidget *frame, *header, *content, *float_win; char *key, *title; int side, visible, floating, fx, fy, fw, fh; } SgDockPanel;
+typedef struct { GtkWidget *frame, *header, *header_label, *header_pill, *content, *float_win; char *key, *title, *short_title, *description, *tip, *pill; int side, visible, floating, fx, fy, fw, fh; } SgDockPanel;
 typedef struct {
     int id;
     GtkWidget *root, *strip[5], *pane[5], *holder[5], *box[5], *bar_label[5];
@@ -587,6 +607,8 @@ static int sg_dock_in_box(SgDock *d, int side, SgDockPanel *p) {
     if (GTK_IS_NOTEBOOK(b)) return gtk_notebook_page_num(GTK_NOTEBOOK(b), p->frame) >= 0;
     return gtk_widget_get_parent(p->frame) == b;
 }
+static const char *sg_dock_tab_text(SgDockPanel *p) { return p->short_title && *p->short_title ? p->short_title : p->title; }
+static const char *sg_dock_tab_tip(SgDockPanel *p) { return p->tip && *p->tip ? p->tip : (p->description ? p->description : ""); }
 static void sg_dock_rebuild(SgDock *d, int side);
 static GtkWidget *sg_dock_tab_label(SgDock *d, SgDockPanel *p);
 static void sg_dock_floatable(SgDock *d, SgDockPanel *p, GtkWidget *w);
@@ -695,8 +717,9 @@ static void sg_dock_rebuild_strip(SgDock *d, int side) {
         SgDockPanel *p = g_ptr_array_index(d->order[side], i);
         GtkWidget *b;
         if (!p->visible || p->floating) continue;
-        b = gtk_button_new_with_label(p->title);
+        b = gtk_button_new_with_label(sg_dock_tab_text(p));
         gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
+        if (*sg_dock_tab_tip(p)) gtk_widget_set_tooltip_text(b, sg_dock_tab_tip(p));
         g_object_set_data(G_OBJECT(b), "sg-dock-owner", d);
         g_signal_connect(b, "clicked", G_CALLBACK(sg_dock_on_strip), p);
         {
@@ -809,9 +832,12 @@ static void sg_dock_floatable(SgDock *d, SgDockPanel *p, GtkWidget *w) {
     gtk_widget_add_controller(w, GTK_EVENT_CONTROLLER(g));
 }
 static GtkWidget *sg_dock_tab_label(SgDock *d, SgDockPanel *p) {
-    GtkWidget *l = gtk_label_new(p->title);
-    sg_dock_floatable(d, p, l);
-    return l;
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4), *l = gtk_label_new(sg_dock_tab_text(p));
+    gtk_box_append(GTK_BOX(box), sg_dock_pill_label(p->pill));
+    gtk_box_append(GTK_BOX(box), l);
+    if (*sg_dock_tab_tip(p)) gtk_widget_set_tooltip_text(box, sg_dock_tab_tip(p));
+    sg_dock_floatable(d, p, box);
+    return box;
 }
 /* The slide-out: the panel shown over the center along its side's edge, at the side's size;
    back 0.5 s after the pointer leaves it, never while the focus is inside. */
@@ -914,7 +940,7 @@ static void sg_dock_free(gpointer data) {
         SgDockPanel *p = g_ptr_array_index(d->panels, i);
         if (p->float_win) { gtk_window_set_child(GTK_WINDOW(p->float_win), NULL); gtk_window_destroy(GTK_WINDOW(p->float_win)); }
         g_object_unref(p->frame);
-        g_free(p->key); g_free(p->title); g_free(p);
+        g_free(p->key); g_free(p->title); g_free(p->short_title); g_free(p->description); g_free(p->tip); g_free(p->pill); g_free(p);
     }
     g_ptr_array_free(d->panels, TRUE);
     for (s = 1; s <= 4; s++) g_ptr_array_free(d->order[s], TRUE);
@@ -1006,10 +1032,14 @@ static void sg_dock_add(int dock, int content, int side, const char *key, const 
     p->key = g_strdup(key); p->title = g_strdup(title); p->side = side; p->visible = 1;
     p->frame = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
     g_object_ref_sink(p->frame);   /* ours: it moves between sides and tabs */
-    p->header = gtk_label_new(title);
+    p->header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    p->header_pill = sg_dock_pill_label("");
+    p->header_label = gtk_label_new(title);
+    gtk_label_set_xalign(GTK_LABEL(p->header_label), 0.0);
+    gtk_widget_add_css_class(p->header_label, "heading");
+    gtk_box_append(GTK_BOX(p->header), p->header_pill);
+    gtk_box_append(GTK_BOX(p->header), p->header_label);
     sg_dock_floatable(d, p, p->header);
-    gtk_label_set_xalign(GTK_LABEL(p->header), 0.0);
-    gtk_widget_add_css_class(p->header, "heading");
     gtk_box_append(GTK_BOX(p->frame), p->header);
     if (sg_w[content]) {
         p->content = sg_w[content];
@@ -1043,14 +1073,14 @@ static void sg_dock_remove(int dock, int index) {
     g_ptr_array_remove_index(d->panels, (guint) index - 1);
     if (p->content && gtk_widget_get_parent(p->content) == p->frame) gtk_box_remove(GTK_BOX(p->frame), p->content);
     g_object_unref(p->frame);
-    g_free(p->key); g_free(p->title); g_free(p);
+    g_free(p->key); g_free(p->title); g_free(p->short_title); g_free(p->description); g_free(p->tip); g_free(p->pill); g_free(p);
 }
 static void sg_dock_set_title(int dock, int index, const char *title) {
     SgDock *d = sg_dock_of(dock);
     SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
     if (!p) return;
     g_free(p->title); p->title = g_strdup(title);
-    gtk_label_set_text(GTK_LABEL(p->header), title);
+    gtk_label_set_text(GTK_LABEL(p->header_label), title);
     sg_dock_rebuild(d, p->side);
 }
 static void sg_dock_set_tabbed(int dock, int side, int on) {
@@ -1159,6 +1189,97 @@ static void sg_test_toggle_center(int dock) {
     sg_dock_maximize_now(d, !d->maximized);
     sg_push(40, dock, 0, d->maximized);
 }
+/* ---------- 1r-c: panel fields and pills ---------- */
+static void sg_dock_set_panel_fields(int dock, int index, const char *short_title, const char *description, const char *tip) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
+    if (!p) return;
+    g_free(p->short_title); p->short_title = g_strdup(short_title);
+    g_free(p->description); p->description = g_strdup(description);
+    g_free(p->tip); p->tip = g_strdup(tip);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(p->frame), GTK_ACCESSIBLE_PROPERTY_DESCRIPTION, p->description, -1);
+    sg_dock_rebuild(d, p->side);   /* tabs and strip names again */
+}
+static void sg_dock_set_panel_pill(int dock, int index, const char *code) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
+    if (!p) return;
+    g_free(p->pill); p->pill = g_strdup(code);
+    gtk_label_set_text(GTK_LABEL(p->header_pill), code);
+    gtk_widget_set_tooltip_text(p->header_pill, p->description);
+    gtk_widget_set_visible(p->header_pill, sg_pills_on && *code);
+    sg_dock_rebuild(d, p->side);
+}
+static const char *sg_test_panel_tab_text(int dock, int index) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
+    return p ? sg_dock_tab_text(p) : "";
+}
+static const char *sg_test_panel_tab_tooltip(int dock, int index) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
+    return p ? sg_dock_tab_tip(p) : "";
+}
+
+/* ---------- 1r-c: collapsible splitter panes. GtkPaned has no collapse: the pane's child hides
+   (the other takes the room) and the handle's place is kept for expanding. A double click on
+   the handle toggles the collapsible pane (the first when both are): 42. Dragging the handle of
+   a collapsed pane does not move it, so a drag never collapses. ---------- */
+static GtkWidget *sg_splitter_child(int s, int pane) {
+    return pane == 1 ? gtk_paned_get_start_child(GTK_PANED(sg_w[s])) : gtk_paned_get_end_child(GTK_PANED(sg_w[s]));
+}
+static int sg_splitter_is_collapsed(int s, int pane) {
+    return sg_w[s] && GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[s]), "sg-collapsed")) == pane;
+}
+static void sg_splitter_collapse(int s, int pane, int on) {
+    GtkWidget *c;
+    int now;
+    if (!sg_w[s] || (pane != 1 && pane != 2)) return;
+    now = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[s]), "sg-collapsed"));
+    c = sg_splitter_child(s, pane);
+    if (on && now == 0) {
+        g_object_set_data(G_OBJECT(sg_w[s]), "sg-kept-position", GINT_TO_POINTER(gtk_paned_get_position(GTK_PANED(sg_w[s]))));
+        g_object_set_data(G_OBJECT(sg_w[s]), "sg-collapsed", GINT_TO_POINTER(pane));
+        if (c) gtk_widget_set_visible(c, FALSE);
+    } else if (!on && now == pane) {
+        g_object_set_data(G_OBJECT(sg_w[s]), "sg-collapsed", GINT_TO_POINTER(0));
+        if (c) gtk_widget_set_visible(c, TRUE);
+        sg_quiet++;
+        gtk_paned_set_position(GTK_PANED(sg_w[s]), GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[s]), "sg-kept-position")));
+        sg_quiet--;
+    }
+}
+static void sg_splitter_toggle_by_user(int s, int pane) {
+    sg_splitter_collapse(s, pane, !sg_splitter_is_collapsed(s, pane));
+    sg_push(42, s, pane, sg_splitter_is_collapsed(s, pane));
+}
+static void sg_splitter_on_press(GtkGestureClick *g, int n, double x, double y, gpointer data) {
+    int s = GPOINTER_TO_INT(data), pos, pane = 0, now;
+    GtkPaned *p = GTK_PANED(sg_w[s]);
+    double at;
+    (void) g;
+    if (n != 2 || !sg_w[s]) return;
+    now = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[s]), "sg-collapsed"));
+    pos = gtk_paned_get_position(p);
+    at = gtk_orientable_get_orientation(GTK_ORIENTABLE(p)) == GTK_ORIENTATION_HORIZONTAL ? x : y;
+    if (now == 0 && (at < pos - 2 || at > pos + 8)) return;   /* not on the handle */
+    if (now) pane = now;
+    else if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[s]), "sg-collapsible-1"))) pane = 1;
+    else if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[s]), "sg-collapsible-2"))) pane = 2;
+    if (pane) sg_splitter_toggle_by_user(s, pane);
+}
+static void sg_splitter_set_collapsible(int s, int pane, int on) {
+    if (!sg_w[s] || (pane != 1 && pane != 2)) return;
+    g_object_set_data(G_OBJECT(sg_w[s]), pane == 1 ? "sg-collapsible-1" : "sg-collapsible-2", GINT_TO_POINTER(on ? 1 : 0));
+    if (on && !g_object_get_data(G_OBJECT(sg_w[s]), "sg-collapse-hooked")) {
+        GtkGesture *g = gtk_gesture_click_new();
+        gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(g), GTK_PHASE_CAPTURE);
+        g_signal_connect(g, "pressed", G_CALLBACK(sg_splitter_on_press), GINT_TO_POINTER(s));
+        gtk_widget_add_controller(sg_w[s], GTK_EVENT_CONTROLLER(g));
+        g_object_set_data(G_OBJECT(sg_w[s]), "sg-collapse-hooked", GINT_TO_POINTER(1));
+    }
+}
+static void sg_test_toggle_splitter_pane(int s, int pane) { if (sg_w[s]) sg_splitter_toggle_by_user(s, pane); }
 static void sg_test_click_dock_tab(int dock, int index) {
     SgDock *d = sg_dock_of(dock);
     SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;

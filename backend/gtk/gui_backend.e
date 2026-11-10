@@ -278,6 +278,54 @@ feature -- Windows and containers
 		alias "sg_test_toggle_center($a_dock);"
 		end
 
+	dock_set_panel_fields (a_dock, an_index: INTEGER; a_short_title, a_description, a_tab_tooltip: POINTER)
+			-- 1r-c.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_set_panel_fields($a_dock, $an_index, (const char *) $a_short_title, (const char *) $a_description, (const char *) $a_tab_tooltip);"
+		end
+
+	dock_set_panel_pill (a_dock, an_index: INTEGER; a_code: POINTER)
+			-- 1r-c.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_set_panel_pill($a_dock, $an_index, (const char *) $a_code);"
+		end
+
+	test_panel_tab_text (a_dock, an_index: INTEGER): POINTER
+			-- 1r-c.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_test_panel_tab_text($a_dock, $an_index);"
+		end
+
+	test_panel_tab_tooltip (a_dock, an_index: INTEGER): POINTER
+			-- 1r-c.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_test_panel_tab_tooltip($a_dock, $an_index);"
+		end
+
+	splitter_set_collapsible (a_splitter, a_pane: INTEGER; a_on: BOOLEAN)
+			-- 1r-c.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_splitter_set_collapsible($a_splitter, $a_pane, $a_on);"
+		end
+
+	splitter_collapse (a_splitter, a_pane: INTEGER; a_on: BOOLEAN)
+			-- 1r-c.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_splitter_collapse($a_splitter, $a_pane, $a_on);"
+		end
+
+	splitter_is_collapsed (a_splitter, a_pane: INTEGER): BOOLEAN
+			-- 1r-c.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_splitter_is_collapsed($a_splitter, $a_pane);"
+		end
+
+	test_toggle_splitter_pane (a_splitter, a_pane: INTEGER)
+			-- 1r-c.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_toggle_splitter_pane($a_splitter, $a_pane);"
+		end
+
 	splitter (a_vertical: BOOLEAN): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_splitter($a_vertical ? 1 : 0);"

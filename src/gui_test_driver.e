@@ -660,6 +660,33 @@ feature -- User actions
 			settle
 		end
 
+	toggle_splitter_pane (a_splitter: GUI_SPLITTER; a_pane: INTEGER)
+			-- Press the divider's button for `a_pane', as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_toggle_splitter_pane (a_splitter.id, a_pane)
+			settle
+		end
+
+	panel_tab_text (a_dock: GUI_DOCK; a_panel: GUI_DOCK_PANEL): STRING_32
+			-- What `a_panel''s tab shows, as the user sees it.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_panel_tab_text (a_dock.id, a_dock.index_of (a_panel)))
+		end
+
+	panel_tab_tooltip (a_dock: GUI_DOCK; a_panel: GUI_DOCK_PANEL): STRING_32
+			-- `a_panel''s tab tooltip, as the user sees it.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_panel_tab_tooltip (a_dock.id, a_dock.index_of (a_panel)))
+		end
+
 	drag_out_carries (a_source: GUI_WIDGET): STRING_32
 			-- What a drag out of `a_source' would give another program now: the text, a line
 			-- feed, then the paths one per line; empty for nothing.

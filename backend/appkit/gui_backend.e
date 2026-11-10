@@ -1184,6 +1184,46 @@ feature -- Common widget state
 		alias "sga_test_toggle_center($a_dock);"
 		end
 
+	dock_set_panel_fields (a_dock, an_index: INTEGER; a_short_title, a_description, a_tab_tooltip: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_set_panel_fields($a_dock, $an_index, (const char *) $a_short_title, (const char *) $a_description, (const char *) $a_tab_tooltip);"
+		end
+
+	dock_set_panel_pill (a_dock, an_index: INTEGER; a_code: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_set_panel_pill($a_dock, $an_index, (const char *) $a_code);"
+		end
+
+	test_panel_tab_text (a_dock, an_index: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_test_panel_tab_text($a_dock, $an_index);"
+		end
+
+	test_panel_tab_tooltip (a_dock, an_index: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_test_panel_tab_tooltip($a_dock, $an_index);"
+		end
+
+	splitter_set_collapsible (a_splitter, a_pane: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_splitter_set_collapsible($a_splitter, $a_pane, $a_on ? 1 : 0);"
+		end
+
+	splitter_collapse (a_splitter, a_pane: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_splitter_collapse($a_splitter, $a_pane, $a_on ? 1 : 0);"
+		end
+
+	splitter_is_collapsed (a_splitter, a_pane: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_splitter_is_collapsed($a_splitter, $a_pane) != 0;"
+		end
+
+	test_toggle_splitter_pane (a_splitter, a_pane: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_toggle_splitter_pane($a_splitter, $a_pane);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

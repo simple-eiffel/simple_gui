@@ -560,6 +560,43 @@ feature -- Windows and containers
 			end
 		end
 
+	dock_set_panel_fields (a_dock, an_index: INTEGER; a_short_title, a_description, a_tab_tooltip: POINTER)
+			-- 1r-c: SW_DOCK_HOST keeps them by the panel's key.
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count then
+				al_h.set_panel_short_title (an_index, from_c (a_short_title))
+				al_h.set_panel_description (an_index, from_c (a_description))
+				al_h.set_panel_tooltip (an_index, from_c (a_tab_tooltip))
+				changed
+			end
+		end
+
+	dock_set_panel_pill (a_dock, an_index: INTEGER; a_code: POINTER)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count then
+				al_h.set_panel_pill (an_index, from_c (a_code))
+				changed
+			end
+		end
+
+	test_panel_tab_text (a_dock, an_index: INTEGER): POINTER
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count then
+				Result := c_text (al_h.tab_text (an_index))
+			else
+				Result := c_text ({STRING_32} "")
+			end
+		end
+
+	test_panel_tab_tooltip (a_dock, an_index: INTEGER): POINTER
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count then
+				Result := c_text (al_h.tab_tip (an_index))
+			else
+				Result := c_text ({STRING_32} "")
+			end
+		end
+
 	test_drag_dock_edge (a_dock, a_side, a_size: INTEGER)
 			-- As the user's drag: the size taken, and the change reported as the host reports a
 			-- drag (35).
@@ -627,6 +664,11 @@ feature -- Windows and containers
 					l_sp.set_grow (1.0)
 					al_holder.put (l_sp)
 					splitters.force (l_sp, a_splitter)
+					l_sp.set_on_collapse_change (agent splitter_collapse_told (a_splitter, ?, ?))
+					if attached splitter_collapsible.item (a_splitter) as al_c then
+						l_sp.set_collapsible (1, al_c [1])
+						l_sp.set_collapsible (2, al_c [2])
+					end
 					changed
 				end
 			end
@@ -641,6 +683,66 @@ feature -- Windows and containers
 			elseif attached splitter_info.item (a_splitter) as al_info and then al_info.pending >= 0 then
 				Result := al_info.pending
 			end
+		end
+
+	splitter_set_collapsible (a_splitter, a_pane: INTEGER; a_on: BOOLEAN)
+			-- 1r-c: kept until SW_SPLITTER is made (it takes both panes at once), then applied.
+		local
+			l_flags: ARRAY [BOOLEAN]
+		do
+			if a_pane = 1 or a_pane = 2 then
+				if attached splitter_collapsible.item (a_splitter) as al_c then
+					l_flags := al_c
+				else
+					create l_flags.make_filled (False, 1, 2)
+					splitter_collapsible.force (l_flags, a_splitter)
+				end
+				l_flags [a_pane] := a_on
+				if attached splitters.item (a_splitter) as al_sp then
+					al_sp.set_collapsible (a_pane, a_on)
+					changed
+				end
+			end
+		end
+
+	splitter_collapse (a_splitter, a_pane: INTEGER; a_on: BOOLEAN)
+		do
+			if attached splitters.item (a_splitter) as al_sp and then (a_pane = 1 or a_pane = 2) then
+				if a_on and then al_sp.is_collapsible (a_pane) and then not al_sp.is_pane_collapsed (a_pane)
+					and then not al_sp.is_pane_collapsed (3 - a_pane)
+				then
+					al_sp.collapse_pane (a_pane)
+				elseif not a_on and then al_sp.is_pane_collapsed (a_pane) then
+					al_sp.expand_pane (a_pane)
+				end
+				changed
+			end
+		end
+
+	splitter_is_collapsed (a_splitter, a_pane: INTEGER): BOOLEAN
+		do
+			Result := attached splitters.item (a_splitter) as al_sp and then (a_pane = 1 or a_pane = 2)
+				and then al_sp.is_pane_collapsed (a_pane)
+		end
+
+	test_toggle_splitter_pane (a_splitter, a_pane: INTEGER)
+			-- As the divider's button: the pane toggles and the change is told (42).
+		do
+			if attached splitters.item (a_splitter) as al_sp and then (a_pane = 1 or a_pane = 2) then
+				splitter_collapse (a_splitter, a_pane, not al_sp.is_pane_collapsed (a_pane))
+				push (42, a_splitter, a_pane, al_sp.is_pane_collapsed (a_pane).to_integer, 0)
+			end
+		end
+
+	splitter_collapse_told (a_splitter, a_pane: INTEGER; a_collapsed: BOOLEAN)
+			-- SW_SPLITTER's notice of the user's act (its button, a double click, an opening drag).
+		do
+			push (42, a_splitter, a_pane, a_collapsed.to_integer, 0)
+		end
+
+	splitter_collapsible: HASH_TABLE [ARRAY [BOOLEAN], INTEGER]
+		once ("OBJECT")
+			create Result.make (2)
 		end
 
 	splitter_set_position (a_splitter, a_position: INTEGER)

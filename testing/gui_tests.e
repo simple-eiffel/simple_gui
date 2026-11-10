@@ -2547,6 +2547,73 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_splitter_panes_collapse
+			-- 1r-c: a collapsible pane collapses (its room to the other) and expands back to the
+			-- divider's place, quietly from code; the user's button fires `collapse_actions'.
+		local
+			l_window: GUI_WINDOW
+			l_split: GUI_SPLITTER
+			l_told: ARRAYED_LIST [STRING]
+		do
+			create l_told.make (2)
+			create l_window.make ("Collapse", 700, 400)
+			create l_split.make_horizontal
+			l_split.set_first (create {GUI_LABEL}.make ("Outline"))
+			l_split.set_second (create {GUI_LABEL}.make ("Document"))
+			l_split.set_collapsible (1, True)
+			l_split.collapse_actions.extend (agent (p: INTEGER; c: BOOLEAN; t: ARRAYED_LIST [STRING]) do t.extend (p.out + ":" + c.out) end (?, ?, l_told))
+			l_window.set_content (l_split)
+			l_window.show
+			settle_window
+			l_split.set_position (200)
+			settle_window
+			assert ("collapsible first only", l_split.is_collapsible (1) and not l_split.is_collapsible (2))
+			l_split.collapse_pane (1)
+			settle_window
+			assert ("collapsed, quietly", l_split.is_pane_collapsed (1) and l_told.is_empty)
+			l_split.expand_pane (1)
+			settle_window
+			assert ("back at 200: " + l_split.position.out, not l_split.is_pane_collapsed (1) and (l_split.position - 200).abs <= 2)
+			driver.toggle_splitter_pane (l_split, 1)
+			assert ("the user's button collapsed it", l_split.is_pane_collapsed (1) and l_told.count = 1 and l_told [1].same_string ("1:True"))
+			driver.toggle_splitter_pane (l_split, 1)
+			assert ("and opened it", not l_split.is_pane_collapsed (1) and l_told.count = 2 and l_told [2].same_string ("1:False"))
+			l_window.close
+		end
+
+	test_dock_panel_fields
+			-- 1r-c: a tab shows the short title when set (else the title) and the tooltip, else
+			-- the description; the fields reach panels set before and after docking.
+		local
+			l_window: GUI_WINDOW
+			l_dock: GUI_DOCK
+			l_props, l_files: GUI_DOCK_PANEL
+		do
+			create l_window.make ("Fields", 800, 500)
+			create l_dock.make (create {GUI_LABEL}.make ("center"))
+			create l_props.make ("props", "Properties", create {GUI_LABEL}.make ("props"))
+			l_props.set_short_title ("Props")
+			l_props.set_description ("The selected object's properties")
+			l_props.set_pill ("P1")
+			create l_files.make ("files", "Files", create {GUI_LABEL}.make ("files"))
+			l_dock.add_panel (l_props, l_dock.Side_right)
+			l_dock.add_panel (l_files, l_dock.Side_right)
+			l_dock.set_tabbed (l_dock.Side_right, True)
+			l_window.set_content (l_dock)
+			l_window.show
+			settle_window
+			assert ("short title on the tab: " + driver.panel_tab_text (l_dock, l_props).out, driver.panel_tab_text (l_dock, l_props).same_string ("Props"))
+			assert ("the description as the tip: " + driver.panel_tab_tooltip (l_dock, l_props).out,
+				driver.panel_tab_tooltip (l_dock, l_props).same_string ("The selected object's properties"))
+			assert ("no short title: the title", driver.panel_tab_text (l_dock, l_files).same_string ("Files"))
+			l_files.set_tab_tooltip ("Every file in the project")
+			l_files.set_short_title ("F")
+			assert ("set after docking", driver.panel_tab_text (l_dock, l_files).same_string ("F")
+				and driver.panel_tab_tooltip (l_dock, l_files).same_string ("Every file in the project"))
+			assert ("the pill kept", l_props.pill_code.same_string ("P1"))
+			l_window.close
+		end
+
 	test_dragged_out_to_other_programs
 			-- 1q-c: a drag out carries the data the program keeps current; Void carries nothing;
 			-- the end of a drag reaches the source's actions only while it has data.
