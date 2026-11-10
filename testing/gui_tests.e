@@ -2030,6 +2030,107 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_code_editor_highlighting
+			-- 1v-b: keywords, comments, strings and numbers take their styles' colors; a block
+			-- comment opened on one line colors the lines after it until it closes, and closing
+			-- or removing it puts them back.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+		do
+			create l_window.make ("Code", 560, 360)
+			create l_code.make
+			l_code.add_keywords (<<"class", "feature", "do", "end">>, l_code.Style_keyword)
+			l_code.add_line_comment ("--", l_code.Style_comment)
+			l_code.add_delimited ("%"", "%"", l_code.Style_string)
+			l_code.add_delimited ("/*", "*/", l_code.Style_comment)
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("class A%N-- a note%Nfeature x: INTEGER = 42%Ndo print (%"hi%") end%Nplain line")
+			assert ("keyword", l_code.text_color_at (1) = l_code.style_color (l_code.Style_keyword))
+			assert ("comment", l_code.text_color_at (9) = l_code.style_color (l_code.Style_comment))
+			assert ("plain identifier", l_code.text_color_at (7) = l_code.style_color (l_code.Style_plain))
+			assert ("number", l_code.text_color_at (l_code.text.substring_index ("42", 1)) = l_code.style_color (l_code.Style_number))
+			assert ("string", l_code.text_color_at (l_code.text.substring_index ("%"hi", 1) + 1) = l_code.style_color (l_code.Style_string))
+			l_code.go_to_line (2)
+			driver.type_code (l_code, "/*")
+			assert ("the block runs on: " + l_code.text_color_at (l_code.text.substring_index ("plain", 1)).to_hex_string,
+				l_code.text_color_at (l_code.text.substring_index ("plain", 1)) = l_code.style_color (l_code.Style_comment))
+			l_code.go_to_line (4)
+			driver.type_code (l_code, "*/")
+			assert ("closed: the last line is plain again", l_code.text_color_at (l_code.text.substring_index ("plain", 1)) = l_code.style_color (l_code.Style_plain))
+			assert ("and line 3 is still inside", l_code.text_color_at (l_code.text.substring_index ("x:", 1)) = l_code.style_color (l_code.Style_comment))
+			l_window.close
+		end
+
+	test_code_editor_lines_and_indent
+			-- 1v-b: lines, the caret and go_to_line; Return keeps the indentation; Tab inserts
+			-- spaces when asked; the user's caret moves fire caret_actions.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_told: ARRAYED_LIST [STRING]
+		do
+			create l_told.make (2)
+			create l_window.make ("Code", 560, 360)
+			create l_code.make
+			l_code.set_indent_with_spaces (True)
+			l_code.caret_actions.extend (agent (l, c: INTEGER; t: ARRAYED_LIST [STRING]) do t.extend (l.out + ":" + c.out) end (?, ?, l_told))
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("feature%N    make%N")
+			assert ("three lines: " + l_code.line_count.out, l_code.line_count = 3)
+			assert ("line text", l_code.line_text (2).same_string ("    make"))
+			l_code.go_to_line (2)
+			assert ("caret at 2:1", l_code.caret_line = 2 and l_code.caret_column = 1 and l_told.is_empty)
+			driver.move_caret (l_code, 2, 9)
+			assert ("the user's caret told: " + l_told.count.out, not l_told.is_empty and l_told.last.same_string ("2:9"))
+			driver.type_code (l_code, "%Ndo")
+			assert ("auto-indent: " + l_code.line_text (3).out, l_code.line_text (3).same_string ("    do"))
+			driver.type_code (l_code, "%N%T")
+			assert ("Tab as four more spaces: [" + l_code.line_text (4).out + "]", l_code.line_text (4).same_string ("        "))
+			assert ("line numbers by default", l_code.is_line_numbers_shown)
+			l_code.set_line_numbers_shown (False)
+			assert ("hidden", not l_code.is_line_numbers_shown)
+			l_window.close
+		end
+
+	test_code_editor_find_replace
+			-- 1v-b: find selects the next match and wraps; whole words skip parts; replace_all
+			-- counts; the find bar drives the editor.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_code: GUI_CODE_EDITOR
+			l_bar: GUI_FIND_BAR
+		do
+			create l_window.make ("Find", 560, 360)
+			create l_stack.make_vertical
+			create l_code.make
+			create l_bar.make (l_code)
+			l_stack.extend (l_bar)
+			l_stack.extend_stretching (l_code)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_code.set_text ("make makes make; remake")
+			l_code.select_range (1, 0)
+			assert ("first", l_code.find_next ("make", True, False) and l_code.selection_start = 1 and l_code.selection_end = 4)
+			assert ("second, inside makes", l_code.find_next ("make", True, False) and l_code.selection_start = 6)
+			assert ("whole word skips to the third", l_code.find_next ("make", True, True) and l_code.selection_start = 12)
+			assert ("wraps to the first", l_code.find_next ("make", True, True) and l_code.selection_start = 1)
+			assert ("none", not l_code.find_next ("absent", True, False))
+			assert ("replace_all counts 2 whole words", l_code.replace_all ("make", "build", True, True) = 2)
+			assert ("replaced: " + l_code.text.out, l_code.text.same_string ("build makes build; remake"))
+			driver.type_text (l_bar.find_field, "makes")
+			driver.type_text (l_bar.replace_field, "builds")
+			driver.perform_click (l_bar.replace_all_button)
+			assert ("the bar replaced: " + l_code.text.out, l_code.text.same_string ("build builds build; remake"))
+			l_window.close
+		end
+
 	test_rating_set_silently_and_user_emits
 		local
 			l_window: GUI_WINDOW
