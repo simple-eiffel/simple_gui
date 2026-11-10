@@ -2400,7 +2400,7 @@ feature -- Forms (1p)
 			settle_window
 			driver.choose_row (l_list, 2)
 			driver.extend_list_selection (l_list, 4)
-			assert ("two rows", l_list.selected_rows.count = 2 and l_list.selected_rows.first = 2 and l_list.selected_rows.last = 4)
+			assert ("two rows: " + l_list.selected_rows.count.out + " from " + (if l_list.selected_rows.is_empty then 0 else l_list.selected_rows.first end).out, l_list.selected_rows.count = 2 and l_list.selected_rows.first = 2 and l_list.selected_rows.last = 4)
 			assert ("told", l_list.selection_actions.fire_count >= 2)
 			l_window.close
 		end
