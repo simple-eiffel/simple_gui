@@ -2592,6 +2592,23 @@ feature -- The remaining controls (1j)
 			assert ("once: " + l_once.item.out, l_once.item = 1 and not l_after.is_active)
 		end
 
+	test_windowless_turn_with_no_wait
+			-- With no window open, a turn of the loop that may wait for nothing is allowed
+			-- (the pump takes one whenever a timer is already due), and a timer still fires
+			-- afterwards.
+		local
+			l_once: CELL [INTEGER]
+			l_after: GUI_TIMER
+		do
+			app.process_events (0)
+			app.process_events (0)
+			create l_once.put (0)
+			l_after := app.after (20, agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_once))
+			app.process_events (0)
+			driver.wait (300)
+			assert ("fired once: " + l_once.item.out, l_once.item = 1 and not l_after.is_active)
+		end
+
 	test_clipboard_round_trip
 			-- 1m: text on the clipboard reads back, beyond the BMP too. The person's own
 			-- clipboard is put back afterward: a test must not take what they copied.
