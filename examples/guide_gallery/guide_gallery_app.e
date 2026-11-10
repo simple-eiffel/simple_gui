@@ -44,6 +44,7 @@ feature {NONE} -- Initialization
 				shoot_docking
 				shoot_rich_lists_and_tables
 				shoot_navigation
+				shoot_dialog_and_help
 				print ("guide gallery: " + saved.out + " pictures in " + folder.name.to_string_8 + "%N")
 			else
 				print ("guide gallery: no display%N")
@@ -766,6 +767,52 @@ feature {NONE} -- Moving things (1q)
 			create l_crumbs.make
 			l_crumbs.set_parts (<<"Library", "Old Testament", "Genesis">>)
 			shoot ("path-control-parts", "Breadcrumbs", 420, 80, l_crumbs)
+		end
+
+	shoot_dialog_and_help
+			-- 1u: a custom dialog over its window, and F1's default tip under a field.
+		local
+			l_window: GUI_WINDOW
+			l_dialog: GUI_DIALOG
+			l_form, l_stack: GUI_STACK
+			l_field, l_name: GUI_TEXT_FIELD
+		do
+			create l_window.make ("Books", 520, 320)
+			l_window.set_content (create {GUI_LABEL}.make ("Genesis, Exodus, Leviticus"))
+			l_window.show
+			settle
+			create l_dialog.make ("Rename book")
+			create l_form.make_vertical
+			create l_field.make
+			l_field.set_text ("Genesis")
+			l_form.extend (create {GUI_LABEL}.make ("Title"))
+			l_form.extend (l_field)
+			l_dialog.set_content (l_form)
+			l_dialog.add_button ("Delete", l_dialog.Role_destructive).do_nothing
+			l_dialog.add_button ("Cancel", l_dialog.Role_cancel).do_nothing
+			l_dialog.add_button ("Save", l_dialog.Role_default).do_nothing
+			l_dialog.present (l_window)
+			settle
+			if driver.snapshot_dialog (l_dialog, l_window, folder.extended ("custom-dialog.png")) then
+				saved := saved + 1
+			end
+			l_dialog.close_with (2)
+			l_window.close
+			if not app.pills.has ("N1") then
+				app.pills.define ("N1", "The name you sign in with").do_nothing
+			end
+			create l_window.make ("Sign up", 420, 180)
+			create l_stack.make_vertical
+			create l_name.make
+			l_name.set_pill ("N1")
+			l_stack.extend (create {GUI_LABEL}.make ("Name"))
+			l_stack.extend (l_name)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle
+			driver.focus (l_name)
+			driver.press_help (l_window)
+			save ("context-help", l_window)
 		end
 
 feature {NONE} -- Implementation
