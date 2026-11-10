@@ -8,6 +8,7 @@
    - the wake is a main-queue block, so it also lands inside modal loops. */
 #import <Cocoa/Cocoa.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <UserNotifications/UserNotifications.h>
 #include <cairo.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -739,12 +740,13 @@ static void sga_place(SGASlot *a_slot, int a_alignment)
 	[NSLayoutConstraint activateConstraints:a_slot->placing];
 }
 
-/* Buttons (a dropdown and a split button too), spin boxes and segmented controls keep their natural width
+/* Buttons (a dropdown and a split button too), spin boxes, segmented controls and spinners keep their natural width
    (GTK: halign START); everything else fills. */
 static int sga_default_alignment(NSView *a_child)
 {
 	return [a_child isKindOfClass:[NSButton class]] || [a_child isKindOfClass:NSClassFromString(@"SGASpin")]
-		|| [a_child isKindOfClass:[NSSegmentedControl class]] || [a_child isKindOfClass:[NSComboButton class]] ? 1 : 0;
+		|| [a_child isKindOfClass:[NSSegmentedControl class]] || [a_child isKindOfClass:[NSComboButton class]]
+		|| ([a_child isKindOfClass:[NSProgressIndicator class]] && [(NSProgressIndicator *)a_child style] == NSProgressIndicatorStyleSpinning) ? 1 : 0;
 }
 
 void sga_stack_extend(int a_stack, int a_child, int a_stretch)
@@ -3346,6 +3348,229 @@ void sga_follow_system_appearance(void)
 /* A list's or table's row brought into view, quietly (the selection stays). */
 void sga_list_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
 void sga_table_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
+
+/* ---------------------------------------------- 1o: feedback and messages */
+
+/* A spinner: AppKit's spinning progress indicator, hidden while it does not turn. */
+int sga_spinner(void)
+{
+	NSProgressIndicator *p = [[NSProgressIndicator alloc] init];
+	[p setStyle:NSProgressIndicatorStyleSpinning];
+	[p setControlSize:NSControlSizeSmall];
+	[p setDisplayedWhenStopped:NO];
+	return sga_keep(p);
+}
+
+void sga_spinner_set(int a_id, int a_on)
+{
+	NSProgressIndicator *p = sga_get(a_id);
+	if (a_on) [p startAnimation:nil]; else [p stopAnimation:nil];
+}
+
+/* An info bar: a tinted rounded box with the kind's symbol, the message, the program's
+   action buttons and, when closable, a close button. An action sends event 26 (a = its
+   number), the close button 26 with a = 0 (the shared class hides the bar). */
+@interface SGAInfoBar : NSBox
+{
+@public
+	NSImageView *icon;
+	NSTextField *message;
+	NSStackView *row;
+	NSButton *close;
+}
+@end
+@implementation SGAInfoBar
+- (void)pressed:(NSButton *)b { if (!s_suppress) sga_push(26, sga_id_of(self), (int)[b tag], 0, 0); }
+@end
+
+static void sga_info_bar_kind(SGAInfoBar *b, int a_kind)
+{
+	NSColor *c = a_kind == 2 ? [NSColor systemGreenColor] : a_kind == 3 ? [NSColor systemOrangeColor] : a_kind == 4 ? [NSColor systemRedColor] : [NSColor systemBlueColor];
+	NSString *s = a_kind == 2 ? @"checkmark.circle.fill" : a_kind == 3 ? @"exclamationmark.triangle.fill" : a_kind == 4 ? @"xmark.octagon.fill" : @"info.circle.fill";
+	[b setFillColor:[c colorWithAlphaComponent:0.15]];
+	[b setBorderColor:[c colorWithAlphaComponent:0.5]];
+	[b->icon setImage:[NSImage imageWithSystemSymbolName:s accessibilityDescription:nil]];
+	[b->icon setContentTintColor:c];
+}
+
+int sga_info_bar(int a_kind, const char *a_message)
+{
+	SGAInfoBar *b = [[SGAInfoBar alloc] init];
+	[b setBoxType:NSBoxCustom];
+	[b setCornerRadius:6];
+	[b setBorderWidth:1];
+	[b setTitlePosition:NSNoTitle];
+	[b setContentViewMargins:NSMakeSize(8, 6)];
+	b->icon = [[NSImageView alloc] init];
+	/* One line that truncates (a wrapping label with no width to wrap at pulls the window in). */
+	b->message = [NSTextField labelWithString:sga_string(a_message)];
+	[b->message setLineBreakMode:NSLineBreakByTruncatingTail];
+	[b->message setToolTip:sga_string(a_message)];
+	[b->message setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[b->message setContentHuggingPriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	b->close = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"xmark" accessibilityDescription:@"Close"] target:b action:@selector(pressed:)];
+	[b->close setBordered:NO];
+	[b->close setTag:0];
+	[b->close setHidden:YES];
+	b->row = [NSStackView stackViewWithViews:@[b->icon, b->message, b->close]];
+	[b->row setSpacing:8];
+	[b->row setTranslatesAutoresizingMaskIntoConstraints:NO];
+	/* The bar takes the width it is given: a stack view hugs its content above the window's
+	   own size, and would pull the window in to the bar's natural width. */
+	[b->row setHuggingPriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[b setContentHuggingPriority:NSLayoutPriorityDefaultLow - 2 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	NSView *c = [b contentView];
+	[c addSubview:b->row];
+	[NSLayoutConstraint activateConstraints:@[[b->row.leadingAnchor constraintEqualToAnchor:c.leadingAnchor], [b->row.trailingAnchor constraintEqualToAnchor:c.trailingAnchor],
+		[b->row.topAnchor constraintEqualToAnchor:c.topAnchor], [b->row.bottomAnchor constraintEqualToAnchor:c.bottomAnchor]]];
+	sga_info_bar_kind(b, a_kind);
+	[b setAccessibilityRole:NSAccessibilityGroupRole];
+	return sga_keep(b);
+}
+
+void sga_info_bar_set(int a_id, int a_kind, const char *a_message)
+{
+	SGAInfoBar *b = sga_get(a_id);
+	[b->message setStringValue:sga_string(a_message)];
+	[b->message setToolTip:sga_string(a_message)];
+	sga_info_bar_kind(b, a_kind);
+}
+
+void sga_info_bar_add_action(int a_id, const char *a_text, int a_number)
+{
+	SGAInfoBar *b = sga_get(a_id);
+	NSButton *x = [NSButton buttonWithTitle:sga_string(a_text) target:b action:@selector(pressed:)];
+	[x setTag:a_number];
+	[x setControlSize:NSControlSizeSmall];
+	[b->row insertArrangedSubview:x atIndex:[[b->row arrangedSubviews] count] - 1];
+}
+
+void sga_info_bar_set_closable(int a_id, int a_on) { [((SGAInfoBar *)sga_get(a_id))->close setHidden:a_on == 0]; }
+
+/* As a user: action `a_number' (0: close) pressed. */
+void sga_test_info_bar_press(int a_id, int a_number)
+{
+	SGAInfoBar *b = sga_get(a_id);
+	for (NSView *v in [b->row arrangedSubviews]) if ([v isKindOfClass:[NSButton class]] && [(NSButton *)v tag] == a_number && ![v isHidden]) { [(NSButton *)v performClick:nil]; return; }
+}
+
+/* A toast: a dark rounded bubble at the bottom of the window's content, over everything,
+   with the message and an optional action; it closes by itself after 4 seconds, or when
+   its action is pressed (event 27, id = window, a = the toast's id). One per window. */
+@interface SGAToast : NSView
+{
+@public
+	NSTextField *message;
+	NSButton *action;
+	int window_id, toast_id;
+	NSInteger serial;
+}
+@end
+@implementation SGAToast
+- (void)pressed:(id)a_sender
+{
+	(void)a_sender;
+	if ([self isHidden]) return;
+	[self setHidden:YES];
+	if (toast_id > 0) sga_push(27, window_id, toast_id, 0, 0);
+}
+@end
+
+static NSMutableDictionary<NSNumber *, SGAToast *> *s_toasts;
+
+void sga_window_show_toast(int a_window, const char *a_message, const char *an_action_text, int a_toast_id)
+{
+	NSWindow *w = sga_get(a_window);
+	NSView *c = [w contentView];
+	if (!s_toasts) s_toasts = [NSMutableDictionary dictionary];
+	SGAToast *t = s_toasts[@(a_window)];
+	if (!t) {
+		t = [[SGAToast alloc] init];
+		[t setWantsLayer:YES];
+		[[t layer] setCornerRadius:10];
+		[[t layer] setBackgroundColor:[[NSColor colorWithWhite:0.15 alpha:0.94] CGColor]];
+		[t setTranslatesAutoresizingMaskIntoConstraints:NO];
+		t->message = [NSTextField labelWithString:@""];
+		[t->message setTextColor:[NSColor whiteColor]];
+		t->action = [NSButton buttonWithTitle:@"" target:t action:@selector(pressed:)];
+		[t->action setBordered:NO];
+		[t->action setContentTintColor:[NSColor systemYellowColor]];
+		NSStackView *l_row = [NSStackView stackViewWithViews:@[t->message, t->action]];
+		[l_row setSpacing:16];
+		[l_row setTranslatesAutoresizingMaskIntoConstraints:NO];
+		[t addSubview:l_row];
+		[NSLayoutConstraint activateConstraints:@[[l_row.leadingAnchor constraintEqualToAnchor:t.leadingAnchor constant:14], [l_row.trailingAnchor constraintEqualToAnchor:t.trailingAnchor constant:-14],
+			[l_row.topAnchor constraintEqualToAnchor:t.topAnchor constant:8], [l_row.bottomAnchor constraintEqualToAnchor:t.bottomAnchor constant:-8]]];
+		t->window_id = a_window;
+		s_toasts[@(a_window)] = t;
+	}
+	if ([t superview] != c) {
+		[t removeFromSuperview];
+		[c addSubview:t positioned:NSWindowAbove relativeTo:nil];
+		[NSLayoutConstraint activateConstraints:@[[t.centerXAnchor constraintEqualToAnchor:c.centerXAnchor],
+			[t.bottomAnchor constraintEqualToAnchor:c.bottomAnchor constant:-16], [t.widthAnchor constraintLessThanOrEqualToAnchor:c.widthAnchor constant:-32]]];
+	}
+	[t->message setStringValue:sga_string(a_message)];
+	[t->action setTitle:sga_string(an_action_text)];
+	[t->action setHidden:strlen(an_action_text) == 0];
+	t->toast_id = a_toast_id;
+	[t setHidden:NO];
+	[c layoutSubtreeIfNeeded];
+	NSInteger l_serial = ++t->serial;
+	SGAToast *l_toast = t;
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+		if (l_toast->serial == l_serial) [l_toast setHidden:YES];
+	});
+}
+
+const char *sga_test_toast_shown(int a_window)
+{
+	SGAToast *t = s_toasts[@(a_window)];
+	return sga_return(Kind_label, t && ![t isHidden] && [t superview] ? [t->message stringValue] : @"");
+}
+
+void sga_test_toast_press(int a_window)
+{
+	SGAToast *t = s_toasts[@(a_window)];
+	if (t && ![t isHidden] && ![t->action isHidden]) [t->action performClick:nil];
+}
+
+/* A desktop notification through UNUserNotificationCenter; a click sends event 28 (a = its
+   id). AppKit allows it only to a bundled application (with a bundle identifier): a program
+   run straight from its executable, as the test runner is, posts nothing. */
+@interface SGANotifier : NSObject <UNUserNotificationCenterDelegate>
+@end
+@implementation SGANotifier
+- (void)userNotificationCenter:(UNUserNotificationCenter *)c didReceiveNotificationResponse:(UNNotificationResponse *)r withCompletionHandler:(void (^)(void))done
+{
+	(void)c;
+	NSNumber *l_id = [[[[r notification] request] content] userInfo][@"sga_id"];
+	if ([l_id intValue] > 0) { sga_push(28, 0, [l_id intValue], 0, 0); sga_wake(); }
+	done();
+}
+- (void)userNotificationCenter:(UNUserNotificationCenter *)c willPresentNotification:(UNNotification *)n withCompletionHandler:(void (^)(UNNotificationPresentationOptions))done
+{
+	(void)c; (void)n;
+	done(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList);
+}
+@end
+static SGANotifier *s_notifier;
+
+void sga_notify(const char *a_title, const char *a_body, int a_notification_id)
+{
+	if (![[NSBundle mainBundle] bundleIdentifier]) return;
+	UNUserNotificationCenter *c = [UNUserNotificationCenter currentNotificationCenter];
+	if (!s_notifier) {
+		s_notifier = [[SGANotifier alloc] init];
+		[c setDelegate:s_notifier];
+		[c requestAuthorizationWithOptions:UNAuthorizationOptionAlert | UNAuthorizationOptionSound completionHandler:^(BOOL g, NSError *e) { (void)g; (void)e; }];
+	}
+	UNMutableNotificationContent *k = [[UNMutableNotificationContent alloc] init];
+	[k setTitle:sga_string(a_title)];
+	[k setBody:sga_string(a_body)];
+	[k setUserInfo:@{@"sga_id": @(a_notification_id)}];
+	[c addNotificationRequest:[UNNotificationRequest requestWithIdentifier:[[NSUUID UUID] UUIDString] content:k trigger:nil] withCompletionHandler:nil];
+}
 
 /* ----------------------------------------------------------------- common */
 
