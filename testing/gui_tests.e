@@ -2341,6 +2341,29 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_file_field_takes_a_dropped_file
+			-- 1q-b: a file of the field's kind dropped on it fills it and fires `change_actions';
+			-- one of another kind is ignored.
+		local
+			l_window: GUI_WINDOW
+			l_open: GUI_FILE_FIELD
+			l_changes: CELL [INTEGER]
+		do
+			create l_changes.put (0)
+			create l_window.make ("File drop", 420, 120)
+			create l_open.make_open ("Open a text", <<"txt", "md">>)
+			l_open.change_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_changes))
+			l_window.set_content (l_open)
+			l_window.show
+			settle_window
+			driver.drop_files (l_open.field, <<create {PATH}.make_from_string ("photo.png"), create {PATH}.make_from_string ("Notes.MD")>>)
+			assert ("the first of its kind: " + l_open.field.text.out, l_open.field.text.same_string ("Notes.MD"))
+			assert ("one change", l_changes.item = 1)
+			driver.drop_files (l_open.choose_button, <<create {PATH}.make_from_string ("photo.png")>>)
+			assert ("another kind is ignored", l_open.field.text.same_string ("Notes.MD") and l_changes.item = 1)
+			l_window.close
+		end
+
 	test_dragged_out_to_other_programs
 			-- 1q-c: a drag out carries the data the program keeps current; Void carries nothing;
 			-- the end of a drag reaches the source's actions only while it has data.
