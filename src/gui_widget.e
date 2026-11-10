@@ -685,7 +685,7 @@ feature -- Style (1w)
 		end
 
 	supports_style (a_property: INTEGER): BOOLEAN
-			-- Can this widget show `a_property' ({GUI_STYLE_PROPERTIES}.Foreground...)? A property
+			-- Can this widget show `a_property' ({GUI_STYLE_PROPERTIES}.Property_foreground...)? A property
 			-- it cannot show may still be set; it has no effect here.
 		require
 			known: (create {GUI_STYLE_PROPERTIES}).is_style_property (a_property)

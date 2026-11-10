@@ -10,23 +10,23 @@ class
 
 feature -- Properties
 
-	Foreground: INTEGER = 1
+	Property_foreground: INTEGER = 1
 			-- The text (or tint) color.
-	Background: INTEGER = 2
-	Placeholder_color: INTEGER = 3
+	Property_background: INTEGER = 2
+	Property_placeholder_color: INTEGER = 3
 			-- A field's placeholder text.
-	Selection_color: INTEGER = 4
+	Property_selection_color: INTEGER = 4
 			-- The text selection, and the selected rows of lists, tables and trees.
-	Font_family: INTEGER = 5
-	Font_size: INTEGER = 6
-	Font_weight: INTEGER = 7
-	Italic: INTEGER = 8
-	Padding: INTEGER = 9
-	Border: INTEGER = 10
+	Property_font_family: INTEGER = 5
+	Property_font_size: INTEGER = 6
+	Property_font_weight: INTEGER = 7
+	Property_italic: INTEGER = 8
+	Property_padding: INTEGER = 9
+	Property_border: INTEGER = 10
 			-- The border's width and color.
-	Corner_radius: INTEGER = 11
-	Shadow: INTEGER = 12
-	Scroll_bars: INTEGER = 13
+	Property_corner_radius: INTEGER = 11
+	Property_shadow: INTEGER = 12
+	Property_scroll_bars: INTEGER = 13
 
 	Property_count: INTEGER = 13
 
@@ -44,9 +44,9 @@ feature -- Status
 
 	is_style_property (a_property: INTEGER): BOOLEAN
 		do
-			Result := a_property >= Foreground and a_property <= Property_count
+			Result := a_property >= Property_foreground and a_property <= Property_count
 		ensure
-			definition: Result = (a_property >= Foreground and a_property <= Property_count)
+			definition: Result = (a_property >= Property_foreground and a_property <= Property_count)
 		end
 
 	is_scroll_bar_kind (a_kind: INTEGER): BOOLEAN
@@ -68,18 +68,18 @@ feature -- Backend keys
 			known: is_style_property (a_property)
 		do
 			inspect a_property
-			when Foreground then Result := "fg"
-			when Background then Result := "bg"
-			when Placeholder_color then Result := "placeholder"
-			when Selection_color then Result := "selection"
-			when Font_family then Result := "font"
-			when Font_size then Result := "size"
-			when Font_weight then Result := "weight"
-			when Italic then Result := "italic"
-			when Padding then Result := "pad"
-			when Border then Result := "border"
-			when Corner_radius then Result := "radius"
-			when Shadow then Result := "shadow"
+			when Property_foreground then Result := "fg"
+			when Property_background then Result := "bg"
+			when Property_placeholder_color then Result := "placeholder"
+			when Property_selection_color then Result := "selection"
+			when Property_font_family then Result := "font"
+			when Property_font_size then Result := "size"
+			when Property_font_weight then Result := "weight"
+			when Property_italic then Result := "italic"
+			when Property_padding then Result := "pad"
+			when Property_border then Result := "border"
+			when Property_corner_radius then Result := "radius"
+			when Property_shadow then Result := "shadow"
 			else Result := "scroll"
 			end
 		ensure

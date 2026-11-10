@@ -525,12 +525,12 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Style (1w)
 			l_dark: BOOLEAN
 		do
 			if
-				not low_contrast_warned and then a_style.is_set (a_style.Foreground)
-				and then a_style.is_set (a_style.Background)
+				not low_contrast_warned and then a_style.is_set (a_style.Property_foreground)
+				and then a_style.is_set (a_style.Property_background)
 			then
 				l_dark := is_dark
-				l_fg := a_style.color (a_style.Foreground, l_dark, agent system_color)
-				l_bg := a_style.color (a_style.Background, l_dark, agent system_color)
+				l_fg := a_style.color (a_style.Property_foreground, l_dark, agent system_color)
+				l_bg := a_style.color (a_style.Property_background, l_dark, agent system_color)
 				if a_style.contrast_ratio (l_fg, l_bg) < 4.5 then
 					low_contrast_warned := True
 					if is_workbench_build then

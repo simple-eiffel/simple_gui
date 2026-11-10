@@ -40,7 +40,7 @@ feature {NONE} -- Initialization
 feature -- Status
 
 	is_set (a_property: INTEGER): BOOLEAN
-			-- Does this style say anything about `a_property' (`Foreground', `Padding'...)?
+			-- Does this style say anything about `a_property' (`Property_foreground', `Property_padding'...)?
 		require
 			known: is_style_property (a_property)
 		do
@@ -60,64 +60,64 @@ feature -- Colors
 	foreground: NATURAL_32
 			-- The text (or tint) color in the light appearance.
 		do
-			Result := lights [Foreground]
+			Result := lights [Property_foreground]
 		end
 
 	foreground_dark: NATURAL_32
 			-- The text color in the dark appearance (`foreground' when no variant is set).
 		do
-			Result := darks [Foreground]
+			Result := darks [Property_foreground]
 		end
 
 	foreground_role: INTEGER
 			-- The theme role the text color follows; 0: a fixed color.
 		do
-			Result := roles [Foreground]
+			Result := roles [Property_foreground]
 		end
 
 	background: NATURAL_32
 		do
-			Result := lights [Background]
+			Result := lights [Property_background]
 		end
 
 	background_dark: NATURAL_32
 		do
-			Result := darks [Background]
+			Result := darks [Property_background]
 		end
 
 	background_role: INTEGER
 		do
-			Result := roles [Background]
+			Result := roles [Property_background]
 		end
 
 	placeholder_color: NATURAL_32
 		do
-			Result := lights [Placeholder_color]
+			Result := lights [Property_placeholder_color]
 		end
 
 	placeholder_color_dark: NATURAL_32
 		do
-			Result := darks [Placeholder_color]
+			Result := darks [Property_placeholder_color]
 		end
 
 	selection_color: NATURAL_32
 		do
-			Result := lights [Selection_color]
+			Result := lights [Property_selection_color]
 		end
 
 	selection_color_dark: NATURAL_32
 		do
-			Result := darks [Selection_color]
+			Result := darks [Property_selection_color]
 		end
 
 	set_foreground (a_rgb: NATURAL_32)
 		require
 			rgb: is_rgb (a_rgb)
 		do
-			put_color (Foreground, a_rgb)
-			flags [Foreground] := True
+			put_color (Property_foreground, a_rgb)
+			flags [Property_foreground] := True
 		ensure
-			set: is_set (Foreground) and foreground = a_rgb
+			set: is_set (Property_foreground) and foreground = a_rgb
 			one_color: foreground_dark = a_rgb and foreground_role = 0
 		end
 
@@ -125,9 +125,9 @@ feature -- Colors
 			-- Use `a_rgb' for the text in the dark appearance.
 		require
 			rgb: is_rgb (a_rgb)
-			has_light: is_set (Foreground) and foreground_role = 0
+			has_light: is_set (Property_foreground) and foreground_role = 0
 		do
-			darks [Foreground] := a_rgb
+			darks [Property_foreground] := a_rgb
 		ensure
 			set: foreground_dark = a_rgb
 			light_kept: foreground = old foreground
@@ -138,30 +138,30 @@ feature -- Colors
 		require
 			known: is_theme_role (a_role)
 		do
-			put_color (Foreground, 0)
-			roles [Foreground] := a_role
-			flags [Foreground] := True
+			put_color (Property_foreground, 0)
+			roles [Property_foreground] := a_role
+			flags [Property_foreground] := True
 		ensure
-			set: is_set (Foreground) and foreground_role = a_role
+			set: is_set (Property_foreground) and foreground_role = a_role
 		end
 
 	set_background (a_rgb: NATURAL_32)
 		require
 			rgb: is_rgb (a_rgb)
 		do
-			put_color (Background, a_rgb)
-			flags [Background] := True
+			put_color (Property_background, a_rgb)
+			flags [Property_background] := True
 		ensure
-			set: is_set (Background) and background = a_rgb
+			set: is_set (Property_background) and background = a_rgb
 			one_color: background_dark = a_rgb and background_role = 0
 		end
 
 	set_background_dark (a_rgb: NATURAL_32)
 		require
 			rgb: is_rgb (a_rgb)
-			has_light: is_set (Background) and background_role = 0
+			has_light: is_set (Property_background) and background_role = 0
 		do
-			darks [Background] := a_rgb
+			darks [Property_background] := a_rgb
 		ensure
 			set: background_dark = a_rgb
 			light_kept: background = old background
@@ -171,11 +171,11 @@ feature -- Colors
 		require
 			known: is_theme_role (a_role)
 		do
-			put_color (Background, 0)
-			roles [Background] := a_role
-			flags [Background] := True
+			put_color (Property_background, 0)
+			roles [Property_background] := a_role
+			flags [Property_background] := True
 		ensure
-			set: is_set (Background) and background_role = a_role
+			set: is_set (Property_background) and background_role = a_role
 		end
 
 	set_placeholder_color (a_rgb: NATURAL_32)
@@ -183,18 +183,18 @@ feature -- Colors
 		require
 			rgb: is_rgb (a_rgb)
 		do
-			put_color (Placeholder_color, a_rgb)
-			flags [Placeholder_color] := True
+			put_color (Property_placeholder_color, a_rgb)
+			flags [Property_placeholder_color] := True
 		ensure
-			set: is_set (Placeholder_color) and placeholder_color = a_rgb
+			set: is_set (Property_placeholder_color) and placeholder_color = a_rgb
 		end
 
 	set_placeholder_color_dark (a_rgb: NATURAL_32)
 		require
 			rgb: is_rgb (a_rgb)
-			has_light: is_set (Placeholder_color)
+			has_light: is_set (Property_placeholder_color)
 		do
-			darks [Placeholder_color] := a_rgb
+			darks [Property_placeholder_color] := a_rgb
 		ensure
 			set: placeholder_color_dark = a_rgb
 		end
@@ -205,18 +205,18 @@ feature -- Colors
 		require
 			rgb: is_rgb (a_rgb)
 		do
-			put_color (Selection_color, a_rgb)
-			flags [Selection_color] := True
+			put_color (Property_selection_color, a_rgb)
+			flags [Property_selection_color] := True
 		ensure
-			set: is_set (Selection_color) and selection_color = a_rgb
+			set: is_set (Property_selection_color) and selection_color = a_rgb
 		end
 
 	set_selection_color_dark (a_rgb: NATURAL_32)
 		require
 			rgb: is_rgb (a_rgb)
-			has_light: is_set (Selection_color)
+			has_light: is_set (Property_selection_color)
 		do
-			darks [Selection_color] := a_rgb
+			darks [Property_selection_color] := a_rgb
 		ensure
 			set: selection_color_dark = a_rgb
 		end
@@ -241,9 +241,9 @@ feature -- Font
 			one_family: not a_name.has (',') and not a_name.has ('=')
 		do
 			font_family := a_name.to_string_32
-			flags [Font_family] := True
+			flags [Property_font_family] := True
 		ensure
-			set: is_set (Font_family) and font_family.same_string_general (a_name)
+			set: is_set (Property_font_family) and font_family.same_string_general (a_name)
 		end
 
 	set_font_size (a_points: REAL_64)
@@ -251,9 +251,9 @@ feature -- Font
 			positive: a_points > 0
 		do
 			font_size := a_points
-			flags [Font_size] := True
+			flags [Property_font_size] := True
 		ensure
-			set: is_set (Font_size) and font_size = a_points
+			set: is_set (Property_font_size) and font_size = a_points
 		end
 
 	set_font_weight (a_weight: INTEGER)
@@ -261,17 +261,17 @@ feature -- Font
 			in_range: a_weight >= 100 and a_weight <= 900
 		do
 			font_weight := a_weight
-			flags [Font_weight] := True
+			flags [Property_font_weight] := True
 		ensure
-			set: is_set (Font_weight) and font_weight = a_weight
+			set: is_set (Property_font_weight) and font_weight = a_weight
 		end
 
 	set_italic (a_on: BOOLEAN)
 		do
 			is_italic := a_on
-			flags [Italic] := True
+			flags [Property_italic] := True
 		ensure
-			set: is_set (Italic) and is_italic = a_on
+			set: is_set (Property_italic) and is_italic = a_on
 		end
 
 	set_font (a_font: GUI_FONT_CHOICE)
@@ -288,9 +288,9 @@ feature -- Font
 			end
 			set_italic (a_font.is_italic)
 		ensure
-			size_set: is_set (Font_size) and font_size = a_font.size
-			weight_set: is_set (Font_weight) and (font_weight = 700) = a_font.is_bold
-			italic_set: is_set (Italic) and is_italic = a_font.is_italic
+			size_set: is_set (Property_font_size) and font_size = a_font.size
+			weight_set: is_set (Property_font_weight) and (font_weight = 700) = a_font.is_bold
+			italic_set: is_set (Property_italic) and is_italic = a_font.is_italic
 		end
 
 feature -- Box
@@ -337,9 +337,9 @@ feature -- Box
 			padding_end := an_end
 			padding_bottom := a_bottom
 			padding_start := a_start
-			flags [Padding] := True
+			flags [Property_padding] := True
 		ensure
-			set: is_set (Padding)
+			set: is_set (Property_padding)
 			sides: padding_top = a_top and padding_end = an_end and padding_bottom = a_bottom and padding_start = a_start
 		end
 
@@ -349,7 +349,7 @@ feature -- Box
 		do
 			set_padding (a_points, a_points, a_points, a_points)
 		ensure
-			set: is_set (Padding)
+			set: is_set (Property_padding)
 			sides: padding_top = a_points and padding_end = a_points and padding_bottom = a_points and padding_start = a_points
 		end
 
@@ -360,16 +360,16 @@ feature -- Box
 		do
 			border_width := a_width
 			put_color (Border_slot, a_rgb)
-			flags [Border] := True
+			flags [Property_border] := True
 		ensure
-			set: is_set (Border) and border_width = a_width and border_color = a_rgb
+			set: is_set (Property_border) and border_width = a_width and border_color = a_rgb
 		end
 
 	set_border_dark (a_rgb: NATURAL_32)
 			-- Use `a_rgb' for the border in the dark appearance.
 		require
 			rgb: is_rgb (a_rgb)
-			has_light: is_set (Border)
+			has_light: is_set (Property_border)
 		do
 			darks [Border_slot] := a_rgb
 		ensure
@@ -381,9 +381,9 @@ feature -- Box
 			non_negative: a_points >= 0
 		do
 			corner_radius := a_points
-			flags [Corner_radius] := True
+			flags [Property_corner_radius] := True
 		ensure
-			set: is_set (Corner_radius) and corner_radius = a_points
+			set: is_set (Property_corner_radius) and corner_radius = a_points
 		end
 
 	set_shadow (a_x, a_y, a_blur: INTEGER; a_rgb: NATURAL_32; an_alpha: INTEGER)
@@ -399,9 +399,9 @@ feature -- Box
 			shadow_blur := a_blur
 			shadow_alpha := an_alpha
 			put_color (Shadow_slot, a_rgb)
-			flags [Shadow] := True
+			flags [Property_shadow] := True
 		ensure
-			set: is_set (Shadow) and shadow_color = a_rgb and shadow_alpha = an_alpha
+			set: is_set (Property_shadow) and shadow_color = a_rgb and shadow_alpha = an_alpha
 			placed: shadow_x = a_x and shadow_y = a_y and shadow_blur = a_blur
 		end
 
@@ -409,7 +409,7 @@ feature -- Box
 			-- Use `a_rgb' for the shadow in the dark appearance.
 		require
 			rgb: is_rgb (a_rgb)
-			has_light: is_set (Shadow)
+			has_light: is_set (Property_shadow)
 		do
 			darks [Shadow_slot] := a_rgb
 		ensure
@@ -427,9 +427,9 @@ feature -- Scroll bars
 			known: is_scroll_bar_kind (a_kind)
 		do
 			scroll_bars := a_kind
-			flags [Scroll_bars] := True
+			flags [Property_scroll_bars] := True
 		ensure
-			set: is_set (Scroll_bars) and scroll_bars = a_kind
+			set: is_set (Property_scroll_bars) and scroll_bars = a_kind
 		end
 
 feature -- Element change
@@ -451,27 +451,27 @@ feature -- Element change
 		do
 			flags [a_property] := other.is_set (a_property)
 			inspect a_property
-			when Foreground, Background, Placeholder_color, Selection_color then
+			when Property_foreground, Property_background, Property_placeholder_color, Property_selection_color then
 				take_color (other, a_property)
-			when Font_family then
+			when Property_font_family then
 				font_family := other.font_family.twin
-			when Font_size then
+			when Property_font_size then
 				font_size := other.font_size
-			when Font_weight then
+			when Property_font_weight then
 				font_weight := other.font_weight
-			when Italic then
+			when Property_italic then
 				is_italic := other.is_italic
-			when Padding then
+			when Property_padding then
 				padding_top := other.padding_top
 				padding_end := other.padding_end
 				padding_bottom := other.padding_bottom
 				padding_start := other.padding_start
-			when Border then
+			when Property_border then
 				border_width := other.border_width
 				take_color (other, Border_slot)
-			when Corner_radius then
+			when Property_corner_radius then
 				corner_radius := other.corner_radius
-			when Shadow then
+			when Property_shadow then
 				shadow_x := other.shadow_x
 				shadow_y := other.shadow_y
 				shadow_blur := other.shadow_blur
@@ -513,24 +513,24 @@ feature -- Comparison
 				Result := True
 			else
 				inspect a_property
-				when Foreground, Background, Placeholder_color, Selection_color then
+				when Property_foreground, Property_background, Property_placeholder_color, Property_selection_color then
 					Result := same_color (other, a_property)
-				when Font_family then
+				when Property_font_family then
 					Result := font_family.same_string (other.font_family)
-				when Font_size then
+				when Property_font_size then
 					Result := font_size = other.font_size
-				when Font_weight then
+				when Property_font_weight then
 					Result := font_weight = other.font_weight
-				when Italic then
+				when Property_italic then
 					Result := is_italic = other.is_italic
-				when Padding then
+				when Property_padding then
 					Result := padding_top = other.padding_top and padding_end = other.padding_end
 						and padding_bottom = other.padding_bottom and padding_start = other.padding_start
-				when Border then
+				when Property_border then
 					Result := border_width = other.border_width and same_color (other, Border_slot)
-				when Corner_radius then
+				when Property_corner_radius then
 					Result := corner_radius = other.corner_radius
-				when Shadow then
+				when Property_shadow then
 					Result := shadow_x = other.shadow_x and shadow_y = other.shadow_y and shadow_blur = other.shadow_blur
 						and shadow_alpha = other.shadow_alpha and same_color (other, Shadow_slot)
 				else
@@ -589,48 +589,48 @@ feature -- For the backend
 		do
 			create Result.make (64)
 			if a_with_colors then
-				if is_set (Foreground) then
-					add (Result, "fg", hex (color (Foreground, a_dark, a_role_color)))
+				if is_set (Property_foreground) then
+					add (Result, "fg", hex (color (Property_foreground, a_dark, a_role_color)))
 				end
-				if is_set (Background) then
-					add (Result, "bg", hex (color (Background, a_dark, a_role_color)))
+				if is_set (Property_background) then
+					add (Result, "bg", hex (color (Property_background, a_dark, a_role_color)))
 				end
-				if is_set (Placeholder_color) then
-					add (Result, "placeholder", hex (color (Placeholder_color, a_dark, Void)))
+				if is_set (Property_placeholder_color) then
+					add (Result, "placeholder", hex (color (Property_placeholder_color, a_dark, Void)))
 				end
-				if is_set (Selection_color) then
-					add (Result, "selection", hex (color (Selection_color, a_dark, Void)))
+				if is_set (Property_selection_color) then
+					add (Result, "selection", hex (color (Property_selection_color, a_dark, Void)))
 				end
 			end
-			if is_set (Font_family) then
+			if is_set (Property_font_family) then
 				add (Result, "font", font_family)
 			end
-			if is_set (Font_size) then
+			if is_set (Property_font_size) then
 				add (Result, "size", number (font_size))
 			end
-			if is_set (Font_weight) then
+			if is_set (Property_font_weight) then
 				add (Result, "weight", font_weight.out)
 			end
-			if is_set (Italic) then
+			if is_set (Property_italic) then
 				add (Result, "italic", if is_italic then "1" else "0" end)
 			end
-			if is_set (Padding) then
+			if is_set (Property_padding) then
 				add (Result, "pad", padding_top.out + "," + padding_end.out + "," + padding_bottom.out + "," + padding_start.out)
 			end
-			if is_set (Border) then
+			if is_set (Property_border) then
 				add (Result, "border", border_width.out)
 				if a_with_colors then
 					add (Result, "border_color", hex (color (Border_slot, a_dark, Void)))
 				end
 			end
-			if is_set (Corner_radius) then
+			if is_set (Property_corner_radius) then
 				add (Result, "radius", corner_radius.out)
 			end
-			if is_set (Shadow) and a_with_colors then
+			if is_set (Property_shadow) and a_with_colors then
 				add (Result, "shadow", shadow_x.out + "," + shadow_y.out + "," + shadow_blur.out + "," + shadow_alpha.out)
 				add (Result, "shadow_color", hex (color (Shadow_slot, a_dark, Void)))
 			end
-			if is_set (Scroll_bars) then
+			if is_set (Property_scroll_bars) then
 				add (Result, "scroll", scroll_bars.out)
 			end
 		ensure
@@ -763,8 +763,8 @@ feature {NONE} -- Implementation
 invariant
 	flags_sized: flags.lower = 1 and flags.upper = Property_count
 	colors_sized: lights.count = Color_slots and darks.count = Color_slots and roles.count = Color_slots
-	weight_in_range: is_set (Font_weight) implies (font_weight >= 100 and font_weight <= 900)
-	size_positive: is_set (Font_size) implies font_size > 0
+	weight_in_range: is_set (Property_font_weight) implies (font_weight >= 100 and font_weight <= 900)
+	size_positive: is_set (Property_font_size) implies font_size > 0
 	scroll_bars_known: is_scroll_bar_kind (scroll_bars)
 
 end

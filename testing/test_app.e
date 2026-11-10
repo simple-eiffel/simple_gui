@@ -148,6 +148,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_styles_badges_and_busy, "styles_badges_and_busy")
 				run_test (agent t.test_style_cascade, "style_cascade")
 				run_test (agent t.test_style_applies_natively, "style_applies_natively")
+				run_test (agent t.test_style_supported_is_shown, "style_supported_is_shown")
 				run_test (agent t.test_style_dark_variant, "style_dark_variant")
 				run_test (agent t.test_style_unsupported_ignored, "style_unsupported_ignored")
 				run_test (agent t.test_theme_accent_and_roles, "theme_accent_and_roles")

@@ -77,6 +77,7 @@ static void sga_style_cell(NSTableView *a_table, NSView *a_cell);
 static void sga_style_rows_height(NSTableView *a_table);
 static NSColor *sga_style_selection(NSView *a_table);   /* nil: the native selection */
 static NSTextView *sga_style_field_editor(NSView *a_field);
+static void sga_style_untint(NSTextView *a_editor);   /* an edit ended: the shared editor's own selection color again */
 static NSColor *sga_theme_color(int a_role);   /* nil: the system's */
 static void sga_theme_apply(int a_id);
 static unsigned char s_style_hint[SGA_MAX];   /* 1: a check box (an NSButton like any other) */
@@ -924,11 +925,24 @@ void sga_stack_extend(int a_stack, int a_child, int a_stretch)
 				[l_share setActive:YES];
 				break;
 			}
-	/* The slot fills the stack across. */
-	if (l_vertical) [[l_slot.widthAnchor constraintEqualToAnchor:s.widthAnchor] setActive:YES];
-	else [[l_slot.heightAnchor constraintEqualToAnchor:s.heightAnchor] setActive:YES];
+	/* The slot fills the stack across, inside its edge insets (1w: a style's padding). */
+	NSEdgeInsets l_insets = [s edgeInsets];
+	if (l_vertical) [[l_slot.widthAnchor constraintEqualToAnchor:s.widthAnchor constant:-(l_insets.left + l_insets.right)] setActive:YES];
+	else [[l_slot.heightAnchor constraintEqualToAnchor:s.heightAnchor constant:-(l_insets.top + l_insets.bottom)] setActive:YES];
 	sga_place(l_slot, s_stack_alignment[a_stack] > 0 ? s_stack_alignment[a_stack] - 1 : sga_default_alignment(v));
 	if (a_stretch) [sga_end_margin(a_stack) setPriority:NSLayoutPriorityRequired - 1];
+}
+
+/* 1w: a stack's edge insets changed (a style's padding): its slots fill it across inside them. */
+static void sga_stack_insets_changed(NSStackView *s)
+{
+	BOOL l_vertical = [s orientation] == NSUserInterfaceLayoutOrientationVertical;
+	NSLayoutAttribute l_across = l_vertical ? NSLayoutAttributeWidth : NSLayoutAttributeHeight;
+	NSEdgeInsets i = [s edgeInsets];
+	CGFloat l_less = l_vertical ? i.left + i.right : i.top + i.bottom;
+	for (NSLayoutConstraint *k in [s constraints])
+		if ([k firstItem] != s && [[k firstItem] isKindOfClass:[SGASlot class]] && [k secondItem] == s
+			&& [k firstAttribute] == l_across && [k secondAttribute] == l_across && [k relation] == NSLayoutRelationEqual) [k setConstant:-l_less];
 }
 
 /* Applies to the existing children and to later ones (stored as alignment + 1; 0 = defaults). */
@@ -1499,6 +1513,11 @@ void sga_tabs_set_title(int a_tabs, int a_page, const char *a_title)
 @end
 @implementation SGAField
 + (Class)cellClass { return [SGAFieldCell class]; }
+- (void)textDidEndEditing:(NSNotification *)a_note
+{
+	sga_style_untint([a_note object]);
+	[super textDidEndEditing:a_note];
+}
 @end
 
 int sga_field(void)
@@ -9469,8 +9488,38 @@ static NSArray<NSTextField *> *sga_style_fields(int a_id, int a_kind)
 	return @[o];
 }
 
+/* The field editor that is editing `a_field' now, if it is one of a style's own (not the
+   window's shared one). */
+static NSTextView *sga_style_editing(NSView *a_field, BOOL *a_shared)
+{
+	NSWindow *w = [a_field window];
+	id r = [w firstResponder];
+	if (a_shared) *a_shared = NO;
+	if (![r isKindOfClass:[NSTextView class]] || ![(NSTextView *)r isFieldEditor] || [(NSTextView *)r delegate] != (id)a_field) return nil;
+	if (r == [w fieldEditor:NO forObject:nil]) { if (a_shared) *a_shared = YES; return nil; }
+	return r;
+}
+
+/* A style that names a selection color, given to a field while the window's shared editor
+   is editing it, shows the color on that editor until the edit ends. */
+static __weak NSTextView *s_style_tinted;
+static NSDictionary *s_style_tinted_saved;
+static void sga_style_untint(NSTextView *a_editor)
+{
+	NSTextView *e = s_style_tinted;
+	if (!e || (a_editor && a_editor != e)) return;
+	[e setSelectedTextAttributes:s_style_tinted_saved ?: @{}];
+	s_style_tinted = nil;
+	s_style_tinted_saved = nil;
+}
+
 static NSTextView *sga_style_field_editor(NSView *a_field)
 {
+	/* An edit in progress keeps the editor it began with, whatever the field's style has
+	   become since: the field finds its text in the editor it is asked for here. */
+	BOOL l_shared;
+	NSTextView *e = sga_style_editing(a_field, &l_shared);
+	if (e || l_shared) return e;
 	if (![s_styles count]) return nil;
 	SGAStyle *st = sga_style_of(sga_id_of(a_field));
 	return st && st->saved ? st->editor : nil;
@@ -9550,8 +9599,20 @@ static void sga_style_apply(int a_id, SGAStyle *st)
 				}
 			}
 			if (l_selection && l_kind == Style_field) {
-				NSTextView *e = [[NSTextView alloc] initWithFrame:NSZeroRect];
+				/* The editor that is editing it now shows the color at once: its own from an
+				   earlier style, or the window's shared one, for this edit only. */
+				BOOL l_shared;
+				NSTextView *e = sga_style_editing(l_first, &l_shared);
+				if (l_shared) {
+					NSTextView *w = (NSTextView *)[[l_first window] firstResponder];
+					sga_style_untint(nil);
+					s_style_tinted = w;
+					s_style_tinted_saved = [w selectedTextAttributes];
+					[w setSelectedTextAttributes:@{NSBackgroundColorAttributeName: l_selection}];
+				}
+				if (!e) e = [[NSTextView alloc] initWithFrame:NSZeroRect];
 				[e setFieldEditor:YES];
+				st->selected = [e selectedTextAttributes];
 				[e setSelectedTextAttributes:@{NSBackgroundColorAttributeName: l_selection}];
 				st->editor = e;
 				st->did_selection = YES;
@@ -9566,6 +9627,7 @@ static void sga_style_apply(int a_id, SGAStyle *st)
 				st->insets = [s edgeInsets];
 				st->did_pad = YES;
 				[s setEdgeInsets:NSEdgeInsetsMake(l_pad[0], l_rtl ? l_pad[1] : l_pad[3], l_pad[2], l_rtl ? l_pad[3] : l_pad[1])];
+				sga_stack_insets_changed(s);
 			}
 			break;
 		}
@@ -9623,7 +9685,14 @@ static void sga_style_apply(int a_id, SGAStyle *st)
 			NSTableView *t = c;
 			if (!s_style_tables) s_style_tables = [NSMapTable weakToStrongObjectsMapTable];
 			[s_style_tables setObject:@(a_id) forKey:t];
-			if (l_back) { st->back = [t backgroundColor]; st->did_back = YES; [t setBackgroundColor:l_back]; }
+			if (l_back) {
+				/* A table's alternate rows are painted over its background: one color it is. */
+				st->back = [t backgroundColor];
+				st->draws = [t usesAlternatingRowBackgroundColors];
+				st->did_back = YES;
+				[t setUsesAlternatingRowBackgroundColors:NO];
+				[t setBackgroundColor:l_back];
+			}
 			st->cell_font = sga_style_font(st, sga_style_cell_default());
 			st->cell_color = l_fore;
 			sga_style_rows_bump(st, t);
@@ -9670,6 +9739,12 @@ static void sga_style_restore(int a_id, SGAStyle *st)
 					[x setPlaceholderString:[st->placeholder length] ? st->placeholder : nil];
 				}
 			}
+			if (l_kind == Style_field && st->did_selection) {
+				BOOL l_shared;
+				if (st->editor) [st->editor setSelectedTextAttributes:st->selected ?: @{}];
+				sga_style_editing(l_fields[0], &l_shared);
+				if (l_shared) sga_style_untint((NSTextView *)[[l_fields[0] window] firstResponder]);
+			}
 			if (l_kind == Style_label) {
 				NSTextField *l = l_fields[0];
 				sga_style_unbox(st, l);
@@ -9682,7 +9757,7 @@ static void sga_style_restore(int a_id, SGAStyle *st)
 		}
 		case Style_box: case Style_grid:
 			sga_style_unbox(st, c);
-			if (st->did_pad) [(NSStackView *)c setEdgeInsets:st->insets];
+			if (st->did_pad) { [(NSStackView *)c setEdgeInsets:st->insets]; sga_stack_insets_changed(c); }
 			break;
 		case Style_button: {
 			SGAButton *b = o;
@@ -9718,7 +9793,7 @@ static void sga_style_restore(int a_id, SGAStyle *st)
 		}
 		case Style_rows: {
 			NSTableView *t = c;
-			if (st->did_back) [t setBackgroundColor:st->back];
+			if (st->did_back) { [t setBackgroundColor:st->back]; [t setUsesAlternatingRowBackgroundColors:st->draws]; }
 			if (st->did_height) [t setRowHeight:st->row_height];
 			sga_style_rows_refresh(t);
 			sga_style_unscroll(st, o);
@@ -9907,7 +9982,7 @@ const char *sga_test_style_value(int a_id, const char *a_key)
 	} else if ([k isEqualToString:@"bg"]) {
 		if (l_kind == Style_label || l_kind == Style_box || l_kind == Style_grid || l_kind == Style_button)
 			r = [[l_box layer] backgroundColor] ? sga_style_hex([NSColor colorWithCGColor:[[l_box layer] backgroundColor]]) : @"";
-		else if (l_rows) r = sga_style_hex([(NSTableView *)c backgroundColor]);
+		else if (l_rows) r = [(NSTableView *)c usesAlternatingRowBackgroundColors] ? @"" : sga_style_hex([(NSTableView *)c backgroundColor]);   /* alternate rows would paint over it */
 		else if (l_field) r = [l_field drawsBackground] ? sga_style_hex([l_field backgroundColor]) : @"";
 		else if (l_text_area) r = sga_style_hex([(NSTextView *)c backgroundColor]);
 		else if (l_kind == Style_grid_view) r = sga_style_hex([[(SGAGridView *)c backgroundColors] firstObject]);
@@ -9918,8 +9993,9 @@ const char *sga_test_style_value(int a_id, const char *a_key)
 		if (l_rows) r = sga_style_hex(sga_style_selection(c));
 		else if (l_text_area) r = sga_style_hex([(NSTextView *)c selectedTextAttributes][NSBackgroundColorAttributeName]);
 		else if (l_kind == Style_field) {
-			/* The editor the field's cell hands out when editing starts. */
-			NSTextView *e = [[(NSTextField *)o cell] fieldEditorForView:o];
+			/* The editor that is editing it now, or the one its cell hands out when an edit starts. */
+			id l_now = [[(NSView *)o window] firstResponder];
+			NSTextView *e = [l_now isKindOfClass:[NSTextView class]] && [(NSTextView *)l_now delegate] == o ? l_now : [[(NSTextField *)o cell] fieldEditorForView:o];
 			r = e ? sga_style_hex([e selectedTextAttributes][NSBackgroundColorAttributeName]) : @"";
 		}
 	} else if ([k isEqualToString:@"pad"]) {
@@ -9927,8 +10003,21 @@ const char *sga_test_style_value(int a_id, const char *a_key)
 		if (l_kind == Style_label && [[(NSTextField *)o cell] isKindOfClass:[SGALabelCell class]]) p = ((SGALabelCell *)[(NSTextField *)o cell])->pad;
 		else if (l_kind == Style_button) p = ((SGAButton *)o)->pad;
 		else if (l_kind == Style_box) {
-			NSEdgeInsets i = [(NSStackView *)c edgeInsets];
-			BOOL l_rtl = [(NSStackView *)c userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft;
+			/* Measured where it can be: where the children really are, across the box and at
+			   its start. */
+			NSStackView *s = c;
+			NSEdgeInsets i = [s edgeInsets];
+			BOOL l_rtl = [s userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft;
+			BOOL l_vertical = [s orientation] == NSUserInterfaceLayoutOrientationVertical, l_any = NO;
+			NSRect u = NSZeroRect, b = [s bounds];
+			[s layoutSubtreeIfNeeded];
+			for (NSView *v in [s arrangedSubviews]) if (![v isHidden]) { u = l_any ? NSUnionRect(u, [v frame]) : [v frame]; l_any = YES; }
+			if (l_any) {
+				CGFloat l_low = NSMinY(u) - NSMinY(b), l_high = NSMaxY(b) - NSMaxY(u);
+				CGFloat l_top = [s isFlipped] ? l_low : l_high, l_bottom = [s isFlipped] ? l_high : l_low;
+				if (l_vertical) { i.left = NSMinX(u) - NSMinX(b); i.right = NSMaxX(b) - NSMaxX(u); i.top = l_top; }
+				else { i.top = l_top; i.bottom = l_bottom; if (l_rtl) i.right = NSMaxX(b) - NSMaxX(u); else i.left = NSMinX(u) - NSMinX(b); }
+			}
 			l_insets[0] = i.top; l_insets[1] = l_rtl ? i.left : i.right; l_insets[2] = i.bottom; l_insets[3] = l_rtl ? i.right : i.left;
 			p = l_insets;
 		}

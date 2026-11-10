@@ -3987,7 +3987,7 @@ feature -- Styles and the theme (1w)
 			l_b.set_italic (True)
 			l_merged := l_a.merged (l_b)
 			assert ("merged: the other's set properties win", l_merged.foreground = 0x445566 and l_merged.font_size = 14 and l_merged.is_italic)
-			assert ("merged leaves both alone", l_a.foreground = 0x112233 and not l_a.is_set (l_a.Italic) and not l_b.is_set (l_b.Font_size))
+			assert ("merged leaves both alone", l_a.foreground = 0x112233 and not l_a.is_set (l_a.Property_italic) and not l_b.is_set (l_b.Property_font_size))
 			app.define_style_class ("cascade_a", l_a)
 			app.define_style_class ("cascade_b", l_b)
 			create l_window.make ("Cascade", 240, 100)
@@ -4014,7 +4014,7 @@ feature -- Styles and the theme (1w)
 			assert ("members restyled: " + driver.style_value (l_label, "size").to_string_8, l_label.effective_style.font_size = 20
 				and driver.style_value (l_label, "size").same_string ("20"))
 			l_label.remove_style_class ("cascade_b")
-			assert ("a class removed", not l_label.has_style_class ("cascade_b") and not l_label.effective_style.is_set (l_a.Italic)
+			assert ("a class removed", not l_label.has_style_class ("cascade_b") and not l_label.effective_style.is_set (l_a.Property_italic)
 				and driver.style_value (l_label, "italic").is_empty)
 			l_label.set_own_style (create {GUI_STYLE}.make)
 			l_label.remove_style_class ("cascade_a")
@@ -4060,8 +4060,8 @@ feature -- Styles and the theme (1w)
 			l_style.set_corner_radius (6)
 			l_style.set_shadow (1, 2, 3, 0x000000, 40)
 			across 1 |..| l_style.Property_count as ic loop
-				assert ("label supports " + ic.out, l_label.supports_style (ic) = (ic /= l_style.Selection_color
-					and ic /= l_style.Placeholder_color and ic /= l_style.Scroll_bars))
+				assert ("label supports " + ic.out, l_label.supports_style (ic) = (ic /= l_style.Property_selection_color
+					and ic /= l_style.Property_placeholder_color and ic /= l_style.Property_scroll_bars))
 			end
 			l_label.set_own_style (l_style)
 			settle_window
@@ -4087,8 +4087,8 @@ feature -- Styles and the theme (1w)
 			l_style.set_selection_color (0xFFCC00)
 			l_style.set_font_family ("monospace")
 			l_style.set_font_size (14)
-			assert ("field supports", l_field.supports_style (l_style.Foreground) and l_field.supports_style (l_style.Placeholder_color)
-				and l_field.supports_style (l_style.Selection_color) and l_field.supports_style (l_style.Font_family))
+			assert ("field supports", l_field.supports_style (l_style.Property_foreground) and l_field.supports_style (l_style.Property_placeholder_color)
+				and l_field.supports_style (l_style.Property_selection_color) and l_field.supports_style (l_style.Property_font_family))
 			l_field.set_own_style (l_style)
 			settle_window
 			check_style (l_field, "fg", "203040")
@@ -4109,8 +4109,8 @@ feature -- Styles and the theme (1w)
 			l_style.set_font_size (16)
 			l_style.set_font_weight (700)
 			l_style.set_scroll_bars (l_style.Scroll_bars_always)
-			assert ("list supports", l_list.supports_style (l_style.Foreground) and l_list.supports_style (l_style.Selection_color)
-				and l_list.supports_style (l_style.Scroll_bars) and not l_list.supports_style (l_style.Padding))
+			assert ("list supports", l_list.supports_style (l_style.Property_foreground) and l_list.supports_style (l_style.Property_selection_color)
+				and l_list.supports_style (l_style.Property_scroll_bars) and not l_list.supports_style (l_style.Property_padding))
 			l_list.set_own_style (l_style)
 			settle_window
 			check_style (l_list, "fg", "004080")
@@ -4130,6 +4130,163 @@ feature -- Styles and the theme (1w)
 			settle_window
 			assert ("native again", driver.style_value (l_label, "bg").is_empty and driver.style_value (l_field, "fg").is_empty
 				and driver.style_value (l_list, "size").is_empty)
+			assert ("the text outlives the style", l_field.text.same_string ("typed"))
+			l_window.close
+		end
+
+	test_style_supported_is_shown
+			-- Every kind of widget takes a style with everything set: what it says it supports
+			-- reads back from the control, what it does not is not shown, and taking the style
+			-- away leaves nothing of it.
+		local
+			l_window: GUI_WINDOW
+			l_columns, l_left, l_right, l_inner: GUI_STACK
+			l_widgets: ARRAYED_LIST [GUI_WIDGET]
+			l_names: ARRAYED_LIST [STRING]
+			l_style: GUI_STYLE
+			l_field: GUI_TEXT_FIELD
+			l_search: GUI_SEARCH_FIELD
+			l_secret: GUI_PASSWORD_FIELD
+			l_area: GUI_TEXT_AREA
+			l_rich: GUI_RICH_TEXT_AREA
+			l_list: GUI_LIST
+			l_table: GUI_TABLE
+			l_tree: GUI_TREE
+			l_grid_view: GUI_GRID_VIEW
+			l_scroll: GUI_SCROLL_AREA
+			l_grid: GUI_GRID
+			l_box: GUI_GROUP_BOX
+			l_flat: GUI_BUTTON
+			l_radios: GUI_RADIO_GROUP
+			l_key: STRING
+			l_shown: STRING_32
+			l_supported: BOOLEAN
+			i, l_any: INTEGER
+		do
+			driver.set_high_contrast (False)
+			driver.set_dark (False)
+			create l_widgets.make (20)
+			create l_names.make (20)
+			create l_window.make ("Kinds", 760, 640)
+			create l_columns.make_horizontal
+			create l_left.make_vertical
+			create l_right.make_vertical
+			l_widgets.extend (create {GUI_LABEL}.make ("A label")); l_names.extend ("label")
+			l_widgets.extend (create {GUI_BUTTON}.make ("Standard")); l_names.extend ("button")
+			create l_flat.make ("Flat")
+			l_flat.set_style (l_flat.Style_flat)
+			l_widgets.extend (l_flat); l_names.extend ("flat button")
+			l_widgets.extend (create {GUI_CHECK_BOX}.make ("A check")); l_names.extend ("check box")
+			create l_radios.make
+			across <<"One", "Two">> as ic loop l_radios.extend (ic) end
+			l_widgets.extend (l_radios); l_names.extend ("radio group")
+			create l_field.make
+			l_field.set_placeholder ("A field")
+			l_widgets.extend (l_field); l_names.extend ("text field")
+			create l_search.make
+			l_search.set_placeholder ("A search")
+			l_widgets.extend (l_search); l_names.extend ("search field")
+			create l_secret.make
+			l_secret.set_placeholder ("A password")
+			l_widgets.extend (l_secret); l_names.extend ("password field")
+			l_widgets.extend (create {GUI_SLIDER}.make (0, 100)); l_names.extend ("slider")
+			create l_inner.make_vertical
+			l_inner.extend (create {GUI_LABEL}.make ("In a box"))
+			l_widgets.extend (l_inner); l_names.extend ("box")
+			create l_grid.make
+			l_grid.put (create {GUI_LABEL}.make ("In a grid"), 1, 1)
+			l_widgets.extend (l_grid); l_names.extend ("grid")
+			create l_box.make ("A group")
+			l_box.set_content (create {GUI_LABEL}.make ("In a group box"))
+			l_widgets.extend (l_box); l_names.extend ("group box")
+			across l_widgets as ic loop l_left.extend (ic) end
+			create l_area.make
+			l_area.set_text ("A text area")
+			l_widgets.extend (l_area); l_names.extend ("text area")
+			create l_rich.make
+			l_rich.set_text ("A rich text area")
+			l_widgets.extend (l_rich); l_names.extend ("rich text area")
+			create l_list.make
+			across <<"One", "Two">> as ic loop l_list.extend (ic) end
+			l_widgets.extend (l_list); l_names.extend ("list")
+			create l_table.make (<<"Book", "Chapters">>)
+			l_table.extend_row (<<"Genesis", "50">>)
+			l_widgets.extend (l_table); l_names.extend ("table")
+			create l_tree.make
+			l_tree.add_root ("Law")
+			l_tree.add_child (l_tree.last_node, "Genesis")
+			l_widgets.extend (l_tree); l_names.extend ("tree")
+			create l_grid_view.make
+			l_grid_view.extend ("Genesis")
+			l_grid_view.extend ("Exodus")
+			l_widgets.extend (l_grid_view); l_names.extend ("grid view")
+			create l_scroll.make
+			l_scroll.set_content (create {GUI_LABEL}.make ("In a scroll area"))
+			l_widgets.extend (l_scroll); l_names.extend ("scroll area")
+			from i := 13 until i > l_widgets.count loop
+				l_right.extend_stretching (l_widgets [i])
+				i := i + 1
+			end
+			l_columns.extend_stretching (l_left)
+			l_columns.extend_stretching (l_right)
+			l_window.set_content (l_columns)
+			l_window.show
+			settle_window
+			create l_style.make
+			l_style.set_foreground (0x202060)
+			l_style.set_background (0xFFF4E0)
+			l_style.set_placeholder_color (0x707890)
+			l_style.set_selection_color (0xFFD060)
+			l_style.set_font_family ("serif")
+			l_style.set_font_size (15)
+			l_style.set_font_weight (700)
+			l_style.set_italic (True)
+			l_style.set_padding (3, 5, 3, 5)
+			l_style.set_border (1, 0x806040)
+			l_style.set_corner_radius (4)
+			l_style.set_shadow (0, 1, 2, 0x000000, 25)
+			l_style.set_scroll_bars (l_style.Scroll_bars_always)
+			across l_widgets as ic loop ic.set_own_style (l_style.twin) end
+			settle_window
+			from i := 1 until i > l_widgets.count loop
+				across 1 |..| l_style.Property_count as ic loop
+					l_key := l_style.style_key (ic)
+					l_shown := driver.style_value (l_widgets [i], l_key)
+					l_supported := l_widgets [i].supports_style (ic)
+					if l_supported then
+						l_any := l_any + 1
+					end
+					assert (l_names [i] + ", " + l_key + ": supported " + l_supported.out + ", shown %""
+						+ {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (l_shown) + "%"", l_supported = not l_shown.is_empty)
+				end
+				i := i + 1
+			end
+			assert ("something is supported: " + l_any.out, l_any > 20)
+				-- The widgets still work under their styles.
+			l_area.set_text ("Changed")
+			l_list.extend ("Three")
+			l_table.extend_row (<<"Exodus", "40">>)
+			l_tree.add_root ("Prophets")
+			l_field.set_text ("typed")
+			l_secret.set_text ("hunter2")
+			l_flat.set_text ("Renamed")
+			settle_window
+			assert ("still working", l_area.text.same_string ("Changed") and l_field.text.same_string ("typed")
+				and l_secret.text.same_string ("hunter2"))
+			assert ("the box's padding is where its content is: " + {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (driver.style_value (l_inner, "pad")),
+				driver.style_value (l_inner, "pad").same_string_general ("3,5,3,5"))
+			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_1w_kinds.png")))
+			across l_widgets as ic loop ic.set_own_style (create {GUI_STYLE}.make) end
+			settle_window
+			from i := 1 until i > l_widgets.count loop
+				across 1 |..| l_style.Property_count as ic loop
+					assert (l_names [i] + " is native again", driver.style_value (l_widgets [i], l_style.style_key (ic)).is_empty)
+				end
+				i := i + 1
+			end
+			assert ("the text outlives the style", l_area.text.same_string ("Changed") and l_field.text.same_string ("typed")
+				and l_secret.text.same_string ("hunter2"))
+			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_1w_kinds_native.png")))
 			l_window.close
 		end
 
@@ -4195,24 +4352,24 @@ feature -- Styles and the theme (1w)
 			create l_style.make
 			l_style.set_background (0xCC0000)
 			l_style.set_font_size (17)
-			assert ("a standard button takes no background", not l_button.supports_style (l_style.Background)
-				and l_button.supports_style (l_style.Font_size))
+			assert ("a standard button takes no background", not l_button.supports_style (l_style.Property_background)
+				and l_button.supports_style (l_style.Property_font_size))
 			l_button.set_own_style (l_style)
 			settle_window
-			assert ("kept in the style", l_button.own_style.is_set (l_style.Background) and l_button.own_style.background = 0xCC0000)
+			assert ("kept in the style", l_button.own_style.is_set (l_style.Property_background) and l_button.own_style.background = 0xCC0000)
 			assert ("not shown: " + driver.style_value (l_button, "bg").to_string_8, driver.style_value (l_button, "bg").is_empty)
 			check_style (l_button, "size", "17")
 			driver.perform_click (l_button)
 			assert ("the button still works", l_hits.item = 1)
 			l_button.set_text ("Renamed")
 			check_style (l_button, "size", "17")
-			assert ("a flat button takes one", l_flat.supports_style (l_style.Background))
+			assert ("a flat button takes one", l_flat.supports_style (l_style.Property_background))
 			l_flat.set_own_style (l_style.twin)
 			settle_window
 			check_style (l_flat, "bg", "cc0000")
 				-- Back to a standard button: the background goes.
 			l_flat.set_style (l_flat.Style_normal)
-			assert ("standard again: " + driver.style_value (l_flat, "bg").to_string_8, not l_flat.supports_style (l_style.Background)
+			assert ("standard again: " + driver.style_value (l_flat, "bg").to_string_8, not l_flat.supports_style (l_style.Property_background)
 				and driver.style_value (l_flat, "bg").is_empty)
 			check_style (l_flat, "size", "17")
 			l_window.close
@@ -4227,6 +4384,8 @@ feature -- Styles and the theme (1w)
 			l_label: GUI_LABEL
 			l_save: GUI_BUTTON
 			l_radios: GUI_RADIO_GROUP
+			l_check: GUI_CHECK_BOX
+			l_slider: GUI_SLIDER
 			l_style: GUI_STYLE
 		do
 			driver.set_high_contrast (False)
@@ -4240,9 +4399,13 @@ feature -- Styles and the theme (1w)
 			across <<"One", "Two">> as ic loop l_radios.extend (ic) end
 			l_stack.extend (l_label)
 			l_stack.extend (l_save)
-			l_stack.extend (create {GUI_CHECK_BOX}.make ("Checked"))
+			create l_check.make ("Checked")
+			l_check.set_checked (True)
+			create l_slider.make (0, 100)
+			l_slider.set_value (50)
+			l_stack.extend (l_check)
 			l_stack.extend (l_radios)
-			l_stack.extend (create {GUI_SLIDER}.make (0, 100))
+			l_stack.extend (l_slider)
 			l_window.set_content (l_stack)
 			l_window.show
 			settle_window
