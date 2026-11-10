@@ -116,6 +116,8 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_drops_find_rows_by_place, "drops_find_rows_by_place")
 				run_test (agent t.test_list_rich_rows, "list_rich_rows")
 				run_test (agent t.test_tabs_positions, "tabs_positions")
+				run_test (agent t.test_preferences_values_and_file, "preferences_values_and_file")
+				run_test (agent t.test_preferences_window, "preferences_window")
 				run_test (agent t.test_grid_view_items, "grid_view_items")
 				run_test (agent t.test_slideshow_moves, "slideshow_moves")
 				run_test (agent t.test_dialog_buttons_and_keys, "dialog_buttons_and_keys")

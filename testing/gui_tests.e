@@ -2030,6 +2030,119 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_preferences_values_and_file
+			-- 1v-d: typed values with defaults; integers clamp; a file round-trips, keeps keys it
+			-- doesn't know, and a bad value falls back to its default; changes are told.
+		local
+			l_prefs, l_again: GUI_PREFERENCES
+			l_file: PATH
+			l_told: ARRAYED_LIST [STRING_32]
+			l_out: PLAIN_TEXT_FILE
+		do
+			create l_told.make (4)
+			l_file := temporary_file ("prefs_test.json")
+			create l_out.make_with_path (l_file)
+			l_out.open_write
+			l_out.put_string ("{%"stranger%": 42, %"size%": %"not a number%"}")
+			l_out.close
+			create l_prefs.make_in_file (l_file)
+			l_prefs.set_section ("Editor")
+			l_prefs.add_boolean ("wrap", "Wrap long lines", True)
+			l_prefs.add_integer ("size", "Font size", 12, 6, 72)
+			l_prefs.add_choice ("theme", "Theme", <<"Light", "Dark", "System">>, "System")
+			l_prefs.set_section ("Files")
+			l_prefs.add_text ("author", "Author", "")
+			l_prefs.add_color ("accent", "Accent", 0x3366CC)
+			l_prefs.add_path ("folder", "Folder", Void)
+			l_prefs.changed_actions.extend (agent (k: STRING_32; t: ARRAYED_LIST [STRING_32]) do t.extend (k) end (?, l_told))
+			assert ("defaults", l_prefs.boolean_item ("wrap") and l_prefs.integer_item ("size") = 12
+				and l_prefs.text_item ("theme").same_string ("System") and l_prefs.color_item ("accent") = 0x3366CC)
+			assert ("sections", l_prefs.sections.count = 2 and l_prefs.sections [2].same_string ("Files"))
+			l_prefs.set_integer ("size", 200)
+			assert ("clamped: " + l_prefs.integer_item ("size").out, l_prefs.integer_item ("size") = 72)
+			l_prefs.set_boolean ("wrap", False)
+			l_prefs.set_text ("theme", "Dark")
+			l_prefs.set_text ("author", "Larry")
+			l_prefs.set_color ("accent", 0x112233)
+			assert ("told", l_told.count = 5 and l_told [1].same_string ("size"))
+			create l_again.make_in_file (l_file)
+			l_again.add_boolean ("wrap", "Wrap long lines", True)
+			l_again.add_integer ("size", "Font size", 12, 6, 72)
+			l_again.add_choice ("theme", "Theme", <<"Light", "Dark", "System">>, "System")
+			l_again.add_text ("author", "Author", "")
+			l_again.add_color ("accent", "Accent", 0x3366CC)
+			assert ("read back", not l_again.boolean_item ("wrap") and l_again.integer_item ("size") = 72
+				and l_again.text_item ("theme").same_string ("Dark") and l_again.text_item ("author").same_string ("Larry")
+				and l_again.color_item ("accent") = 0x112233)
+			assert ("the stranger kept", file_text (l_file).has_substring ("stranger"))
+			l_again.reset ("size")
+			assert ("reset", l_again.integer_item ("size") = 12)
+			l_again.reset_all
+			assert ("all reset", l_again.boolean_item ("wrap") and l_again.text_item ("theme").same_string ("System"))
+		end
+
+	test_preferences_window
+			-- 1v-d: the window's controls show the values, a user's change sets them at once,
+			-- and Restore defaults puts the section back.
+		local
+			l_prefs: GUI_PREFERENCES
+		do
+			create l_prefs.make_in_file (temporary_file ("prefs_window.json"))
+			l_prefs.reset_all
+			l_prefs.add_boolean ("wrap", "Wrap long lines", True)
+			l_prefs.add_integer ("size", "Font size", 12, 6, 72)
+			l_prefs.add_text ("author", "Author", "")
+			l_prefs.reset_all
+			l_prefs.show_window (Void)
+			settle_window
+			assert ("a switch, on", attached {GUI_SWITCH} l_prefs.control_for ("wrap") as al_s and then al_s.is_on)
+			if attached {GUI_SWITCH} l_prefs.control_for ("wrap") as al_s then
+				driver.flip_switch (al_s)
+			end
+			assert ("the user's flip set it", not l_prefs.boolean_item ("wrap"))
+			if attached {GUI_SPIN_BOX} l_prefs.control_for ("size") as al_spin then
+				driver.enter_number (al_spin, 20)
+			end
+			assert ("the user's number", l_prefs.integer_item ("size") = 20)
+			if attached {GUI_TEXT_FIELD} l_prefs.control_for ("author") as al_f then
+				driver.type_text (al_f, "Larry")
+			end
+			assert ("the user's text", l_prefs.text_item ("author").same_string ("Larry"))
+			l_prefs.reset_section ("General")
+			assert ("restored", l_prefs.boolean_item ("wrap") and l_prefs.integer_item ("size") = 12)
+			if attached l_prefs.window as al_w then
+				al_w.close
+			end
+		end
+
+	temporary_file (a_name: STRING): PATH
+			-- `a_name' in the system's temporary folder, removed first.
+		local
+			l_env: EXECUTION_ENVIRONMENT
+			l_dir: STRING_32
+			l_f: RAW_FILE
+		do
+			create l_env
+			if attached l_env.item ("TEMP") as al_t then l_dir := al_t
+			elseif attached l_env.item ("TMPDIR") as al_t then l_dir := al_t
+			else l_dir := {STRING_32} "/tmp" end
+			create Result.make_from_string (l_dir)
+			Result := Result.extended (a_name)
+			create l_f.make_with_path (Result)
+			if l_f.exists then l_f.delete end
+		end
+
+	file_text (a_path: PATH): STRING
+		local
+			l_f: PLAIN_TEXT_FILE
+		do
+			create l_f.make_with_path (a_path)
+			l_f.open_read
+			l_f.read_stream (l_f.count)
+			Result := l_f.last_string
+			l_f.close
+		end
+
 	test_grid_view_items
 			-- 1v-a: pictures load off the GUI thread and show; the user's click and double click
 			-- fire, code is quiet; several items select; a filter keeps item numbers.
