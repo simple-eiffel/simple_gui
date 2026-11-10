@@ -40,6 +40,14 @@ feature -- Element change
 			one_more: count = old count + 1
 		end
 
+	prune (an_agent: PROCEDURE [G])
+			-- Stop running `an_agent' (the same agent object `extend' was given).
+		do
+			agents.prune_all (an_agent)
+		ensure
+			gone: not agents.has (an_agent)
+		end
+
 	wipe_out
 		do
 			agents.wipe_out

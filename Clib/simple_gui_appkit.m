@@ -625,11 +625,13 @@ void sga_window_set_content(int a_window, int a_child)
 		if ([v contentHuggingPriorityForOrientation:o] >= NSLayoutPriorityWindowSizeStayPut)
 			[v setContentHuggingPriority:NSLayoutPriorityWindowSizeStayPut - 1 forOrientation:o];
 	[l_content addSubview:v];
-	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:l_content.bottomAnchor constant:-l_content->bottom_bar];
+	/* a group box as the whole content keeps the containers' 12 from the window's edges */
+	CGFloat m = [v isKindOfClass:[NSBox class]] ? 12 : 0;
+	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:l_content.bottomAnchor constant:-l_content->bottom_bar - m];
 	[NSLayoutConstraint activateConstraints:@[
-		[v.leadingAnchor constraintEqualToAnchor:l_content.leadingAnchor],
-		[v.trailingAnchor constraintEqualToAnchor:l_content.trailingAnchor],
-		[v.topAnchor constraintEqualToAnchor:l_content.topAnchor],
+		[v.leadingAnchor constraintEqualToAnchor:l_content.leadingAnchor constant:m],
+		[v.trailingAnchor constraintEqualToAnchor:l_content.trailingAnchor constant:-m],
+		[v.topAnchor constraintEqualToAnchor:l_content.topAnchor constant:m],
 		l_bottom]];
 	if (!s_content_bottom) s_content_bottom = [NSMutableDictionary dictionary];
 	s_content_bottom[@(a_window)] = l_bottom;
@@ -1162,6 +1164,10 @@ void sga_splitter_set_pane(int a_splitter, int a_pane, int a_child)
 	NSView *l_holder = [s arrangedSubviews][(NSUInteger)(a_pane - 1)];
 	NSView *v = sga_get(a_child);
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	/* as a window's content: a lone label in a pane must not pull the window to its height */
+	for (NSInteger o = 0; o < 2; o++)
+		if ([v contentHuggingPriorityForOrientation:o] >= NSLayoutPriorityWindowSizeStayPut)
+			[v setContentHuggingPriority:NSLayoutPriorityWindowSizeStayPut - 1 forOrientation:o];
 	[l_holder addSubview:v];
 	[NSLayoutConstraint activateConstraints:@[
 		[v.leadingAnchor constraintEqualToAnchor:l_holder.leadingAnchor], [v.trailingAnchor constraintEqualToAnchor:l_holder.trailingAnchor],
@@ -2886,7 +2892,36 @@ int sga_group_box(const char *a_title)
 	return sga_keep(b);
 }
 
-void sga_group_box_set_title(int a_id, const char *a_title) { [(NSBox *)sga_get(a_id) setTitle:sga_string(a_title)]; }
+/* An NSBox places its content view by frame and does not size itself from that view's
+   constraints, so a box given no height by its container (a window's whole content, say)
+   came out as tall as its content alone, its title drawn over it. The child is pinned to
+   the box itself instead, by the insets the box's own layout gives (title, border and
+   content margins, measured on a sample frame), plus 4. */
+static void sga_group_box_pin(NSBox *b)
+{
+	NSView *c = [b contentView];
+	NSView *v = [[c subviews] firstObject];
+	if (!v) return;
+	NSRect l_was = [b frame];
+	[b setFrame:NSMakeRect(0, 0, 400, 400)];
+	NSRect f = [c frame];   /* in the box's (unflipped) coordinates */
+	[b setFrame:l_was];
+	CGFloat l_top = 400 - NSMaxY(f), l_bottom = NSMinY(f), l_start = NSMinX(f), l_end = 400 - NSMaxX(f);
+	for (NSLayoutConstraint *k in [[b constraints] copy]) if ([[k identifier] isEqualToString:@"sga_group_pin"]) [k setActive:NO];
+	NSArray<NSLayoutConstraint *> *l_pins = @[
+		[v.leadingAnchor constraintEqualToAnchor:b.leadingAnchor constant:l_start + 4],
+		[v.trailingAnchor constraintEqualToAnchor:b.trailingAnchor constant:-(l_end + 4)],
+		[v.topAnchor constraintEqualToAnchor:b.topAnchor constant:l_top + 4],
+		/* the box may be taller than its content (a window or stack gives it room) */
+		[v.bottomAnchor constraintLessThanOrEqualToAnchor:b.bottomAnchor constant:-(l_bottom + 4)]];
+	NSLayoutConstraint *l_snug = [v.bottomAnchor constraintEqualToAnchor:b.bottomAnchor constant:-(l_bottom + 4)];
+	[l_snug setPriority:NSLayoutPriorityDefaultLow];
+	l_pins = [l_pins arrayByAddingObject:l_snug];
+	for (NSLayoutConstraint *k in l_pins) [k setIdentifier:@"sga_group_pin"];
+	[NSLayoutConstraint activateConstraints:l_pins];
+}
+
+void sga_group_box_set_title(int a_id, const char *a_title) { NSBox *b = sga_get(a_id); [b setTitle:sga_string(a_title)]; sga_group_box_pin(b); }
 
 void sga_group_box_set_content(int a_id, int a_child)
 {
@@ -2896,11 +2931,7 @@ void sga_group_box_set_content(int a_id, int a_child)
 	for (NSView *l_old in [[c subviews] copy]) [l_old removeFromSuperview];
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
 	[c addSubview:v];
-	[NSLayoutConstraint activateConstraints:@[
-		[v.leadingAnchor constraintEqualToAnchor:c.leadingAnchor constant:4],
-		[v.trailingAnchor constraintEqualToAnchor:c.trailingAnchor constant:-4],
-		[v.topAnchor constraintEqualToAnchor:c.topAnchor constant:4],
-		[v.bottomAnchor constraintEqualToAnchor:c.bottomAnchor constant:-4]]];
+	sga_group_box_pin(b);
 }
 
 /* An expander: a disclosure triangle with a title, and the content it shows or hides
@@ -8643,6 +8674,9 @@ const char *sga_test_help_tip_shown(void) { return sga_return(Kind_label, [s_hel
 	NSMutableArray<SGAGridItem *> *items;
 	NSArray<NSNumber *> *shown;   /* model items (from 0) shown, nil all */
 	NSString *filter;
+	/* model items selected while the grid has no window: an NSCollectionView that has
+	   not loaded its items yet drops a selection, so it is applied on joining a window */
+	NSMutableSet<NSNumber *> *pending;
 }
 @end
 
@@ -8659,7 +8693,15 @@ static void sga_grid_load(SGAGridView *g, SGAGridItem *it);
 }
 @end
 
+static void sga_grid_apply_pending(SGAGridView *g);
 @implementation SGAGridView
+- (void)viewDidMoveToWindow
+{
+	[super viewDidMoveToWindow];
+	/* after the window has laid the grid out, when it has items to select */
+	__weak SGAGridView *w = self;
+	if ([self window] && pending) dispatch_async(dispatch_get_main_queue(), ^{ SGAGridView *g = w; if (g && [g window] && g->pending) sga_grid_apply_pending(g); });
+}
 - (void)tellSelection
 {
 	NSIndexPath *p = [[[self selectionIndexPaths] allObjects] sortedArrayUsingSelector:@selector(compare:)].firstObject;
@@ -8724,7 +8766,14 @@ static void sga_grid_load(SGAGridView *g, SGAGridItem *it)
 			it->loading = NO;
 			NSUInteger m = l_g ? [l_g->items indexOfObjectIdenticalTo:it] : NSNotFound;
 			NSInteger v = m == NSNotFound ? -1 : sga_grid_view_index(l_g, (NSInteger)m);
-			if (v >= 0) { s_suppress++; [l_g reloadItemsAtIndexPaths:[NSSet setWithObject:[NSIndexPath indexPathForItem:v inSection:0]]]; s_suppress--; }
+			if (v >= 0) {
+				/* reloading an item deselects it: keep the selection */
+				NSSet<NSIndexPath *> *l_selected = [l_g selectionIndexPaths];
+				s_suppress++;
+				[l_g reloadItemsAtIndexPaths:[NSSet setWithObject:[NSIndexPath indexPathForItem:v inSection:0]]];
+				[l_g setSelectionIndexPaths:l_selected];
+				s_suppress--;
+			}
 		});
 	});
 }
@@ -8839,10 +8888,32 @@ void sga_grid_view_set_spacing(int a_id, int s)
 void sga_grid_view_set_multiple(int a_id, int a_on) { SGAGridView *g = sga_grid_of(a_id); if (g) [g setAllowsMultipleSelection:a_on != 0]; }
 
 /* Quiet: item `i' selected (added to the selection when `an_extend'); 0 clears. */
+static void sga_grid_apply_pending(SGAGridView *g)
+{
+	NSMutableSet<NSIndexPath *> *l_paths = [NSMutableSet set];
+	for (NSNumber *k in g->pending) { NSInteger v = sga_grid_view_index(g, [k integerValue]); if (v >= 0) [l_paths addObject:[NSIndexPath indexPathForItem:v inSection:0]]; }
+	g->pending = nil;
+	s_suppress++;
+	[g reloadData];
+	[g layoutSubtreeIfNeeded];
+	[g setSelectionIndexPaths:l_paths];
+	s_suppress--;
+}
+
 void sga_grid_view_select(int a_id, int i, int an_extend)
 {
 	SGAGridView *g = sga_grid_of(a_id);
 	if (!g) return;
+	if (![g window]) {
+		if (!an_extend || !g->pending) {
+			NSMutableSet<NSNumber *> *l_old = g->pending;
+			g->pending = [NSMutableSet set];
+			if (an_extend) for (NSIndexPath *p in [g selectionIndexPaths]) [g->pending addObject:@(sga_grid_model(g, [p item]))];
+			(void)l_old;
+		}
+		if (i >= 1 && sga_grid_view_index(g, i - 1) >= 0) [g->pending addObject:@(i - 1)];
+		return;
+	}
 	NSMutableSet<NSIndexPath *> *s = an_extend ? [[g selectionIndexPaths] mutableCopy] : [NSMutableSet set];
 	NSInteger v = i >= 1 ? sga_grid_view_index(g, i - 1) : -1;
 	if (v >= 0) [s addObject:[NSIndexPath indexPathForItem:v inSection:0]];
@@ -8853,6 +8924,7 @@ void sga_grid_view_select(int a_id, int i, int an_extend)
 
 static NSArray<NSNumber *> *sga_grid_selected_models(SGAGridView *g)
 {
+	if (g->pending) return [[g->pending allObjects] sortedArrayUsingSelector:@selector(compare:)];
 	NSMutableArray<NSNumber *> *r = [NSMutableArray array];
 	for (NSIndexPath *p in [g selectionIndexPaths]) [r addObject:@(sga_grid_model(g, [p item]) + 1)];
 	[r sortUsingSelector:@selector(compare:)];
@@ -8890,7 +8962,17 @@ static void sga_grid_user_select(int a_id, int i, BOOL an_extend)
 	[g tellSelection];
 }
 void sga_test_activate_item(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); NSInteger v = g && i >= 1 ? sga_grid_view_index(g, i - 1) : -1; if (v >= 0) [g openAt:v]; }
-int sga_test_item_picture_ready(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); return g && i >= 1 && i <= (int)[g->items count] && g->items[(NSUInteger)i - 1]->image ? 1 : 0; }
+/* Item `i''s picture is loaded and, when its cell is on screen, that cell shows it. */
+int sga_test_item_picture_ready(int a_id, int i)
+{
+	SGAGridView *g = sga_grid_of(a_id);
+	if (!g || i < 1 || i > (int)[g->items count]) return 0;
+	SGAGridItem *it = g->items[(NSUInteger)i - 1];
+	if (!it->image) return 0;
+	NSInteger v = sga_grid_view_index(g, i - 1);
+	SGAGridCell *c = v >= 0 ? (SGAGridCell *)[g itemAtIndexPath:[NSIndexPath indexPathForItem:v inSection:0]] : nil;
+	return !c || [c->picture_view image] == it->image ? 1 : 0;
+}
 
 /* ------------------------------------------------------------------ 1p-b: focus and Escape */
 

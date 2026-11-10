@@ -52,6 +52,7 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - [Tabs](tabs.md): pages, one at a time, with the tabs on any side
 - [Sidebar](sidebar.md): pages beside a list of their titles, collapsible to icons
 - [Wizard](wizard.md): steps in order, with Back, Next and Finish
+- [Slideshow](slideshow.md): one item at a time, with previous, next and dots, and autoplay
 - [Scroll area](scroll-area.md): a part of something larger
 - [Group box](group-box.md): a titled frame
 - [Expander](expander.md): content the user shows or hides
@@ -60,6 +61,7 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - [Table](table.md): rows and columns, filled or lazy (100,000 rows and more)
 - [Tree](tree.md): a hierarchy, whose nodes can be moved
 - [Tree table](tree-table.md): a hierarchy with columns
+- [Grid view](grid-view.md): pictures or icons over titles, in a flowing grid
 
 ## Drag and drop
 - [Pick and drop](pick-and-drop.md): move an object from one widget to another, with typed targets
@@ -83,6 +85,7 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - [Dialogs](dialogs.md): files, folders, messages, questions, text, fonts, About
 - [Custom dialog](custom-dialog.md): a modal dialog with any content and the platform's buttons
 - [Context help](context-help.md): F1 help about the focused control
+- [Preferences](preferences.md): typed, saved settings and a ready preferences window
 
 ## Drawing
 - [Canvas](canvas.md): your own drawing with Cairo, at the screen's scale
