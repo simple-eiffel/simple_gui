@@ -19,11 +19,14 @@ create
 
 feature {NONE} -- Initialization
 
-	make (a_target_id: INTEGER)
+	make (a_target_id: INTEGER; a_first_told: PROCEDURE)
+			-- Empty; `a_first_told' runs when the first action is added (the widget tells the
+			-- backend what it takes, pebbles and outside drops together).
 		require
 			named: a_target_id > 0
 		do
 			target_id := a_target_id
+			first_told := a_first_told
 			create actions.make (2)
 		ensure
 			set: target_id = a_target_id
@@ -64,7 +67,7 @@ feature -- Element change
 		do
 			actions.extend (an_action)
 			if actions.count = 1 then
-				backend.widget_set_drop_target (target_id, True, False, False)
+				first_told.call (Void)
 			end
 		ensure
 			one_more: count = old count + 1
@@ -94,6 +97,9 @@ feature {GUI_APPLICATION} -- Basic operations
 feature {NONE} -- Implementation
 
 	actions: ARRAYED_LIST [PROCEDURE [TUPLE [ANY]]]
+
+	first_told: PROCEDURE
+			-- Told when the first action arrives.
 
 invariant
 	actions_exist: actions /= Void

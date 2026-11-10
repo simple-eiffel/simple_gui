@@ -1225,6 +1225,27 @@ feature -- Common widget state
 		deferred
 		end
 
+	take_dropped_paths (an_id: INTEGER): POINTER
+			-- 1q-b: the files dropped on `an_id' (event 33, a = 1), newline-separated; taken once.
+		deferred
+		end
+
+	take_dropped_text (an_id: INTEGER): POINTER
+			-- The text dropped on `an_id' (event 33, a = 2); taken once.
+		deferred
+		end
+
+	test_drop_files (an_id: INTEGER; a_paths: POINTER)
+			-- As another program dropping these files (newline-separated) on `an_id': nothing
+			-- happens unless it takes files.
+		deferred
+		end
+
+	test_drop_text (an_id: INTEGER; a_text: POINTER)
+			-- As another program dropping text on `an_id': nothing unless it takes text.
+		deferred
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 			-- As the user starting a pick on `a_source' (row `a_row', 0 for the widget).
 		deferred

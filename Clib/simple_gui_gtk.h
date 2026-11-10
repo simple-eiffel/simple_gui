@@ -4719,30 +4719,83 @@ static void sg_pick_on_drag_end(GtkDragSource *s, GdkDrag *drag, gboolean del, g
         sg_pick_clear();
     }
 }
+/* 1q-b: what the widget takes from other programs ("sg-take-files", "sg-take-text"); a string
+   that arrives while one of our picks is on is the pick's token, otherwise outside text. */
+static int sg_takes(int id, const char *what) { return sg_w[id] && GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), what)); }
+static int sg_outside_ok(int id, GdkDrop *drop) {
+    GdkContentFormats *f = drop ? gdk_drop_get_formats(drop) : NULL;
+    if (!f) return 0;
+    return (sg_takes(id, "sg-take-files") && gdk_content_formats_contain_gtype(f, GDK_TYPE_FILE_LIST))
+        || (sg_takes(id, "sg-take-text") && gdk_content_formats_contain_gtype(f, G_TYPE_STRING));
+}
 static gboolean sg_pick_on_accept(GtkDropTarget *t, GdkDrop *drop, gpointer d) {
-    (void) t; (void) drop; (void) d;
-    return sg_pick_on && sg_pick_mode == 1;
+    int id = GPOINTER_TO_INT(d);
+    (void) t;
+    if (sg_pick_on) return sg_pick_mode == 1;
+    return sg_outside_ok(id, drop);
 }
 static GdkDragAction sg_pick_on_enter(GtkDropTarget *t, double x, double y, gpointer d) {
     int id = GPOINTER_TO_INT(d);
-    (void) t; (void) x; (void) y;
-    if (sg_pick_on && sg_pick_ok[id]) {
+    (void) x; (void) y;
+    if ((sg_pick_on && sg_pick_ok[id]) || (!sg_pick_on && sg_outside_ok(id, gtk_drop_target_get_current_drop(t)))) {
         gtk_widget_add_css_class(sg_pick_widget(id), "sg-drop-hover");
         return GDK_ACTION_COPY;
     }
     return 0;
 }
+/* Keep what was dropped from outside until the next drop, and tell Eiffel (33, a = 1 files, 2 text). */
+static void sg_outside_files(int id, const char *joined) {
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-dropped-paths", g_strdup(joined), g_free);
+    sg_push(33, id, 1, 0);
+}
+static void sg_outside_text(int id, const char *text) {
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-dropped-text", g_strdup(text), g_free);
+    sg_push(33, id, 2, 0);
+}
+static const char *sg_take_dropped_paths(int id) {
+    const char *s = sg_w[id] ? g_object_get_data(G_OBJECT(sg_w[id]), "sg-dropped-paths") : NULL;
+    return s ? s : "";
+}
+static const char *sg_take_dropped_text(int id) {
+    const char *s = sg_w[id] ? g_object_get_data(G_OBJECT(sg_w[id]), "sg-dropped-text") : NULL;
+    return s ? s : "";
+}
+static void sg_test_drop_files(int id, const char *joined) { if (sg_takes(id, "sg-take-files")) sg_outside_files(id, joined); }
+static void sg_test_drop_text(int id, const char *text) { if (sg_takes(id, "sg-take-text")) sg_outside_text(id, text); }
 static void sg_pick_on_leave(GtkDropTarget *t, gpointer d) {
     (void) t;
     gtk_widget_remove_css_class(sg_pick_widget(GPOINTER_TO_INT(d)), "sg-drop-hover");
 }
 static gboolean sg_pick_on_drop(GtkDropTarget *t, const GValue *v, double x, double y, gpointer d) {
     int id = GPOINTER_TO_INT(d);
-    (void) t; (void) v;
-    if (!sg_pick_on || !sg_pick_ok[id]) return FALSE;
-    sg_push(31, id, sg_pick_row_at(id, x, y), 0);
-    sg_pick_clear();
-    return TRUE;
+    (void) t;
+    gtk_widget_remove_css_class(sg_pick_widget(id), "sg-drop-hover");
+    if (sg_pick_on) {
+        if (!sg_pick_ok[id]) return FALSE;
+        sg_push(31, id, sg_pick_row_at(id, x, y), 0);
+        sg_pick_clear();
+        return TRUE;
+    }
+    if (G_VALUE_HOLDS(v, GDK_TYPE_FILE_LIST) && sg_takes(id, "sg-take-files")) {
+        GString *joined = g_string_new(NULL);
+        GSList *it;
+        for (it = g_value_get_boxed(v); it; it = it->next) {
+            char *path = g_file_get_path(G_FILE(it->data));
+            if (path) {
+                if (joined->len) g_string_append_c(joined, '\n');
+                g_string_append(joined, path);
+                g_free(path);
+            }
+        }
+        if (joined->len) sg_outside_files(id, joined->str);
+        g_string_free(joined, TRUE);
+        return TRUE;
+    }
+    if (G_VALUE_HOLDS(v, G_TYPE_STRING) && sg_takes(id, "sg-take-text")) {
+        sg_outside_text(id, g_value_get_string(v));
+        return TRUE;
+    }
+    return FALSE;
 }
 
 static void sg_widget_set_pick(int id, int mode, int is_source, int by_row) {
@@ -4767,10 +4820,15 @@ static void sg_widget_set_pick(int id, int mode, int is_source, int by_row) {
 }
 static void sg_widget_set_drop_target(int id, int internal, int files, int text) {
     GtkWidget *w = sg_w[id];
-    (void) files; (void) text;   /* 1q-b */
-    if (internal && !g_object_get_data(G_OBJECT(w), "sg-drop-hooked")) {
-        GtkDropTarget *t = gtk_drop_target_new(G_TYPE_STRING, GDK_ACTION_COPY);
-        g_signal_connect(t, "accept", G_CALLBACK(sg_pick_on_accept), NULL);
+    g_object_set_data(G_OBJECT(w), "sg-take-files", GINT_TO_POINTER(files));
+    g_object_set_data(G_OBJECT(w), "sg-take-text", GINT_TO_POINTER(text));
+    if ((internal || files || text) && !g_object_get_data(G_OBJECT(w), "sg-drop-hooked")) {
+        /* one target for pebbles (a string token), files and text from other programs */
+        GtkDropTarget *t = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_COPY);
+        GType types[2];
+        types[0] = GDK_TYPE_FILE_LIST; types[1] = G_TYPE_STRING;
+        gtk_drop_target_set_gtypes(t, types, 2);
+        g_signal_connect(t, "accept", G_CALLBACK(sg_pick_on_accept), GINT_TO_POINTER(id));
         g_signal_connect(t, "enter", G_CALLBACK(sg_pick_on_enter), GINT_TO_POINTER(id));
         g_signal_connect(t, "motion", G_CALLBACK(sg_pick_on_enter), GINT_TO_POINTER(id));
         g_signal_connect(t, "leave", G_CALLBACK(sg_pick_on_leave), GINT_TO_POINTER(id));

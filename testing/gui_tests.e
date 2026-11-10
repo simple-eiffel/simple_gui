@@ -2205,6 +2205,48 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_files_and_text_dropped_in
+			-- 1q-b: files and text another program drops reach the actions that take them; a
+			-- widget that takes only files ignores text, and one that takes nothing ignores both.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_files, l_text, l_neither: GUI_LABEL
+			l_got_paths: CELL [INTEGER]
+			l_got_text: CELL [STRING_32]
+			l_first: CELL [STRING_32]
+			l_a, l_b: PATH
+		do
+			create l_got_paths.put (0)
+			create l_got_text.put ({STRING_32} "")
+			create l_first.put ({STRING_32} "")
+			create l_window.make ("Dropped in", 360, 200)
+			create l_stack.make_vertical
+			create l_files.make ("Drop files here")
+			l_files.file_drop_actions.extend (agent (a_paths: ARRAYED_LIST [PATH]; a_n: CELL [INTEGER]; a_f: CELL [STRING_32])
+				do a_n.put (a_paths.count); a_f.put (a_paths.first.name) end (?, l_got_paths, l_first))
+			create l_text.make ("Drop text here")
+			l_text.text_drop_actions.extend (agent (a_t: STRING_32; a_got: CELL [STRING_32]) do a_got.put (a_t) end (?, l_got_text))
+			create l_neither.make ("Takes nothing")
+			l_stack.extend (l_files)
+			l_stack.extend (l_text)
+			l_stack.extend (l_neither)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("who takes what", l_files.takes_files and not l_files.takes_text and l_text.takes_text and not l_neither.takes_files)
+			create l_a.make_from_string ("notes.txt")
+			create l_b.make_from_string ("sermon.md")
+			driver.drop_files (l_files, <<l_a, l_b>>)
+			assert ("two files: " + l_got_paths.item.out, l_got_paths.item = 2 and l_first.item.same_string (l_a.name))
+			driver.drop_text (l_text, "Romans 8:28")
+			assert ("the text", l_got_text.item.same_string ("Romans 8:28"))
+			driver.drop_text (l_files, "ignored")
+			driver.drop_files (l_neither, <<l_a>>)
+			assert ("nothing else", l_got_paths.item = 2 and l_got_text.item.same_string ("Romans 8:28"))
+			l_window.close
+		end
+
 	test_rich_text_ranges_round_trip
 			-- Formatting from code is silent and reads back; positions count characters, so an
 			-- emoji (two UTF-16 units on macOS and Windows) is one.

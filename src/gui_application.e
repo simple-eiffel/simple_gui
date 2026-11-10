@@ -328,6 +328,10 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 					finish_pick (l_id, l_a)
 				when 32 then
 					pebble_in_flight := Void
+				when 33 then
+					if attached widgets.item (l_id) as al_target then
+						al_target.take_outside_drop (l_a)
+					end
 				when 24 then
 					if attached timers.item (l_a) as al_timer then
 						al_timer.fire

@@ -346,7 +346,7 @@ feature -- Pick and drop (1q)
 			if attached drop_actions_made as al_d then
 				Result := al_d
 			else
-				create Result.make (id)
+				create Result.make (id, agent tell_drop_target)
 				drop_actions_made := Result
 			end
 		end
@@ -360,6 +360,42 @@ feature -- Pick and drop (1q)
 	last_drop_row: INTEGER
 			-- The row the last drop on this widget landed on (0: not on a row). Read it in a
 			-- drop action.
+
+	file_drop_actions: GUI_TARGET_ACTIONS [TUPLE [paths: ARRAYED_LIST [PATH]]]
+			-- 1q-b: run with the files another program's drag dropped here. The first agent makes
+			-- the widget take file drops.
+		do
+			if attached file_drop_actions_made as al_a then
+				Result := al_a
+			else
+				create Result.make (agent tell_drop_target)
+				file_drop_actions_made := Result
+			end
+		end
+
+	text_drop_actions: GUI_TARGET_ACTIONS [TUPLE [text: STRING_32]]
+			-- 1q-b: run with the text another program's drag dropped here. The first agent makes
+			-- the widget take text drops.
+		do
+			if attached text_drop_actions_made as al_a then
+				Result := al_a
+			else
+				create Result.make (agent tell_drop_target)
+				text_drop_actions_made := Result
+			end
+		end
+
+	takes_files: BOOLEAN
+			-- Does this widget take files dropped from other programs?
+		do
+			Result := attached file_drop_actions_made as al_a and then al_a.count > 0
+		end
+
+	takes_text: BOOLEAN
+			-- Does this widget take text dropped from other programs?
+		do
+			Result := attached text_drop_actions_made as al_a and then al_a.count > 0
+		end
 
 	set_pebble (a_pebble: detachable ANY)
 			-- Let a pick lift `a_pebble' (Void: this widget is no source, unless its rows are).
@@ -398,6 +434,28 @@ feature -- Pick and drop (1q)
 
 feature {GUI_APPLICATION} -- Pick and drop
 
+	take_outside_drop (a_kind: INTEGER)
+			-- Event 33: files (`a_kind' 1) or text (2) another program dropped here.
+		local
+			l_paths: ARRAYED_LIST [PATH]
+			l_text: STRING_32
+		do
+			if a_kind = 1 and takes_files then
+				create l_paths.make (2)
+				across backend.from_c (backend.take_dropped_paths (id)).split ('%N') as ic loop
+					if not ic.is_empty then
+						l_paths.extend (create {PATH}.make_from_string (ic))
+					end
+				end
+				if not l_paths.is_empty then
+					file_drop_actions.call ([l_paths])
+				end
+			elseif a_kind = 2 and takes_text then
+				l_text := backend.from_c (backend.take_dropped_text (id))
+				text_drop_actions.call ([l_text])
+			end
+		end
+
 	pebble_at_row (a_row: INTEGER): detachable ANY
 			-- The pebble a pick on row `a_row' lifts (0: the widget itself).
 		do
@@ -418,6 +476,16 @@ feature {NONE} -- Pick and drop
 	pick_mode_set: INTEGER
 
 	drop_actions_made: detachable GUI_DROP_ACTIONS
+
+	file_drop_actions_made: detachable like file_drop_actions
+
+	text_drop_actions_made: detachable like text_drop_actions
+
+	tell_drop_target
+			-- Tell the backend everything this widget takes: pebbles, files, text.
+		do
+			backend.widget_set_drop_target (id, has_drop_actions, takes_files, takes_text)
+		end
 
 	tell_pick
 			-- Tell the backend whether and how a pick starts here.
