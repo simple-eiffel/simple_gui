@@ -59,13 +59,185 @@ feature -- Operation
 					-- a processor called SHELL_WAKE.wake
 				backend.push (11, 0, 0, 0, 0)
 			when 66 then
-					-- the close button, with close requests as events
-				backend.push (6, gui_id, 0, 0, 0)
+					-- the close button, with close requests as events; with a dialog up it
+					-- presses Cancel instead and the window stays
+				if attached dialog_up as al_d and then sheet = al_d then
+					al_d.press_role (2)
+				else
+					backend.push (6, gui_id, 0, 0, 0)
+				end
 			else
-				Precursor (a_type, a_x, a_y)
+				if a_type = 3 and then eat_char and then a_x < 32 then
+						-- the character that trails a key the dialog or F1 took
+					eat_char := False
+				elseif a_type = 4 and then key_taken (a_x) then
+					do_nothing
+				else
+					if a_type = 4 then
+						eat_char := False
+					end
+					Precursor (a_type, a_x, a_y)
+				end
 				if a_type = 53 then
 						-- the light/dark setting flipped (the theme followed it)
 					backend.push (10, 0, theme.is_dark.to_integer, 0, 0)
+				end
+			end
+		end
+
+feature {GUI_BACKEND} -- Custom dialogs (1u)
+
+	dialog_up: detachable GUI_SW_DIALOG
+			-- The dialog presented as a sheet here, while it is up.
+
+	is_dialog_up (a_dialog: GUI_SW_DIALOG): BOOLEAN
+			-- Is `a_dialog' the sheet now?
+		do
+			Result := is_window_open and then dialog_up = a_dialog and then sheet = a_dialog
+		end
+
+	present_dialog (a_dialog: GUI_SW_DIALOG)
+			-- Show `a_dialog' as a centered sheet; focus goes to the first focusable widget in it.
+		do
+			prior_focus := focused
+			a_dialog.build
+			a_dialog.set_host (Current)
+			dialog_up := a_dialog
+			show_sheet (a_dialog, 420.0)
+			focus_next
+		ensure
+			up: dialog_up = a_dialog and sheet = a_dialog
+		end
+
+	dismiss_dialog (a_dialog: GUI_SW_DIALOG)
+			-- Close `a_dialog' if it is the sheet (from code: no Cancel is pressed), and hand the
+			-- focus back to where it was.
+		do
+			if dialog_up = a_dialog then
+				if sheet = a_dialog then
+					releasing_dialog := True
+					close_sheet
+					releasing_dialog := False
+				end
+				dialog_up := Void
+				a_dialog.set_host (Void)
+				if attached prior_focus as al_f and then al_f.accepts_focus and then window_of_widget_is_here (al_f) then
+					give_focus (al_f)
+				end
+				prior_focus := Void
+			end
+		ensure
+			gone: dialog_up = Void
+		end
+
+feature {GUI_BACKEND} -- Context help (1u)
+
+	press_help
+			-- As F1: 49 with the focused widget's simple_gui id, or its nearest registered
+			-- ancestor's, else 0.
+		local
+			l_w: detachable SW_WIDGET
+			l_id: INTEGER
+		do
+			from
+				l_w := focused
+			until
+				l_id > 0 or l_w = Void
+			loop
+				l_id := backend.id_of_widget (l_w)
+				l_w := l_w.parent
+			end
+			backend.push (49, 0, l_id, 0, 0)
+		end
+
+	help_tip: detachable GUI_SW_POPOVER_PANEL
+			-- The help tip's panel, the last one shown.
+
+	help_tip_text: STRING_32
+			-- What the last help tip said.
+		attribute
+			create Result.make_empty
+		end
+
+	show_help_tip (a_text: READABLE_STRING_GENERAL; a_x, a_y: REAL_64)
+			-- A note with `a_text' at (`a_x', `a_y'); never over a dialog.
+		local
+			l_panel: GUI_SW_POPOVER_PANEL
+		do
+			if dialog_up = Void or else sheet /= dialog_up then
+				create l_panel.make
+				l_panel.set_content (create {SW_LABEL}.make_ui (a_text))
+				help_tip := l_panel
+				help_tip_text := a_text.to_string_32
+				show_popover (l_panel, a_x, a_y, 260.0)
+			end
+		end
+
+	hide_help_tip
+			-- Take the tip down if it is still the sheet.
+		do
+			if attached help_tip as al_t and then sheet = al_t then
+				close_sheet
+			end
+		end
+
+	help_tip_showing: STRING_32
+			-- The tip's text while it shows, else empty.
+		do
+			create Result.make_empty
+			if is_window_open and then attached help_tip as al_t and then sheet = al_t then
+				Result := help_tip_text
+			end
+		end
+
+feature {NONE} -- Keys of dialogs and help (1u)
+
+	prior_focus: detachable SW_WIDGET
+			-- What had the focus when the dialog came up.
+
+	releasing_dialog: BOOLEAN
+			-- Is the program closing the dialog (so no Cancel is pressed)?
+
+	eat_char: BOOLEAN
+			-- Did a key-down just taken (Return, Escape) have a character still to come?
+
+	window_of_widget_is_here (a_widget: SW_WIDGET): BOOLEAN
+			-- Is `a_widget' in this window's tree?
+		local
+			l_top: SW_WIDGET
+		do
+			from
+				l_top := a_widget
+			until
+				not attached l_top.parent as al_up
+			loop
+				l_top := al_up
+			end
+			Result := l_top = root
+		end
+
+	key_taken (a_vk: INTEGER): BOOLEAN
+			-- Does this key-down belong to simple_gui: F1 asks for help; with a dialog up and no
+			-- popup open, Return presses the default button (a multi-line text keeps its Return)
+			-- and Escape the cancel button?
+		local
+			l_multi: BOOLEAN
+		do
+			if a_vk = 112 then
+				press_help
+				Result := True
+			elseif attached dialog_up as al_d and then sheet = al_d and then popup = Void then
+				if a_vk = 13 then
+					l_multi := attached {SW_TEXT_BOX} focused as al_t and then not al_t.is_single_line and then not al_t.is_one_paragraph
+					if not l_multi then
+						al_d.press_role (1)
+						eat_char := True
+						Result := True
+					end
+				elseif a_vk = 27 then
+					al_d.press_role (2)
+					eat_char := True
+					Result := True
 				end
 			end
 		end
@@ -269,9 +441,12 @@ feature {GUI_BACKEND} -- Popover (1j)
 
 	close_sheet
 			-- As SW_WINDOW's; a popover the user dismissed (a click outside, Escape) reports
-			-- closed (17).
+			-- closed (17). A dialog sheet closed by the user (its close mark) presses Cancel
+			-- instead, and stays up until the program closes it.
 		do
-			if attached popover_shown as al_p and then sheet = al_p then
+			if attached dialog_up as al_d and then sheet = al_d and then not releasing_dialog then
+				al_d.press_role (2)
+			elseif attached popover_shown as al_p and then sheet = al_p then
 				popover_shown := Void
 				Precursor
 				backend.push (17, popover_id, 0, 0, 0)
