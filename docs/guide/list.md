@@ -109,7 +109,7 @@ The list keeps a copy, so change a row in the list through `set_row_checked`. A 
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkListBox` (single selection, `boxed-list` style) in a `GtkScrolledWindow` | `NSTableView` with one column and no header, inset style, in a bordered `NSScrollView` | `SW_TEXT_LIST`: a drawn list that names its rows for screen readers |
-| Looks or behaves differently | At least 80 pixels tall. A cleared selection sends row 0. Rich rows are a box of `GtkCheckButton`, labels (the subtitle `dim-label`), an icon, a badge and a flat close button; GtkListBox's own filter hides rows. | A cleared selection sends row 0. Rich rows are table cell views; Command and Backspace closes a row. | Starts 120 pixels tall. A click always selects a row, so the user has no way to clear the selection and row 0 does not arrive. Rich rows are drawn; while any row has a subtitle, every row is two lines tall. |
+| Looks or behaves differently | At least 80 pixels tall. A cleared selection sends row 0. Rich rows are a box of `GtkCheckButton`, labels (the subtitle `dim-label`), an icon, a badge and a flat close button; GtkListBox's own filter hides rows. | A cleared selection sends row 0. Rich rows are table cell views; while any row has a subtitle, every row is two lines tall. Space checks the selected row; Delete, or Command and Backspace, closes it. A filter keeps a map of the rows shown, so row numbers stay the program's. | Starts 120 pixels tall. A click always selects a row, so the user has no way to clear the selection and row 0 does not arrive. Rich rows are drawn; while any row has a subtitle, every row is two lines tall. |
 
 ## Design guidance
 
