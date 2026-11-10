@@ -8958,7 +8958,17 @@ static void sga_grid_user_select(int a_id, int i, BOOL an_extend)
 	[g tellSelection];
 }
 void sga_test_activate_item(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); NSInteger v = g && i >= 1 ? sga_grid_view_index(g, i - 1) : -1; if (v >= 0) [g openAt:v]; }
-int sga_test_item_picture_ready(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); return g && i >= 1 && i <= (int)[g->items count] && g->items[(NSUInteger)i - 1]->image ? 1 : 0; }
+/* Item `i''s picture is loaded and, when its cell is on screen, that cell shows it. */
+int sga_test_item_picture_ready(int a_id, int i)
+{
+	SGAGridView *g = sga_grid_of(a_id);
+	if (!g || i < 1 || i > (int)[g->items count]) return 0;
+	SGAGridItem *it = g->items[(NSUInteger)i - 1];
+	if (!it->image) return 0;
+	NSInteger v = sga_grid_view_index(g, i - 1);
+	SGAGridCell *c = v >= 0 ? (SGAGridCell *)[g itemAtIndexPath:[NSIndexPath indexPathForItem:v inSection:0]] : nil;
+	return !c || [c->picture_view image] == it->image ? 1 : 0;
+}
 
 /* ------------------------------------------------------------------ 1p-b: focus and Escape */
 
