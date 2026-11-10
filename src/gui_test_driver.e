@@ -732,6 +732,52 @@ feature -- User actions
 			settle
 		end
 
+	choose_grid_item (a_grid: GUI_GRID_VIEW; i: INTEGER)
+			-- Click item `i', as the user would: 50.
+		require
+			has_application: has_application
+		do
+			backend.test_choose (a_grid.id, i)
+			settle
+		end
+
+	extend_grid_selection (a_grid: GUI_GRID_VIEW; i: INTEGER)
+			-- Add item `i' to the selection, as Ctrl or Command and a click would: 50.
+		require
+			has_application: has_application
+		do
+			backend.test_extend_list_selection (a_grid.id, i)
+			settle
+		end
+
+	activate_grid_item (a_grid: GUI_GRID_VIEW; i: INTEGER)
+			-- Double-click item `i', as the user would: 51.
+		require
+			has_application: has_application
+		do
+			backend.test_activate_item (a_grid.id, i)
+			settle
+		end
+
+	grid_picture_ready (a_grid: GUI_GRID_VIEW; i: INTEGER; a_ms: INTEGER): BOOLEAN
+			-- Is item `i''s picture shown, waiting up to `a_ms' for it to load?
+		require
+			has_application: has_application
+		local
+			l_waited: INTEGER
+		do
+			from
+				settle
+				Result := backend.test_item_picture_ready (a_grid.id, i)
+			until
+				Result or l_waited >= a_ms
+			loop
+				wait (50)
+				l_waited := l_waited + 50
+				Result := backend.test_item_picture_ready (a_grid.id, i)
+			end
+		end
+
 	press_dialog_button (a_dialog: GUI_DIALOG; n: INTEGER)
 		require
 			has_application: has_application

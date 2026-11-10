@@ -2030,6 +2030,89 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_grid_view_items
+			-- 1v-a: pictures load off the GUI thread and show; the user's click and double click
+			-- fire, code is quiet; several items select; a filter keeps item numbers.
+		local
+			l_window: GUI_WINDOW
+			l_grid: GUI_GRID_VIEW
+			l_chosen, l_opened: ARRAYED_LIST [INTEGER]
+			l_png: PATH
+		do
+			create l_chosen.make (2)
+			create l_opened.make (2)
+			create l_png.make_from_string ("docs/guide/images/linux/button.png")
+			create l_window.make ("Grid", 560, 400)
+			create l_grid.make
+			l_grid.extend_picture ("Button", l_png)
+			l_grid.extend_icon ("Folder", "folder")
+			l_grid.extend ("Genesis")
+			l_grid.extend ("Exodus")
+			l_grid.set_item_subtitle (3, "The beginning")
+			l_grid.set_item_size (140, 120)
+			l_grid.selection_actions.extend (agent (i: INTEGER; t: ARRAYED_LIST [INTEGER]) do t.extend (i) end (?, l_chosen))
+			l_grid.activate_actions.extend (agent (i: INTEGER; t: ARRAYED_LIST [INTEGER]) do t.extend (i) end (?, l_opened))
+			l_window.set_content (l_grid)
+			l_window.show
+			settle_window
+			assert ("four items", l_grid.count = 4 and l_grid.item_title (2).same_string ("Folder"))
+			assert ("the picture loaded", driver.grid_picture_ready (l_grid, 1, 3000))
+			l_grid.select_item (2)
+			assert ("selected quietly", l_grid.selected_index = 2 and l_chosen.is_empty)
+			driver.choose_grid_item (l_grid, 3)
+			assert ("the user chose Genesis", l_grid.selected_index = 3 and l_chosen.count = 1 and l_chosen [1] = 3)
+			driver.activate_grid_item (l_grid, 4)
+			assert ("opened Exodus", l_opened.count = 1 and l_opened [1] = 4)
+			l_grid.set_multiple_selection (True)
+			l_grid.select_item (1)
+			driver.extend_grid_selection (l_grid, 4)
+			assert ("two selected: " + l_grid.selected_items.count.out, l_grid.selected_items.count = 2 and l_grid.selected_items [2] = 4)
+			l_grid.set_filter ("BEGIN")
+			settle_window
+			assert ("the subtitle matched: " + l_grid.shown_count.out, l_grid.shown_count = 1)
+			l_grid.set_filter ("")
+			l_grid.remove_item (1)
+			assert ("removed", l_grid.count = 3 and l_grid.item_title (1).same_string ("Folder"))
+			l_window.close
+		end
+
+	test_slideshow_moves
+			-- 1v-a: next and previous stop at the ends unless it wraps; the user's moves fire,
+			-- show_item is quiet; autoplay moves, and pauses.
+		local
+			l_window: GUI_WINDOW
+			l_show: GUI_SLIDESHOW
+			l_told: ARRAYED_LIST [INTEGER]
+		do
+			create l_told.make (4)
+			create l_window.make ("Slides", 420, 260)
+			create l_show.make
+			l_show.extend_item (create {GUI_LABEL}.make ("In the beginning"))
+			l_show.extend_item (create {GUI_LABEL}.make ("Let there be light"))
+			l_show.extend_item (create {GUI_LABEL}.make ("And it was good"))
+			l_show.item_changed_actions.extend (agent (i: INTEGER; t: ARRAYED_LIST [INTEGER]) do t.extend (i) end (?, l_told))
+			l_window.set_content (l_show)
+			l_window.show
+			settle_window
+			assert ("first shown, Previous off", l_show.item_index = 1 and not l_show.previous_button.is_enabled)
+			driver.perform_click (l_show.next_button)
+			assert ("the user's next", l_show.item_index = 2 and l_told.count = 1 and l_told [1] = 2)
+			l_show.show_item (3)
+			assert ("quietly to the last, Next off", l_show.item_index = 3 and l_told.count = 1 and not l_show.next_button.is_enabled)
+			l_show.set_wraps (True)
+			driver.perform_click (l_show.next_button)
+			assert ("wraps to the first", l_show.item_index = 1 and l_told.count = 2)
+			l_show.set_interval (100)
+			driver.wait (450)
+			assert ("autoplay moved: " + l_told.count.out, l_told.count >= 4)
+			l_show.set_paused (True)
+			l_told.wipe_out
+			driver.wait (350)
+			assert ("paused", l_told.is_empty)
+			l_show.set_interval (0)
+			l_window.close
+		end
+
 	test_rating_set_silently_and_user_emits
 		local
 			l_window: GUI_WINDOW
