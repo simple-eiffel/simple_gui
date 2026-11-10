@@ -2037,17 +2037,19 @@ feature -- The remaining controls (1j)
 			l_window: GUI_WINDOW
 			l_grid: GUI_GRID_VIEW
 			l_chosen, l_opened: ARRAYED_LIST [INTEGER]
-			l_png: PATH
+			l_png, l_jpg: PATH
 		do
 			create l_chosen.make (2)
 			create l_opened.make (2)
 			create l_png.make_from_string ("docs/guide/images/linux/button.png")
+			create l_jpg.make_from_string ("testing/fixtures/grid_small.jpg")
 			create l_window.make ("Grid", 560, 400)
 			create l_grid.make
 			l_grid.extend_picture ("Button", l_png)
 			l_grid.extend_icon ("Folder", "folder")
 			l_grid.extend ("Genesis")
 			l_grid.extend ("Exodus")
+			l_grid.extend_picture ("Photo", l_jpg)
 			l_grid.set_item_subtitle (3, "The beginning")
 			l_grid.set_item_size (140, 120)
 			l_grid.selection_actions.extend (agent (i: INTEGER; t: ARRAYED_LIST [INTEGER]) do t.extend (i) end (?, l_chosen))
@@ -2055,8 +2057,9 @@ feature -- The remaining controls (1j)
 			l_window.set_content (l_grid)
 			l_window.show
 			settle_window
-			assert ("four items", l_grid.count = 4 and l_grid.item_title (2).same_string ("Folder"))
+			assert ("five items", l_grid.count = 5 and l_grid.item_title (2).same_string ("Folder"))
 			assert ("the picture loaded", driver.grid_picture_ready (l_grid, 1, 3000))
+			assert ("the JPEG loaded too", driver.grid_picture_ready (l_grid, 5, 5000))
 			l_grid.select_item (2)
 			assert ("selected quietly", l_grid.selected_index = 2 and l_chosen.is_empty)
 			driver.choose_grid_item (l_grid, 3)
@@ -2072,7 +2075,44 @@ feature -- The remaining controls (1j)
 			assert ("the subtitle matched: " + l_grid.shown_count.out, l_grid.shown_count = 1)
 			l_grid.set_filter ("")
 			l_grid.remove_item (1)
-			assert ("removed", l_grid.count = 3 and l_grid.item_title (1).same_string ("Folder"))
+			assert ("removed", l_grid.count = 4 and l_grid.item_title (1).same_string ("Folder"))
+			l_window.close
+		end
+
+	test_grid_view_keeps_turning_while_a_large_picture_decodes
+			-- 1v-a: a 6000 by 4000 JPEG decodes off the GUI thread, so a 20 ms timer keeps firing
+			-- (no gap over 400 ms) until the picture shows.
+		local
+			l_window: GUI_WINDOW
+			l_grid: GUI_GRID_VIEW
+			l_timer: GUI_TIMER
+			l_ready: BOOLEAN
+			l_waited: INTEGER
+		do
+			create l_window.make ("Large picture", 560, 400)
+			create l_grid.make
+			l_grid.extend_picture ("Large", create {PATH}.make_from_string ("testing/fixtures/grid_large.jpg"))
+			l_grid.set_item_size (200, 160)
+			l_window.set_content (l_grid)
+			l_window.show
+			settle_window
+			tick_count := 0
+			tick_longest_gap := 0.0
+			tick_last := now_seconds
+			l_timer := app.every (20, agent on_tick)
+			from
+			until
+				l_ready or l_waited >= 30000
+			loop
+				driver.wait (20)
+				l_waited := l_waited + 20
+				l_ready := driver.grid_picture_ready (l_grid, 1, 0)
+			end
+			l_timer.cancel
+			print ("    large picture: ready after " + l_waited.out + " ms, " + tick_count.out + " ticks, longest gap " + (tick_longest_gap * 1000.0).rounded.out + " ms%N")
+			assert ("the large picture loaded", l_ready)
+			assert ("the timer fired while it decoded: " + tick_count.out, tick_count >= 1)
+			assert ("no gap over 400 ms (longest " + (tick_longest_gap * 1000.0).rounded.out + " ms, " + tick_count.out + " ticks)", tick_longest_gap < 0.4)
 			l_window.close
 		end
 
@@ -3852,6 +3892,34 @@ feature {NONE} -- Fixtures
 	count_click
 		do
 			clicks := clicks + 1
+		end
+
+	tick_count: INTEGER
+
+	tick_longest_gap, tick_last: REAL_64
+			-- The timer test: ticks seen, the longest gap between two (seconds), and when the last was.
+
+	now_seconds: REAL_64
+			-- A wall clock on Windows (C `clock'), in seconds.
+		do
+			Result := c_clock_ms / 1000.0
+		end
+
+	c_clock_ms: INTEGER_64
+		external
+			"C inline use <time.h>"
+		alias
+			"return (EIF_INTEGER_64) (((long long) clock () * 1000) / CLOCKS_PER_SEC);"
+		end
+
+	on_tick
+		local
+			l_now: REAL_64
+		do
+			l_now := now_seconds
+			tick_longest_gap := tick_longest_gap.max (l_now - tick_last)
+			tick_last := l_now
+			tick_count := tick_count + 1
 		end
 
 	on_message (a_tag: INTEGER; a_text: STRING_32)
