@@ -1325,6 +1325,76 @@ feature -- Common widget state
 		alias "return (EIF_POINTER) sga_test_cell_note($a_table);"
 		end
 
+	tabs_set_position (a_tabs, a_position: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_tabs_set_position($a_tabs, $a_position);"
+		end
+
+	sidebar: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_sidebar();"
+		end
+
+	sidebar_extend (a_sidebar, a_page: INTEGER; a_title: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_sidebar_extend($a_sidebar, $a_page, (const char *) $a_title);"
+		end
+
+	sidebar_add_heading (a_sidebar: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_sidebar_add_heading($a_sidebar, (const char *) $a_text);"
+		end
+
+	sidebar_set_icon (a_sidebar, i: INTEGER; a_name: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_sidebar_set_icon($a_sidebar, $i, (const char *) $a_name);"
+		end
+
+	sidebar_set_badge (a_sidebar, i: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_sidebar_set_badge($a_sidebar, $i, (const char *) $a_text);"
+		end
+
+	sidebar_select (a_sidebar, i: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_sidebar_select($a_sidebar, $i);"
+		end
+
+	sidebar_selected (a_sidebar: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_sidebar_selected($a_sidebar);"
+		end
+
+	sidebar_set_collapsible (a_sidebar: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_sidebar_set_collapsible($a_sidebar, $a_on ? 1 : 0);"
+		end
+
+	sidebar_set_collapsed (a_sidebar: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_sidebar_set_collapsed($a_sidebar, $a_on ? 1 : 0);"
+		end
+
+	sidebar_is_collapsed (a_sidebar: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_sidebar_is_collapsed($a_sidebar) != 0;"
+		end
+
+	path_control_set_parts (an_id: INTEGER; a_parts: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_path_control_set_parts($an_id, (const char *) $a_parts);"
+		end
+
+	test_toggle_sidebar (a_sidebar: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_toggle_sidebar($a_sidebar);"
+		end
+
+	test_page_shown (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_page_shown($an_id);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"
