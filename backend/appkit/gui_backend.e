@@ -1586,6 +1586,46 @@ feature -- Common widget state
 		alias "sga_test_field_escape($an_id);"
 		end
 
+	widget_set_style (an_id: INTEGER; a_spec: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_widget_set_style($an_id, (const char *)$a_spec);"
+		end
+
+	widget_style_supported (an_id: INTEGER; a_property: POINTER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_widget_style_supported($an_id, (const char *)$a_property) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	set_theme_color (a_role, a_rgb: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_set_theme_color($a_role, $a_rgb);"
+		end
+
+	font_load (a_path: POINTER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_font_load((const char *)$a_path);"
+		end
+
+	font_family_available (a_name: POINTER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_font_family_available((const char *)$a_name) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	is_high_contrast: BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_is_high_contrast() ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	test_style_value (an_id: INTEGER; a_key: POINTER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_test_style_value($an_id, (const char *)$a_key);"
+		end
+
+	test_set_high_contrast (a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_set_high_contrast($a_on ? 1 : 0);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

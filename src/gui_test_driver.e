@@ -448,6 +448,26 @@ feature -- User actions
 			settle
 		end
 
+	set_high_contrast (a_on: BOOLEAN)
+			-- Act as if the system's contrast setting were on (1w); styled widgets restyle.
+		require
+			has_application: has_application
+		do
+			backend.test_set_high_contrast (a_on)
+			settle
+		end
+
+	style_value (a_widget: GUI_WIDGET; a_key: READABLE_STRING_GENERAL): STRING_32
+			-- What the native control shows now for key `a_key' of a flat style (`fg', `font',
+			-- `size'...; see GUI_BACKEND_API.widget_set_style), read back from the control.
+			-- Empty when the control does not show it.
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_key)
+			Result := backend.from_c (backend.test_style_value (a_widget.id, l_c.item))
+		end
+
 	pump_until_idle (a_ms: INTEGER)
 			-- Run the loop until nothing is pending (or `a_ms' pass), then fire the queue.
 		require

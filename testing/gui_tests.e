@@ -3968,6 +3968,411 @@ feature -- Lazy tables (1f)
 			l_window.close
 		end
 
+feature -- Styles and the theme (1w)
+
+	test_style_cascade
+			-- Classes in the order they were added, the own style over them, `merged', and a
+			-- class defined again restyling its members.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_a, l_b, l_merged: GUI_STYLE
+		do
+			driver.set_high_contrast (False)
+			create l_a.make
+			l_a.set_foreground (0x112233)
+			l_a.set_font_size (14)
+			create l_b.make
+			l_b.set_foreground (0x445566)
+			l_b.set_italic (True)
+			l_merged := l_a.merged (l_b)
+			assert ("merged: the other's set properties win", l_merged.foreground = 0x445566 and l_merged.font_size = 14 and l_merged.is_italic)
+			assert ("merged leaves both alone", l_a.foreground = 0x112233 and not l_a.is_set (l_a.Italic) and not l_b.is_set (l_b.Font_size))
+			app.define_style_class ("cascade_a", l_a)
+			app.define_style_class ("cascade_b", l_b)
+			create l_window.make ("Cascade", 240, 100)
+			create l_label.make ("cascade")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			assert ("native at first", not l_label.is_styled and driver.style_value (l_label, "fg").is_empty)
+			l_label.add_style_class ("cascade_a")
+			l_label.add_style_class ("cascade_b")
+			assert ("classes in order", l_label.style_classes.count = 2 and l_label.style_classes.first.same_string ("cascade_a")
+				and l_label.has_style_class ("cascade_b"))
+			assert ("the later class wins", l_label.effective_style.foreground = 0x445566 and l_label.effective_style.font_size = 14
+				and l_label.effective_style.is_italic)
+			assert ("classes shown: " + driver.style_value (l_label, "fg").to_string_8, driver.style_value (l_label, "fg").same_string ("445566")
+				and driver.style_value (l_label, "size").same_string ("14"))
+			l_label.own_style.set_foreground (0x778899)
+			l_label.restyle
+			assert ("the own style wins", l_label.effective_style.foreground = 0x778899 and l_label.effective_style.is_italic)
+			assert ("own shown: " + driver.style_value (l_label, "fg").to_string_8, driver.style_value (l_label, "fg").same_string ("778899"))
+			l_a.set_font_size (20)
+			assert ("a class keeps what it was defined with", attached app.style_class ("cascade_a") as al_class and then al_class.font_size = 14)
+			app.define_style_class ("cascade_a", l_a)
+			assert ("members restyled: " + driver.style_value (l_label, "size").to_string_8, l_label.effective_style.font_size = 20
+				and driver.style_value (l_label, "size").same_string ("20"))
+			l_label.remove_style_class ("cascade_b")
+			assert ("a class removed", not l_label.has_style_class ("cascade_b") and not l_label.effective_style.is_set (l_a.Italic)
+				and driver.style_value (l_label, "italic").is_empty)
+			l_label.set_own_style (create {GUI_STYLE}.make)
+			l_label.remove_style_class ("cascade_a")
+			assert ("native again", not l_label.is_styled and driver.style_value (l_label, "fg").is_empty
+				and driver.style_value (l_label, "size").is_empty)
+			l_window.close
+		end
+
+	test_style_applies_natively
+			-- A label, a field and a list are styled; each set key reads back from the control.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_label: GUI_LABEL
+			l_field: GUI_TEXT_FIELD
+			l_list: GUI_LIST
+			l_style: GUI_STYLE
+		do
+			driver.set_high_contrast (False)
+			create l_window.make ("Styled", 360, 320)
+			create l_stack.make_vertical
+			create l_label.make ("A styled label")
+			create l_field.make
+			l_field.set_placeholder ("Type here")
+			create l_list.make
+			across <<"One", "Two", "Three">> as ic loop l_list.extend (ic) end
+			l_stack.extend (l_label)
+			l_stack.extend (l_field)
+			l_stack.extend_stretching (l_list)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+				-- The label: everything but a selection color and scroll bars.
+			create l_style.make
+			l_style.set_foreground (0x102030)
+			l_style.set_background (0xF0E0D0)
+			l_style.set_font_family ("system")
+			l_style.set_font_size (15.5)
+			l_style.set_font_weight (700)
+			l_style.set_italic (True)
+			l_style.set_padding (2, 4, 6, 8)
+			l_style.set_border (2, 0x304050)
+			l_style.set_corner_radius (6)
+			l_style.set_shadow (1, 2, 3, 0x000000, 40)
+			across 1 |..| l_style.Property_count as ic loop
+				assert ("label supports " + ic.out, l_label.supports_style (ic) = (ic /= l_style.Selection_color
+					and ic /= l_style.Placeholder_color and ic /= l_style.Scroll_bars))
+			end
+			l_label.set_own_style (l_style)
+			settle_window
+			check_style (l_label, "fg", "102030")
+			check_style (l_label, "bg", "f0e0d0")
+			check_style (l_label, "font", "system")
+			check_style (l_label, "size", "15.5")
+			check_style (l_label, "weight", "700")
+			check_style (l_label, "italic", "1")
+			check_style (l_label, "pad", "2,4,6,8")
+			check_style (l_label, "border", "2")
+			check_style (l_label, "border_color", "304050")
+			check_style (l_label, "radius", "6")
+			check_style (l_label, "shadow", "1,2,3,40")
+			check_style (l_label, "shadow_color", "000000")
+			l_label.set_text ("The text changed")
+			check_style (l_label, "fg", "102030")
+				-- The field.
+			create l_style.make
+			l_style.set_foreground (0x203040)
+			l_style.set_background (0xFFF8E0)
+			l_style.set_placeholder_color (0x8090A0)
+			l_style.set_selection_color (0xFFCC00)
+			l_style.set_font_family ("monospace")
+			l_style.set_font_size (14)
+			assert ("field supports", l_field.supports_style (l_style.Foreground) and l_field.supports_style (l_style.Placeholder_color)
+				and l_field.supports_style (l_style.Selection_color) and l_field.supports_style (l_style.Font_family))
+			l_field.set_own_style (l_style)
+			settle_window
+			check_style (l_field, "fg", "203040")
+			check_style (l_field, "bg", "fff8e0")
+			check_style (l_field, "placeholder", "8090a0")
+			check_style (l_field, "selection", "ffcc00")
+			check_style (l_field, "font", "monospace")
+			check_style (l_field, "size", "14")
+			l_field.set_placeholder ("Another hint")
+			check_style (l_field, "placeholder", "8090a0")
+			l_field.set_text ("typed")
+			assert ("the field still works", l_field.text.same_string ("typed"))
+				-- The list.
+			create l_style.make
+			l_style.set_foreground (0x004080)
+			l_style.set_background (0xF4F4FF)
+			l_style.set_selection_color (0x800040)
+			l_style.set_font_size (16)
+			l_style.set_font_weight (700)
+			l_style.set_scroll_bars (l_style.Scroll_bars_always)
+			assert ("list supports", l_list.supports_style (l_style.Foreground) and l_list.supports_style (l_style.Selection_color)
+				and l_list.supports_style (l_style.Scroll_bars) and not l_list.supports_style (l_style.Padding))
+			l_list.set_own_style (l_style)
+			settle_window
+			check_style (l_list, "fg", "004080")
+			check_style (l_list, "bg", "f4f4ff")
+			check_style (l_list, "selection", "800040")
+			check_style (l_list, "size", "16")
+			check_style (l_list, "weight", "700")
+			check_style (l_list, "scroll", "2")
+			l_list.extend ("Four")
+			settle_window
+			check_style (l_list, "fg", "004080")
+			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_1w_styles.png")))
+				-- And back to the native look.
+			l_label.set_own_style (create {GUI_STYLE}.make)
+			l_field.set_own_style (create {GUI_STYLE}.make)
+			l_list.set_own_style (create {GUI_STYLE}.make)
+			settle_window
+			assert ("native again", driver.style_value (l_label, "bg").is_empty and driver.style_value (l_field, "fg").is_empty
+				and driver.style_value (l_list, "size").is_empty)
+			l_window.close
+		end
+
+	test_style_dark_variant
+			-- The dark appearance shows a style's dark colors, and light shows the light ones again.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_style: GUI_STYLE
+		do
+			driver.set_high_contrast (False)
+			driver.set_dark (False)
+			create l_window.make ("Variants", 240, 100)
+			create l_label.make ("light and dark")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			create l_style.make
+			l_style.set_foreground (0x111111)
+			l_style.set_foreground_dark (0xEEEEEE)
+			l_style.set_background (0xFFFFFF)
+			l_style.set_background_dark (0x000000)
+			l_style.set_border (1, 0x222222)
+			l_label.set_own_style (l_style)
+			check_style (l_label, "fg", "111111")
+			check_style (l_label, "bg", "ffffff")
+			driver.set_dark (True)
+			settle_window
+			check_style (l_label, "fg", "eeeeee")
+			check_style (l_label, "bg", "000000")
+				-- No dark variant: the light color serves both.
+			check_style (l_label, "border_color", "222222")
+			driver.set_dark (False)
+			settle_window
+			check_style (l_label, "fg", "111111")
+			check_style (l_label, "bg", "ffffff")
+			l_window.close
+		end
+
+	test_style_unsupported_ignored
+			-- A standard button keeps its native bezel: a background is not supported, is kept in
+			-- the style, and changes nothing. A flat button takes one.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_button, l_flat: GUI_BUTTON
+			l_style: GUI_STYLE
+			l_hits: CELL [INTEGER]
+		do
+			driver.set_high_contrast (False)
+			create l_hits.put (0)
+			create l_window.make ("Unsupported", 260, 140)
+			create l_stack.make_vertical
+			create l_button.make ("Standard")
+			l_button.click_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_hits))
+			create l_flat.make ("Flat")
+			l_flat.set_style (l_flat.Style_flat)
+			l_stack.extend (l_button)
+			l_stack.extend (l_flat)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			create l_style.make
+			l_style.set_background (0xCC0000)
+			l_style.set_font_size (17)
+			assert ("a standard button takes no background", not l_button.supports_style (l_style.Background)
+				and l_button.supports_style (l_style.Font_size))
+			l_button.set_own_style (l_style)
+			settle_window
+			assert ("kept in the style", l_button.own_style.is_set (l_style.Background) and l_button.own_style.background = 0xCC0000)
+			assert ("not shown: " + driver.style_value (l_button, "bg").to_string_8, driver.style_value (l_button, "bg").is_empty)
+			check_style (l_button, "size", "17")
+			driver.perform_click (l_button)
+			assert ("the button still works", l_hits.item = 1)
+			l_button.set_text ("Renamed")
+			check_style (l_button, "size", "17")
+			assert ("a flat button takes one", l_flat.supports_style (l_style.Background))
+			l_flat.set_own_style (l_style.twin)
+			settle_window
+			check_style (l_flat, "bg", "cc0000")
+				-- Back to a standard button: the background goes.
+			l_flat.set_style (l_flat.Style_normal)
+			assert ("standard again: " + driver.style_value (l_flat, "bg").to_string_8, not l_flat.supports_style (l_style.Background)
+				and driver.style_value (l_flat, "bg").is_empty)
+			check_style (l_flat, "size", "17")
+			l_window.close
+		end
+
+	test_theme_accent_and_roles
+			-- `system_color' answers the program's own colors, and a label colored by a role
+			-- follows the role.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_label: GUI_LABEL
+			l_save: GUI_BUTTON
+			l_radios: GUI_RADIO_GROUP
+			l_style: GUI_STYLE
+		do
+			driver.set_high_contrast (False)
+			driver.set_dark (False)
+			create l_window.make ("Theme", 300, 240)
+			create l_stack.make_vertical
+			create l_label.make ("In the text role")
+			create l_save.make ("Save")
+			l_save.set_style (l_save.Style_suggested)
+			create l_radios.make
+			across <<"One", "Two">> as ic loop l_radios.extend (ic) end
+			l_stack.extend (l_label)
+			l_stack.extend (l_save)
+			l_stack.extend (create {GUI_CHECK_BOX}.make ("Checked"))
+			l_stack.extend (l_radios)
+			l_stack.extend (create {GUI_SLIDER}.make (0, 100))
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			create l_style.make
+			l_style.set_foreground_role (app.Color_text)
+			l_label.set_own_style (l_style)
+			check_style (l_label, "fg", hex6 (app.system_color (app.Color_text)))
+			app.set_theme_color (app.Color_text, 0x123456, 0xABCDEF)
+			assert ("answers the override", app.has_theme_color (app.Color_text) and app.system_color (app.Color_text) = 0x123456)
+			check_style (l_label, "fg", "123456")
+			app.set_theme_color (app.Color_text, 0x654321, 0xFEDCBA)
+			check_style (l_label, "fg", "654321")
+			driver.set_dark (True)
+			settle_window
+			assert ("dark answers the dark one", app.system_color (app.Color_text) = 0xFEDCBA)
+			check_style (l_label, "fg", "fedcba")
+			driver.set_dark (False)
+			settle_window
+			check_style (l_label, "fg", "654321")
+			app.set_accent_color (0xFF0080, 0x80FF00)
+			app.set_theme_color (app.Color_window_background, 0xFFF0F0, 0x201010)
+			settle_window
+			assert ("the accent", app.has_theme_color (app.Color_accent) and app.system_color (app.Color_accent) = 0xFF0080
+				and app.system_color (app.Color_window_background) = 0xFFF0F0)
+			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_1w_theme.png")))
+			across app.Color_window_background |..| app.Color_separator as ic loop
+				app.reset_theme_color (ic)
+			end
+			settle_window
+			assert ("the system's again", not app.has_theme_color (app.Color_text) and not app.has_theme_color (app.Color_accent)
+				and app.system_color (app.Color_text) /= 0x654321)
+			check_style (l_label, "fg", hex6 (app.system_color (app.Color_text)))
+			l_window.close
+		end
+
+	test_font_load_runtime
+			-- A font file loaded while the program runs: its family is listed and usable.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_names: ARRAYED_LIST [STRING_32]
+			l_style: GUI_STYLE
+		do
+			driver.set_high_contrast (False)
+			assert ("generic families", app.has_font_family ("system") and app.has_font_family ("monospace")
+				and app.has_font_family ("serif") and app.has_font_family ("sans-serif"))
+			assert ("no such family", not app.has_font_family ("No Such Family 1w"))
+			assert ("no such file", app.load_font (create {PATH}.make_from_string ("testing/fonts/no_such_font.ttf")).is_empty)
+			l_names := app.load_font (test_font_path)
+			assert ("the family is listed: " + l_names.count.out, l_names.count = 1 and then l_names.first.same_string ("Simple Gui Test"))
+			assert ("usable", app.has_font_family ("Simple Gui Test"))
+			l_names := app.load_font (test_font_path)
+			assert ("loaded twice", l_names.count = 1 and then l_names.first.same_string ("Simple Gui Test"))
+			create l_window.make ("Fonts", 280, 100)
+			create l_label.make ("ABC abc 123")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			create l_style.make
+			l_style.set_font_family ("Simple Gui Test")
+			l_style.set_font_size (20)
+			l_label.set_own_style (l_style)
+			settle_window
+			check_style (l_label, "font", "Simple Gui Test")
+			check_style (l_label, "size", "20")
+			l_window.close
+		end
+
+	test_high_contrast_drops_colors
+			-- The system's contrast setting wins: colors, backgrounds and shadows go, while the
+			-- font, the padding and the border stay.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_style: GUI_STYLE
+			l_before: INTEGER
+		do
+			driver.set_high_contrast (False)
+			driver.set_dark (False)
+			assert ("off", not app.is_high_contrast)
+			create l_window.make ("Contrast", 260, 120)
+			create l_label.make ("High contrast")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			create l_style.make
+			l_style.set_foreground (0x336699)
+			l_style.set_background (0xFFFFEE)
+			l_style.set_font_size (18)
+			l_style.set_padding_all (5)
+			l_style.set_border (2, 0x996633)
+			l_style.set_shadow (0, 2, 4, 0x000000, 30)
+			l_label.set_own_style (l_style)
+			app.set_theme_color (app.Color_text, 0x010203, 0x040506)
+			check_style (l_label, "fg", "336699")
+			check_style (l_label, "shadow", "0,2,4,30")
+			l_before := app.appearance_changed_actions.fire_count
+			driver.set_high_contrast (True)
+			settle_window
+			assert ("on", app.is_high_contrast and app.appearance_changed_actions.fire_count > l_before)
+			assert ("colors dropped: " + driver.style_value (l_label, "fg").to_string_8, driver.style_value (l_label, "fg").is_empty
+				and driver.style_value (l_label, "bg").is_empty and driver.style_value (l_label, "shadow").is_empty
+				and driver.style_value (l_label, "border_color").is_empty)
+			check_style (l_label, "size", "18")
+			check_style (l_label, "pad", "5,5,5,5")
+			check_style (l_label, "border", "2")
+			assert ("the system's colors", app.has_theme_color (app.Color_text) and app.system_color (app.Color_text) /= 0x010203)
+			driver.set_high_contrast (False)
+			settle_window
+			assert ("off again", not app.is_high_contrast and app.system_color (app.Color_text) = 0x010203)
+			check_style (l_label, "fg", "336699")
+			check_style (l_label, "bg", "ffffee")
+			check_style (l_label, "border_color", "996633")
+			app.reset_theme_color (app.Color_text)
+			l_window.close
+		end
+
+	test_style_contrast_ratio
+			-- WCAG 2: black on white is 21, a color on itself 1, and the order does not matter.
+		local
+			l_style: GUI_STYLE
+		do
+			create l_style.make
+			assert ("black on white", (l_style.contrast_ratio (0x000000, 0xFFFFFF) - 21.0).abs < 0.001)
+			assert ("white on black", (l_style.contrast_ratio (0xFFFFFF, 0x000000) - 21.0).abs < 0.001)
+			assert ("a color on itself", (l_style.contrast_ratio (0x336699, 0x336699) - 1.0).abs < 0.001)
+			assert ("gray on white is below the minimum", l_style.contrast_ratio (0x999999, 0xFFFFFF) < 4.5)
+			assert ("dark gray on white is above it", l_style.contrast_ratio (0x595959, 0xFFFFFF) >= 4.5)
+		end
+
 feature {NONE} -- Fixtures
 
 	source_calls: INTEGER
@@ -4106,6 +4511,35 @@ feature {NONE} -- Fixtures
 			from i := 1 until i > 10 loop
 				app.process_events (30)
 				i := i + 1
+			end
+		end
+
+	check_style (a_widget: GUI_WIDGET; a_key, a_wanted: STRING)
+			-- The native control shows `a_wanted' for key `a_key' of its style.
+		local
+			l_shown: STRING_32
+		do
+			l_shown := driver.style_value (a_widget, a_key)
+			assert (a_key + " shows " + a_wanted + ", not " + {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (l_shown),
+				l_shown.same_string_general (a_wanted))
+		end
+
+	hex6 (a_rgb: NATURAL_32): STRING
+			-- `a_rgb' as a flat style writes a color: six lowercase hex digits.
+		do
+			Result := a_rgb.to_hex_string
+			Result := Result.substring (Result.count - 5, Result.count)
+			Result.to_lower
+		end
+
+	test_font_path: PATH
+			-- The test font (family "Simple Gui Test"), in this library's testing/fonts.
+		do
+			if attached (create {EXECUTION_ENVIRONMENT}).item ("SIMPLE_EIFFEL") as al_root and then not al_root.is_empty then
+				create Result.make_from_string (al_root)
+				Result := Result.extended ("simple_gui").extended ("testing").extended ("fonts").extended ("simple_gui_test.ttf")
+			else
+				create Result.make_from_string ("testing/fonts/simple_gui_test.ttf")
 			end
 		end
 
