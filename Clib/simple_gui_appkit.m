@@ -688,7 +688,6 @@ int sga_stack(int a_vertical, int a_spacing)
 	int alignment;
 	BOOL vertical;
 	BOOL natural;   /* a button: keeps its natural size on the main axis too */
-	BOOL stretches; /* takes a share of the stack's spare room */
 }
 @end
 @implementation SGASlot
@@ -786,18 +785,6 @@ void sga_stack_extend(int a_stack, int a_child, int a_stretch)
 	l_slot->natural = [v isKindOfClass:[NSButton class]];
 	s_slots[[NSValue valueWithNonretainedObject:v]] = l_slot;
 	[s addArrangedSubview:l_slot];
-	/* Stretching children share the spare room, as in a GTK box: tie each to the first one
-	   along the axis, just above their hugging, or Auto Layout gives all of it to one. */
-	l_slot->stretches = a_stretch != 0;
-	if (a_stretch)
-		for (NSView *l_other in [s arrangedSubviews])
-			if (l_other != l_slot && [l_other isKindOfClass:[SGASlot class]] && ((SGASlot *)l_other)->stretches) {
-				NSLayoutConstraint *l_share = l_vertical ? [l_slot.heightAnchor constraintEqualToAnchor:l_other.heightAnchor]
-					: [l_slot.widthAnchor constraintEqualToAnchor:l_other.widthAnchor];
-				[l_share setPriority:2];
-				[l_share setActive:YES];
-				break;
-			}
 	/* The slot fills the stack across. */
 	if (l_vertical) [[l_slot.widthAnchor constraintEqualToAnchor:s.widthAnchor] setActive:YES];
 	else [[l_slot.heightAnchor constraintEqualToAnchor:s.heightAnchor] setActive:YES];
