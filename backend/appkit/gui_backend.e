@@ -1224,6 +1224,12 @@ feature -- Common widget state
 		alias "sga_test_toggle_splitter_pane($a_splitter, $a_pane);"
 		end
 
+	test_locate_row (an_id, a_row: INTEGER): INTEGER
+			-- The row a drop finds at the middle of row `a_row''s place.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_locate_row($an_id, $a_row);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

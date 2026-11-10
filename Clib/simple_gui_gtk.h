@@ -3710,6 +3710,10 @@ static void sg_token_rebuild(int id) {
         GtkWidget *chip = gtk_button_new_with_label(g_ptr_array_index(tk, i));
         gtk_widget_add_css_class(chip, "pill");
         gtk_widget_set_focusable(chip, FALSE);
+        /* a chip has no click of its own: let a press reach the field, so a pick or a drag can
+           start on it (1q-c movable tokens); sg_pick_row_at finds it by place */
+        gtk_widget_set_can_target(chip, FALSE);
+        g_object_set_data(G_OBJECT(chip), "sg-token-index", GINT_TO_POINTER((int) i + 1));
         gtk_box_insert_child_after(GTK_BOX(box), chip, gtk_widget_get_prev_sibling(entry));
     }
 }
@@ -5420,12 +5424,47 @@ static GtkWidget *sg_pick_widget(int id) {
     return l ? l : sg_w[id];
 }
 /* The row (from 1) of widget `id' at (x, y) in sg_pick_widget's coordinates; 0 for none. */
+/* The row (from 1) of widget `id' at (x, y) in sg_pick_widget's coordinates; 0 for none: a list's
+   row, a tree's node number (the GtkTreeExpander under the point), a token field's token. */
 static int sg_pick_row_at(int id, double x, double y) {
-    GtkWidget *l = g_object_get_data(G_OBJECT(sg_w[id]), "sg-list");
+    GtkWidget *l = g_object_get_data(G_OBJECT(sg_w[id]), "sg-list"), *w = sg_pick_widget(id), *c, *hit;
     GtkListBoxRow *r;
-    (void) x;
-    if (l && (r = gtk_list_box_get_row_at_y(GTK_LIST_BOX(l), (int) y))) return gtk_list_box_row_get_index(r) + 1;
+    if (l) return (r = gtk_list_box_get_row_at_y(GTK_LIST_BOX(l), (int) y)) ? gtk_list_box_row_get_index(r) + 1 : 0;
+    if (g_object_get_data(G_OBJECT(sg_w[id]), "sg-tokens")) {
+        for (c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) {
+            graphene_rect_t b;
+            int k = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(c), "sg-token-index"));
+            if (k && gtk_widget_compute_bounds(c, w, &b) && x >= b.origin.x && x < b.origin.x + b.size.width
+                && y >= b.origin.y && y < b.origin.y + b.size.height) return k;
+        }
+        return 0;
+    }
+    hit = gtk_widget_pick(w, x, y, GTK_PICK_DEFAULT);
+    for (c = hit; c && c != w; c = gtk_widget_get_parent(c))
+        if (GTK_IS_TREE_EXPANDER(c)) return sg_row_number(gtk_tree_expander_get_list_row(GTK_TREE_EXPANDER(c)));
     return 0;
+}
+/* Test: the row sg_pick_row_at finds at the middle of row `row''s widget (a list row, a tree
+   node's expander, a token's chip), in sg_pick_widget's coordinates. */
+static GtkWidget *sg_find_expander(GtkWidget *w, int row) {
+    GtkWidget *c, *f;
+    if (GTK_IS_TREE_EXPANDER(w) && sg_row_number(gtk_tree_expander_get_list_row(GTK_TREE_EXPANDER(w))) == row) return w;
+    for (c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c))
+        if ((f = sg_find_expander(c, row))) return f;
+    return NULL;
+}
+static int sg_test_locate_row(int id, int row) {
+    GtkWidget *w = sg_w[id] ? sg_pick_widget(id) : NULL, *l, *target = NULL, *c;
+    graphene_rect_t b;
+    if (!w) return 0;
+    l = g_object_get_data(G_OBJECT(sg_w[id]), "sg-list");
+    if (l) target = (GtkWidget *) gtk_list_box_get_row_at_index(GTK_LIST_BOX(l), row - 1);
+    else if (g_object_get_data(G_OBJECT(sg_w[id]), "sg-tokens")) {
+        for (c = gtk_widget_get_first_child(w); c && !target; c = gtk_widget_get_next_sibling(c))
+            if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(c), "sg-token-index")) == row) target = c;
+    } else target = sg_find_expander(w, row);
+    if (!target || !gtk_widget_compute_bounds(target, w, &b)) return 0;
+    return sg_pick_row_at(id, b.origin.x + b.size.width / 2, b.origin.y + b.size.height / 2);
 }
 static void sg_pick_css(void) {
     GtkCssProvider *p;

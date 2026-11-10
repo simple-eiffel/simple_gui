@@ -1315,9 +1315,37 @@ void sga_field_set_placeholder(int a_id, const char *a_text)
 	else [(NSTextField *)o setPlaceholderString:sga_string(a_text)];
 }
 
+/* A list's, table's or tree's scroll view: its natural height is its rows' (as a GTK list's
+   is), so a stack placing it at its natural size gives it room for them; it gives way before
+   the window grows (low compression resistance), and follows its rows as they change. */
+@interface SGARowsScroll : NSScrollView
+@end
+@implementation SGARowsScroll
+- (instancetype)init
+{
+	if ((self = [super init])) [self setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationVertical];
+	return self;
+}
+- (void)setDocumentView:(NSView *)v
+{
+	[super setDocumentView:v];
+	[v setPostsFrameChangedNotifications:YES];
+	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(rowsChanged:) name:NSViewFrameDidChangeNotification object:v];
+}
+- (void)rowsChanged:(NSNotification *)n { (void)n; [self invalidateIntrinsicContentSize]; }
+- (NSSize)intrinsicContentSize
+{
+	NSTableView *t = [self documentView];
+	if (![t isKindOfClass:[NSTableView class]]) return NSMakeSize(NSViewNoIntrinsicMetric, NSViewNoIntrinsicMetric);
+	CGFloat h = [t numberOfRows] > 0 ? NSMaxY([t rectOfRow:[t numberOfRows] - 1]) : [t rowHeight];
+	h += [[t headerView] frame].size.height + 4;   /* the header, and the bezel and insets */
+	return NSMakeSize(NSViewNoIntrinsicMetric, ceil(h));
+}
+@end
+
 int sga_list(void)
 {
-	NSScrollView *l_scroll = [[NSScrollView alloc] init];
+	NSScrollView *l_scroll = [[SGARowsScroll alloc] init];
 	NSTableView *t = [[NSTableView alloc] init];
 	NSTableColumn *k = [[NSTableColumn alloc] initWithIdentifier:@"sga_column"];
 	[k setResizingMask:NSTableColumnAutoresizingMask];
@@ -1445,7 +1473,7 @@ static NSArray<NSString *> *sga_fields(const char *a_joined)
 
 int sga_table(const char *a_titles)
 {
-	NSScrollView *l_scroll = [[NSScrollView alloc] init];
+	NSScrollView *l_scroll = [[SGARowsScroll alloc] init];
 	SGAGridTable *t = [[SGAGridTable alloc] init];
 	NSUInteger k = 0;
 	t->data = [NSMutableArray array];
@@ -1676,7 +1704,7 @@ void sga_test_click_header(int a_id, int a_column)
 
 int sga_tree(void)
 {
-	NSScrollView *l_scroll = [[NSScrollView alloc] init];
+	NSScrollView *l_scroll = [[SGARowsScroll alloc] init];
 	SGATree *t = [[SGATree alloc] init];
 	NSTableColumn *k = [[NSTableColumn alloc] initWithIdentifier:@"sga_tree_column"];
 	t->roots = [NSMutableArray array];
@@ -2981,6 +3009,43 @@ int sga_search_field(void)
 - (void)entered:(id)a_sender { (void)a_sender; [self check]; }
 @end
 
+/* The chips' rectangles (field coordinates), in token order: the field's attributed string
+   holds one attachment per token, laid out at the field's text width (AppKit has no public
+   rectangle for a token). */
+static NSArray<NSValue *> *sga_token_rects(SGATokenField *f)
+{
+	NSMutableArray<NSValue *> *r = [NSMutableArray array];
+	NSAttributedString *a = [f attributedStringValue];
+	NSRect l_text = [[f cell] drawingRectForBounds:[f bounds]];
+	NSTextStorage *l_store = [[NSTextStorage alloc] initWithAttributedString:a];
+	NSLayoutManager *l_layout = [[NSLayoutManager alloc] init];
+	NSTextContainer *l_box = [[NSTextContainer alloc] initWithContainerSize:NSMakeSize(l_text.size.width, CGFLOAT_MAX)];
+	[l_box setLineFragmentPadding:0];
+	[l_layout addTextContainer:l_box];
+	[l_store addLayoutManager:l_layout];
+	[l_layout ensureLayoutForTextContainer:l_box];
+	for (NSUInteger i = 0; i < [a length]; i++) {
+		if ([a attribute:NSAttachmentAttributeName atIndex:i effectiveRange:NULL]) {
+			NSRect g = [l_layout boundingRectForGlyphRange:[l_layout glyphRangeForCharacterRange:NSMakeRange(i, 1) actualCharacterRange:NULL] inTextContainer:l_box];
+			g = NSOffsetRect(g, NSMinX(l_text), NSMinY(l_text));
+			if (![f isFlipped]) g.origin.y = NSMaxY([f bounds]) - NSMaxY(g);
+			[r addObject:[NSValue valueWithRect:g]];
+		}
+	}
+	return r;
+}
+
+/* The token (from 1) whose chip holds `p' (field coordinates); past the last chip, the count + 1. */
+static int sga_token_at(SGATokenField *f, NSPoint p)
+{
+	NSArray<NSValue *> *l_rects = sga_token_rects(f);
+	for (NSUInteger i = 0; i < [l_rects count]; i++) {
+		NSRect g = [l_rects[i] rectValue];
+		if (p.x < NSMaxX(g) && p.y >= NSMinY(g) - 2 && p.y <= NSMaxY(g) + 2) return (int)i + 1;
+	}
+	return (int)[l_rects count] + 1;
+}
+
 int sga_token_field(void)
 {
 	SGATokenField *f = [[SGATokenField alloc] init];
@@ -3667,6 +3732,7 @@ static int sga_widget_at(NSWindow *w, NSPoint p, int *a_row)
 				NSInteger r = [(NSTableView *)c rowAtPoint:[(NSView *)c convertPoint:p fromView:nil]];
 				if (r >= 0) *a_row = [c isKindOfClass:[SGATree class]] ? ((SGANode *)[(SGATree *)c itemAtRow:r])->number : (int)r + 1;
 			}
+			if ([c isKindOfClass:[SGATokenField class]]) *a_row = sga_token_at((SGATokenField *)c, [(NSView *)c convertPoint:p fromView:nil]);
 			return l_id;
 		}
 		v = [v superview];
@@ -7072,4 +7138,28 @@ const char *sga_test_panel_tab_tooltip(int a_dock, int an_index)
 {
 	SGADockPanel *p = sga_dock_panel(sga_dock_of(a_dock), an_index);
 	return sga_return(Kind_label, p ? [p tabTip] : @"");
+}
+
+/* As a drop would: the row found at the middle of row `a_row''s place (a list's or a table's
+   row, a tree's node by its number, a token field's token). */
+int sga_test_locate_row(int a_id, int a_row)
+{
+	id c = sga_core(a_id);
+	NSView *v = c;
+	NSRect r = NSZeroRect;
+	if ([c isKindOfClass:[SGATree class]]) {
+		SGANode *n = sga_tree_node((SGATree *)c, a_row);
+		NSInteger i = n ? [(SGATree *)c rowForItem:n] : -1;
+		if (i >= 0) r = [(SGATree *)c rectOfRow:i];
+	} else if ([c isKindOfClass:[NSTableView class]]) {
+		if (a_row >= 1 && a_row <= [(NSTableView *)c numberOfRows]) r = [(NSTableView *)c rectOfRow:a_row - 1];
+	} else if ([c isKindOfClass:[SGATokenField class]]) {
+		NSArray<NSValue *> *l_rects = sga_token_rects((SGATokenField *)c);
+		if (a_row >= 1 && a_row <= (int)[l_rects count]) r = [l_rects[(NSUInteger)a_row - 1] rectValue];
+	}
+	if (NSIsEmptyRect(r) || ![v window]) return 0;
+	[[[v window] contentView] layoutSubtreeIfNeeded];
+	NSPoint p = [v convertPoint:NSMakePoint(NSMidX(r), NSMidY(r)) toView:nil];
+	int l_row = 0;
+	return sga_widget_at([v window], p, &l_row) == a_id ? l_row : 0;
 }

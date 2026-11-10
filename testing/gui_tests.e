@@ -2547,6 +2547,44 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_drops_find_rows_by_place
+			-- 1q-c: a drop finds the row under the pointer: a list's row, a tree's node, a
+			-- token field's token (by its chip's place, not only its height).
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_list: GUI_LIST
+			l_tree: GUI_TREE
+			l_tokens: GUI_TOKEN_FIELD
+			l_law, l_prophets: INTEGER
+		do
+			create l_window.make ("Rows by place", 420, 460)
+			create l_stack.make_vertical
+			create l_list.make
+			across <<"Genesis", "Exodus", "Leviticus", "Numbers">> as ic loop l_list.extend (ic) end
+			create l_tree.make
+			l_tree.add_root ("Law")
+			l_law := l_tree.last_node
+			l_tree.add_child (l_law, "Torah")
+			l_tree.add_root ("Prophets")
+			l_prophets := l_tree.last_node
+			create l_tokens.make
+			across <<"grace", "faith", "hope">> as ic loop l_tokens.extend_token (ic) end
+			l_stack.extend (l_list)
+			l_stack.extend (l_tree)
+			l_stack.extend (l_tokens)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			assert ("list row 2: " + driver.located_row (l_list, 2).out, driver.located_row (l_list, 2) = 2)
+			assert ("list row 4", driver.located_row (l_list, 4) = 4)
+			assert ("tree Law: " + driver.located_row (l_tree, l_law).out, driver.located_row (l_tree, l_law) = l_law)
+			assert ("tree Prophets: " + driver.located_row (l_tree, l_prophets).out, driver.located_row (l_tree, l_prophets) = l_prophets)
+			assert ("token 1: " + driver.located_row (l_tokens, 1).out, driver.located_row (l_tokens, 1) = 1)
+			assert ("token 3: " + driver.located_row (l_tokens, 3).out, driver.located_row (l_tokens, 3) = 3)
+			l_window.close
+		end
+
 	test_splitter_panes_collapse
 			-- 1r-c: a collapsible pane collapses (its room to the other) and expands back to the
 			-- divider's place, quietly from code; the user's button fires `collapse_actions'.

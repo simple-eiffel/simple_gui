@@ -301,6 +301,12 @@ feature -- Windows and containers
 		deferred
 		end
 
+	test_locate_row (an_id, a_row: INTEGER): INTEGER
+			-- The row a drop's locating finds at the middle of row `a_row''s place on screen: a
+			-- list's row, a tree's node number, a token field's token; 0 when it finds none.
+		deferred
+		end
+
 	test_drag_dock_edge (a_dock, a_side, a_size: INTEGER)
 			-- As the user dragging the side's edge to `a_size': 35.
 		deferred

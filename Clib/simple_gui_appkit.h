@@ -413,3 +413,4 @@ void sga_dock_set_panel_fields(int a_dock, int an_index, const char *a_short, co
 void sga_dock_set_panel_pill(int a_dock, int an_index, const char *a_code);
 const char *sga_test_panel_tab_text(int a_dock, int an_index);
 const char *sga_test_panel_tab_tooltip(int a_dock, int an_index);
+int sga_test_locate_row(int a_id, int a_row);

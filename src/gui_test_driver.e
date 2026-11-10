@@ -660,6 +660,15 @@ feature -- User actions
 			settle
 		end
 
+	located_row (a_widget: GUI_WIDGET; a_row: INTEGER): INTEGER
+			-- The row a drop at the middle of row `a_row' (a list row, tree node or token) lands on.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.test_locate_row (a_widget.id, a_row)
+		end
+
 	toggle_splitter_pane (a_splitter: GUI_SPLITTER; a_pane: INTEGER)
 			-- Press the divider's button for `a_pane', as the user would.
 		require
