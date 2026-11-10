@@ -37,6 +37,32 @@ feature -- Access
 			Result := backend.dropdown_selected (id)
 		end
 
+feature -- Option groups (1p)
+
+	add_group_header (a_text: READABLE_STRING_GENERAL)
+			-- A header over the choices that follow (HTML's optgroup). Not a choice: `count',
+			-- `i_th' and `selected_index' number the choices only.
+		require
+			gui_thread: is_gui_thread
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_text)
+			backend.dropdown_add_header (id, l_c.item)
+		ensure
+			same_choices: count = old count
+		end
+
+	add_separator
+			-- A line between groups of choices; not a choice.
+		require
+			gui_thread: is_gui_thread
+		do
+			backend.dropdown_add_separator (id)
+		ensure
+			same_choices: count = old count
+		end
+
 feature -- Removal
 
 	wipe_out

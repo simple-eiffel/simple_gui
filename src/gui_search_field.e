@@ -21,9 +21,7 @@ feature {NONE} -- Initialization
 
 	make
 		do
-			create change_actions.make
-			create activate_actions.make
-			create placeholder.make_empty
+			make_field
 			register (backend.search_field)
 		end
 
