@@ -403,3 +403,13 @@ void sga_test_close_floating(int a_dock, int an_index);
 void sga_test_drag_panel(int a_dock, int an_index, int a_side, int a_position);
 int sga_test_slide_out(int a_dock, int an_index);
 void sga_test_toggle_center(int a_dock);
+
+/* 1r-c: collapsible splitter panes, panel fields and pills */
+void sga_splitter_set_collapsible(int a_splitter, int a_pane, int a_on);
+void sga_splitter_collapse(int a_splitter, int a_pane, int a_on);
+int sga_splitter_is_collapsed(int a_splitter, int a_pane);
+void sga_test_toggle_splitter_pane(int a_splitter, int a_pane);
+void sga_dock_set_panel_fields(int a_dock, int an_index, const char *a_short, const char *a_description, const char *a_tip);
+void sga_dock_set_panel_pill(int a_dock, int an_index, const char *a_code);
+const char *sga_test_panel_tab_text(int a_dock, int an_index);
+const char *sga_test_panel_tab_tooltip(int a_dock, int an_index);

@@ -955,12 +955,21 @@ void sga_grid_set_spacing(int a_grid, int a_row_gap, int a_column_gap)
    under right-to-left layout. */
 static void sga_split_apply(NSSplitView *s, NSInteger a_position);
 
-@interface SGASplit : NSSplitView
+@interface SGASplit : NSSplitView <NSSplitViewDelegate>
 {
 @public
 	NSInteger pending;   /* -1: none; -2: halfway, at the first layout (until set_position) */
+	/* 1r-c: collapsible panes. A collapsed pane is a hidden subview (NSSplitView's own
+	   collapse), its divider staying; expanding puts the divider back where it was. Only the
+	   divider's button and a double click on it collapse; a drag can open a collapsed pane. */
+	BOOL collapsible[3];
+	int collapsed;               /* 0 none, else the collapsed pane */
+	NSInteger kept;              /* the position before collapsing */
+	NSButton *arrow[3];          /* on the divider, pointing toward its pane */
 }
+- (void)userToggle:(int)a_pane;
 @end
+static void sga_split_collapse(SGASplit *s, int a_pane, BOOL a_on);
 @implementation SGASplit
 - (void)layout
 {
@@ -970,8 +979,91 @@ static void sga_split_apply(NSSplitView *s, NSInteger a_position);
 		pending = -1;
 		sga_split_apply(self, p);
 	}
+	[self placeArrows];
+}
+/* The buttons sit centered on the divider, one per collapsible pane; while one pane is
+   collapsed only its button shows, pointing back toward where it opens. */
+- (void)placeArrows
+{
+	NSRect d = NSZeroRect;
+	NSView *l_first = [self arrangedSubviews][0];
+	BOOL v = [self isVertical];
+	CGFloat at = [l_first isHidden] ? 0 : (v ? NSMaxX([l_first frame]) : NSMaxY([l_first frame]));
+	d = v ? NSMakeRect(at, 0, [self dividerThickness], NSHeight([self bounds])) : NSMakeRect(0, at, NSWidth([self bounds]), [self dividerThickness]);
+	int l_shown = 0;
+	for (int k = 1; k <= 2; k++) {
+		NSButton *b = arrow[k];
+		BOOL l_show = collapsible[k] && (!collapsed || collapsed == k);
+		[b setHidden:!l_show];
+		if (!l_show) continue;
+		/* toward the pane when it is open, away from it when collapsed */
+		BOOL l_toward_first = (k == 1) != (collapsed == k);
+		NSString *l_name = v ? (l_toward_first ? @"chevron.left" : @"chevron.right") : (l_toward_first ? @"chevron.up" : @"chevron.down");
+		[b setImage:[NSImage imageWithSystemSymbolName:l_name accessibilityDescription:collapsed == k ? @"Expand" : @"Collapse"]];
+		CGFloat c = (v ? NSMidY(d) : NSMidX(d)) + (l_shown ? 16 : 0) - (collapsible[1] && collapsible[2] && !collapsed ? 8 : 0);
+		[b setFrame:v ? NSMakeRect(NSMidX(d) - 7, c - 7, 14, 14) : NSMakeRect(c - 7, NSMidY(d) - 7, 14, 14)];
+		l_shown++;
+	}
+}
+- (void)arrowPressed:(NSButton *)b { [self userToggle:(int)[b tag]]; }
+- (void)userToggle:(int)a_pane
+{
+	if (!collapsible[a_pane] || (collapsed && collapsed != a_pane)) return;
+	BOOL l_on = collapsed != a_pane;
+	sga_split_collapse(self, a_pane, l_on);
+	sga_push(42, sga_id_of(self), a_pane, l_on ? 1 : 0, 0);
+	sga_wake();
+}
+/* Only the collapsed pane may be collapsed in NSSplitView's eyes: a drag can then open it,
+   and no drag can collapse a pane. */
+- (BOOL)splitView:(NSSplitView *)v canCollapseSubview:(NSView *)a_sub
+{
+	(void)v;
+	return collapsed && a_sub == [self arrangedSubviews][(NSUInteger)collapsed - 1];
+}
+/* A double click on the divider: the collapsible pane (the first when both are), ours. */
+- (BOOL)splitView:(NSSplitView *)v shouldCollapseSubview:(NSView *)a_sub forDoubleClickOnDividerAtIndex:(NSInteger)i
+{
+	(void)v; (void)a_sub; (void)i;
+	if ([[NSApp currentEvent] type] == NSEventTypeLeftMouseDown || [[NSApp currentEvent] clickCount] == 2) {
+		int k = collapsed ? collapsed : collapsible[1] ? 1 : collapsible[2] ? 2 : 0;
+		if (k) [self userToggle:k];
+	}
+	return NO;
+}
+/* A drag that opened a collapsed pane: it is expanded now (42, b = 0). */
+- (void)splitViewDidResizeSubviews:(NSNotification *)n
+{
+	if (collapsed && ![[self arrangedSubviews][(NSUInteger)collapsed - 1] isHidden] && [n userInfo][@"NSSplitViewDividerIndex"]) {
+		int k = collapsed;
+		collapsed = 0;
+		sga_push(42, sga_id_of(self), k, 0, 0);
+		sga_wake();
+	}
+	[self placeArrows];
 }
 @end
+
+/* Silent: collapse pane `a_pane' (keeping the position) or expand it back. A pane cannot
+   collapse while the other is. */
+static void sga_split_collapse(SGASplit *s, int a_pane, BOOL a_on)
+{
+	NSView *h = [s arrangedSubviews][(NSUInteger)a_pane - 1];
+	if (a_on) {
+		if (s->collapsed) return;
+		NSView *l_first = [s arrangedSubviews][0];
+		s->kept = (NSInteger)lround([s isVertical] ? NSWidth([l_first frame]) : NSHeight([l_first frame]));
+		s->collapsed = a_pane;
+		[h setHidden:YES];
+		[s adjustSubviews];
+	} else if (s->collapsed == a_pane) {
+		s->collapsed = 0;
+		[h setHidden:NO];
+		[s adjustSubviews];
+		sga_split_apply(s, s->kept);
+	}
+	[s placeArrows];
+}
 
 static void sga_split_apply(NSSplitView *s, NSInteger a_position)
 {
@@ -984,8 +1076,18 @@ int sga_splitter(int a_vertical)
 	s->pending = -2;   /* the divider starts halfway, as GUI_SPLITTER's note says */
 	[s setVertical:a_vertical == 0];   /* NSSplitView's "vertical" means vertical dividers: side by side */
 	[s setDividerStyle:NSSplitViewDividerStyleThin];
+	[s setArrangesAllSubviews:NO];   /* 1r-c: the divider's buttons are subviews, not panes */
+	[s setDelegate:s];
 	[s addArrangedSubview:[[NSView alloc] init]];
 	[s addArrangedSubview:[[NSView alloc] init]];
+	for (int k = 1; k <= 2; k++) {
+		s->arrow[k] = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"chevron.left" accessibilityDescription:@"Collapse"] target:s action:@selector(arrowPressed:)];
+		[s->arrow[k] setBordered:NO];
+		[s->arrow[k] setTag:k];
+		[s->arrow[k] setHidden:YES];
+		[s->arrow[k] setTranslatesAutoresizingMaskIntoConstraints:YES];
+		[s addSubview:s->arrow[k]];
+	}
 	[s setHoldingPriority:NSLayoutPriorityDefaultLow + 1 forSubviewAtIndex:0];
 	[s setHoldingPriority:NSLayoutPriorityDefaultLow forSubviewAtIndex:1];
 	return sga_keep(s);
@@ -5875,12 +5977,18 @@ static void sga_push_replacing(int a_type, int a_id, int a_a, int a_b)
 	BOOL floating;       /* 1r-b: in a window of its own, still keeping its side and place */
 	NSPanel *float_win;
 	NSRect float_frame;  /* logical units, from the dock window's top-left; empty until first floated */
+	NSString *short_title, *about, *tab_tip, *pill;   /* 1r-c: empty when not set */
+	int header_id;       /* the title bar's handle, for its pill */
 }
 @end
 @implementation SGADockPanel
+/* What its tab and its strip name show, and their tooltip. */
+- (NSString *)tabText { return [short_title length] ? short_title : title; }
+- (NSString *)tabTip { return [tab_tip length] ? tab_tip : (about ?: @""); }
 @end
 
 static void sga_dock_press_name(SGADock *d, SGADockPanel *p);
+static void sga_dock_place_tab_pill(SGADock *d, int a_side);
 static void sga_dock_slide_out(SGADock *d, SGADockPanel *p);
 static void sga_dock_slide_back_later(SGADock *d);
 static void sga_dock_slide_back(SGADock *d);
@@ -5952,8 +6060,10 @@ static CGFloat sga_dock_depth(SGADock *d, int a_side)
 	rects = [NSMutableArray array];
 	CGFloat at = 6;
 	BOOL l_down = sga_dock_long_vertical(side);
+	[self removeAllToolTips];
 	for (SGADockPanel *p in sga_dock_visible(dock, side)) {
-		NSSize s = [p->title sizeWithAttributes:l_att];
+		NSString *l_name = [p tabText];
+		NSSize s = [l_name sizeWithAttributes:l_att];
 		NSRect l_rect = l_down ? NSMakeRect(0, at, SGA_DOCK_STRIP, s.width + 12) : NSMakeRect(at, 0, s.width + 12, SGA_DOCK_STRIP);
 		[rects addObject:[NSValue valueWithRect:l_rect]];
 		if (l_down) {
@@ -5963,10 +6073,11 @@ static CGFloat sga_dock_depth(SGADock *d, int a_side)
 			[t translateXBy:NSMidX(l_rect) - s.height / 2 yBy:NSMaxY(l_rect) - 6];
 			[t rotateByDegrees:-90];
 			[t concat];
-			[p->title drawAtPoint:NSZeroPoint withAttributes:l_att];
+			[l_name drawAtPoint:NSZeroPoint withAttributes:l_att];
 			[g restoreGraphicsState];
 		} else
-			[p->title drawAtPoint:NSMakePoint(NSMinX(l_rect) + 6, (SGA_DOCK_STRIP - s.height) / 2) withAttributes:l_att];
+			[l_name drawAtPoint:NSMakePoint(NSMinX(l_rect) + 6, (SGA_DOCK_STRIP - s.height) / 2) withAttributes:l_att];
+		if ([[p tabTip] length]) [self addToolTipRect:l_rect owner:[p tabTip] userData:NULL];
 		at += (l_down ? l_rect.size.height : l_rect.size.width) + 4;
 	}
 }
@@ -6236,6 +6347,7 @@ static void sga_dock_select_silently(SGADock *d, SGADockPanel *p)
 {
 	(void)t;
 	SGADockPanel *p = [i identifier];
+	if (p) sga_dock_place_tab_pill(self, p->side);
 	if (s_suppress || !p) return;
 	sga_push(37, sga_id_of(self), p->side, (int)[panels indexOfObjectIdenticalTo:p] + 1, 0);
 	sga_wake();
@@ -6256,7 +6368,8 @@ static void sga_dock_select_silently(SGADock *d, SGADockPanel *p)
 		[p->at_top setActive:tabbed[a_side]];
 		if (tabbed[a_side]) {
 			NSTabViewItem *i = [[NSTabViewItem alloc] initWithIdentifier:p];
-			[i setLabel:p->title];
+			[i setLabel:[p tabText]];
+			[i setToolTip:[p tabTip]];
 			[i setView:p->box];
 			[tabs[a_side] addTabViewItem:i];
 		} else {
@@ -6269,6 +6382,7 @@ static void sga_dock_select_silently(SGADock *d, SGADockPanel *p)
 	if (l_active && [l_shown containsObject:l_active]) [tabs[a_side] selectTabViewItemWithIdentifier:l_active];
 	s_suppress--;
 	side_view[a_side] = tabbed[a_side] ? tabs[a_side] : stack[a_side];
+	sga_dock_place_tab_pill(self, a_side);
 	[tabs[a_side] setHidden:!tabbed[a_side]];
 	[stack[a_side] setHidden:tabbed[a_side]];
 	[strip[a_side] setNeedsDisplay:YES];
@@ -6703,7 +6817,8 @@ void sga_dock_set_title(int a_dock, int an_index, const char *a_title)
 	[p->header setStringValue:p->title];
 	[p->box setAccessibilityLabel:p->title];
 	NSInteger i = [d->tabs[p->side] indexOfTabViewItemWithIdentifier:p];
-	if (i != NSNotFound) [[d->tabs[p->side] tabViewItemAtIndex:i] setLabel:p->title];
+	if (i != NSNotFound) [[d->tabs[p->side] tabViewItemAtIndex:i] setLabel:[p tabText]];
+	[p->float_win setTitle:p->title];
 	[d->strip[p->side] setNeedsDisplay:YES];
 }
 
@@ -6877,4 +6992,84 @@ void sga_test_toggle_center(int a_dock)
 {
 	SGADock *d = sga_dock_of(a_dock);
 	if (d) sga_dock_toggle_center_as_user(d);
+}
+
+/* 1r-c: collapsible splitter panes. */
+void sga_splitter_set_collapsible(int a_splitter, int a_pane, int a_on)
+{
+	SGASplit *s = sga_get(a_splitter);
+	if (a_pane < 1 || a_pane > 2) return;
+	if (!a_on && s->collapsed == a_pane) sga_split_collapse(s, a_pane, NO);
+	s->collapsible[a_pane] = a_on != 0;
+	[s placeArrows];
+}
+void sga_splitter_collapse(int a_splitter, int a_pane, int a_on)
+{
+	SGASplit *s = sga_get(a_splitter);
+	if (a_pane >= 1 && a_pane <= 2) sga_split_collapse(s, a_pane, a_on != 0);
+}
+int sga_splitter_is_collapsed(int a_splitter, int a_pane) { SGASplit *s = sga_get(a_splitter); return s->collapsed == a_pane ? 1 : 0; }
+/* As the user: the divider's button for `a_pane'. */
+void sga_test_toggle_splitter_pane(int a_splitter, int a_pane) { [(SGASplit *)sga_get(a_splitter) userToggle:a_pane]; }
+
+/* 1r-c: a panel's short title, description and tab tooltip (empty: not set). */
+void sga_dock_set_panel_fields(int a_dock, int an_index, const char *a_short, const char *a_description, const char *a_tip)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (!p) return;
+	p->short_title = sga_string(a_short);
+	p->about = sga_string(a_description);
+	p->tab_tip = sga_string(a_tip);
+	[p->box setAccessibilityHelp:[p->about length] ? p->about : nil];
+	NSInteger i = [d->tabs[p->side] indexOfTabViewItemWithIdentifier:p];
+	if (i != NSNotFound) {
+		NSTabViewItem *t = [d->tabs[p->side] tabViewItemAtIndex:i];
+		[t setLabel:[p tabText]];
+		[t setToolTip:[p tabTip]];
+	}
+	if ([p->pill length] && p->header_id) sga_pill_set(p->header_id, [p->pill UTF8String], [p->about UTF8String], 2);
+	sga_dock_place_tab_pill(d, p->side);
+	[d->strip[p->side] setNeedsDisplay:YES];
+}
+
+/* A reference pill on the panel's title bar; on a tabbed side, at the tab view's corner while
+   its tab is selected (NSTabView's tabs cannot hold one). Empty: none. Its tip is the
+   description. */
+void sga_dock_set_panel_pill(int a_dock, int an_index, const char *a_code)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (!p) return;
+	p->pill = sga_string(a_code);
+	if (!p->header_id) p->header_id = sga_keep(p->header);
+	if ([p->pill length]) sga_pill_set(p->header_id, [p->pill UTF8String], [p->about ?: @"" UTF8String], 2);
+	else sga_pill_clear(p->header_id);
+	sga_dock_place_tab_pill(d, p->side);
+}
+
+static void sga_dock_place_tab_pill(SGADock *d, int a_side)
+{
+	static NSMutableDictionary<NSValue *, NSNumber *> *s_tab_ids;
+	if (!s_tab_ids) s_tab_ids = [NSMutableDictionary dictionary];
+	NSTabView *t = d->tabs[a_side];
+	if (!t) return;
+	NSValue *k = [NSValue valueWithNonretainedObject:t];
+	if (!s_tab_ids[k]) s_tab_ids[k] = @(sga_keep(t));
+	int l_id = [s_tab_ids[k] intValue];
+	SGADockPanel *p = d->tabbed[a_side] ? [[t selectedTabViewItem] identifier] : nil;
+	if (p && [p->pill length]) sga_pill_set(l_id, [p->pill UTF8String], [p->about ?: @"" UTF8String], 2);
+	else sga_pill_clear(l_id);
+}
+
+/* What a tab of panel `an_index' shows, and its tooltip, whatever the side's mode. */
+const char *sga_test_panel_tab_text(int a_dock, int an_index)
+{
+	SGADockPanel *p = sga_dock_panel(sga_dock_of(a_dock), an_index);
+	return sga_return(Kind_label, p ? [p tabText] : @"");
+}
+const char *sga_test_panel_tab_tooltip(int a_dock, int an_index)
+{
+	SGADockPanel *p = sga_dock_panel(sga_dock_of(a_dock), an_index);
+	return sga_return(Kind_label, p ? [p tabTip] : @"");
 }
