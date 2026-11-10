@@ -95,8 +95,6 @@ See [Window](window.md) for the rest of `GUI_WINDOW`.
 | Notification | `org.freedesktop.Notifications` over D-Bus, with no extra library; the program listens for the server's `ActionInvoked` signal to run the action. | `UNUserNotificationCenter`. | A balloon from the program's notification-area icon, made by simple_shell's `SHELL_TRAY`. A click on the balloon runs the action. |
 | Looks or behaves differently | If the program cannot reach the D-Bus session bus, `notify` shows nothing and raises nothing. | The same overlay view carries the action. | The icon is made at the first notice; the balloon's title and body are shortened to the limits `SHELL_TRAY` sets. If the icon cannot be installed, nothing shows. |
 
-The macOS column follows the design for that platform; the AppKit side is still to be written.
-
 ## Testing
 
 A test cannot click a desktop notification: it belongs to the system, not to the program's windows. That is why `last_notification` exists. A test calls `app.notify ("simple_gui", "A test notification")` and checks that `last_notification` reads "simple_gui", a new line, and "A test notification". The same applies to `last_toast` for the text of a toast. A test can press a toast's action with the shared `GUI_TEST_DRIVER` (`toast_shown` and `press_toast`); two presses run the action once.

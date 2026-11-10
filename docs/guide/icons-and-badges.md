@@ -213,8 +213,6 @@ Add the page first: `i` must name a page already added. See [tabs](tabs.md).
 | Menu item icons | The `GMenu` "icon" attribute, shown where GTK shows menu icons. | `NSMenuItem.image`. | A glyph drawn beside the item when the menu is built. |
 | Tab icons and badges | A box inside the tab's label holding the icon, the title and the badge. | The tab item's image. | `SW_TABS` draws the page's glyph and badge on the tab. |
 
-The macOS column follows the design for that platform; the AppKit side is still to be written.
-
 ## Design guidance
 
 - Pair an icon with a word when there is room. Use an icon alone only where its meaning is plain (a gear for settings, a plus for add) and give it an accessible label and a tooltip.
