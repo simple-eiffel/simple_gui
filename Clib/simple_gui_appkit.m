@@ -8501,6 +8501,9 @@ const char *sga_test_help_tip_shown(void) { return sga_return(Kind_label, [s_hel
 	NSMutableArray<SGAGridItem *> *items;
 	NSArray<NSNumber *> *shown;   /* model items (from 0) shown, nil all */
 	NSString *filter;
+	/* model items selected while the grid has no window: an NSCollectionView that has
+	   not loaded its items yet drops a selection, so it is applied on joining a window */
+	NSMutableSet<NSNumber *> *pending;
 }
 @end
 
@@ -8517,7 +8520,15 @@ static void sga_grid_load(SGAGridView *g, SGAGridItem *it);
 }
 @end
 
+static void sga_grid_apply_pending(SGAGridView *g);
 @implementation SGAGridView
+- (void)viewDidMoveToWindow
+{
+	[super viewDidMoveToWindow];
+	/* after the window has laid the grid out, when it has items to select */
+	__weak SGAGridView *w = self;
+	if ([self window] && pending) dispatch_async(dispatch_get_main_queue(), ^{ SGAGridView *g = w; if (g && [g window] && g->pending) sga_grid_apply_pending(g); });
+}
 - (void)tellSelection
 {
 	NSIndexPath *p = [[[self selectionIndexPaths] allObjects] sortedArrayUsingSelector:@selector(compare:)].firstObject;
@@ -8582,7 +8593,14 @@ static void sga_grid_load(SGAGridView *g, SGAGridItem *it)
 			it->loading = NO;
 			NSUInteger m = l_g ? [l_g->items indexOfObjectIdenticalTo:it] : NSNotFound;
 			NSInteger v = m == NSNotFound ? -1 : sga_grid_view_index(l_g, (NSInteger)m);
-			if (v >= 0) { s_suppress++; [l_g reloadItemsAtIndexPaths:[NSSet setWithObject:[NSIndexPath indexPathForItem:v inSection:0]]]; s_suppress--; }
+			if (v >= 0) {
+				/* reloading an item deselects it: keep the selection */
+				NSSet<NSIndexPath *> *l_selected = [l_g selectionIndexPaths];
+				s_suppress++;
+				[l_g reloadItemsAtIndexPaths:[NSSet setWithObject:[NSIndexPath indexPathForItem:v inSection:0]]];
+				[l_g setSelectionIndexPaths:l_selected];
+				s_suppress--;
+			}
 		});
 	});
 }
@@ -8697,10 +8715,32 @@ void sga_grid_view_set_spacing(int a_id, int s)
 void sga_grid_view_set_multiple(int a_id, int a_on) { SGAGridView *g = sga_grid_of(a_id); if (g) [g setAllowsMultipleSelection:a_on != 0]; }
 
 /* Quiet: item `i' selected (added to the selection when `an_extend'); 0 clears. */
+static void sga_grid_apply_pending(SGAGridView *g)
+{
+	NSMutableSet<NSIndexPath *> *l_paths = [NSMutableSet set];
+	for (NSNumber *k in g->pending) { NSInteger v = sga_grid_view_index(g, [k integerValue]); if (v >= 0) [l_paths addObject:[NSIndexPath indexPathForItem:v inSection:0]]; }
+	g->pending = nil;
+	s_suppress++;
+	[g reloadData];
+	[g layoutSubtreeIfNeeded];
+	[g setSelectionIndexPaths:l_paths];
+	s_suppress--;
+}
+
 void sga_grid_view_select(int a_id, int i, int an_extend)
 {
 	SGAGridView *g = sga_grid_of(a_id);
 	if (!g) return;
+	if (![g window]) {
+		if (!an_extend || !g->pending) {
+			NSMutableSet<NSNumber *> *l_old = g->pending;
+			g->pending = [NSMutableSet set];
+			if (an_extend) for (NSIndexPath *p in [g selectionIndexPaths]) [g->pending addObject:@(sga_grid_model(g, [p item]))];
+			(void)l_old;
+		}
+		if (i >= 1 && sga_grid_view_index(g, i - 1) >= 0) [g->pending addObject:@(i - 1)];
+		return;
+	}
 	NSMutableSet<NSIndexPath *> *s = an_extend ? [[g selectionIndexPaths] mutableCopy] : [NSMutableSet set];
 	NSInteger v = i >= 1 ? sga_grid_view_index(g, i - 1) : -1;
 	if (v >= 0) [s addObject:[NSIndexPath indexPathForItem:v inSection:0]];
@@ -8711,6 +8751,7 @@ void sga_grid_view_select(int a_id, int i, int an_extend)
 
 static NSArray<NSNumber *> *sga_grid_selected_models(SGAGridView *g)
 {
+	if (g->pending) return [[g->pending allObjects] sortedArrayUsingSelector:@selector(compare:)];
 	NSMutableArray<NSNumber *> *r = [NSMutableArray array];
 	for (NSIndexPath *p in [g selectionIndexPaths]) [r addObject:@(sga_grid_model(g, [p item]) + 1)];
 	[r sortUsingSelector:@selector(compare:)];
