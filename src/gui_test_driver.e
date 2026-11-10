@@ -271,6 +271,85 @@ feature -- User actions
 			set: a_rating.value = a_value
 		end
 
+	toggle_reveal (a_field: GUI_PASSWORD_FIELD)
+			-- Click the eye, as a user (fires `reveal_actions').
+		require
+			has_application: has_application
+		do
+			backend.test_toggle_reveal (a_field.id)
+			settle
+		ensure
+			flipped: a_field.is_revealed /= old a_field.is_revealed
+		end
+
+	leave_field (a_field: GUI_TEXT_FIELD)
+			-- Move the focus out of `a_field', as a user tabbing away (commits it: validation).
+		require
+			has_application: has_application
+		do
+			backend.test_end_editing (a_field.id)
+			settle
+		end
+
+	pick_suggestion (a_field: GUI_TEXT_FIELD; i: INTEGER)
+			-- Choose suggestion `i' from the list, as a user.
+		require
+			has_application: has_application
+			valid: 1 <= i and i <= a_field.suggestions.count
+		do
+			backend.test_pick_suggestion (a_field.id, i)
+			settle
+		end
+
+	field_error (a_field: GUI_TEXT_FIELD): STRING_32
+			-- The message shown under `a_field' now (empty: none).
+		require
+			has_application: has_application
+		do
+			Result := backend.from_c (backend.field_error_shown (a_field.id))
+		end
+
+	set_date_time (a_picker: GUI_DATE_TIME_PICKER; y, m, d, h, min: INTEGER)
+			-- Enter a date and time, as a user.
+		require
+			has_application: has_application
+			valid: a_picker.is_valid_date (y, m, d) and 0 <= h and h <= 23 and 0 <= min and min <= 59
+		do
+			backend.test_set_date_time (a_picker.id, y * 10000 + m * 100 + d, h * 60 + min)
+			settle
+		end
+
+	set_month (a_picker: GUI_MONTH_PICKER; y, m: INTEGER)
+			-- Enter a month, as a user.
+		require
+			has_application: has_application
+			valid: 1 <= y and y <= 9999 and 1 <= m and m <= 12
+		do
+			backend.test_set_date_time (a_picker.id, y * 10000 + m * 100 + 1, 0)
+			settle
+		end
+
+	slide_range (a_slider: GUI_RANGE_SLIDER; a_low, a_high: INTEGER)
+			-- Drag the thumbs to `a_low' and `a_high', as a user.
+		require
+			has_application: has_application
+			in_range: a_slider.minimum <= a_low and a_low <= a_high and a_high <= a_slider.maximum
+		do
+			backend.test_slide_range (a_slider.id, a_low, a_high)
+			settle
+		end
+
+	extend_list_selection (a_list: GUI_LIST; a_row: INTEGER)
+			-- Add row `a_row' to the selection, as a Command-click or Control-click.
+		require
+			has_application: has_application
+			multiple: a_list.is_multiple_selection
+			valid: 1 <= a_row and a_row <= a_list.count
+		do
+			backend.test_extend_list_selection (a_list.id, a_row)
+			settle
+		end
+
 	cancel_dialogs_after (a_ms: INTEGER)
 			-- Cancel each dialog `a_ms' milliseconds after it opens (0: never), so tests of
 			-- GUI_DIALOGS run unattended.

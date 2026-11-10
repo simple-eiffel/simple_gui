@@ -230,6 +230,8 @@ static int s_setting_dark;
 @end
 
 static int sga_tab_page(NSTabView *t, NSInteger an_item);
+static BOOL sga_suggest_key(int a_id, SEL a_command);   /* 1p */
+static void sga_suggest_end(int a_id);   /* 1p */
 
 /* A cell's text starts at the leading edge: the right one under right to left, as GTK mirrors
    a label's alignment. */
@@ -246,6 +248,14 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 - (void)toggled:(NSButton *)a_box { sga_push(12, sga_id_of(a_box), [a_box state] == NSControlStateValueOn ? 1 : 0, 0, 0); }
 - (void)tabView:(NSTabView *)a_tabs didSelectTabViewItem:(NSTabViewItem *)an_item { if (!s_suppress) sga_push(13, sga_id_of(a_tabs), sga_tab_page(a_tabs, [a_tabs indexOfTabViewItem:an_item]), 0, 0); }
 - (void)controlTextDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
+/* 1p: leaving a field ends its editing (29), when validation on commit checks it. */
+- (void)controlTextDidEndEditing:(NSNotification *)n { sga_suggest_end(sga_id_of([n object])); if (!s_suppress) sga_push(29, sga_id_of([n object]), 0, 0, 0); }
+/* 1p: Up, Down, Return and Escape go to the field's suggestion list while it shows. */
+- (BOOL)control:(NSControl *)c textView:(NSTextView *)tv doCommandBySelector:(SEL)a_command
+{
+	(void)tv;
+	return sga_suggest_key(sga_id_of(c), a_command);
+}
 - (void)textDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
 - (NSMutableArray<NSString *> *)rowsOf:(NSTableView *)t { return rows[[NSValue valueWithNonretainedObject:t]]; }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)t { return (NSInteger)[[self rowsOf:t] count]; }
@@ -261,8 +271,9 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 - (void)tableViewSelectionDidChange:(NSNotification *)n
 {
 	NSTableView *t = [n object];
-	/* A user's emptying of the selection is a selection too: row 0. */
-	if (!s_suppress) sga_push(4, sga_id_of(t), (int)[t selectedRow] + 1, 0, 0);
+	/* A user's emptying of the selection is a selection too: row 0. With several rows (1p), the first. */
+	NSUInteger l_first = [[t selectedRowIndexes] firstIndex];
+	if (!s_suppress) sga_push(4, sga_id_of(t), l_first == NSNotFound ? 0 : (int)l_first + 1, 0, 0);
 }
 - (BOOL)windowShouldClose:(NSWindow *)w { sga_push(6, sga_id_of(w), 0, 0, 0); return NO; }
 - (void)observeValueForKeyPath:(NSString *)p ofObject:(id)o change:(NSDictionary *)ch context:(void *)ctx
@@ -453,11 +464,13 @@ static void sga_pill_place(SGAPill *p)
 }
 
 /* Pills whose widget joined a window since: placed now (window shown, content set). */
+static void sga_error_notes_sync(void);   /* 1p */
 static void sga_badges_sync(void);   /* 1n */
 
 static void sga_pills_sync(void)
 {
 	for (SGAPill *p in [s_pills allValues]) if (![p superview]) sga_pill_place(p);
+	sga_error_notes_sync();
 	sga_badges_sync();
 }
 
@@ -1169,15 +1182,22 @@ void sga_text_area_set(int a_id, const char *a_text)
 const char *sga_text_area_get(int a_id) { return sga_return(Kind_area, [(NSTextView *)sga_core(a_id) string]); }
 void sga_text_area_set_read_only(int a_id, int a_on) { [(NSTextView *)sga_core(a_id) setEditable:a_on == 0]; }
 
+static NSTextField *sga_text_field(int a_id);   /* 1p: a password field's shown field */
+
 void sga_field_set(int a_id, const char *a_text)
 {
 	s_suppress++;
-	[(NSTextField *)sga_get(a_id) setStringValue:sga_string(a_text)];
+	[sga_text_field(a_id) setStringValue:sga_string(a_text)];
 	s_suppress--;
 }
 
-const char *sga_field_get(int a_id) { return sga_return(Kind_field, [(NSTextField *)sga_get(a_id) stringValue]); }
-void sga_field_set_placeholder(int a_id, const char *a_text) { [(NSTextField *)sga_get(a_id) setPlaceholderString:sga_string(a_text)]; }
+const char *sga_field_get(int a_id) { return sga_return(Kind_field, [sga_text_field(a_id) stringValue]); }
+void sga_field_set_placeholder(int a_id, const char *a_text)
+{
+	id o = sga_get(a_id);
+	if ([o isKindOfClass:NSClassFromString(@"SGAPassword")]) for (NSView *v in [o subviews]) { if ([v isKindOfClass:[NSTextField class]]) [(NSTextField *)v setPlaceholderString:sga_string(a_text)]; }
+	else [(NSTextField *)o setPlaceholderString:sga_string(a_text)];
+}
 
 int sga_list(void)
 {
@@ -1688,12 +1708,18 @@ void sga_test_expand(int a_id, int a_node, int a_on)
 {
 @public
 	NSInteger shown;   /* the row last reported or set; 0 = none */
+	NSMutableArray<NSMenuItem *> *choices;   /* the choices, apart from group headers and separators (1p) */
 }
 @end
 @implementation SGADropdown
+- (NSInteger)choice
+{
+	NSUInteger k = [self selectedItem] ? [choices indexOfObjectIdenticalTo:[self selectedItem]] : NSNotFound;
+	return k == NSNotFound ? 0 : (NSInteger)k + 1;
+}
 - (void)chosen:(id)a_sender
 {
-	NSInteger r = [self indexOfSelectedItem] + 1;
+	NSInteger r = [self choice];
 	(void)a_sender;
 	if (r != shown) {
 		shown = r;
@@ -1705,6 +1731,8 @@ void sga_test_expand(int a_id, int a_node, int a_on)
 int sga_dropdown(void)
 {
 	SGADropdown *d = [[SGADropdown alloc] initWithFrame:NSZeroRect pullsDown:NO];
+	d->choices = [NSMutableArray array];
+	[d setAutoenablesItems:NO];
 	[d setTarget:d];
 	[d setAction:@selector(chosen:)];
 	return sga_keep(d);
@@ -1713,32 +1741,50 @@ int sga_dropdown(void)
 void sga_dropdown_extend(int a_id, const char *a_text)
 {
 	SGADropdown *d = sga_get(a_id);
-	[[d menu] addItemWithTitle:sga_string(a_text) action:NULL keyEquivalent:@""];
-	if ([d numberOfItems] == 1) [d selectItemAtIndex:0];
-	d->shown = [d indexOfSelectedItem] + 1;
+	NSMenuItem *i = [[d menu] addItemWithTitle:sga_string(a_text) action:NULL keyEquivalent:@""];
+	[d->choices addObject:i];
+	if ([d->choices count] == 1) [d selectItem:i];
+	d->shown = [d choice];
 }
+
+/* 1p: a group header (a section header on macOS 14 and later) and a separator; neither is a choice. */
+void sga_dropdown_add_header(int a_id, const char *a_text)
+{
+	SGADropdown *d = sga_get(a_id);
+	NSMenuItem *i;
+	if (@available(macOS 14.0, *)) i = [NSMenuItem sectionHeaderWithTitle:sga_string(a_text)];
+	else {
+		i = [[NSMenuItem alloc] initWithTitle:sga_string(a_text) action:NULL keyEquivalent:@""];
+		[i setEnabled:NO];
+	}
+	[[d menu] addItem:i];
+	if ([d->choices count] == 0) [d selectItem:nil];
+}
+
+void sga_dropdown_add_separator(int a_id) { [[(SGADropdown *)sga_get(a_id) menu] addItem:[NSMenuItem separatorItem]]; }
 
 void sga_dropdown_wipe_out(int a_id)
 {
 	SGADropdown *d = sga_get(a_id);
 	[d removeAllItems];
+	[d->choices removeAllObjects];
 	d->shown = 0;
 }
 
 void sga_dropdown_select(int a_id, int a_row)
 {
 	SGADropdown *d = sga_get(a_id);
-	[d selectItemAtIndex:a_row - 1];
-	d->shown = [d indexOfSelectedItem] + 1;
+	[d selectItem:d->choices[(NSUInteger)(a_row - 1)]];
+	d->shown = [d choice];
 }
 
-int sga_dropdown_selected(int a_id) { return (int)[(NSPopUpButton *)sga_get(a_id) indexOfSelectedItem] + 1; }
+int sga_dropdown_selected(int a_id) { return (int)[(SGADropdown *)sga_get(a_id) choice]; }
 
 /* As a user: the row chosen from the menu, then the button's action. */
 static void sga_test_choose_option(int a_id, int a_row)
 {
 	SGADropdown *d = sga_get(a_id);
-	[d selectItemAtIndex:a_row - 1];
+	[d selectItem:d->choices[(NSUInteger)(a_row - 1)]];
 	[d sendAction:[d action] to:[d target]];
 }
 
@@ -2181,6 +2227,7 @@ int sga_segmented_selected(int a_id) { return (int)((SGASegmented *)sga_get(a_id
 @public
 	BOOL is_time;
 	NSInteger last;
+	int kind;   /* 1p: 0 date or time (is_time), 2 date and time, 3 month */
 }
 @end
 static NSInteger sga_date_value(SGADatePicker *p)
@@ -2194,7 +2241,16 @@ static NSInteger sga_date_value(SGADatePicker *p)
 {
 	NSInteger v = sga_date_value(self);
 	(void)a_sender;
-	if (v != last) {
+	if (kind == 2) {   /* the date in a, the time in b */
+		NSCalendar *c = [NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian];
+		NSDateComponents *k = [c components:NSCalendarUnitHour | NSCalendarUnitMinute fromDate:[self dateValue]];
+		NSInteger l_time = [k hour] * 60 + [k minute];
+		if (v * 10000 + l_time != last) { last = v * 10000 + l_time; if (!s_suppress) sga_push(2, sga_id_of(self), (int)v, (int)l_time, 0); }
+	}
+	else if (kind == 3) {   /* year * 100 + month */
+		if (v / 100 != last) { last = v / 100; if (!s_suppress) sga_push(2, sga_id_of(self), (int)(v / 100), 0, 0); }
+	}
+	else if (v != last) {
 		last = v;
 		if (!s_suppress) sga_push(2, sga_id_of(self), (int)v, 0, 0);
 	}
@@ -2233,6 +2289,11 @@ void sga_date_picker_set(int a_id, int a_value)
 	SGADatePicker *p = sga_get(a_id);
 	[p setDateValue:sga_date_of(p, a_value)];
 	p->last = sga_date_value(p);
+	if (p->kind == 2) {   /* 1p: date and time keep date * 10000 + time */
+		NSDateComponents *k = [[NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian] components:NSCalendarUnitHour | NSCalendarUnitMinute fromDate:[p dateValue]];
+		p->last = p->last * 10000 + [k hour] * 60 + [k minute];
+	}
+	else if (p->kind == 3) p->last = p->last / 100;
 }
 
 int sga_date_picker_value(int a_id) { return (int)sga_date_value(sga_get(a_id)); }
@@ -3351,6 +3412,437 @@ void sga_follow_system_appearance(void)
 /* A list's or table's row brought into view, quietly (the selection stays). */
 void sga_list_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
 void sga_table_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
+
+/* ---------------------------------------------------------------- 1p: forms */
+
+/* A password field: an NSSecureTextField, and a plain field holding the same text that the
+   eye button swaps in (AppKit's secure field has no reveal of its own; it shows the caps-lock
+   symbol itself). Typing sends text changed (2), Return activate (3), the eye toggled (12,
+   a = 1 revealed). */
+@interface SGAPassword : NSView <NSTextFieldDelegate>
+{
+@public
+	NSSecureTextField *secure;
+	NSTextField *plain;
+	NSButton *eye;
+	BOOL revealed;
+}
+@end
+@implementation SGAPassword
+- (NSTextField *)shown { return revealed ? plain : secure; }
+- (void)reveal:(BOOL)a_on
+{
+	NSString *l_text = [[self shown] stringValue] ?: @"";
+	BOOL l_focused = [[self window] firstResponder] == [[self shown] currentEditor];
+	revealed = a_on;
+	[plain setStringValue:l_text];
+	[secure setStringValue:l_text];
+	[plain setHidden:!a_on];
+	[secure setHidden:a_on];
+	[eye setImage:[NSImage imageWithSystemSymbolName:a_on ? @"eye.slash" : @"eye" accessibilityDescription:a_on ? @"Hide password" : @"Show password"]];
+	if (l_focused) [[self window] makeFirstResponder:[self shown]];
+}
+- (void)eyed:(id)a_sender { (void)a_sender; [self reveal:!revealed]; if (!s_suppress) sga_push(12, sga_id_of(self), revealed ? 1 : 0, 0, 0); }
+- (void)controlTextDidChange:(NSNotification *)n { (void)n; if (!s_suppress) sga_push(2, sga_id_of(self), 0, 0, 0); }
+- (void)controlTextDidEndEditing:(NSNotification *)n { (void)n; if (!s_suppress) sga_push(29, sga_id_of(self), 0, 0, 0); }
+- (void)entered:(id)a_sender { (void)a_sender; if (!s_suppress) sga_push(3, sga_id_of(self), 0, 0, 0); }
+- (BOOL)isAccessibilityElement { return NO; }
+@end
+
+int sga_password_field(void)
+{
+	SGAPassword *p = [[SGAPassword alloc] initWithFrame:NSZeroRect];
+	p->secure = [[NSSecureTextField alloc] init];
+	p->plain = [NSTextField textFieldWithString:@""];
+	p->eye = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"eye" accessibilityDescription:@"Show password"] target:p action:@selector(eyed:)];
+	[p->eye setBordered:NO];
+	for (NSTextField *f in @[p->secure, p->plain]) {
+		[f setDelegate:p];
+		[f setTarget:p];
+		[f setAction:@selector(entered:)];
+	}
+	for (NSView *v in @[p->secure, p->plain, p->eye]) { [v setTranslatesAutoresizingMaskIntoConstraints:NO]; [p addSubview:v]; }
+	NSMutableArray *k = [NSMutableArray array];
+	for (NSTextField *f in @[p->secure, p->plain]) [k addObjectsFromArray:@[
+		[f.leadingAnchor constraintEqualToAnchor:p.leadingAnchor], [f.trailingAnchor constraintEqualToAnchor:p->eye.leadingAnchor constant:-4],
+		[f.topAnchor constraintEqualToAnchor:p.topAnchor], [f.bottomAnchor constraintEqualToAnchor:p.bottomAnchor]]];
+	[k addObjectsFromArray:@[[p->eye.trailingAnchor constraintEqualToAnchor:p.trailingAnchor], [p->eye.centerYAnchor constraintEqualToAnchor:p.centerYAnchor],
+		[p->eye.widthAnchor constraintEqualToConstant:22]]];
+	[NSLayoutConstraint activateConstraints:k];
+	[p reveal:NO];
+	return sga_keep(p);
+}
+
+void sga_password_set_revealed(int a_id, int a_on) { [(SGAPassword *)sga_get(a_id) reveal:a_on != 0]; }
+int sga_password_is_revealed(int a_id) { return ((SGAPassword *)sga_get(a_id))->revealed ? 1 : 0; }
+int sga_caps_lock_on(void) { return ([NSEvent modifierFlags] & NSEventModifierFlagCapsLock) ? 1 : 0; }
+void sga_test_toggle_reveal(int a_id) { [((SGAPassword *)sga_get(a_id))->eye performClick:nil]; }
+
+/* The text field a widget id names: a field's own, a password field's shown one. */
+static NSTextField *sga_text_field(int a_id)
+{
+	id o = sga_get(a_id);
+	return [o isKindOfClass:[SGAPassword class]] ? [(SGAPassword *)o shown] : o;
+}
+
+/* Validation's look: a red border on the field and a small red note under it (placed as the
+   pills are, over the content, so the layout does not move); an empty message clears both. */
+static NSMutableDictionary<NSNumber *, NSTextField *> *s_error_notes;
+
+static void sga_error_place(int a_id)
+{
+	NSTextField *l_note = s_error_notes[@(a_id)];
+	NSView *t = sga_get(a_id);
+	NSView *c = [[t window] contentView];
+	if (!l_note || !c || ![t isDescendantOf:c]) return;
+	if ([l_note superview] != c) {
+		[l_note removeFromSuperview];
+		[c addSubview:l_note positioned:NSWindowAbove relativeTo:nil];
+		[NSLayoutConstraint activateConstraints:@[
+			[l_note.leadingAnchor constraintEqualToAnchor:t.leadingAnchor constant:2],
+			[l_note.topAnchor constraintEqualToAnchor:t.bottomAnchor constant:1]]];
+	}
+}
+
+void sga_field_set_error(int a_id, const char *a_message)
+{
+	NSView *t = sga_get(a_id);
+	NSString *m = sga_string(a_message);
+	if (!s_error_notes) s_error_notes = [NSMutableDictionary dictionary];
+	[t setWantsLayer:YES];
+	if ([m length]) {
+		[[t layer] setBorderColor:[[NSColor systemRedColor] CGColor]];
+		[[t layer] setBorderWidth:1.5];
+		[[t layer] setCornerRadius:4];
+		NSTextField *l_note = s_error_notes[@(a_id)];
+		if (!l_note) {
+			l_note = [NSTextField labelWithString:@""];
+			[l_note setTranslatesAutoresizingMaskIntoConstraints:NO];
+			[l_note setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
+			[l_note setTextColor:[NSColor systemRedColor]];
+			s_error_notes[@(a_id)] = l_note;
+		}
+		[l_note setStringValue:m];
+		[l_note setHidden:NO];
+		[t setAccessibilityHelp:m];
+		sga_error_place(a_id);
+	} else {
+		[[t layer] setBorderWidth:0];
+		[s_error_notes[@(a_id)] setHidden:YES];
+		[t setAccessibilityHelp:nil];
+	}
+}
+
+static void sga_error_notes_sync(void)
+{
+	for (NSNumber *k in [s_error_notes allKeys]) sga_error_place([k intValue]);
+}
+
+const char *sga_field_error_shown(int a_id)
+{
+	NSTextField *l_note = s_error_notes[@(a_id)];
+	return sga_return(Kind_label, l_note && ![l_note isHidden] ? [l_note stringValue] : @"");
+}
+
+/* Autocomplete: the suggestions Eiffel computed for the field's text, in a list under the
+   field (a borderless child panel, never modal: AppKit's own completion runs a modal loop
+   that would hold the program until the user picks). A click on a row, or Return on the
+   highlighted one, fills the field (text changed); Up and Down move the highlight while the
+   field keeps the focus; Escape, or leaving the field, closes the list. */
+static NSMutableDictionary<NSNumber *, NSArray<NSString *> *> *s_suggestions;
+static NSArray<NSString *> *sga_fields(const char *a_joined);
+
+@interface SGASuggestions : NSObject <NSTableViewDataSource, NSTableViewDelegate>
+{
+@public
+	NSPanel *panel;
+	NSTableView *table;
+	int field;   /* the widget id the list serves */
+}
+@end
+static SGASuggestions *s_suggest;
+static void sga_suggest_pick(int a_row);
+@implementation SGASuggestions
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)t { (void)t; return (NSInteger)[s_suggestions[@(field)] count]; }
+- (NSView *)tableView:(NSTableView *)t viewForTableColumn:(NSTableColumn *)c row:(NSInteger)r
+{
+	(void)c;
+	NSTextField *l = [t makeViewWithIdentifier:@"sga_suggest" owner:self];
+	if (!l) { l = [NSTextField labelWithString:@""]; [l setIdentifier:@"sga_suggest"]; }
+	[l setStringValue:s_suggestions[@(field)][(NSUInteger)r]];
+	return l;
+}
+- (void)clicked:(id)a_sender { (void)a_sender; if ([table clickedRow] >= 0) sga_suggest_pick((int)[table clickedRow] + 1); }
+@end
+
+static void sga_suggest_hide(void) { if (s_suggest) [[s_suggest->panel parentWindow] removeChildWindow:s_suggest->panel], [s_suggest->panel orderOut:nil]; }
+
+static void sga_suggest_show(int a_id)
+{
+	NSView *f = sga_get(a_id);
+	NSWindow *w = [f window];
+	NSArray *l_list = s_suggestions[@(a_id)];
+	if (!w || ![w isVisible] || ![l_list count]) { if (s_suggest && s_suggest->field == a_id) sga_suggest_hide(); return; }
+	if (!s_suggest) {
+		s_suggest = [[SGASuggestions alloc] init];
+		s_suggest->panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 200, 100) styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:YES];
+		[s_suggest->panel setHasShadow:YES];
+		[s_suggest->panel setBecomesKeyOnlyIfNeeded:YES];
+		NSScrollView *l_scroll = [[NSScrollView alloc] init];
+		s_suggest->table = [[NSTableView alloc] init];
+		[s_suggest->table addTableColumn:[[NSTableColumn alloc] initWithIdentifier:@"s"]];
+		[s_suggest->table setHeaderView:nil];
+		[s_suggest->table setDataSource:s_suggest];
+		[s_suggest->table setDelegate:s_suggest];
+		[s_suggest->table setTarget:s_suggest];
+		[s_suggest->table setAction:@selector(clicked:)];
+		[s_suggest->table setRefusesFirstResponder:YES];
+		[l_scroll setDocumentView:s_suggest->table];
+		[l_scroll setHasVerticalScroller:YES];
+		[s_suggest->panel setContentView:l_scroll];
+	}
+	s_suggest->field = a_id;
+	[s_suggest->table reloadData];
+	NSRect r = [w convertRectToScreen:[f convertRect:[f bounds] toView:nil]];
+	CGFloat h = MIN([l_list count], 8) * ([s_suggest->table rowHeight] + [s_suggest->table intercellSpacing].height) + 4;
+	[s_suggest->panel setFrame:NSMakeRect(NSMinX(r), NSMinY(r) - h - 2, MAX(NSWidth(r), 160), h) display:YES];
+	if ([s_suggest->panel parentWindow] != w) { sga_suggest_hide(); [w addChildWindow:s_suggest->panel ordered:NSWindowAbove]; }
+	[s_suggest->panel orderFront:nil];
+}
+
+static void sga_suggest_pick(int a_row)
+{
+	if (!s_suggest) return;
+	int l_id = s_suggest->field;
+	NSArray<NSString *> *l_list = s_suggestions[@(l_id)];
+	if (a_row < 1 || a_row > (int)[l_list count]) return;
+	NSTextField *f = sga_text_field(l_id);
+	s_suppress++;
+	[f setStringValue:l_list[(NSUInteger)(a_row - 1)]];
+	s_suppress--;
+	sga_suggest_hide();
+	sga_push(2, l_id, 0, 0, 0);
+}
+
+/* The field's keys, while its list shows (SGATarget's doCommandBySelector asks): YES when handled. */
+static BOOL sga_suggest_key(int a_id, SEL a_command)
+{
+	if (!s_suggest || s_suggest->field != a_id || ![s_suggest->panel isVisible]) return NO;
+	NSTableView *t = s_suggest->table;
+	NSInteger n = [t numberOfRows], r = [t selectedRow];
+	if (a_command == @selector(moveDown:)) { [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)MIN(r + 1, n - 1)] byExtendingSelection:NO]; [t scrollRowToVisible:[t selectedRow]]; return YES; }
+	if (a_command == @selector(moveUp:)) { [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)MAX(r - 1, 0)] byExtendingSelection:NO]; [t scrollRowToVisible:[t selectedRow]]; return YES; }
+	if (a_command == @selector(insertNewline:) && r >= 0) { sga_suggest_pick((int)r + 1); return YES; }
+	if (a_command == @selector(cancelOperation:)) { sga_suggest_hide(); return YES; }
+	return NO;
+}
+
+void sga_field_set_suggestions(int a_id, const char *a_joined)
+{
+	if (!s_suggestions) s_suggestions = [NSMutableDictionary dictionary];
+	s_suggestions[@(a_id)] = strlen(a_joined) ? sga_fields(a_joined) : @[];
+	sga_suggest_show(a_id);
+}
+
+int sga_field_suggestion_count(int a_id) { return (int)[s_suggestions[@(a_id)] count]; }
+
+/* Leaving field `a_id' closes its suggestion list. */
+static void sga_suggest_end(int a_id) { if (s_suggest && s_suggest->field == a_id) sga_suggest_hide(); }
+
+/* As a user: suggestion `i' chosen, filling the field (text changed). */
+void sga_test_pick_suggestion(int a_id, int i)
+{
+	if (!s_suggest || s_suggest->field != a_id) sga_suggest_show(a_id);
+	if (s_suggest && s_suggest->field == a_id) sga_suggest_pick(i);
+	else {
+		NSArray<NSString *> *l_list = s_suggestions[@(a_id)];
+		if (i < 1 || i > (int)[l_list count]) return;
+		[sga_text_field(a_id) setStringValue:l_list[(NSUInteger)(i - 1)]];
+		sga_push(2, a_id, 0, 0, 0);
+	}
+}
+
+/* Date and time together, and a month (1p): a date picker of another kind. */
+int sga_date_picker(void);
+static NSDate *sga_date_of(SGADatePicker *p, int a_value);
+
+int sga_date_time_picker(int a_kind)
+{
+	int l_id = sga_date_picker();
+	SGADatePicker *p = sga_get(l_id);
+	p->kind = a_kind == 3 ? 3 : 2;
+	[p setDatePickerElements:p->kind == 3 ? NSDatePickerElementFlagYearMonth
+		: NSDatePickerElementFlagYearMonthDay | NSDatePickerElementFlagHourMinute];
+	p->last = -1;
+	return l_id;
+}
+
+/* `a_date' = year * 10000 + month * 100 + day, `a_time' = hour * 60 + minute; silent. */
+void sga_date_time_set(int a_id, int a_date, int a_time)
+{
+	SGADatePicker *p = sga_get(a_id);
+	NSCalendar *c = [NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian];
+	NSDateComponents *k = [[NSDateComponents alloc] init];
+	[k setYear:a_date / 10000]; [k setMonth:a_date / 100 % 100]; [k setDay:MAX(a_date % 100, 1)];
+	[k setHour:a_time / 60]; [k setMinute:a_time % 60];
+	[p setDateValue:[c dateFromComponents:k]];
+	p->last = p->kind == 3 ? a_date / 100 : (long)a_date * 10000 + a_time;
+}
+
+int sga_date_time_date(int a_id)
+{
+	NSCalendar *c = [NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian];
+	NSDateComponents *k = [c components:NSCalendarUnitYear | NSCalendarUnitMonth | NSCalendarUnitDay fromDate:[(NSDatePicker *)sga_get(a_id) dateValue]];
+	return (int)([k year] * 10000 + [k month] * 100 + [k day]);
+}
+
+int sga_date_time_time(int a_id)
+{
+	NSCalendar *c = [NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian];
+	NSDateComponents *k = [c components:NSCalendarUnitHour | NSCalendarUnitMinute fromDate:[(NSDatePicker *)sga_get(a_id) dateValue]];
+	return (int)([k hour] * 60 + [k minute]);
+}
+
+/* As a user: the date and time entered, then the action. */
+void sga_test_set_date_time(int a_id, int a_date, int a_time)
+{
+	SGADatePicker *p = sga_get(a_id);
+	NSInteger l_last = p->last;
+	sga_date_time_set(a_id, a_date, a_time);
+	p->last = l_last;
+	[p sendAction:[p action] to:[p target]];
+}
+
+/* A range slider: two knobs on one track, hand-built (AppKit has no two-thumb slider). A
+   press takes the nearer knob; dragging or the arrow keys move it, never past the other.
+   A change sends text changed (2, a = low, b = high). For assistive tools: two sliders,
+   "Minimum" and "Maximum". */
+@interface SGARangeSlider : NSView
+{
+@public
+	NSInteger minimum, maximum, low, high, step;
+	int dragging;   /* 0 none, 1 low, 2 high */
+	int focused;    /* the knob the keys move */
+	NSArray *elements;
+}
+@end
+@implementation SGARangeSlider
+- (BOOL)isFlipped { return YES; }
+- (BOOL)acceptsFirstResponder { return YES; }
+- (NSSize)intrinsicContentSize { return NSMakeSize(NSViewNoIntrinsicMetric, 24); }
+- (CGFloat)xOf:(NSInteger)v
+{
+	CGFloat l_inset = 10, w = NSWidth([self bounds]) - 2 * l_inset;
+	return l_inset + (maximum > minimum ? (CGFloat)(v - minimum) / (CGFloat)(maximum - minimum) : 0) * w;
+}
+- (NSInteger)valueAt:(CGFloat)x
+{
+	CGFloat l_inset = 10, w = MAX(NSWidth([self bounds]) - 2 * l_inset, 1);
+	NSInteger v = minimum + (NSInteger)lround((x - l_inset) / w * (CGFloat)(maximum - minimum));
+	if (step > 1) v = minimum + ((v - minimum + step / 2) / step) * step;
+	return MAX(minimum, MIN(maximum, v));
+}
+- (void)drawRect:(NSRect)r
+{
+	(void)r;
+	CGFloat y = NSMidY([self bounds]);
+	NSBezierPath *l_track = [NSBezierPath bezierPathWithRoundedRect:NSMakeRect(10, y - 2, NSWidth([self bounds]) - 20, 4) xRadius:2 yRadius:2];
+	[[NSColor tertiaryLabelColor] setFill]; [l_track fill];
+	NSBezierPath *l_range = [NSBezierPath bezierPathWithRoundedRect:NSMakeRect([self xOf:low], y - 2, [self xOf:high] - [self xOf:low], 4) xRadius:2 yRadius:2];
+	[[NSColor controlAccentColor] setFill]; [l_range fill];
+	for (int k = 1; k <= 2; k++) {
+		CGFloat x = [self xOf:k == 1 ? low : high];
+		NSShadow *s = [[NSShadow alloc] init]; [s setShadowBlurRadius:2]; [s setShadowOffset:NSMakeSize(0, -1)]; [s setShadowColor:[NSColor colorWithWhite:0 alpha:0.3]];
+		[NSGraphicsContext saveGraphicsState]; [s set];
+		[[NSColor whiteColor] setFill]; [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(x - 9, y - 9, 18, 18)] fill];
+		[NSGraphicsContext restoreGraphicsState];
+		if ([[self window] firstResponder] == self && focused == k) {
+			[[NSColor keyboardFocusIndicatorColor] setStroke];
+			NSBezierPath *l_ring = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(x - 10, y - 10, 20, 20)]; [l_ring setLineWidth:2]; [l_ring stroke];
+		}
+	}
+}
+- (void)moveKnob:(int)k to:(NSInteger)v
+{
+	NSInteger l_low = low, l_high = high;
+	if (k == 1) low = MIN(v, high); else high = MAX(v, low);
+	if (low != l_low || high != l_high) {
+		[self setNeedsDisplay:YES];
+		if (!s_suppress) sga_push(2, sga_id_of(self), (int)low, (int)high, 0);
+	}
+}
+- (void)mouseDown:(NSEvent *)e
+{
+	NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
+	[[self window] makeFirstResponder:self];
+	dragging = fabs(p.x - [self xOf:low]) <= fabs(p.x - [self xOf:high]) ? 1 : 2;
+	if (low == high) dragging = p.x < [self xOf:low] ? 1 : 2;
+	focused = dragging;
+	[self moveKnob:dragging to:[self valueAt:p.x]];
+}
+- (void)mouseDragged:(NSEvent *)e { if (dragging) [self moveKnob:dragging to:[self valueAt:[self convertPoint:[e locationInWindow] fromView:nil].x]]; }
+- (void)mouseUp:(NSEvent *)e { (void)e; dragging = 0; }
+- (void)keyDown:(NSEvent *)e
+{
+	unichar c = [[e charactersIgnoringModifiers] length] ? [[e charactersIgnoringModifiers] characterAtIndex:0] : 0;
+	NSInteger d = c == NSRightArrowFunctionKey || c == NSUpArrowFunctionKey ? MAX(step, 1) : c == NSLeftArrowFunctionKey || c == NSDownArrowFunctionKey ? -MAX(step, 1) : 0;
+	if (c == '\t') { [super keyDown:e]; return; }
+	if (d) [self moveKnob:focused to:(focused == 1 ? low : high) + d];
+	else [super keyDown:e];
+}
+- (BOOL)isAccessibilityElement { return NO; }
+- (NSArray *)accessibilityChildren
+{
+	NSMutableArray *a = [NSMutableArray array];
+	for (int k = 1; k <= 2; k++) {
+		NSAccessibilityElement *x = [NSAccessibilityElement accessibilityElementWithRole:NSAccessibilitySliderRole
+			frame:NSZeroRect label:k == 1 ? @"Minimum" : @"Maximum" parent:self];
+		[x setAccessibilityValue:@(k == 1 ? low : high)];
+		[a addObject:x];
+	}
+	elements = a;
+	return a;
+}
+@end
+
+int sga_range_slider(int a_min, int a_max)
+{
+	SGARangeSlider *r = [[SGARangeSlider alloc] initWithFrame:NSMakeRect(0, 0, 200, 24)];
+	r->minimum = a_min; r->maximum = a_max; r->low = a_min; r->high = a_max; r->step = 1; r->focused = 1;
+	[r setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[[r.widthAnchor constraintGreaterThanOrEqualToConstant:120] setActive:YES];
+	return sga_keep(r);
+}
+
+void sga_range_slider_set(int a_id, int a_low, int a_high) { SGARangeSlider *r = sga_get(a_id); r->low = a_low; r->high = a_high; [r setNeedsDisplay:YES]; }
+int sga_range_slider_low(int a_id) { return (int)((SGARangeSlider *)sga_get(a_id))->low; }
+int sga_range_slider_high(int a_id) { return (int)((SGARangeSlider *)sga_get(a_id))->high; }
+void sga_range_slider_set_step(int a_id, int a_step) { ((SGARangeSlider *)sga_get(a_id))->step = a_step; }
+
+/* As a user: each knob dragged where asked (the low one first). */
+void sga_test_slide_range(int a_id, int a_low, int a_high)
+{
+	SGARangeSlider *r = sga_get(a_id);
+	if (a_low > r->high) { [r moveKnob:2 to:a_high]; [r moveKnob:1 to:a_low]; }
+	else { [r moveKnob:1 to:a_low]; [r moveKnob:2 to:a_high]; }
+}
+
+/* A list's multiple selection (1p): AppKit's own; the user adds rows with Command and Shift. */
+void sga_list_set_multiple(int a_id, int a_on) { [(NSTableView *)s_inner[a_id] setAllowsMultipleSelection:a_on != 0]; }
+int sga_list_selected_count(int a_id) { return (int)[[(NSTableView *)s_inner[a_id] selectedRowIndexes] count]; }
+int sga_list_selected_at(int a_id, int i)
+{
+	NSIndexSet *s = [(NSTableView *)s_inner[a_id] selectedRowIndexes];
+	__block int l_row = 0, k = 0;
+	[s enumerateIndexesUsingBlock:^(NSUInteger r, BOOL *a_stop) { if (++k == i) { l_row = (int)r + 1; *a_stop = YES; } }];
+	return l_row;
+}
+
+/* As a user: row `a_row' added to the selection (Command-click). */
+void sga_test_extend_list_selection(int a_id, int a_row)
+{
+	[(NSTableView *)s_inner[a_id] selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)(a_row - 1)] byExtendingSelection:YES];
+}
 
 /* ---------------------------------------------- 1o: feedback and messages */
 
@@ -4532,7 +5024,7 @@ void sga_test_type(int a_id, const char *a_text)
 		[t insertText:sga_string(a_text) replacementRange:l_all];
 		return;
 	}
-	NSTextField *f = o;
+	NSTextField *f = sga_text_field(a_id);
 	[f setStringValue:sga_string(a_text)];
 	[[NSNotificationCenter defaultCenter] postNotificationName:NSControlTextDidChangeNotification object:f];
 }

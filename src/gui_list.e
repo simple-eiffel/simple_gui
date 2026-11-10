@@ -114,6 +114,36 @@ feature -- Element change
 			none: selected_index = 0
 		end
 
+feature -- Multiple selection (1p)
+
+	is_multiple_selection: BOOLEAN
+			-- May the user select several rows (Command or Control, and Shift)?
+
+	set_multiple_selection (a_on: BOOLEAN)
+		require
+			gui_thread: is_gui_thread
+		do
+			is_multiple_selection := a_on
+			backend.list_set_multiple (id, a_on)
+		ensure
+			set: is_multiple_selection = a_on
+		end
+
+	selected_rows: ARRAYED_LIST [INTEGER]
+			-- Every selected row, in order (`selection_actions' tell the first, or 0).
+		local
+			i, n: INTEGER
+		do
+			n := backend.list_selected_count (id)
+			create Result.make (n)
+			from i := 1 until i > n loop
+				Result.extend (backend.list_selected_at (id, i))
+				i := i + 1
+			end
+		ensure
+			in_range: across Result as ic all 1 <= ic and ic <= count end
+		end
+
 feature {GUI_APPLICATION} -- Events
 
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)

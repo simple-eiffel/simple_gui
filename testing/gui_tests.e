@@ -2221,6 +2221,264 @@ feature -- The remaining controls (1j)
 			Result.show
 		end
 
+feature -- Forms (1p)
+
+	test_password_field_reveals_and_hides
+		local
+			l_window: GUI_WINDOW
+			l_secret: GUI_PASSWORD_FIELD
+		do
+			create l_window.make ("Password", 320, 100)
+			create l_secret.make
+			l_secret.set_accessible_label ("Password")
+			l_window.set_content (l_secret)
+			l_window.show
+			settle_window
+			l_secret.set_text ("hunter2")
+			assert ("hidden at first", not l_secret.is_revealed and l_secret.text.same_string ("hunter2"))
+			l_secret.set_revealed (True)
+			assert ("revealed silently", l_secret.is_revealed and l_secret.reveal_actions.fire_count = 0 and l_secret.text.same_string ("hunter2"))
+			driver.toggle_reveal (l_secret)
+			assert ("user hid it", not l_secret.is_revealed and l_secret.reveal_actions.fire_count = 1)
+			driver.type_text (l_secret, "s3cret")
+			assert ("typed", l_secret.text.same_string ("s3cret") and l_secret.change_count >= 1)
+			l_window.close
+		end
+
+	test_validation_kinds_and_live_check
+		local
+			l_window: GUI_WINDOW
+			l_email: GUI_TEXT_FIELD
+		do
+			create l_window.make ("Validation", 320, 120)
+			create l_email.make
+			l_email.set_validation (l_email.Validate_email)
+			l_window.set_content (l_email)
+			l_window.show
+			settle_window
+			driver.type_text (l_email, "not an address")
+			assert ("not checked before commit", l_email.is_valid)
+			driver.leave_field (l_email)
+			assert ("invalid on commit", not l_email.is_valid and l_email.validation_actions.fire_count = 1)
+			assert ("message shown", driver.field_error (l_email).has_substring ("email"))
+			l_email.set_validate_live (True)
+			driver.type_text (l_email, "ada@example.org")
+			assert ("valid as typed", l_email.is_valid and driver.field_error (l_email).is_empty)
+			l_email.set_validation (l_email.Validate_required)
+			driver.type_text (l_email, "")
+			assert ("required", not l_email.is_valid)
+			l_email.set_validation (l_email.Validate_none)
+			l_email.set_validator (agent (t: STRING_32): detachable STRING_32 do if t.count < 3 then Result := "Too short." end end)
+			driver.type_text (l_email, "ab")
+			assert ("the program's own check", l_email.validation_message.same_string ("Too short."))
+			l_window.close
+		end
+
+	test_autocomplete_suggests_and_fills
+		local
+			l_window: GUI_WINDOW
+			l_city: GUI_TEXT_FIELD
+		do
+			create l_window.make ("Autocomplete", 320, 120)
+			create l_city.make
+			l_city.set_suggestions (<<"Amsterdam", "Athens", "Berlin", "Austin">>)
+			l_window.set_content (l_city)
+			l_window.show
+			settle_window
+			driver.type_text (l_city, "a")
+			assert ("three start with a: " + l_city.suggestions.count.out, l_city.suggestions.count = 3)
+			driver.type_text (l_city, "at")
+			assert ("one: Athens", l_city.suggestions.count = 1 and l_city.suggestions.first.same_string ("Athens"))
+			driver.pick_suggestion (l_city, 1)
+			assert ("filled", l_city.text.same_string ("Athens"))
+			l_window.close
+		end
+
+	test_file_field_shows_the_path
+		local
+			l_window: GUI_WINDOW
+			l_file: GUI_FILE_FIELD
+		do
+			create l_window.make ("File field", 400, 100)
+			create l_file.make_open ("Transcript", <<"txt">>)
+			l_window.set_content (l_file)
+			l_window.show
+			settle_window
+			assert ("empty", l_file.path = Void)
+			l_file.set_path (create {PATH}.make_from_string ("/tmp/notes.txt"))
+			assert ("shows the path", attached l_file.path as al_path and then al_path.name.same_string ((create {PATH}.make_from_string ("/tmp/notes.txt")).name))
+			assert ("silent", l_file.change_actions.fire_count = 0)
+			driver.cancel_dialogs_after (300)
+			l_file.choose
+			driver.cancel_dialogs_after (0)
+			assert ("a cancelled dialog changes nothing", l_file.change_actions.fire_count = 0)
+			l_window.close
+		end
+
+	test_dropdown_groups_do_not_count
+		local
+			l_window: GUI_WINDOW
+			l_drop: GUI_DROPDOWN
+		do
+			create l_window.make ("Groups", 300, 100)
+			create l_drop.make
+			l_drop.add_group_header ("Local")
+			l_drop.extend ("Whisper")
+			l_drop.extend ("Vosk")
+			l_drop.add_separator
+			l_drop.add_group_header ("Cloud")
+			l_drop.extend ("Speechmatics")
+			l_window.set_content (l_drop)
+			l_window.show
+			settle_window
+			assert ("choices only", l_drop.count = 3 and l_drop.i_th (3).same_string ("Speechmatics"))
+			assert ("first choice selected", l_drop.selected_index = 1)
+			l_drop.select_row (3)
+			assert ("third", l_drop.selected_index = 3 and l_drop.selected_text.same_string ("Speechmatics"))
+			driver.choose_option (l_drop, 2)
+			assert ("user chose the second", l_drop.selected_index = 2 and l_drop.selection_actions.fire_count = 1)
+			l_window.close
+		end
+
+	test_date_time_and_month_pickers_round_trip
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_when: GUI_DATE_TIME_PICKER
+			l_month: GUI_MONTH_PICKER
+		do
+			create l_window.make ("Date and time", 380, 120)
+			create l_stack.make_vertical
+			create l_when.make
+			create l_month.make
+			l_stack.extend (l_when)
+			l_stack.extend (l_month)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_when.set_date_time (2026, 11, 9, 17, 5)
+			assert ("date and time", l_when.year = 2026 and l_when.month = 11 and l_when.day = 9 and l_when.hour = 17 and l_when.minute = 5)
+			l_month.set_month (2027, 2)
+			assert ("month", l_month.year = 2027 and l_month.month = 2)
+			assert ("silent", l_when.change_actions.fire_count = 0 and l_month.change_actions.fire_count = 0)
+			driver.set_date_time (l_when, 2026, 12, 24, 9, 30)
+			driver.set_month (l_month, 2027, 3)
+			assert ("emitted", l_when.change_actions.fire_count = 1 and l_month.change_actions.fire_count = 1)
+			assert ("read back", l_when.hour = 9 and l_month.month = 3)
+			l_when.set_date (2027, 1, 2)
+			assert ("inherited date", l_when.year = 2027 and l_when.month = 1 and l_when.day = 2 and l_when.hour = 9 and l_when.minute = 30)
+			assert ("inherited silent", l_when.change_actions.fire_count = 1)
+			l_window.close
+		end
+
+	test_range_slider_keeps_low_below_high
+		local
+			l_window: GUI_WINDOW
+			l_price: GUI_RANGE_SLIDER
+		do
+			create l_window.make ("Range", 320, 100)
+			create l_price.make (0, 100)
+			l_window.set_content (l_price)
+			l_window.show
+			settle_window
+			assert ("whole range", l_price.low = 0 and l_price.high = 100)
+			l_price.set_range (20, 80)
+			assert ("set silently", l_price.low = 20 and l_price.high = 80 and l_price.change_actions.fire_count = 0)
+			driver.slide_range (l_price, 30, 60)
+			assert ("slid", l_price.low = 30 and l_price.high = 60 and l_price.change_actions.fire_count >= 1)
+			l_window.close
+		end
+
+	test_list_multiple_selection
+		local
+			l_window: GUI_WINDOW
+			l_list: GUI_LIST
+		do
+			create l_window.make ("Several", 300, 200)
+			create l_list.make
+			across <<"Genesis", "Exodus", "Leviticus", "Numbers">> as ic loop l_list.extend (ic) end
+			l_list.set_multiple_selection (True)
+			l_window.set_content (l_list)
+			l_window.show
+			settle_window
+			driver.choose_row (l_list, 2)
+			driver.extend_list_selection (l_list, 4)
+			assert ("two rows: " + l_list.selected_rows.count.out + " from " + (if l_list.selected_rows.is_empty then 0 else l_list.selected_rows.first end).out, l_list.selected_rows.count = 2 and l_list.selected_rows.first = 2 and l_list.selected_rows.last = 4)
+			assert ("told", l_list.selection_actions.fire_count >= 2)
+			l_window.close
+		end
+
+	test_window_of_1p_controls_describes_roles
+		local
+			l_window: GUI_WINDOW
+			l_tree: STRING_32
+		do
+			l_window := controls_1p_window
+			settle_window
+			l_tree := driver.describe_accessibility (l_window)
+			print (indented (l_tree))
+			assert ("password", l_tree.has_substring ("text-box:"))
+			assert ("range: two sliders", l_tree.has_substring ("slider: Minimum") and l_tree.has_substring ("slider: Maximum"))
+			assert ("file field button", l_tree.has_substring ("button: Choose"))
+			l_window.close
+		end
+
+	test_window_of_1p_controls_snapshot
+		local
+			l_window: GUI_WINDOW
+		do
+			l_window := controls_1p_window
+			settle_window
+			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_1p_controls.png")))
+			l_window.close
+		end
+
+	controls_1p_window: GUI_WINDOW
+		local
+			l_stack: GUI_STACK
+			l_secret: GUI_PASSWORD_FIELD
+			l_email: GUI_TEXT_FIELD
+			l_file: GUI_FILE_FIELD
+			l_drop: GUI_DROPDOWN
+			l_when: GUI_DATE_TIME_PICKER
+			l_month: GUI_MONTH_PICKER
+			l_price: GUI_RANGE_SLIDER
+		do
+			create Result.make ("Forms", 460, 360)
+			create l_stack.make_vertical
+			create l_secret.make
+			l_secret.set_accessible_label ("Password")
+			l_secret.set_text ("hunter2")
+			create l_email.make
+			l_email.set_accessible_label ("Email")
+			l_email.set_validation (l_email.Validate_email)
+			l_email.set_text ("not an address")
+			create l_file.make_open ("Transcript", <<"txt">>)
+			l_file.set_path (create {PATH}.make_from_string ("/tmp/notes.txt"))
+			create l_drop.make
+			l_drop.add_group_header ("Local")
+			l_drop.extend ("Whisper")
+			l_drop.add_group_header ("Cloud")
+			l_drop.extend ("Speechmatics")
+			l_drop.set_accessible_label ("Engine")
+			create l_when.make
+			l_when.set_date_time (2026, 11, 9, 17, 5)
+			create l_month.make
+			l_month.set_month (2027, 2)
+			create l_price.make (0, 100)
+			l_price.set_range (20, 80)
+			l_stack.extend (l_secret)
+			l_stack.extend (l_email)
+			l_stack.extend (l_file)
+			l_stack.extend (l_drop)
+			l_stack.extend (l_when)
+			l_stack.extend (l_month)
+			l_stack.extend (l_price)
+			Result.set_content (l_stack)
+			Result.show
+			l_email.validate
+		end
+
 feature -- Lazy tables (1f)
 
 	test_a_row_source_asks_only_for_rows_in_view

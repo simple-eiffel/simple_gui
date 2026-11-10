@@ -277,6 +277,34 @@ void sga_list_scroll_to_row(int a_id, int a_row);
 void sga_table_scroll_to_row(int a_id, int a_row);
 void sga_test_press_shortcut(int a_window, const char *a_shortcut);
 
+/* 1p: forms */
+int sga_password_field(void);   /* a field's set, get and events; 12 for the eye */
+void sga_password_set_revealed(int a_id, int a_on);
+int sga_password_is_revealed(int a_id);
+int sga_caps_lock_on(void);
+void sga_field_set_error(int a_id, const char *a_message);   /* "" clears */
+const char *sga_field_error_shown(int a_id);
+void sga_field_set_suggestions(int a_id, const char *a_joined);   /* joined by 0x1F; "" none */
+int sga_field_suggestion_count(int a_id);
+void sga_dropdown_add_header(int a_id, const char *a_text);
+void sga_dropdown_add_separator(int a_id);
+int sga_date_time_picker(int a_kind);   /* 2 date and time, 3 month */
+void sga_date_time_set(int a_id, int a_date, int a_time);
+int sga_date_time_date(int a_id);
+int sga_date_time_time(int a_id);
+int sga_range_slider(int a_min, int a_max);
+void sga_range_slider_set(int a_id, int a_low, int a_high);
+int sga_range_slider_low(int a_id);
+int sga_range_slider_high(int a_id);
+void sga_range_slider_set_step(int a_id, int a_step);
+void sga_list_set_multiple(int a_id, int a_on);
+int sga_list_selected_count(int a_id);
+int sga_list_selected_at(int a_id, int i);
+void sga_test_toggle_reveal(int a_id);
+void sga_test_pick_suggestion(int a_id, int i);
+void sga_test_set_date_time(int a_id, int a_date, int a_time);
+void sga_test_slide_range(int a_id, int a_low, int a_high);
+void sga_test_extend_list_selection(int a_id, int a_row);
 /* 1o: feedback and messages */
 int sga_spinner(void);
 void sga_spinner_set(int a_id, int a_on);

@@ -11,7 +11,7 @@ note
 		| 8 key (a = key code, b = character, c = modifiers << 8) | 9 resize (a, b)
 		| 10 appearance (a = 1 dark) | 11 wake | 12 toggled (a = 1 checked)
 		| 13 page changed (a = page, 1-based) | 14 header clicked (a = column) | 15 expansion
-		(a = node, b = 1 open) | 16 rows wanted (a = first, b = last) | 17 closed (a popover the user dismissed).
+		(a = node, b = 1 open) | 16 rows wanted (a = first, b = last) | 17 closed (a popover the user dismissed) | 29 editing ended (a field the user left, 1p).
 		A drawn view (1i): 18 pointer (a = x, b = y, c = kind + button * 16 + modifiers * 256;
 		kind 1 press, 2 release, 3 move, 4 leave, 5 double, 6 triple; button 1 primary,
 		2 secondary, 3 middle) | 19 wheel (a, b, c = delta, 120 a notch, positive away from the
@@ -961,6 +961,98 @@ feature -- Common widget state
 		deferred
 		end
 
+	password_field: INTEGER
+			-- 1p: an empty password field: a field's text features and events; toggled (12, a = 1 revealed) for its eye.
+		deferred
+		end
+
+	password_set_revealed (an_id: INTEGER; a_on: BOOLEAN)
+			-- Without an event.
+		deferred
+		end
+
+	password_is_revealed (an_id: INTEGER): BOOLEAN
+		deferred
+		end
+
+	caps_lock_on: BOOLEAN
+		deferred
+		end
+
+	field_set_error (an_id: INTEGER; a_message: POINTER)
+			-- The platform's error look on field `an_id', with `a_message' under it; empty clears both.
+		deferred
+		end
+
+	field_set_suggestions (an_id: INTEGER; a_joined: POINTER)
+			-- Show these suggestions (joined by 0x1F; empty: none) for the field's text, as the user types.
+		deferred
+		end
+
+	dropdown_add_header (an_id: INTEGER; a_text: POINTER)
+			-- A group header; not a choice.
+		deferred
+		end
+
+	dropdown_add_separator (an_id: INTEGER)
+			-- A separator; not a choice.
+		deferred
+		end
+
+	date_time_picker (a_kind: INTEGER): INTEGER
+			-- 2: a date and time picker (event 2, a = date, b = h*60+m); 3: a month picker (event 2, a = y*100+m).
+		deferred
+		end
+
+	date_time_set (an_id, a_date, a_time: INTEGER)
+			-- Date y*10000+m*100+d and time h*60+m; without an event.
+		deferred
+		end
+
+	date_time_date (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	date_time_time (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	range_slider (a_min, a_max: INTEGER): INTEGER
+			-- A two-thumb slider, the whole range selected; a change sends 2 (a = low, b = high).
+		deferred
+		end
+
+	range_slider_set (an_id, a_low, a_high: INTEGER)
+			-- Without an event.
+		deferred
+		end
+
+	range_slider_low (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	range_slider_high (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	range_slider_set_step (an_id, a_step: INTEGER)
+		deferred
+		end
+
+	list_set_multiple (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1p: several rows at once.
+		deferred
+		end
+
+	list_selected_count (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	list_selected_at (an_id, i: INTEGER): INTEGER
+			-- The `i'th selected row, in order.
+		deferred
+		end
+
 	set_tooltip (an_id: INTEGER; a_text: POINTER)
 			-- Short help on hover; empty removes it.
 		deferred
@@ -1427,6 +1519,41 @@ feature -- Test driver
 
 	test_drawn_event (an_id, a_type, a_a, a_b, a_c: INTEGER)
 			-- Put a drawn view's event (18 to 23) on the queue, as the view would.
+		deferred
+		end
+
+	test_toggle_reveal (an_id: INTEGER)
+			-- Click a password field's eye, as a user (emits 12).
+		deferred
+		end
+
+	test_pick_suggestion (an_id, i: INTEGER)
+			-- Choose suggestion `i', as a user (fills the field; emits 2).
+		deferred
+		end
+
+	test_end_editing (an_id: INTEGER)
+			-- Leave a field, as a user tabbing away (emits 29).
+		deferred
+		end
+
+	test_set_date_time (an_id, a_date, a_time: INTEGER)
+			-- Enter a date and time, or a month, as a user (emits 2).
+		deferred
+		end
+
+	test_slide_range (an_id, a_low, a_high: INTEGER)
+			-- Drag the thumbs, as a user (emits 2 for each change).
+		deferred
+		end
+
+	test_extend_list_selection (an_id, a_row: INTEGER)
+			-- Add a row to a list's selection, as a Command-click (emits 4).
+		deferred
+		end
+
+	field_error_shown (an_id: INTEGER): POINTER
+			-- For tests: the error message shown under field `an_id' now; empty when none.
 		deferred
 		end
 

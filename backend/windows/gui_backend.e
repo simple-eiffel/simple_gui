@@ -433,6 +433,7 @@ feature -- Controls
 			Result := register (l_t)
 			l_t.set_on_change (agent push (2, Result, 0, 0, 0))
 			l_t.set_on_activate (agent push (3, Result, 0, 0, 0))
+			l_t.set_on_focus_lost (agent push (29, Result, 0, 0, 0))
 		end
 
 	field_set (an_id: INTEGER; a_text: POINTER)
@@ -765,6 +766,9 @@ feature -- Controls
 			elseif attached {SW_TIME_PICKER} widget (an_id) as al_t then
 				quietly (agent al_t.set_time (a_value // 60, a_value \\ 60))
 				changed
+			elseif attached date_time_values.item (an_id) as al_v then
+					-- 1p's date and time picker, set as a date picker: its time stays
+				date_time_set (an_id, a_value, al_v.time)
 			end
 		end
 
@@ -776,6 +780,9 @@ feature -- Controls
 				Result := al_d.selected_year * 10000 + al_d.selected_month * 100 + al_d.selected_day
 			elseif attached {SW_TIME_PICKER} widget (an_id) as al_t then
 				Result := al_t.hour * 60 + al_t.minute
+			elseif attached date_time_values.item (an_id) as al_v then
+					-- 1p's date and time picker, read as a date picker
+				Result := al_v.date
 			end
 		end
 
@@ -1446,6 +1453,326 @@ feature -- Controls
 			end
 		end
 
+	password_field: INTEGER
+			-- 1p: a masked SW_TEXT_BOX with its eye (12, a = 1 shown) and editing ended (29).
+		local
+			l_t: SW_TEXT_BOX
+		do
+			create l_t.make_password ("")
+			Result := register (l_t)
+			l_t.set_on_change (agent push (2, Result, 0, 0, 0))
+			l_t.set_on_activate (agent push (3, Result, 0, 0, 0))
+			l_t.set_on_focus_lost (agent push (29, Result, 0, 0, 0))
+			l_t.set_on_reveal (agent report_reveal (Result, ?))
+		end
+
+	password_set_revealed (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_TEXT_BOX} widget (an_id) as al_t and then al_t.is_masked then
+				al_t.set_revealed (a_on)
+				changed
+			end
+		end
+
+	password_is_revealed (an_id: INTEGER): BOOLEAN
+		do
+			if attached {SW_TEXT_BOX} widget (an_id) as al_t then
+				Result := al_t.is_revealed
+			end
+		end
+
+	caps_lock_on: BOOLEAN
+		do
+			Result := c_caps_lock_on /= 0
+		end
+
+	field_set_error (an_id: INTEGER; a_message: POINTER)
+			-- The danger look, and the message as a note under the field (kept, and drawn by its
+			-- window once it is in one).
+		local
+			l_message: STRING_32
+		do
+			l_message := from_c (a_message)
+			if attached {SW_TEXT_BOX} widget (an_id) as al_t then
+				al_t.set_invalid (not l_message.is_empty)
+			end
+			if l_message.is_empty then
+				field_errors.remove (an_id)
+			else
+				field_errors.force (l_message, an_id)
+			end
+			if attached widget (an_id) as al_w and then attached window_of (al_w) as al_win then
+				al_win.set_widget_note (al_w, l_message)
+				if al_win.is_window_open then
+					al_win.request_render
+				end
+			end
+		end
+
+	field_error_shown (an_id: INTEGER): POINTER
+		local
+			l_shown: STRING_32
+		do
+			create l_shown.make_empty
+			if attached widget (an_id) as al_w and then attached window_of (al_w) as al_win
+				and then attached al_win.widget_note_text (al_w) as al_note
+			then
+				l_shown := al_note
+			end
+			Result := c_text (l_shown)
+		end
+
+	field_set_suggestions (an_id: INTEGER; a_joined: POINTER)
+			-- SW_WINDOW's suggestion list under the field; a choice fills the field (2).
+		local
+			l_items: LIST [STRING_32]
+			l_kept: ARRAYED_LIST [STRING_32]
+		do
+			l_items := from_c (a_joined).split ('%/31/')
+			create l_kept.make (l_items.count)
+			across l_items as ic loop
+				if not ic.is_empty then
+					l_kept.extend (ic)
+				end
+			end
+			field_suggestions.force (l_kept, an_id)
+			if attached widget (an_id) as al_w and then attached window_of (al_w) as al_win then
+				if l_kept.is_empty then
+					if al_win.suggestions_for = al_w then
+						al_win.hide_suggestions
+					end
+				else
+					al_win.show_suggestions (al_w, l_kept, agent fill_suggestion (an_id, ?))
+				end
+				if al_win.is_window_open then
+					al_win.request_render
+				end
+			end
+		end
+
+	dropdown_add_header (an_id: INTEGER; a_text: POINTER)
+		do
+			if attached {GUI_SW_DROPDOWN} widget (an_id) as al_d then
+				al_d.add_header (from_c (a_text))
+			end
+		end
+
+	dropdown_add_separator (an_id: INTEGER)
+		do
+			if attached {GUI_SW_DROPDOWN} widget (an_id) as al_d then
+				al_d.add_separator_row
+			end
+		end
+
+	date_time_picker (a_kind: INTEGER): INTEGER
+			-- 2: an SW_DATE_PICKER and an SW_TIME_PICKER in a row (2, a = date, b = time);
+			-- 3: a month dropdown and a year spin box in a row (2, a = y*100+m).
+		local
+			l_row: SW_ROW
+			l_date: SW_DATE_PICKER
+			l_time: SW_TIME_PICKER
+			l_month: GUI_SW_DROPDOWN
+			l_year: GUI_SW_SPIN_BOX
+			l_now: SIMPLE_DATE
+			l_clock: SIMPLE_TIME
+			i: INTEGER
+		do
+			create l_now.make_now
+			create l_clock.make_now
+			create l_row.make
+			Result := register (l_row)
+			if a_kind = 3 then
+				create l_month.make_dropdown
+				from i := 1 until i > 12 loop
+					l_month.extend_option (month_name (i))
+					i := i + 1
+				end
+				l_month.set_accessible_name ("Month")
+				create l_year.make (l_now.year, 1, 9999, Void)
+				l_year.set_accessible_name ("Year")
+				l_row.put (l_month)
+				l_row.put (l_year)
+				date_time_parts.force ([l_month, l_year], Result)
+				date_time_values.force ([l_now.year * 10000 + l_now.month * 100 + 1, 0], Result)
+				quietly (agent l_month.select_quietly (l_now.month))
+				l_month.set_on_pick (agent month_picked (Result, ?))
+				l_year.set_on_change (agent year_changed (Result, ?))
+			else
+				create l_date.make_picker
+				l_date.set_date (l_now.year, l_now.month, l_now.day)
+				create l_time.make_picker
+				l_time.set_time (l_clock.hour, l_clock.minute)
+				l_row.put (l_date)
+				l_row.put (l_time)
+				date_time_parts.force ([l_date, l_time], Result)
+				date_time_values.force ([l_now.year * 10000 + l_now.month * 100 + l_now.day, l_clock.hour * 60 + l_clock.minute], Result)
+				l_date.set_on_date_change (agent date_part_changed (Result, ?, ?, ?))
+				l_time.set_on_time_change (agent time_part_changed (Result, ?, ?))
+			end
+		end
+
+	date_time_set (an_id, a_date, a_time: INTEGER)
+		do
+			if attached date_time_values.item (an_id) as al_v and then attached date_time_parts.item (an_id) as al_p then
+				al_v.date := a_date
+				al_v.time := a_time
+				if attached {GUI_SW_DROPDOWN} al_p.first as al_month and then attached {GUI_SW_SPIN_BOX} al_p.second as al_year then
+					quietly (agent al_month.select_quietly ((a_date // 100 \\ 100).max (1).min (12)))
+					quietly (agent al_year.set_value (a_date // 10000))
+				elseif attached {SW_DATE_PICKER} al_p.first as al_date and then attached {SW_TIME_PICKER} al_p.second as al_time then
+					quietly (agent al_date.set_date (a_date // 10000, a_date // 100 \\ 100, a_date \\ 100))
+					quietly (agent al_time.set_time (a_time // 60, a_time \\ 60))
+				end
+				changed
+			end
+		end
+
+	date_time_date (an_id: INTEGER): INTEGER
+		do
+			if attached date_time_values.item (an_id) as al_v then
+				Result := al_v.date
+			end
+		end
+
+	date_time_time (an_id: INTEGER): INTEGER
+		do
+			if attached date_time_values.item (an_id) as al_v then
+				Result := al_v.time
+			end
+		end
+
+	range_slider (a_min, a_max: INTEGER): INTEGER
+			-- Two GUI_SW_SLIDERs, Minimum over Maximum, kept in order (2, a = low, b = high).
+		local
+			l_column: SW_COLUMN
+			l_low, l_high: GUI_SW_SLIDER
+		do
+			create l_column.make
+			Result := register (l_column)
+			create l_low.make_range (a_min, a_max, False)
+			create l_high.make_range (a_min, a_max, False)
+			l_low.set_accessible_name ("Minimum")
+			l_high.set_accessible_name ("Maximum")
+			quietly (agent l_low.set_value (a_min))
+			quietly (agent l_high.set_value (a_max))
+			l_column.put (l_low)
+			l_column.put (l_high)
+			range_parts.force ([l_low, l_high], Result)
+			l_low.set_on_change (agent range_moved (Result, True, ?))
+			l_high.set_on_change (agent range_moved (Result, False, ?))
+		end
+
+	range_slider_set (an_id, a_low, a_high: INTEGER)
+		do
+			if attached range_parts.item (an_id) as al_p then
+				quietly (agent (al_p.low).set_value (a_low))
+				quietly (agent (al_p.high).set_value (a_high))
+				changed
+			end
+		end
+
+	range_slider_low (an_id: INTEGER): INTEGER
+		do
+			if attached range_parts.item (an_id) as al_p then
+				Result := al_p.low.value
+			end
+		end
+
+	range_slider_high (an_id: INTEGER): INTEGER
+		do
+			if attached range_parts.item (an_id) as al_p then
+				Result := al_p.high.value
+			end
+		end
+
+	range_slider_set_step (an_id, a_step: INTEGER)
+		do
+			if attached range_parts.item (an_id) as al_p then
+				al_p.low.set_step (a_step)
+				al_p.high.set_step (a_step)
+			end
+		end
+
+	list_set_multiple (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l then
+				al_l.set_multiple (a_on)
+				changed
+			end
+		end
+
+	list_selected_count (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l then
+				Result := al_l.selected_rows.count
+			end
+		end
+
+	list_selected_at (an_id, i: INTEGER): INTEGER
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l and then al_l.selected_rows.valid_index (i) then
+				Result := al_l.selected_rows [i]
+			end
+		end
+
+	test_toggle_reveal (an_id: INTEGER)
+			-- What a click on the eye does.
+		do
+			if attached {SW_TEXT_BOX} widget (an_id) as al_t and then al_t.is_masked then
+				al_t.toggle_reveal
+				report_reveal (an_id, al_t.is_revealed)
+				changed
+			end
+		end
+
+	test_pick_suggestion (an_id, i: INTEGER)
+		do
+			if attached widget (an_id) as al_w and then attached window_of (al_w) as al_win
+				and then al_win.suggestions_for = al_w and then i >= 1 and then i <= al_win.suggestions.count
+			then
+				al_win.choose_suggestion (i)
+			else
+				fill_suggestion (an_id, i)
+			end
+		end
+
+	test_end_editing (an_id: INTEGER)
+		do
+			push (29, an_id, 0, 0, 0)
+		end
+
+	test_set_date_time (an_id, a_date, a_time: INTEGER)
+		do
+			date_time_set (an_id, a_date, a_time)
+			if attached date_time_parts.item (an_id) as al_p and then attached {GUI_SW_DROPDOWN} al_p.first then
+				push (2, an_id, a_date // 100, 0, 0)
+			else
+				push (2, an_id, a_date, a_time, 0)
+			end
+		end
+
+	test_slide_range (an_id, a_low, a_high: INTEGER)
+			-- As dragging each thumb in turn.
+		do
+			if attached range_parts.item (an_id) as al_p then
+				al_p.low.set_value (a_low)
+				range_moved (an_id, True, a_low)
+				al_p.high.set_value (a_high)
+				range_moved (an_id, False, a_high)
+				changed
+			end
+		end
+
+	test_extend_list_selection (an_id, a_row: INTEGER)
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l and then al_l.is_multiple
+				and then a_row >= 1 and then a_row <= al_l.row_count
+			then
+				al_l.extend_selection (a_row)
+				changed
+			end
+		end
+
 	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
 			-- 1l: kept here, drawn as the window's reference marks (simple_widgets' pills).
 		do
@@ -1627,6 +1954,7 @@ feature -- Controls
 			Result := register (l_s)
 			l_s.set_on_change (agent push (2, Result, 0, 0, 0))
 			l_s.set_on_activate (agent push (3, Result, 0, 0, 0))
+			l_s.set_on_focus_lost (agent push (29, Result, 0, 0, 0))
 		end
 
 	token_field: INTEGER
@@ -3467,6 +3795,141 @@ feature {NONE} -- Feedback (1o)
 			end
 		end
 
+feature {NONE} -- Forms (1p)
+
+	field_errors: HASH_TABLE [STRING_32, INTEGER]
+			-- Each field's error message, drawn as a note once the field is in a window.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	field_suggestions: HASH_TABLE [ARRAYED_LIST [STRING_32], INTEGER]
+			-- The suggestions shown last under each field.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	date_time_parts: HASH_TABLE [TUPLE [first, second: SW_WIDGET], INTEGER]
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	date_time_values: HASH_TABLE [TUPLE [date, time: INTEGER], INTEGER]
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	range_parts: HASH_TABLE [TUPLE [low, high: GUI_SW_SLIDER], INTEGER]
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	apply_notes (a_w: GUI_SW_WINDOW)
+			-- `a_w''s field errors, as notes under their fields.
+		do
+			a_w.widget_notes.wipe_out
+			across field_errors as ic loop
+				if attached widget (@ic.key) as al_w and then window_of (al_w) = a_w then
+					a_w.set_widget_note (al_w, ic)
+				end
+			end
+		end
+
+	report_reveal (an_id: INTEGER; a_shown: BOOLEAN)
+		do
+			push (12, an_id, if a_shown then 1 else 0 end, 0, 0)
+		end
+
+	fill_suggestion (an_id, i: INTEGER)
+			-- The user chose suggestion `i': it fills the field, and the field reports the change.
+		do
+			if attached {SW_TEXT_BOX} widget (an_id) as al_t and then attached field_suggestions.item (an_id) as al_items
+				and then al_items.valid_index (i)
+			then
+				al_t.set_text (al_items [i])
+				push (2, an_id, 0, 0, 0)
+				changed
+			end
+		end
+
+	month_name (a_month: INTEGER): STRING_32
+		do
+			inspect a_month
+			when 1 then Result := "January"
+			when 2 then Result := "February"
+			when 3 then Result := "March"
+			when 4 then Result := "April"
+			when 5 then Result := "May"
+			when 6 then Result := "June"
+			when 7 then Result := "July"
+			when 8 then Result := "August"
+			when 9 then Result := "September"
+			when 10 then Result := "October"
+			when 11 then Result := "November"
+			else Result := "December"
+			end
+		end
+
+	month_picked (an_id, a_month: INTEGER)
+		do
+			if attached date_time_values.item (an_id) as al_v then
+				al_v.date := (al_v.date // 10000) * 10000 + a_month * 100 + 1
+				if quiet = 0 then
+					push (2, an_id, al_v.date // 100, 0, 0)
+				end
+			end
+		end
+
+	year_changed (an_id, a_year: INTEGER)
+		do
+			if attached date_time_values.item (an_id) as al_v then
+				al_v.date := a_year * 10000 + (al_v.date // 100 \\ 100) * 100 + 1
+				if quiet = 0 then
+					push (2, an_id, al_v.date // 100, 0, 0)
+				end
+			end
+		end
+
+	date_part_changed (an_id, y, m, d: INTEGER)
+		do
+			if attached date_time_values.item (an_id) as al_v then
+				al_v.date := y * 10000 + m * 100 + d
+				if quiet = 0 then
+					push (2, an_id, al_v.date, al_v.time, 0)
+				end
+			end
+		end
+
+	time_part_changed (an_id, h, m: INTEGER)
+		do
+			if attached date_time_values.item (an_id) as al_v then
+				al_v.time := h * 60 + m
+				if quiet = 0 then
+					push (2, an_id, al_v.date, al_v.time, 0)
+				end
+			end
+		end
+
+	range_moved (an_id: INTEGER; a_low_moved: BOOLEAN; a_value: REAL_64)
+			-- Keep low <= high (the thumb moved stops at the other), and report both.
+		do
+			if quiet = 0 and then attached range_parts.item (an_id) as al_p then
+				if al_p.low.value > al_p.high.value then
+					if a_low_moved then
+						quietly (agent (al_p.low).set_value (al_p.high.value))
+					else
+						quietly (agent (al_p.high).set_value (al_p.low.value))
+					end
+				end
+				push (2, an_id, al_p.low.value, al_p.high.value, 0)
+			end
+		end
+
+	c_caps_lock_on: INTEGER
+		external "C inline use <windows.h>"
+		alias "return (GetKeyState (VK_CAPITAL) & 1) ? 1 : 0;"
+		end
+
 feature {NONE} -- Reference pills (1l)
 
 	pills: HASH_TABLE [TUPLE [code, tip: STRING_32; corner: INTEGER], INTEGER]
@@ -3498,6 +3961,7 @@ feature {NONE} -- Reference pills (1l)
 			end
 			a_w.set_reference_marks_shown (pills_are_shown)
 			apply_badges (a_w)
+			apply_notes (a_w)
 			if a_w.is_window_open then
 				a_w.request_render
 			end
@@ -4215,10 +4679,15 @@ feature {NONE} -- Implementation
 		end
 
 	quietly (a_change: PROCEDURE)
-			-- Run the program's own change without reporting it.
+			-- Run the program's own change without reporting it. An exception in the change
+			-- still lowers the count: left raised, it silenced every later user event.
 		do
 			quiet := quiet + 1
 			a_change.call
+			quiet := quiet - 1
+		ensure
+			balanced: quiet = old quiet
+		rescue
 			quiet := quiet - 1
 		end
 
