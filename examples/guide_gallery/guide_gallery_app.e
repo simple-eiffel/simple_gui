@@ -485,6 +485,7 @@ feature {NONE} -- Icons and feedback (1n, 1o)
 			l_tabs: GUI_TABS
 			l_bar: GUI_INFO_BAR
 			l_spinner: GUI_SPINNER
+			l_hint: GUI_LABEL
 		do
 			create l_stack.make_vertical
 			create l_save.make ("Save")
@@ -509,13 +510,22 @@ feature {NONE} -- Icons and feedback (1n, 1o)
 			l_tabs.extend (create {GUI_LABEL}.make ("News page"), "News")
 			l_tabs.set_page_icon (1, "mail")
 			l_tabs.set_page_badge (2, "5")
+			create l_hint.make ("Styles, icons, badges and busy:")
+			l_stack.extend (l_hint)
 			l_stack.extend (l_save)
 			l_stack.extend (l_delete)
 			l_stack.extend (l_settings)
 			l_stack.extend (l_inbox)
 			l_stack.extend (l_upload)
 			l_stack.extend (l_tabs)
-			shoot ("icons-and-badges", "Icons", 420, 320, l_stack)
+				-- Shown in its own window, made key: macOS draws the suggested and destructive
+				-- tints only in the key window.
+			create l_window.make ("Icons", 420, 320)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle
+			driver.focus (l_hint)
+			save ("icons-and-badges", l_window)
 			create l_stack.make_vertical
 			create l_bar.make ({GUI_INFO_BAR}.Kind_info, "A new version is ready.")
 			l_bar.add_action ("Update").do_nothing
