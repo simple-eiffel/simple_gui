@@ -2205,7 +2205,13 @@ static int sg_date_picker(int y, int m, int d) {
     sg_date_store(id, y, m, d);
     return id;
 }
-static void sg_date_set(int id, int y, int m, int d) { sg_date_store(id, y, m, d); }
+static void sg_dt_put(int id, int date, int time);   /* 1p, below */
+static void sg_date_set(int id, int y, int m, int d) {
+    /* 1p's date and time picker (53) and month picker (54) are set as date pickers too: their
+       own parts take the date, and the time stays */
+    if (sg_kind[id] == 53 || sg_kind[id] == 54) { sg_dt_put(id, y * 10000 + m * 100 + d, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-time"))); return; }
+    sg_date_store(id, y, m, d);
+}
 static int sg_date_value(int id) { return GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-date")); }
 
 /* Time picker: hour and minute spin buttons (wrapping, two digits) side by side. */
