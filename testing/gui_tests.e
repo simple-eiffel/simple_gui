@@ -2205,6 +2205,182 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_list_rows_reorder
+			-- 1q-c: a reorderable list's row picked and dropped on another row moves there and
+			-- the list tells from and to; below the rows is the end; another list never lights
+			-- for it; a list that stops being reorderable lifts nothing.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_list, l_other: GUI_LIST
+			l_moves: ARRAYED_LIST [STRING]
+		do
+			create l_moves.make (2)
+			create l_window.make ("Reorder", 360, 300)
+			create l_stack.make_vertical
+			create l_list.make
+			across <<"Genesis", "Exodus", "Leviticus", "Numbers">> as ic loop l_list.extend (ic) end
+			create l_other.make
+			l_other.extend ("Elsewhere")
+			l_other.set_reorderable (True)
+			l_list.set_reorderable (True)
+			l_list.reorder_actions.extend (agent (f, t: INTEGER; m: ARRAYED_LIST [STRING]) do m.extend (f.out + ">" + t.out) end (?, ?, l_moves))
+			l_stack.extend (l_list)
+			l_stack.extend (l_other)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			driver.pick (l_list, 1)
+			assert ("its own list lights", driver.is_accepting (l_list))
+			assert ("another list does not", not driver.is_accepting (l_other))
+			driver.drop (l_list, 3)
+			assert ("moved: " + l_list.i_th (1).out + "," + l_list.i_th (2).out + "," + l_list.i_th (3).out,
+				l_list.i_th (1).same_string ("Exodus") and l_list.i_th (2).same_string ("Leviticus")
+				and l_list.i_th (3).same_string ("Genesis") and l_list.i_th (4).same_string ("Numbers"))
+			assert ("told 1>3", l_moves.count = 1 and l_moves [1].same_string ("1>3"))
+			assert ("the moved row is selected", l_list.selected_index = 3)
+			driver.pick (l_list, 1)
+			driver.drop (l_list, 0)
+			assert ("below the rows is the end", l_list.i_th (4).same_string ("Exodus") and l_moves [2].same_string ("1>4"))
+			l_list.set_reorderable (False)
+			driver.pick (l_list, 2)
+			assert ("not reorderable: nothing lifted", not driver.is_accepting (l_list))
+			driver.cancel_pick
+			l_window.close
+		end
+
+	test_tree_nodes_move
+			-- 1q-c: a reorderable tree's node dropped on another becomes its last child, with its
+			-- subtree; below the rows is the top level; never into itself or its children.
+		local
+			l_window: GUI_WINDOW
+			l_tree: GUI_TREE
+			l_moves: ARRAYED_LIST [STRING]
+			l_law, l_torah, l_prophets: INTEGER
+		do
+			create l_moves.make (2)
+			create l_window.make ("Move nodes", 360, 300)
+			create l_tree.make
+			l_tree.add_root ("Law")
+			l_law := l_tree.last_node
+			l_tree.add_child (l_law, "Torah")
+			l_torah := l_tree.last_node
+			l_tree.add_child (l_torah, "Genesis")
+			l_tree.add_root ("Prophets")
+			l_prophets := l_tree.last_node
+			l_tree.set_reorderable (True)
+			l_tree.move_actions.extend (agent (n, p, k: INTEGER; m: ARRAYED_LIST [STRING]) do m.extend (n.out + ">" + p.out + "#" + k.out) end (?, ?, ?, l_moves))
+			l_window.set_content (l_tree)
+			l_window.show
+			settle_window
+			driver.pick (l_tree, l_torah)
+			assert ("the tree lights for its own node", driver.is_accepting (l_tree))
+			driver.drop (l_tree, l_prophets)
+			assert ("under Prophets", l_tree.parent_of (l_torah) = l_prophets and l_tree.children_of (l_prophets).first = l_torah)
+			assert ("its child came along", l_tree.parent_of (l_torah + 1) = l_torah)
+			assert ("Law is empty", l_tree.children_of (l_law).is_empty)
+			assert ("told: " + l_moves.count.out, l_moves.count = 1 and l_moves [1].same_string (l_torah.out + ">" + l_prophets.out + "#1"))
+			driver.pick (l_tree, l_prophets)
+			driver.drop (l_tree, l_torah + 1)
+			assert ("never under its own child", l_tree.parent_of (l_prophets) = 0 and l_moves.count = 1)
+			driver.pick (l_tree, l_law)
+			driver.drop (l_tree, 0)
+			assert ("below the rows: last at the top", l_tree.children_of (0).last = l_law and l_moves [2].same_string (l_law.out + ">0#2"))
+			l_tree.move_node (l_torah, 0, 1)
+			assert ("moved by the program: first at the top", l_tree.children_of (0).first = l_torah and l_moves.count = 2)
+			l_tree.select_node (l_torah + 1)
+			assert ("the moved subtree still shows", l_tree.selected_node = l_torah + 1)
+			l_window.close
+		end
+
+	test_tokens_move
+			-- 1q-c: a movable field's token dropped on another token takes its place; dropped
+			-- on another movable field it moves there (the end, or the token's place); a field
+			-- whose tokens do not move neither gives nor takes them.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_a, l_b, l_c: GUI_TOKEN_FIELD
+			l_changes: CELL [INTEGER]
+		do
+			create l_changes.put (0)
+			create l_window.make ("Tokens", 400, 260)
+			create l_stack.make_vertical
+			create l_a.make
+			create l_b.make
+			create l_c.make
+			across <<"grace", "faith", "hope">> as ic loop l_a.extend_token (ic) end
+			l_b.extend_token ("love")
+			l_c.extend_token ("fixed")
+			l_a.set_tokens_movable (True)
+			l_b.set_tokens_movable (True)
+			l_a.change_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_changes))
+			l_b.change_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 10) end (l_changes))
+			l_stack.extend (l_a)
+			l_stack.extend (l_b)
+			l_stack.extend (l_c)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			driver.pick (l_a, 1)
+			assert ("both movable fields light", driver.is_accepting (l_a) and driver.is_accepting (l_b))
+			assert ("the fixed one does not", not driver.is_accepting (l_c))
+			driver.drop (l_a, 3)
+			assert ("grace took hope's place", l_a.i_th (1).same_string ("faith") and l_a.i_th (2).same_string ("hope") and l_a.i_th (3).same_string ("grace"))
+			assert ("one change", l_changes.item = 1)
+			driver.pick (l_a, 1)
+			driver.drop (l_b, 0)
+			assert ("faith moved to the end of the other", l_a.count = 2 and l_b.count = 2 and l_b.i_th (2).same_string ("faith"))
+			assert ("both changed", l_changes.item = 12)
+			driver.pick (l_b, 2)
+			driver.drop (l_a, 1)
+			assert ("back, in the first place", l_a.i_th (1).same_string ("faith") and l_a.count = 3 and l_b.count = 1)
+			driver.pick (l_c, 1)
+			assert ("a fixed token lifts nothing", not driver.is_accepting (l_a))
+			driver.cancel_pick
+			l_window.close
+		end
+
+	test_dragged_out_to_other_programs
+			-- 1q-c: a drag out carries the data the program keeps current; Void carries nothing;
+			-- the end of a drag reaches the source's actions only while it has data.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_both, l_text: GUI_LABEL
+			l_a, l_b: PATH
+			l_how: CELL [INTEGER]
+		do
+			create l_how.put (-1)
+			create l_window.make ("Dragged out", 360, 200)
+			create l_stack.make_vertical
+			create l_both.make ("Text and files")
+			create l_text.make ("Text only")
+			l_stack.extend (l_both)
+			l_stack.extend (l_text)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			create l_a.make_from_string ("notes.txt")
+			create l_b.make_from_string ("sermon.md")
+			l_both.set_drag_out (create {GUI_DRAG_DATA}.make ("Romans 8:28", <<l_a, l_b>>))
+			l_text.set_drag_out (create {GUI_DRAG_DATA}.make_text ("John 3:16"))
+			l_both.drag_out_ended_actions.extend (agent (a_how: INTEGER; a_cell: CELL [INTEGER]) do a_cell.put (a_how) end (?, l_how))
+			assert ("both: " + driver.drag_out_carries (l_both).out,
+				driver.drag_out_carries (l_both).same_string ({STRING_32} "Romans 8:28%N" + l_a.name + "%N" + l_b.name))
+			assert ("text: " + driver.drag_out_carries (l_text).out, driver.drag_out_carries (l_text).same_string ("John 3:16%N"))
+			driver.end_drag_out (l_both, l_both.Drag_copied)
+			assert ("copied: " + l_how.item.out, l_how.item = l_both.Drag_copied)
+			l_text.set_drag_out (create {GUI_DRAG_DATA}.make_files (<<l_b>>))
+			assert ("files now: " + driver.drag_out_carries (l_text).out, driver.drag_out_carries (l_text).same_string ({STRING_32} "%N" + l_b.name))
+			l_both.set_drag_out (Void)
+			assert ("nothing", driver.drag_out_carries (l_both).is_empty and l_both.drag_out = Void)
+			l_how.put (-1)
+			driver.end_drag_out (l_both, l_both.Drag_refused)
+			assert ("no data, no end", l_how.item = -1)
+			l_window.close
+		end
+
 	test_files_and_text_dropped_in
 			-- 1q-b: files and text another program drops reach the actions that take them; a
 			-- widget that takes only files ignores text, and one that takes nothing ignores both.

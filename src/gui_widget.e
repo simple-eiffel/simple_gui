@@ -421,6 +421,49 @@ feature -- Pick and drop (1q)
 			set: pebble_function = a_function
 		end
 
+	drag_out: detachable GUI_DRAG_DATA
+			-- 1q-c: what a drag out of this widget gives other programs (Void: nothing).
+
+	set_drag_out (a_data: detachable GUI_DRAG_DATA)
+			-- Let the user drag `a_data' out of this widget into other programs (Void: stop).
+			-- Keep it current: on a list, set it again when the selection changes. Inside the
+			-- application a pebble, when there is one, wins over it.
+		require
+			gui_thread: is_gui_thread
+		local
+			l_text, l_paths: C_STRING
+		do
+			drag_out := a_data
+			if attached a_data as al_d then
+				l_text := backend.to_c (al_d.text)
+				l_paths := backend.to_c (al_d.joined_paths)
+			else
+				l_text := backend.to_c ({STRING_32} "")
+				l_paths := backend.to_c ({STRING_32} "")
+			end
+			backend.widget_set_drag_out (id, l_text.item, l_paths.item)
+		ensure
+			set: drag_out = a_data
+		end
+
+	drag_out_ended_actions: GUI_ACTIONS [TUPLE [how: INTEGER]]
+			-- Run when a drag out of this widget ends in another program: `how' is
+			-- `Drag_copied', or `Drag_refused' when nothing took it.
+		do
+			if attached drag_out_ended_actions_made as al_a then
+				Result := al_a
+			else
+				create Result.make
+				drag_out_ended_actions_made := Result
+			end
+		end
+
+	Drag_refused: INTEGER = 0
+	Drag_copied: INTEGER = 1
+	Drag_moved: INTEGER = 2
+			-- How a drag out ended. Drags out offer a copy only today; `Drag_moved' is kept
+			-- for a later move option.
+
 	set_pick_mode (a_mode: INTEGER)
 		require
 			gui_thread: is_gui_thread
@@ -456,6 +499,14 @@ feature {GUI_APPLICATION} -- Pick and drop
 			end
 		end
 
+	end_drag_out (a_how: INTEGER)
+			-- Event 34: a drag out of this widget ended in another program.
+		do
+			if attached drag_out_ended_actions_made as al_a then
+				al_a.call ([a_how])
+			end
+		end
+
 	pebble_at_row (a_row: INTEGER): detachable ANY
 			-- The pebble a pick on row `a_row' lifts (0: the widget itself).
 		do
@@ -480,6 +531,8 @@ feature {NONE} -- Pick and drop
 	file_drop_actions_made: detachable like file_drop_actions
 
 	text_drop_actions_made: detachable like text_drop_actions
+
+	drag_out_ended_actions_made: detachable like drag_out_ended_actions
 
 	tell_drop_target
 			-- Tell the backend everything this widget takes: pebbles, files, text.

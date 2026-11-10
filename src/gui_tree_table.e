@@ -34,6 +34,8 @@ feature {NONE} -- Initialization
 		do
 			create texts.make (16)
 			create parents.make (16)
+			create roots.make (8)
+			create kids.make (16)
 			create selection_actions.make
 			create expansion_actions.make
 			create cells.make (16)

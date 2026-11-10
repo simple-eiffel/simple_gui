@@ -1645,6 +1645,29 @@ void sga_tree_add(int a_id, int a_node, int a_parent, const char *a_text)
 	s_suppress--;
 }
 
+/* 1q-c: move `a_node' with its subtree under `a_parent' (0: the top level) as child number
+   `a_position' there (1-based, counted after taking it out); silent. Never under itself. */
+void sga_tree_move(int a_id, int a_node, int a_parent, int a_position)
+{
+	SGATree *t = s_inner[a_id];
+	SGANode *n = sga_tree_node(t, a_node), *p = sga_tree_node(t, a_parent);
+	if (!n) return;
+	for (SGANode *q = p; q; q = q->parent) if (q == n) return;
+	NSMutableArray<SGANode *> *l_from = n->parent ? n->parent->children : t->roots, *l_to = p ? p->children : t->roots;
+	NSUInteger l_old = [l_from indexOfObjectIdenticalTo:n];
+	if (l_old == NSNotFound) return;
+	SGANode *l_old_parent = n->parent;
+	[l_from removeObjectAtIndex:l_old];
+	NSUInteger l_new = (NSUInteger)MAX(0, MIN(a_position - 1, (int)[l_to count]));
+	[l_to insertObject:n atIndex:l_new];
+	n->parent = p;
+	s_suppress++;
+	[t beginUpdates];
+	[t moveItemAtIndex:(NSInteger)l_old inParent:l_old_parent toIndex:(NSInteger)l_new inParent:p];
+	[t endUpdates];
+	s_suppress--;
+}
+
 void sga_tree_set_expanded(int a_id, int a_node, int a_on)
 {
 	SGATree *t = s_inner[a_id];
@@ -3461,6 +3484,60 @@ static NSPoint s_press_point;
 static int s_press_source, s_press_row;
 static SGAPickLine *s_pick_line;
 
+/* 1q-c: dragging out to other programs. A widget with drag-out data starts an AppKit
+   dragging session when a press on it moves 4 points; the session carries the text and
+   the files (as file URLs) and offers copy only. When the widget is also a drag-mode pick
+   source, the same drag starts the pick: our own windows (the content view as destination)
+   take it as the pick, everything else gets the data. The session runs AppKit's own
+   tracking, so Eiffel's answer to the pick (the targets) may come only after the drop; a
+   drop on one of our widgets before then is kept and done when the answer comes. The
+   session's end sends 34 (a = 1 taken, 0 not) unless it ended on one of our widgets. */
+static NSMutableDictionary<NSNumber *, NSArray<NSString *> *> *s_drag_out;   /* id -> @[text, paths] */
+static int s_out_source;        /* the widget a dragging session left from, 0 none */
+static BOOL s_out_with_pick;    /* that session also carries a pick */
+static BOOL s_out_landed;       /* it ended on one of our widgets */
+static int s_pending_drop;      /* a drop waiting for the pick's targets: the target, -1 a cancel, 0 none */
+static int s_pending_row;
+
+@interface SGADragOutSource : NSObject <NSDraggingSource>
+@end
+static SGADragOutSource *s_out_object;
+
+static NSImage *sga_drag_image(NSView *v, NSRect r)
+{
+	NSBitmapImageRep *l_rep = [v bitmapImageRepForCachingDisplayInRect:r];
+	if (!l_rep) return nil;
+	[v cacheDisplayInRect:r toBitmapImageRep:l_rep];
+	NSImage *i = [[NSImage alloc] initWithSize:r.size];
+	[i addRepresentation:l_rep];
+	return i;
+}
+
+/* Begin the dragging session for `a_source' (row `a_row'), inside drag event `e'. */
+static BOOL sga_drag_out_begin(int a_source, int a_row, NSEvent *e)
+{
+	NSArray<NSString *> *d = s_drag_out[@(a_source)];
+	NSView *v = sga_core(a_source);
+	if (!d || ![v isKindOfClass:[NSView class]]) return NO;
+	NSRect r = [v bounds];
+	if (a_row > 0 && [v isKindOfClass:[NSTableView class]] && ![v isKindOfClass:[SGATree class]] && a_row <= [(NSTableView *)v numberOfRows])
+		r = [(NSTableView *)v rectOfRow:a_row - 1];
+	r = NSIntersectionRect(r, [v visibleRect]);
+	if (NSIsEmptyRect(r)) r = NSMakeRect(0, 0, 40, 20);
+	NSImage *l_image = sga_drag_image(v, r);
+	NSMutableArray<NSDraggingItem *> *l_items = [NSMutableArray array];
+	if ([d[0] length]) [l_items addObject:[[NSDraggingItem alloc] initWithPasteboardWriter:d[0]]];
+	for (NSString *l_path in [d[1] componentsSeparatedByString:@"\n"])
+		if ([l_path length]) [l_items addObject:[[NSDraggingItem alloc] initWithPasteboardWriter:[NSURL fileURLWithPath:l_path]]];
+	if (![l_items count]) return NO;
+	for (NSUInteger k = 0; k < [l_items count]; k++) [l_items[k] setDraggingFrame:r contents:k == 0 ? l_image : nil];
+	if (!s_out_object) s_out_object = [[SGADragOutSource alloc] init];
+	s_out_source = a_source;
+	s_out_landed = NO;
+	[v beginDraggingSessionWithItems:l_items event:e source:s_out_object];
+	return YES;
+}
+
 /* The registered widget at window point `p' (walking up from the view hit), and the row or
    node under it when it is a list, table or tree. */
 static int sga_widget_at(NSWindow *w, NSPoint p, int *a_row)
@@ -3539,12 +3616,23 @@ static NSEvent *sga_pick_watch(NSEvent *e)
 		if (t == NSEventTypeLeftMouseDown) {
 			l_id = sga_widget_at(w, p, &l_row);
 			NSNumber *k = s_pick_sources[@(l_id)];
-			s_press_source = k && [k intValue] % 4 == 1 ? l_id : 0;
-			s_press_row = [k intValue] / 4 ? l_row : 0;
+			BOOL l_out = s_drag_out[@(l_id)] != nil;
+			s_press_source = (k && [k intValue] % 4 == 1) || l_out ? l_id : 0;
+			s_press_row = [k intValue] / 4 || (l_out && [sga_core(l_id) isKindOfClass:[NSTableView class]]) ? l_row : 0;
 			s_press_point = p;
 		} else if (t == NSEventTypeLeftMouseDragged && s_press_source && hypot(p.x - s_press_point.x, p.y - s_press_point.y) > 4) {
 			int l_source = s_press_source;
+			NSNumber *k = s_pick_sources[@(l_source)];
+			BOOL l_pick = k && [k intValue] % 4 == 1;
 			s_press_source = 0;
+			if (s_drag_out[@(l_source)]) {
+				/* 1q-c: one AppKit drag serves both the pick (our widgets) and other programs. */
+				s_out_with_pick = l_pick;
+				s_pending_drop = 0;
+				if (l_pick) { s_pick_test = YES; sga_pick_start(l_source, [k intValue] / 4 ? s_press_row : 0, s_press_point, w); s_pick_test = NO; }
+				if (!sga_drag_out_begin(l_source, s_press_row, e) && l_pick) { sga_pick_end(); sga_push(32, 0, 0, 0, 0); }
+				return nil;
+			}
 			sga_pick_start(l_source, s_press_row, s_press_point, w);
 			return nil;
 		} else if (t == NSEventTypeRightMouseDown) {
@@ -3661,10 +3749,24 @@ static void sga_drop_text(int a_id, NSString *a_text)
 	sga_wake();
 }
 
+/* 1q-c: our own drag carrying a pick, over our window: the pick target under the pointer
+   (any internal drop target while the targets are not known yet), and its row. */
+static int sga_drag_pick_target(NSWindow *w, NSPoint p, int *a_row)
+{
+	int l_id = sga_widget_at(w, p, a_row);
+	if (s_pick_state == 2) return [s_pick_targets containsObject:@(l_id)] ? l_id : 0;
+	return [s_drop_targets containsObject:@(l_id)] ? l_id : 0;
+}
+
 @implementation SGAContent (SGADropIn)
 - (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)a_info
 {
 	int l_kind;
+	if ([a_info draggingSource] == s_out_object && s_out_with_pick) {
+		int l_row, l_target = sga_drag_pick_target([self window], [a_info draggingLocation], &l_row);
+		sga_drag_light(s_pick_state == 2 ? 0 : l_target);
+		return l_target ? NSDragOperationCopy : NSDragOperationNone;
+	}
 	int l_id = sga_drag_target([self window], [a_info draggingLocation], [a_info draggingPasteboard], &l_kind);
 	sga_drag_light(l_id);
 	return l_id ? NSDragOperationCopy : NSDragOperationNone;
@@ -3676,8 +3778,17 @@ static void sga_drop_text(int a_id, NSString *a_text)
 {
 	int l_kind;
 	NSPasteboard *pb = [a_info draggingPasteboard];
+	if ([a_info draggingSource] == s_out_object && s_out_with_pick) {
+		int l_row, l_target = sga_drag_pick_target([self window], [a_info draggingLocation], &l_row);
+		sga_drag_light(0);
+		if (!l_target) return NO;
+		s_out_landed = YES;
+		if (s_pick_state == 2) sga_pick_drop_at(l_target, l_row); else { s_pending_drop = l_target; s_pending_row = l_row; }
+		return YES;
+	}
 	int l_id = sga_drag_target([self window], [a_info draggingLocation], pb, &l_kind);
 	sga_drag_light(0);
+	if (l_kind && [a_info draggingSource] == s_out_object) s_out_landed = YES;
 	if (l_kind == 1) {
 		NSMutableArray *l_paths = [NSMutableArray array];
 		for (NSURL *u in sga_drag_files(pb)) [l_paths addObject:[u path]];
@@ -3696,6 +3807,46 @@ const char *sga_take_dropped_text(int a_id) { return sga_return(Kind_area, s_dro
 void sga_test_drop_files(int a_id, const char *a_paths) { if ([s_file_targets containsObject:@(a_id)]) sga_drop_files(a_id, sga_string(a_paths)); }
 void sga_test_drop_text(int a_id, const char *a_text) { if ([s_text_targets containsObject:@(a_id)]) sga_drop_text(a_id, sga_string(a_text)); }
 
+@implementation SGADragOutSource
+- (NSDragOperation)draggingSession:(NSDraggingSession *)a_session sourceOperationMaskForDraggingContext:(NSDraggingContext)a_context
+{
+	(void)a_session; (void)a_context;
+	return NSDragOperationCopy;
+}
+- (void)draggingSession:(NSDraggingSession *)a_session endedAtPoint:(NSPoint)p operation:(NSDragOperation)an_op
+{
+	(void)a_session; (void)p;
+	int l_source = s_out_source;
+	s_out_source = 0;
+	sga_drag_light(0);
+	if (s_out_with_pick && !s_out_landed) {   /* the pick ended outside our widgets: cancelled */
+		if (s_pick_state == 2) { sga_pick_end(); sga_push(32, 0, 0, 0, 0); }
+		else if (s_pick_state == 1) s_pending_drop = -1;
+	}
+	s_out_with_pick = NO;
+	if (!s_out_landed && l_source && s_drag_out[@(l_source)]) sga_push(34, l_source, an_op != NSDragOperationNone ? 1 : 0, 0, 0);
+	sga_wake();
+}
+@end
+
+void sga_widget_set_drag_out(int a_id, const char *a_text, const char *a_paths)
+{
+	NSString *l_text = sga_string(a_text), *l_paths = sga_string(a_paths);
+	if (!s_drag_out) s_drag_out = [NSMutableDictionary dictionary];
+	if ([l_text length] || [l_paths length]) s_drag_out[@(a_id)] = @[l_text, l_paths]; else [s_drag_out removeObjectForKey:@(a_id)];
+	sga_pick_watch_start();
+}
+
+/* As another program: what a drag out of `a_id' carries (the text, a line feed, the paths;
+   "" for nothing), and the end of one (34, only while it has data). */
+const char *sga_test_drag_out(int a_id)
+{
+	NSArray<NSString *> *d = s_drag_out[@(a_id)];
+	return sga_return(Kind_path, d ? [NSString stringWithFormat:@"%@\n%@", d[0], d[1]] : @"");
+}
+
+void sga_test_drag_out_ended(int a_id, int a_how) { if (s_drag_out[@(a_id)]) sga_push(34, a_id, a_how, 0, 0); }
+
 @interface SGAPickMenuTarget : NSObject
 @end
 @implementation SGAPickMenuTarget
@@ -3710,6 +3861,12 @@ void sga_pick_targets(int a_source, const int *a_ids, int a_count, const char *a
 	s_pick_targets = l_ids;
 	s_pick_labels = a_labels && strlen(a_labels) ? [sga_string(a_labels) componentsSeparatedByString:@"\n"] : @[];
 	s_pick_state = 2;
+	if (s_pending_drop) {   /* 1q-c: the drag's drop came before the targets */
+		int l_target = s_pending_drop;
+		s_pending_drop = 0;
+		if (l_target > 0) sga_pick_drop_at(l_target, s_pending_row); else { sga_pick_end(); sga_push(32, 0, 0, 0, 0); }
+		return;
+	}
 	sga_pick_light(YES);
 	if (s_pick_mode == 3 && !s_pick_test) {
 		/* The target menu, at the pointer: choosing drops there; dismissing it cancels. */

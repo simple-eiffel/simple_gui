@@ -93,6 +93,7 @@ void sga_table_forget_row(int a_id, int a_row);
 void sga_table_scroll_to(int a_id, int a_row);
 int sga_tree(void);   /* selection 4 (a = node), expansion 15 (a = node, b = 1 expanded) */
 void sga_tree_add(int a_id, int a_node, int a_parent, const char *a_text);   /* nodes numbered 1, 2, 3... by the caller; parent 0: a root */
+void sga_tree_move(int a_id, int a_node, int a_parent, int a_position);   /* 1q-c: with its subtree; position 1-based after taking it out */
 void sga_tree_set_expanded(int a_id, int a_node, int a_on);   /* no event */
 int sga_tree_is_expanded(int a_id, int a_node);
 void sga_tree_select(int a_id, int a_node);   /* 0 clears; expands the ancestors; no event */
@@ -288,6 +289,9 @@ const char *sga_take_dropped_paths(int a_id);
 const char *sga_take_dropped_text(int a_id);
 void sga_test_drop_files(int a_id, const char *a_paths);
 void sga_test_drop_text(int a_id, const char *a_text);
+void sga_widget_set_drag_out(int a_id, const char *a_text, const char *a_paths);
+const char *sga_test_drag_out(int a_id);
+void sga_test_drag_out_ended(int a_id, int a_how);
 void sga_test_cancel_pick(void);
 int sga_test_is_accepting(int a_target);
 /* 1p: forms */

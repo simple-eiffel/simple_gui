@@ -398,6 +398,12 @@ feature -- Controls
 		alias "sga_tree_add($a_tree, $a_node, $a_parent, (const char *) $a_text);"
 		end
 
+	tree_move (a_tree, a_node, a_parent, a_position: INTEGER)
+			-- 1q-c: with its subtree, silently.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_tree_move($a_tree, $a_node, $a_parent, $a_position);"
+		end
+
 	tree_set_expanded (a_tree, a_node: INTEGER; a_on: BOOLEAN)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_tree_set_expanded($a_tree, $a_node, $a_on ? 1 : 0);"
@@ -1039,6 +1045,22 @@ feature -- Common widget state
 	test_drop_text (an_id: INTEGER; a_text: POINTER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_drop_text($an_id, (const char *) $a_text);"
+		end
+
+	widget_set_drag_out (an_id: INTEGER; a_text, a_paths: POINTER)
+			-- 1q-c: copies both; both empty: no drag out.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_widget_set_drag_out($an_id, (const char *) $a_text, (const char *) $a_paths);"
+		end
+
+	test_drag_out (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_test_drag_out($an_id);"
+		end
+
+	test_drag_out_ended (an_id, a_how: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_drag_out_ended($an_id, $a_how);"
 		end
 
 	test_pick (a_source, a_row: INTEGER)

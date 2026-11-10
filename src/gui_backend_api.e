@@ -440,6 +440,12 @@ feature -- Controls
 		deferred
 		end
 
+	tree_move (a_tree, a_node, a_parent, a_position: INTEGER)
+			-- 1q-c: move `a_node' (with its subtree) under `a_parent' (0: the top level) as child
+			-- number `a_position' there (1-based, counted after taking it out).
+		deferred
+		end
+
 	tree_set_expanded (a_tree, a_node: INTEGER; a_on: BOOLEAN)
 			-- Expand or collapse `a_node', without an event.
 		deferred
@@ -1222,6 +1228,24 @@ feature -- Common widget state
 
 	pick_cancel
 			-- The answer to event 30 when the source has no pebble: end the gesture, no event.
+		deferred
+		end
+
+	widget_set_drag_out (an_id: INTEGER; a_text, a_paths: POINTER)
+			-- 1q-c: a drag out of `an_id' carries `a_text' and the newline-separated `a_paths'
+			-- (both empty: no drag out). Copy both; they are freed after the call.
+		deferred
+		end
+
+	test_drag_out (an_id: INTEGER): POINTER
+			-- What a drag out of `an_id' would carry now: the text, a line feed, then the paths
+			-- one per line; empty when it carries nothing.
+		deferred
+		end
+
+	test_drag_out_ended (an_id, a_how: INTEGER)
+			-- As a drag out of `an_id' ending in another program with `a_how' (event 34);
+			-- nothing unless `an_id' has something to drag out.
 		deferred
 		end
 
