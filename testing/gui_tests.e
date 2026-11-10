@@ -2462,6 +2462,91 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_dock_floats_hides_and_maximizes
+			-- 1r-b: a panel floats (code quietly, the user's double click with 38) and docks
+			-- again (closing its window), keeping its place; a side auto-hides and its panel
+			-- slides out; the center maximizes (the user's toggle with 40) and floating panels
+			-- stay floating; a drag moves a panel to a place on a side (41).
+		local
+			l_window: GUI_WINDOW
+			l_dock: GUI_DOCK
+			l_files, l_outline, l_search, l_props: GUI_DOCK_PANEL
+			l_changes: CELL [INTEGER]
+		do
+			create l_changes.put (0)
+			create l_window.make ("Dock 1r-b", 1000, 700)
+			create l_dock.make (create {GUI_LABEL}.make ("The document"))
+			create l_files.make ("files", "Files", create {GUI_LABEL}.make ("files"))
+			create l_outline.make ("outline", "Outline", create {GUI_LABEL}.make ("outline"))
+			create l_search.make ("search", "Search", create {GUI_LABEL}.make ("search"))
+			create l_props.make ("props", "Properties", create {GUI_LABEL}.make ("props"))
+			l_dock.add_panel (l_files, l_dock.Side_left)
+			l_dock.add_panel (l_outline, l_dock.Side_left)
+			l_dock.add_panel (l_search, l_dock.Side_bottom)
+			l_dock.add_panel (l_props, l_dock.Side_right)
+			l_dock.layout_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_changes))
+			l_window.set_content (l_dock)
+			l_window.show
+			settle_window
+			l_dock.float_panel (l_props)
+			assert ("floating, quietly", l_props.is_floating and l_props.side = l_dock.Side_right and l_changes.item = 0)
+			l_dock.set_floating_frame (l_props, 40, 50, 300, 200)
+			assert ("its size: " + l_dock.floating_frame (l_props).width.out, l_dock.floating_frame (l_props).width = 300 and l_dock.floating_frame (l_props).height = 200)
+			driver.close_floating (l_dock, l_props)
+			assert ("closing docks it again", not l_props.is_floating and l_props.side = l_dock.Side_right and l_changes.item = 1)
+			driver.float_by_user (l_dock, l_outline)
+			assert ("the user floated Outline", l_outline.is_floating and l_changes.item = 2)
+			l_dock.set_auto_hide (l_dock.Side_bottom, True)
+			assert ("bottom auto-hides", l_dock.is_auto_hide (l_dock.Side_bottom) and not l_dock.is_collapsed (l_dock.Side_bottom))
+			assert ("Search slides out", driver.slide_out (l_dock, l_search))
+			l_dock.expand_side (l_dock.Side_bottom)
+			assert ("expanding pins it", not l_dock.is_auto_hide (l_dock.Side_bottom))
+			driver.toggle_center (l_dock)
+			assert ("the user maximized the center", l_dock.is_center_maximized and l_changes.item = 3)
+			assert ("Outline still floats", l_outline.is_floating)
+			l_dock.restore_center
+			assert ("restored, quietly", not l_dock.is_center_maximized and l_changes.item = 3)
+			driver.drag_panel (l_dock, l_props, l_dock.Side_left, 1)
+			assert ("dragged to the left, first", l_props.side = l_dock.Side_left and l_dock.panels_on (l_dock.Side_left).first = l_props and l_changes.item = 4)
+			l_window.close
+		end
+
+	test_dock_layout_keeps_1r_b_states
+			-- 1r-b: the layout keeps auto-hide, floating frames and the maximized center; a 1r-a
+			-- layout (no such lines) still restores.
+		local
+			l_window: GUI_WINDOW
+			l_dock: GUI_DOCK
+			l_a, l_b: GUI_DOCK_PANEL
+			l_saved: STRING_32
+		do
+			create l_window.make ("Layouts 1r-b", 900, 640)
+			create l_dock.make (create {GUI_LABEL}.make ("center"))
+			create l_a.make ("a", "A", create {GUI_LABEL}.make ("a"))
+			create l_b.make ("b", "B", create {GUI_LABEL}.make ("b"))
+			l_dock.add_panel (l_a, l_dock.Side_left)
+			l_dock.add_panel (l_b, l_dock.Side_bottom)
+			l_window.set_content (l_dock)
+			l_window.show
+			settle_window
+			l_dock.set_auto_hide (l_dock.Side_bottom, True)
+			l_dock.set_floating_frame (l_a, 30, 40, 260, 180)
+			l_dock.float_panel (l_a)
+			l_dock.maximize_center
+			l_saved := l_dock.layout
+			l_dock.restore_center
+			l_dock.redock_panel (l_a)
+			l_dock.set_auto_hide (l_dock.Side_bottom, False)
+			assert ("restored", l_dock.restore_layout (l_saved))
+			assert ("auto-hide back", l_dock.is_auto_hide (l_dock.Side_bottom))
+			assert ("floating back, its size", l_a.is_floating and l_dock.floating_frame (l_a).width = 260)
+			assert ("maximized back", l_dock.is_center_maximized)
+			l_dock.restore_center
+			assert ("a 1r-a layout", l_dock.restore_layout ("dock 1%Nside 1%T200%T0%T0%T%Npanel 1%T1%Ta%Nside 4%T150%T0%T0%T%Npanel 4%T1%Tb%N"))
+			assert ("docks everything, pins the bottom", not l_a.is_floating and not l_dock.is_auto_hide (l_dock.Side_bottom))
+			l_window.close
+		end
+
 	test_dragged_out_to_other_programs
 			-- 1q-c: a drag out carries the data the program keeps current; Void carries nothing;
 			-- the end of a drag reaches the source's actions only while it has data.

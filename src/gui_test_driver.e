@@ -615,6 +615,51 @@ feature -- User actions
 			settle
 		end
 
+	float_by_user (a_dock: GUI_DOCK; a_panel: GUI_DOCK_PANEL)
+			-- Double-click `a_panel''s tab or title, as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_float_by_user (a_dock.id, a_dock.index_of (a_panel))
+			settle
+		end
+
+	close_floating (a_dock: GUI_DOCK; a_panel: GUI_DOCK_PANEL)
+			-- Close `a_panel''s floating window, as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_close_floating (a_dock.id, a_dock.index_of (a_panel))
+			settle
+		end
+
+	drag_panel (a_dock: GUI_DOCK; a_panel: GUI_DOCK_PANEL; a_side, a_position: INTEGER)
+			-- Drag `a_panel' to `a_position' on `a_side', as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_drag_panel (a_dock.id, a_dock.index_of (a_panel), a_side, a_position)
+			settle
+		end
+
+	slide_out (a_dock: GUI_DOCK; a_panel: GUI_DOCK_PANEL): BOOLEAN
+			-- Rest on `a_panel''s name in its auto-hide strip; did it slide out?
+		require
+			has_application: has_application
+		do
+			Result := backend.test_slide_out (a_dock.id, a_dock.index_of (a_panel))
+			settle
+		end
+
+	toggle_center (a_dock: GUI_DOCK)
+			-- Double-click the center's frame, as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_toggle_center (a_dock.id)
+			settle
+		end
+
 	drag_out_carries (a_source: GUI_WIDGET): STRING_32
 			-- What a drag out of `a_source' would give another program now: the text, a line
 			-- feed, then the paths one per line; empty for nothing.

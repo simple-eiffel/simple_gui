@@ -111,6 +111,8 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_file_field_takes_a_dropped_file, "file_field_takes_a_dropped_file")
 				run_test (agent t.test_dock_sides_tabs_sizes_and_collapse, "dock_sides_tabs_sizes_and_collapse")
 				run_test (agent t.test_dock_layout_round_trip, "dock_layout_round_trip")
+				run_test (agent t.test_dock_floats_hides_and_maximizes, "dock_floats_hides_and_maximizes")
+				run_test (agent t.test_dock_layout_keeps_1r_b_states, "dock_layout_keeps_1r_b_states")
 				run_test (agent t.test_password_field_reveals_and_hides, "password_field_reveals_and_hides")
 				run_test (agent t.test_validation_kinds_and_live_check, "validation_kinds_and_live_check")
 				run_test (agent t.test_autocomplete_suggests_and_fills, "autocomplete_suggests_and_fills")

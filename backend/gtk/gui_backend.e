@@ -218,6 +218,66 @@ feature -- Windows and containers
 		alias "sg_test_click_dock_tab($a_dock, $an_index);"
 		end
 
+	dock_float (a_dock, an_index: INTEGER; a_on: BOOLEAN)
+			-- 1r-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_float($a_dock, $an_index, $a_on);"
+		end
+
+	dock_float_frame (a_dock, an_index, a_x, a_y, a_width, a_height: INTEGER)
+			-- 1r-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_float_frame($a_dock, $an_index, $a_x, $a_y, $a_width, $a_height);"
+		end
+
+	dock_float_frame_field (a_dock, an_index, a_field: INTEGER): INTEGER
+			-- 1r-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_dock_float_frame_field($a_dock, $an_index, $a_field);"
+		end
+
+	dock_set_auto_hide (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+			-- 1r-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_set_auto_hide($a_dock, $a_side, $a_on);"
+		end
+
+	dock_maximize_center (a_dock: INTEGER; a_on: BOOLEAN)
+			-- 1r-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_dock_maximize_center($a_dock, $a_on);"
+		end
+
+	test_float_by_user (a_dock, an_index: INTEGER)
+			-- 1r-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_float_by_user($a_dock, $an_index);"
+		end
+
+	test_close_floating (a_dock, an_index: INTEGER)
+			-- 1r-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_close_floating($a_dock, $an_index);"
+		end
+
+	test_drag_panel (a_dock, an_index, a_side, a_position: INTEGER)
+			-- 1r-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_drag_panel($a_dock, $an_index, $a_side, $a_position);"
+		end
+
+	test_slide_out (a_dock, an_index: INTEGER): BOOLEAN
+			-- 1r-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_slide_out($a_dock, $an_index);"
+		end
+
+	test_toggle_center (a_dock: INTEGER)
+			-- 1r-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_toggle_center($a_dock);"
+		end
+
 	splitter (a_vertical: BOOLEAN): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_splitter($a_vertical ? 1 : 0);"

@@ -213,6 +213,54 @@ feature -- Windows and containers
 		deferred
 		end
 
+	dock_float (a_dock, an_index: INTEGER; a_on: BOOLEAN)
+			-- 1r-b: panel `an_index' into a window of its own, or back to its side and place.
+		deferred
+		end
+
+	dock_float_frame (a_dock, an_index, a_x, a_y, a_width, a_height: INTEGER)
+			-- The panel's floating window frame, logical units relative to the dock's window.
+		deferred
+		end
+
+	dock_float_frame_field (a_dock, an_index, a_field: INTEGER): INTEGER
+			-- 1 x, 2 y, 3 width, 4 height of the panel's floating window frame.
+		deferred
+		end
+
+	dock_set_auto_hide (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	dock_maximize_center (a_dock: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	test_float_by_user (a_dock, an_index: INTEGER)
+			-- As the user's double click on the panel's tab or title: 38 (index, 1).
+		deferred
+		end
+
+	test_close_floating (a_dock, an_index: INTEGER)
+			-- As the user closing the panel's floating window: it docks again, 38 (index, 0).
+		deferred
+		end
+
+	test_drag_panel (a_dock, an_index, a_side, a_position: INTEGER)
+			-- As the user dragging the panel to `a_position' on `a_side': 41.
+		deferred
+		end
+
+	test_slide_out (a_dock, an_index: INTEGER): BOOLEAN
+			-- As the user resting on the panel's name in its auto-hide strip; did it slide out?
+		deferred
+		end
+
+	test_toggle_center (a_dock: INTEGER)
+			-- As the user's double click on the center's frame: 40.
+		deferred
+		end
+
 	test_drag_dock_edge (a_dock, a_side, a_size: INTEGER)
 			-- As the user dragging the side's edge to `a_size': 35.
 		deferred

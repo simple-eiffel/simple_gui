@@ -52,6 +52,9 @@ feature -- Access
 	is_visible: BOOLEAN
 			-- Is it shown (else hidden, keeping its place)?
 
+	is_floating: BOOLEAN
+			-- Is it in a window of its own (1r-b), keeping its side and place for redocking?
+
 feature -- Status
 
 	is_usable_key (a_key: READABLE_STRING_GENERAL): BOOLEAN
@@ -113,6 +116,13 @@ feature {GUI_DOCK} -- Docking
 			is_visible := a_on
 		ensure
 			set: is_visible = a_on
+		end
+
+	put_floating (a_on: BOOLEAN)
+		do
+			is_floating := a_on
+		ensure
+			set: is_floating = a_on
 		end
 
 feature {NONE} -- Implementation
