@@ -305,6 +305,28 @@ void sga_test_pick_suggestion(int a_id, int i);
 void sga_test_set_date_time(int a_id, int a_date, int a_time);
 void sga_test_slide_range(int a_id, int a_low, int a_high);
 void sga_test_extend_list_selection(int a_id, int a_row);
+/* 1o: feedback and messages */
+int sga_spinner(void);
+void sga_spinner_set(int a_id, int a_on);
+int sga_info_bar(int a_kind, const char *a_message);   /* 1 info, 2 success, 3 warning, 4 error; event 26 */
+void sga_info_bar_set(int a_id, int a_kind, const char *a_message);
+void sga_info_bar_add_action(int a_id, const char *a_text, int a_number);
+void sga_info_bar_set_closable(int a_id, int a_on);
+void sga_window_show_toast(int a_window, const char *a_message, const char *an_action_text, int a_toast_id);   /* event 27 */
+void sga_notify(const char *a_title, const char *a_body, int a_notification_id);   /* event 28; bundled programs only */
+void sga_test_info_bar_press(int a_id, int a_number);
+const char *sga_test_toast_shown(int a_window);
+void sga_test_toast_press(int a_window);
+/* 1n: icons, styles, badges, busy */
+void sga_button_set_icon(int a_id, const char *a_name);   /* GUI_ICON's names; "" removes */
+void sga_button_set_style(int a_id, int a_style);   /* 0 normal, 1 suggested, 2 destructive, 3 flat, 4 pill */
+void sga_button_set_busy(int a_id, int a_on);
+void sga_menu_set_item_icon(int a_item_id, const char *a_name);
+void sga_tabs_set_page_icon(int a_tabs, int a_page, const char *a_name);
+void sga_tabs_set_page_badge(int a_tabs, int a_page, const char *a_text);
+void sga_widget_set_badge(int a_id, const char *a_text, int a_kind);   /* 0 none, 1 text, 2 dot */
+const char *sga_test_button_icon(int a_id);
+const char *sga_test_badge_shown(int a_id);
 
 /* Appearance */
 int sga_is_dark(void);

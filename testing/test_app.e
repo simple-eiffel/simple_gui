@@ -112,6 +112,9 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_list_multiple_selection, "list_multiple_selection")
 				run_test (agent t.test_window_of_1p_controls_describes_roles, "window_of_1p_controls_describes_roles")
 				run_test (agent t.test_window_of_1p_controls_snapshot, "window_of_1p_controls_snapshot")
+				run_test (agent t.test_feedback_spinner_info_bar_toast_notify, "feedback_spinner_info_bar_toast_notify")
+				run_test (agent t.test_every_icon_shows_on_a_button, "every_icon_shows_on_a_button")
+				run_test (agent t.test_styles_badges_and_busy, "styles_badges_and_busy")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then

@@ -33,6 +33,8 @@ feature {NONE} -- Initialization
 		do
 			create close_requested_actions.make
 			create shortcut_actions.make (4)
+			create toast_actions.make (2)
+			create last_toast.make_empty
 			title := a_title.to_string_32
 			l_c := backend.to_c (a_title)
 			register (backend.window (l_c.item, a_width, a_height))
@@ -68,6 +70,48 @@ feature -- Access
 			-- Shortcuts added with `add_shortcut'.
 		do
 			Result := shortcut_actions.count
+		end
+
+feature -- Toasts (1o)
+
+	last_toast: STRING_32
+			-- The message of the toast shown most recently (empty before the first).
+
+	show_toast (a_message: READABLE_STRING_GENERAL)
+			-- A short message at the bottom of the window, closing by itself after about 4 s.
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+			has_text: not a_message.is_empty
+		local
+			l_m, l_a: C_STRING
+		do
+			last_toast := a_message.to_string_32
+			l_m := backend.to_c (a_message)
+			l_a := backend.to_c ("")
+			backend.window_show_toast (id, l_m.item, l_a.item, 0)
+		ensure
+			recorded: last_toast.same_string_general (a_message)
+		end
+
+	show_toast_with_action (a_message, an_action_text: READABLE_STRING_GENERAL; an_action: PROCEDURE)
+			-- A toast that offers one action ("Undo"); it lives about 8 s, and `an_action' runs
+			-- once if the user presses it.
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+			has_text: not a_message.is_empty
+			has_action_text: not an_action_text.is_empty
+		local
+			l_m, l_a: C_STRING
+		do
+			last_toast := a_message.to_string_32
+			toast_actions.extend (an_action)
+			l_m := backend.to_c (a_message)
+			l_a := backend.to_c (an_action_text)
+			backend.window_show_toast (id, l_m.item, l_a.item, toast_actions.count)
+		ensure
+			recorded: last_toast.same_string_general (a_message)
 		end
 
 feature -- Shortcuts and full screen (1m)
@@ -207,10 +251,17 @@ feature {GUI_APPLICATION} -- Events
 				end
 			elseif a_type = 25 and not is_closed and then shortcut_actions.valid_index (a_a) then
 				shortcut_actions.i_th (a_a).call (Void)
+			elseif a_type = 27 and then toast_actions.valid_index (a_a) and then attached toast_actions.i_th (a_a) as al_action then
+					-- once only
+				toast_actions.put_i_th (Void, a_a)
+				al_action.call (Void)
 			end
 		end
 
 feature {NONE} -- Implementation
+
+	toast_actions: ARRAYED_LIST [detachable PROCEDURE]
+			-- Each toast action, by its id (from 1); Void once it ran.
 
 	shortcut_actions: ARRAYED_LIST [PROCEDURE]
 			-- Each shortcut's action, by its number (from 1).

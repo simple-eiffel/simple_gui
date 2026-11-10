@@ -592,6 +592,111 @@ feature -- Controls
 		alias "sg_test_press_shortcut($a_window, (const char *) $a_shortcut);"
 		end
 
+	spinner: INTEGER
+			-- 1o: a GtkSpinner.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_spinner();"
+		end
+
+	spinner_set (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_spinner_set($an_id, $a_on ? 1 : 0);"
+		end
+
+	info_bar (a_kind: INTEGER; a_message: POINTER): INTEGER
+			-- A box styled by kind, with an icon, the message, action buttons and a close button.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_info_bar($a_kind, (const char *) $a_message);"
+		end
+
+	info_bar_set (an_id, a_kind: INTEGER; a_message: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_info_bar_set($an_id, $a_kind, (const char *) $a_message);"
+		end
+
+	info_bar_add_action (an_id: INTEGER; a_text: POINTER; a_number: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_info_bar_add_action($an_id, (const char *) $a_text, $a_number);"
+		end
+
+	info_bar_set_closable (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_info_bar_set_closable($an_id, $a_on ? 1 : 0);"
+		end
+
+	window_show_toast (a_window: INTEGER; a_message, an_action_text: POINTER; a_toast_id: INTEGER)
+			-- A pill at the bottom of the window's overlay, gone after 4 s (8 s with an action).
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_window_show_toast($a_window, (const char *) $a_message, (const char *) $an_action_text, $a_toast_id);"
+		end
+
+	notify (a_title, a_body: POINTER; a_notification_id: INTEGER)
+			-- org.freedesktop.Notifications over D-Bus; quiet when there is no server.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_notify((const char *) $a_title, (const char *) $a_body, $a_notification_id);"
+		end
+
+	test_info_bar_press (an_id, a_number: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_info_bar_press($an_id, $a_number);"
+		end
+
+	test_toast_shown (a_window: INTEGER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_test_toast_shown($a_window);"
+		end
+
+	test_toast_press (a_window: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_toast_press($a_window);"
+		end
+
+	button_set_icon (an_id: INTEGER; a_name: POINTER)
+			-- 1n: an Adwaita symbolic icon beside the label (sg_button_build), and the eight after it.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_button_set_icon($an_id, (const char *) $a_name);"
+		end
+
+	button_set_style (an_id, a_style: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_button_set_style($an_id, $a_style);"
+		end
+
+	button_set_busy (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_button_set_busy($an_id, $a_on ? 1 : 0);"
+		end
+
+	menu_set_item_icon (an_item_id: INTEGER; a_name: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_menu_set_item_icon($an_item_id, (const char *) $a_name);"
+		end
+
+	tabs_set_page_icon (a_tabs, a_page: INTEGER; a_name: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_tabs_set_page_icon($a_tabs, $a_page, (const char *) $a_name);"
+		end
+
+	tabs_set_page_badge (a_tabs, a_page: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_tabs_set_page_badge($a_tabs, $a_page, (const char *) $a_text);"
+		end
+
+	widget_set_badge (an_id: INTEGER; a_text: POINTER; a_kind: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_widget_set_badge($an_id, (const char *) $a_text, $a_kind);"
+		end
+
+	test_button_icon (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_test_button_icon($an_id);"
+		end
+
+	test_badge_shown (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_test_badge_shown($an_id);"
+		end
+
 	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
 			-- 1l: a label in the window's overlay (sg_pill_set).
 		external "C inline use %"simple_gui_gtk.h%""

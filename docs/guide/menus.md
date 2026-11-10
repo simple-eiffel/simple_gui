@@ -91,6 +91,7 @@ On macOS, About and Quit are not in Help and File: they are at the top and botto
 | `set_item_text (an_item_id, a_text)` | Relabel item `an_item_id`, keeping its action and shortcut. `an_item_id` is between 1 and `model.item_count`. |
 | `item_text (an_item_id)` | The label the toolkit shows now. On macOS, About and Quit read "About" or "Quit" followed by the application's name. |
 | `last_item_id` | The id of the item added last. Keep it to relabel the item later. |
+| `set_item_icon (an_item_id, a_name)` | Shows icon `a_name` beside item `an_item_id`, where the platform shows menu icons. `an_item_id` must be an item of this menu, and `a_name` a name from `GUI_ICON`. See [Icons and badges](icons-and-badges.md). |
 | `is_context` | Is this a context menu? |
 | `model` | The model the menu belongs to. |
 
