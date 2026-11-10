@@ -6472,10 +6472,10 @@ static void sga_dock_select_silently(SGADock *d, SGADockPanel *p)
 		[side_view[s] setFrame:f];
 		[strip[s] setFrame:f];
 		[strip[s] setNeedsDisplay:YES];
-		/* the chevron and the pin at the side's corner nearest the center's top */
-		NSRect c = NSMakeRect(s == 2 ? NSMinX(f) + 2 : NSMaxX(f) - 18, NSMinY(f) + 2, 16, 16);
+		/* the chevron and the pin at the side's top-trailing corner, clear of the first title */
+		NSRect c = NSMakeRect(NSMaxX(f) - 18, NSMinY(f) + 2, 16, 16);
 		[chevron[s] setFrame:c];
-		[pin[s] setFrame:NSOffsetRect(c, s == 2 ? 18 : -18, 0)];
+		[pin[s] setFrame:NSOffsetRect(c, -18, 0)];
 		/* the strip's pin at its far end */
 		[strip_pin[s] setFrame:sga_dock_long_vertical(s) ? NSMakeRect(NSMinX(f) + 3, NSMaxY(f) - 19, 16, 16) : NSMakeRect(NSMaxX(f) - 19, NSMinY(f) + 3, 16, 16)];
 	}
@@ -7033,7 +7033,7 @@ void sga_dock_add(int a_dock, int a_widget, int a_side, const char *a_key, const
 	[NSLayoutConstraint activateConstraints:@[
 		[p->header.topAnchor constraintEqualToAnchor:b.topAnchor constant:4],
 		[p->header.leadingAnchor constraintEqualToAnchor:b.leadingAnchor constant:6],
-		[p->header.trailingAnchor constraintLessThanOrEqualToAnchor:b.trailingAnchor constant:-22],
+		[p->header.trailingAnchor constraintLessThanOrEqualToAnchor:b.trailingAnchor constant:-40],
 		p->under_header,
 		[v.leadingAnchor constraintEqualToAnchor:b.leadingAnchor constant:6],
 		[v.trailingAnchor constraintEqualToAnchor:b.trailingAnchor constant:-6],
