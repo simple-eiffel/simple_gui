@@ -128,15 +128,40 @@ The second program opens a table of 100,000 numbers and their squares. Only the 
 | `selection_actions` | `GUI_ACTIONS [TUPLE [row: INTEGER]]`: run when the user changes the selection, with the first selected row (0: none). |
 | `header_actions` | `GUI_ACTIONS [TUPLE [column: INTEGER; ascending: BOOLEAN]]`: run when the user clicks a column's header, with the direction to sort in. |
 | `set_row_pebble_function (a_function)` | Lets each row carry a pebble for [pick and drop](pick-and-drop.md); a drop on the table sets `last_drop_row` to the row it landed on (0: empty space). |
+| `set_column_editor (c, a_kind)`, `column_editor (c)` | Lets the user edit column `c`'s cells: `Edit_text`, `Edit_check` (a check box; the text is "1" or "0") or `Edit_none` (the default). |
+| `set_column_choices (c, a_choices)` | Column `c`'s cells are chosen from a dropdown of `a_choices` (`Edit_choice`). |
+| `set_cell_validator (c, a_validator)` | Before an edit of column `c` is kept, `a_validator` gets the row and the new text. A message refuses it: the cell keeps its old text and shows the message under it until the next edit in the table. Void accepts it. |
+| `cell_edit_actions` | `GUI_ACTIONS [TUPLE [row, column: INTEGER; text: STRING_32]]`: run after an accepted edit. A filled table already holds the new text; a lazy table's program updates its source. |
+| `set_filter (a_text)`, `filter_text`, `set_filter_columns (a_columns)`, `filter_columns`, `shown_count` | Shows only the rows with a cell (in the filter's columns, or any) containing `a_text`, ignoring case. Row numbers stay the table's own; a selected row the filter hides is deselected, with the selection event. |
+| `filter_with (a_search)` | Filters by a [search field](search-field.md)'s text as the user types. |
+| `set_shown_rows (a_rows)` | A lazy table shows only those rows (empty: all), for a program with its own index. Requires `has_row_source`. |
 
 Inherited: `set_accessible_label`, `set_context_menu` and the rest of the [common features](widget.md).
 
 **Events:**
 - `selection_actions` fires when the user changes the selection, with the first selected row, or 0 when none is left.
 - `header_actions` fires when the user clicks a header. A new column asks for ascending; the same column again asks for the reverse. Before the agents run, the table has already moved its sort indicator there, so `sort_column` and `is_sort_ascending` match the arguments.
+- `cell_edit_actions` fires after the user's accepted edit, never for a refused or cancelled one.
 - `select_row`, `select_rows` and `wipe_out` fire nothing: `select_row` and `select_rows` ensure `selection_actions.fire_count = old selection_actions.fire_count`. `set_row_source`, `set_row_count`, `refresh_rows` and `set_sort_indicator` fire nothing either.
 
 **Accessibility:** the table reads as a `tree-grid`; its rows are `row`s, its cells `grid-cell`s, and its headers `column-header`s named by their titles. Give the table `set_accessible_label` with what the rows are ("Books", "Search results"). A lazy table exposes the rows the toolkit has made views for, which are the rows near the view.
+
+**Editing cells.** Give a column an editor and the user can change its cells:
+
+```eiffel
+books.set_column_editor (2, books.Edit_text)              -- Chapters
+books.set_column_editor (3, books.Edit_check)             -- Read
+books.set_column_choices (4, <<"Old", "New">>)            -- Testament
+books.set_cell_validator (2, agent (r: INTEGER; t: STRING_32): detachable STRING_32
+	do
+		if not t.is_integer then Result := {STRING_32} "A whole number, please" end
+	end)
+books.cell_edit_actions.extend (agent save_cell)          -- (row, column, text)
+```
+
+A double click, F2 or Return on the selected row starts editing its first editable column; Return or leaving the cell commits and Escape cancels. A check or a choice commits as soon as it changes. A refused edit leaves the old text and a note under the cell. A lazy table holds no text of its own, so it passes accepted edits to `cell_edit_actions` and the program updates its source (then `refresh_row`).
+
+**Filtering.** `set_filter` keeps the rows with a matching cell and `filter_with` ties it to a search field. A filled table matches in the toolkit. A lazy table filters through its row source, which may ask for every row once; with your own index, call `set_shown_rows` instead. Row numbers never change, so selections and events speak of the table's own rows, and `shown_count` says how many show.
 
 **The program owns the order.** A header click does not reorder anything. In `header_actions`, sort your own data by that column and direction, then show it again:
 - a filled table: `wipe_out`, then `extend_row` for each row in the new order;
@@ -168,7 +193,7 @@ l_cache.attach (l_table, 100_000)            -- calls l_table.set_row_source for
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkColumnView` over a `GtkStringList`, in a `GtkScrolledWindow`; columns expand and resize | `NSTableView` in a bordered `NSScrollView`; columns resize but cannot be reordered; alternating row colors | `SW_DATA_GRID`; a header click is reported, not sorted |
-| Looks or behaves differently | Each column has a sorter that keeps the order, so GTK shows the indicator while the program sorts. Lazy: an unanswered row holds a one-character placeholder, and the asks are sent as one event per idle. | Lazy: the table is its own data source over a bounded cache; it asks for the rows in view plus a viewful either side. | Lazy: every unanswered row is one shared empty row; after each layout the rows in sight plus one viewful either side are checked. |
+| Looks or behaves differently | Each column has a sorter that keeps the order, so GTK shows the indicator while the program sorts. Lazy: an unanswered row holds a one-character placeholder, and the asks are sent as one event per idle. Edited cells are `GtkEditableLabel`, `GtkCheckButton` and `GtkDropDown`; a click on a text cell starts editing, as GTK's editable labels do. A filtered table shows its own list of the matching rows. | Lazy: the table is its own data source over a bounded cache; it asks for the rows in view plus a viewful either side. Edited cells are an editable text field (a double click, or Return or F2 on the selected row; a single click only selects), a check box and a pop-up button; a refused edit's note sits under its cell. A filtered table keeps a map of the rows shown, so row numbers stay the program's. | Lazy: every unanswered row is one shared empty row; after each layout the rows in sight plus one viewful either side are checked. |
 
 ## Design guidance
 
@@ -184,3 +209,4 @@ l_cache.attach (l_table, 100_000)            -- calls l_table.set_row_source for
 | Linux | macOS | Windows |
 |---|---|---|
 | ![table on Linux](images/linux/table.png) | ![table on macOS](images/macos/table.png) | ![table on Windows](images/windows/table.png) |
+| ![editing cells on Linux](images/linux/table-editing.png) | ![editing cells on macOS](images/macos/table-editing.png) | ![editing cells on Windows](images/windows/table-editing.png) |
