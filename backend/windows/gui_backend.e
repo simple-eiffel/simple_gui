@@ -2920,6 +2920,42 @@ feature -- Controls
 			end
 		end
 
+	tree_move (a_tree, a_node, a_parent, a_position: INTEGER)
+			-- 1q-c: the node's children travel with it (they hang off its number).
+		local
+			l_from, l_into: detachable ARRAYED_LIST [INTEGER]
+		do
+			if attached {SW_TREE [INTEGER]} widget (a_tree) as al_t and then attached tree_roots.item (a_tree) as al_roots then
+				if node_parent.item (node_key (a_tree, a_node)) = 0 then
+					l_from := al_roots
+				else
+					l_from := node_children.item (node_key (a_tree, node_parent.item (node_key (a_tree, a_node))))
+				end
+				if attached l_from then
+					l_from.prune_all (a_node)
+				end
+				if a_parent = 0 then
+					l_into := al_roots
+				else
+					if not node_children.has (node_key (a_tree, a_parent)) then
+						node_children.force (create {ARRAYED_LIST [INTEGER]}.make (4), node_key (a_tree, a_parent))
+					end
+					l_into := node_children.item (node_key (a_tree, a_parent))
+				end
+				if attached l_into as al_into then
+					if a_position >= 1 and a_position <= al_into.count then
+						al_into.go_i_th (a_position)
+						al_into.put_left (a_node)
+					else
+						al_into.extend (a_node)
+					end
+				end
+				node_parent.force (a_parent, node_key (a_tree, a_node))
+				al_t.set_roots (al_roots)
+				changed
+			end
+		end
+
 	tree_set_expanded (a_tree, a_node: INTEGER; a_on: BOOLEAN)
 			-- The program's: silent (SW_TREE reports only the user's).
 		do
@@ -4298,10 +4334,18 @@ feature {NONE} -- Pick and drop (1q)
 		end
 
 	row_at_point (an_id: INTEGER; a_y: REAL_64): INTEGER
-			-- The list row under window y `a_y'; 0 for none or another kind of widget.
+			-- The list row, or the tree's node number (1q-c), under window y `a_y'; 0 for none
+			-- or another kind of widget.
+		local
+			r: INTEGER
 		do
 			if attached {SW_LIST} widget (an_id) as al_list then
 				Result := al_list.row_at (a_y)
+			elseif attached {SW_TREE [INTEGER]} widget (an_id) as al_tree then
+				r := al_tree.row_at (a_y)
+				if r > 0 then
+					Result := al_tree.visible.i_th (r).node
+				end
 			end
 		end
 

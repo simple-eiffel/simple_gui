@@ -2249,6 +2249,50 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_tree_nodes_move
+			-- 1q-c: a reorderable tree's node dropped on another becomes its last child, with its
+			-- subtree; below the rows is the top level; never into itself or its children.
+		local
+			l_window: GUI_WINDOW
+			l_tree: GUI_TREE
+			l_moves: ARRAYED_LIST [STRING]
+			l_law, l_torah, l_prophets: INTEGER
+		do
+			create l_moves.make (2)
+			create l_window.make ("Move nodes", 360, 300)
+			create l_tree.make
+			l_tree.add_root ("Law")
+			l_law := l_tree.last_node
+			l_tree.add_child (l_law, "Torah")
+			l_torah := l_tree.last_node
+			l_tree.add_child (l_torah, "Genesis")
+			l_tree.add_root ("Prophets")
+			l_prophets := l_tree.last_node
+			l_tree.set_reorderable (True)
+			l_tree.move_actions.extend (agent (n, p, k: INTEGER; m: ARRAYED_LIST [STRING]) do m.extend (n.out + ">" + p.out + "#" + k.out) end (?, ?, ?, l_moves))
+			l_window.set_content (l_tree)
+			l_window.show
+			settle_window
+			driver.pick (l_tree, l_torah)
+			assert ("the tree lights for its own node", driver.is_accepting (l_tree))
+			driver.drop (l_tree, l_prophets)
+			assert ("under Prophets", l_tree.parent_of (l_torah) = l_prophets and l_tree.children_of (l_prophets).first = l_torah)
+			assert ("its child came along", l_tree.parent_of (l_torah + 1) = l_torah)
+			assert ("Law is empty", l_tree.children_of (l_law).is_empty)
+			assert ("told: " + l_moves.count.out, l_moves.count = 1 and l_moves [1].same_string (l_torah.out + ">" + l_prophets.out + "#1"))
+			driver.pick (l_tree, l_prophets)
+			driver.drop (l_tree, l_torah + 1)
+			assert ("never under its own child", l_tree.parent_of (l_prophets) = 0 and l_moves.count = 1)
+			driver.pick (l_tree, l_law)
+			driver.drop (l_tree, 0)
+			assert ("below the rows: last at the top", l_tree.children_of (0).last = l_law and l_moves [2].same_string (l_law.out + ">0#2"))
+			l_tree.move_node (l_torah, 0, 1)
+			assert ("moved by the program: first at the top", l_tree.children_of (0).first = l_torah and l_moves.count = 2)
+			l_tree.select_node (l_torah + 1)
+			assert ("the moved subtree still shows", l_tree.selected_node = l_torah + 1)
+			l_window.close
+		end
+
 	test_dragged_out_to_other_programs
 			-- 1q-c: a drag out carries the data the program keeps current; Void carries nothing;
 			-- the end of a drag reaches the source's actions only while it has data.

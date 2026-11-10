@@ -1008,6 +1008,45 @@ static void sg_tree_add(int id, int node, int parent, const char *text) {
     sg_quiet--;
     g_object_unref(o);
 }
+/* 1q-c: move `node' (its children travel in its own store) under `parent' (0: the roots) as
+   child number `pos' there. */
+static GListStore *sg_tree_store_of(int id, int parent) {
+    GPtrArray *nodes = g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-nodes");
+    if (parent >= 1 && (guint) parent <= nodes->len)
+        return g_object_get_data(G_OBJECT(g_ptr_array_index(nodes, parent - 1)), "sg-children");
+    return G_LIST_STORE(g_object_get_data(G_OBJECT(sg_w[id]), "sg-roots"));
+}
+static void sg_tree_move(int id, int node, int parent, int pos) {
+    GPtrArray *nodes = g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-nodes");
+    GObject *o;
+    GListStore *from, *into;
+    guint at, n;
+    if (!nodes || node < 1 || (guint) node > nodes->len) return;
+    o = g_ptr_array_index(nodes, node - 1);
+    from = sg_tree_store_of(id, GPOINTER_TO_INT(g_object_get_data(o, "sg-parent")));
+    into = sg_tree_store_of(id, parent);
+    g_object_ref(o);   /* the old store's reference goes with the removal */
+    sg_quiet++;
+    if (g_list_store_find(from, o, &at)) g_list_store_remove(from, at);
+    n = g_list_model_get_n_items(G_LIST_MODEL(into));
+    g_list_store_insert(into, (pos >= 1 && (guint) pos <= n + 1) ? (guint) (pos - 1) : n, o);
+    g_object_set_data(o, "sg-parent", GINT_TO_POINTER(parent));
+    if (n == 0 && parent >= 1 && (guint) parent <= nodes->len) {
+        /* the parent's row was made childless, with no expander: put the parent back in its
+           own store so GTK makes its row again, now with children */
+        GObject *p = g_ptr_array_index(nodes, parent - 1);
+        GListStore *ps = sg_tree_store_of(id, GPOINTER_TO_INT(g_object_get_data(p, "sg-parent")));
+        guint pat;
+        if (g_list_store_find(ps, p, &pat)) {
+            g_object_ref(p);
+            g_list_store_remove(ps, pat);
+            g_list_store_insert(ps, pat, p);
+            g_object_unref(p);
+        }
+    }
+    sg_quiet--;
+    g_object_unref(o);
+}
 /* Expand every ancestor of `node', root first (silently), so its row is shown. */
 static void sg_tree_reveal(int id, int node) {
     GPtrArray *nodes = g_object_get_data(G_OBJECT(sg_w[id]), "sg-tree-nodes");

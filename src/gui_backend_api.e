@@ -440,6 +440,12 @@ feature -- Controls
 		deferred
 		end
 
+	tree_move (a_tree, a_node, a_parent, a_position: INTEGER)
+			-- 1q-c: move `a_node' (with its subtree) under `a_parent' (0: the top level) as child
+			-- number `a_position' there (1-based, counted after taking it out).
+		deferred
+		end
+
 	tree_set_expanded (a_tree, a_node: INTEGER; a_on: BOOLEAN)
 			-- Expand or collapse `a_node', without an event.
 		deferred
