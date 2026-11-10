@@ -268,6 +268,7 @@ static NSInteger sga_view_row(NSTableView *t, NSInteger a_model)
 static NSString *sga_row_title(id a_row) { return [a_row isKindOfClass:[SGARichRow class]] ? ((SGARichRow *)a_row)->title : (NSString *)a_row; }
 
 static int sga_tab_page(NSTabView *t, NSInteger an_item);
+static void sga_tabs_titles_follow(NSTabView *t);   /* 1t: a side strip follows its tab view */
 static NSView *sga_rich_cell(NSTableView *t, SGARichRow *a_row, NSInteger a_model);
 static BOOL sga_suggest_key(int a_id, SEL a_command);   /* 1p */
 static void sga_suggest_end(int a_id);   /* 1p */
@@ -285,7 +286,7 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 - (void)activated:(id)a_sender { sga_push(3, sga_id_of(a_sender), 0, 0, 0); }
 - (void)menuItem:(NSMenuItem *)a_item { sga_push(5, 0, (int)[a_item tag], 0, 0); }
 - (void)toggled:(NSButton *)a_box { sga_push(12, sga_id_of(a_box), [a_box state] == NSControlStateValueOn ? 1 : 0, 0, 0); }
-- (void)tabView:(NSTabView *)a_tabs didSelectTabViewItem:(NSTabViewItem *)an_item { if (!s_suppress) sga_push(13, sga_id_of(a_tabs), sga_tab_page(a_tabs, [a_tabs indexOfTabViewItem:an_item]), 0, 0); }
+- (void)tabView:(NSTabView *)a_tabs didSelectTabViewItem:(NSTabViewItem *)an_item { sga_tabs_titles_follow(a_tabs); if (!s_suppress) sga_push(13, sga_id_of(a_tabs), sga_tab_page(a_tabs, [a_tabs indexOfTabViewItem:an_item]), 0, 0); }
 - (void)controlTextDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
 /* 1p: leaving a field ends its editing (29), when validation on commit checks it. */
 - (void)controlTextDidEndEditing:(NSNotification *)n { sga_suggest_end(sga_id_of([n object])); if (!s_suppress) sga_push(29, sga_id_of([n object]), 0, 0, 0); }
@@ -1251,9 +1252,60 @@ static BOOL sga_tabs_reversed(NSTabView *t) { return [t userInterfaceLayoutDirec
 static NSInteger sga_tab_item(NSTabView *t, int a_page) { return sga_tabs_reversed(t) ? (NSInteger)[t numberOfTabViewItems] - a_page : a_page - 1; }
 static int sga_tab_page(NSTabView *t, NSInteger an_item) { return sga_tabs_reversed(t) ? (int)([t numberOfTabViewItems] - an_item) : (int)an_item + 1; }
 
+@class SGANavList;
+static SGANavList *sga_nav_list_new(int a_owner, BOOL a_full);
+static void sga_nav_list_reload(SGANavList *l);
+/* 1t: tabs placed left or right: a tabless NSTabView with a strip of its titles inside it,
+   on that side (AppKit's own left and right tabs draw rotated, dated tabs). */
+@interface SGATabs : NSTabView
+{
+@public
+	int position;          /* 1 top, 2 bottom, 3 left, 4 right, 0 none */
+	NSScrollView *strip;   /* left and right: the titles */
+	SGANavList *titles;
+}
+@end
+@implementation SGATabs
+- (NSRect)contentRect
+{
+	NSRect r = [super contentRect];
+	if (position == 3 || position == 4) {
+		CGFloat w = 140;
+		r = [self bounds];
+		r.size.width -= w;
+		if (position == 3) r.origin.x += w;
+	}
+	return r;
+}
+- (void)layout
+{
+	[super layout];
+	if (strip) {
+		NSRect b = [self bounds];
+		[strip setFrame:position == 3 ? NSMakeRect(0, 0, 140, b.size.height) : NSMakeRect(b.size.width - 140, 0, 140, b.size.height)];
+	}
+}
+@end
+
+/* A page in its holder (a tab's or a sidebar's): it fills the holder, but its own wish to be
+   small (a label's hugging) must not pull the holder, the tab view and the window down with it,
+   so the trailing and bottom edges hold just below the window's keep-its-size priority. */
+static void sga_pin_page(NSView *v, NSView *a_holder)
+{
+	NSLayoutConstraint *l_trailing = [v.trailingAnchor constraintEqualToAnchor:a_holder.trailingAnchor];
+	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:a_holder.bottomAnchor];
+	[l_trailing setPriority:NSLayoutPriorityWindowSizeStayPut - 1];
+	[l_bottom setPriority:NSLayoutPriorityWindowSizeStayPut - 1];
+	[NSLayoutConstraint activateConstraints:@[
+		[v.leadingAnchor constraintEqualToAnchor:a_holder.leadingAnchor], [v.topAnchor constraintEqualToAnchor:a_holder.topAnchor],
+		[v.trailingAnchor constraintLessThanOrEqualToAnchor:a_holder.trailingAnchor], [v.bottomAnchor constraintLessThanOrEqualToAnchor:a_holder.bottomAnchor],
+		l_trailing, l_bottom]];
+}
+
 int sga_tabs(void)
 {
-	NSTabView *t = [[NSTabView alloc] init];
+	NSTabView *t = [[SGATabs alloc] init];
+	((SGATabs *)t)->position = 1;
 	[t setDelegate:(id<NSTabViewDelegate>)s_target];
 	return sga_keep(t);
 }
@@ -1265,14 +1317,13 @@ void sga_tabs_extend(int a_tabs, int a_page, const char *a_title)
 	NSTabViewItem *i = [[NSTabViewItem alloc] initWithIdentifier:nil];
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
 	[l_holder addSubview:v];
-	[NSLayoutConstraint activateConstraints:@[
-		[v.leadingAnchor constraintEqualToAnchor:l_holder.leadingAnchor], [v.trailingAnchor constraintEqualToAnchor:l_holder.trailingAnchor],
-		[v.topAnchor constraintEqualToAnchor:l_holder.topAnchor], [v.bottomAnchor constraintEqualToAnchor:l_holder.bottomAnchor]]];
+	sga_pin_page(v, l_holder);
 	[i setLabel:sga_string(a_title)];
 	[i setView:l_holder];
 	s_suppress++;
 	if (sga_tabs_reversed(t)) [t insertTabViewItem:i atIndex:0]; else [t addTabViewItem:i];
 	s_suppress--;
+	sga_tabs_titles_follow(t);
 	/* The tab view keeps room for this page: its content rect is inset from its bounds by the
 	   tab row and border, so the page's fitting size plus that inset is a minimum. */
 	NSSize l_fit = [v fittingSize];
@@ -1299,7 +1350,7 @@ int sga_tabs_selected(int a_tabs)
 }
 void sga_tabs_set_title(int a_tabs, int a_page, const char *a_title)
 {
-	{ NSTabView *t = sga_get(a_tabs); [[t tabViewItemAtIndex:sga_tab_item(t, a_page)] setLabel:sga_string(a_title)]; }
+	{ NSTabView *t = sga_get(a_tabs); [[t tabViewItemAtIndex:sga_tab_item(t, a_page)] setLabel:sga_string(a_title)]; sga_tabs_titles_follow(t); }
 }
 
 int sga_field(void)
@@ -3305,6 +3356,18 @@ int sga_path_control(void)
 }
 
 void sga_path_control_set(int a_id, const char *a_path) { [(NSPathControl *)sga_get(a_id) setURL:[NSURL fileURLWithPath:sga_string(a_path)]]; }
+/* 1t: breadcrumbs for anything: one item per part, titled exactly (separated by 0x1F). */
+void sga_path_control_set_parts(int a_id, const char *a_parts)
+{
+	NSMutableArray<NSPathControlItem *> *l_items = [NSMutableArray array];
+	for (NSString *l_part in [sga_string(a_parts) componentsSeparatedByString:@"\x1f"]) {
+		if (![l_part length]) continue;
+		NSPathControlItem *i = [[NSPathControlItem alloc] init];
+		[i setTitle:l_part];
+		[l_items addObject:i];
+	}
+	[(NSPathControl *)sga_get(a_id) setPathItems:l_items];
+}
 int sga_path_control_count(int a_id) { return (int)[[(NSPathControl *)sga_get(a_id) pathItems] count]; }
 const char *sga_path_control_part(int a_id, int i) { return sga_return(Kind_label, [[(NSPathControl *)sga_get(a_id) pathItems][(NSUInteger)(i - 1)] title]); }
 
@@ -5909,8 +5972,15 @@ void sga_test_type(int a_id, const char *a_text)
 	[[NSNotificationCenter defaultCenter] postNotificationName:NSControlTextDidChangeNotification object:f];
 }
 
+static void sga_sidebar_user_choose(int a_id, int a_page);
+@class SGASidebar;
 void sga_test_choose(int a_id, int a_row)
 {
+	if ([sga_get(a_id) isKindOfClass:NSClassFromString(@"SGASidebar")]) { sga_sidebar_user_choose(a_id, a_row); return; }
+	if ([sga_get(a_id) isKindOfClass:[SGAPathControl class]]) {   /* a click on that part */
+		if (a_row >= 1 && a_row <= (int)[[(NSPathControl *)sga_get(a_id) pathItems] count]) sga_push(4, a_id, a_row, 0, 0);
+		return;
+	}
 	if ([sga_get(a_id) isKindOfClass:[SGADropdown class]]) {
 		sga_test_choose_option(a_id, a_row);
 		return;
@@ -7747,3 +7817,330 @@ const char *sga_test_cell_text(int a_id, int a_row, int a_column)
 	return sga_return(Kind_field, a_column >= 1 && (NSUInteger)a_column <= [l_row count] ? l_row[(NSUInteger)a_column - 1] : @"");
 }
 const char *sga_test_cell_note(int a_id) { SGAGridTable *t = s_inner[a_id]; return sga_return(Kind_label, t->note ? [t->note stringValue] : @""); }
+
+/* ------------------------------------------------- 1t: navigation (tabs placed, the sidebar) */
+
+/* A navigation list: a source-list table of entries, a heading (not selectable, not counted)
+   or a page (its title, icon and badge). A click, or Return or Space, chooses a page; the
+   arrow keys move the highlight, skipping headings. Collapsed, only icons show (or the
+   title's first letter in a circle), the title as a tooltip. The owner hears the choice. */
+@interface SGANavEntry : NSObject
+{
+@public
+	BOOL heading;
+	NSString *title, *icon, *badge;
+	int page;   /* from 1; 0 for a heading */
+}
+@end
+@implementation SGANavEntry
+@end
+
+@interface SGANavList : NSTableView <NSTableViewDataSource, NSTableViewDelegate>
+{
+@public
+	int owner;                    /* the tabs' or the sidebar's handle */
+	NSMutableArray<SGANavEntry *> *entries;
+	BOOL collapsed;
+}
+@end
+
+static void sga_nav_chosen(SGANavList *l, int a_page);
+
+@implementation SGANavList
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)t { (void)t; return (NSInteger)[entries count]; }
+- (BOOL)tableView:(NSTableView *)t isGroupRow:(NSInteger)r { (void)t; return entries[(NSUInteger)r]->heading; }
+- (BOOL)tableView:(NSTableView *)t shouldSelectRow:(NSInteger)r { (void)t; return !entries[(NSUInteger)r]->heading; }
+- (NSView *)tableView:(NSTableView *)t viewForTableColumn:(NSTableColumn *)c row:(NSInteger)r
+{
+	(void)c;
+	SGANavEntry *e = entries[(NSUInteger)r];
+	if (e->heading) {
+		NSTextField *h = [NSTextField labelWithString:collapsed ? @"" : [e->title uppercaseString]];
+		[h setFont:[NSFont boldSystemFontOfSize:[NSFont smallSystemFontSize]]];
+		[h setTextColor:[NSColor secondaryLabelColor]];
+		return h;
+	}
+	NSTableCellView *v = [[NSTableCellView alloc] initWithFrame:NSZeroRect];
+	NSImageView *i = [[NSImageView alloc] init];
+	NSImage *l_image = [e->icon length] ? [NSImage imageWithSystemSymbolName:sga_symbol_of(e->icon) accessibilityDescription:e->title] : nil;
+	if (!l_image && collapsed) {   /* no icon: the title's first letter in a circle */
+		NSString *l_letter = [e->title length] ? [[e->title substringToIndex:1] uppercaseString] : @"?";
+		l_image = [NSImage imageWithSize:NSMakeSize(18, 18) flipped:NO drawingHandler:^BOOL(NSRect a_rect) {
+			[[NSColor secondaryLabelColor] setStroke];
+			NSBezierPath *o = [NSBezierPath bezierPathWithOvalInRect:NSInsetRect(a_rect, 1, 1)];
+			[o stroke];
+			NSDictionary *a = @{NSFontAttributeName: [NSFont boldSystemFontOfSize:10], NSForegroundColorAttributeName: [NSColor labelColor]};
+			NSSize z = [l_letter sizeWithAttributes:a];
+			[l_letter drawAtPoint:NSMakePoint(NSMidX(a_rect) - z.width / 2, NSMidY(a_rect) - z.height / 2) withAttributes:a];
+			return YES;
+		}];
+	}
+	[i setImage:l_image];
+	[i setHidden:l_image == nil];
+	NSTextField *l_title = [NSTextField labelWithString:e->title];
+	[l_title setLineBreakMode:NSLineBreakByTruncatingTail];
+	[l_title setHidden:collapsed];
+	NSTextField *l_badge = [NSTextField labelWithString:[e->badge length] ? e->badge : @""];
+	[l_badge setTextColor:[NSColor secondaryLabelColor]];
+	[l_badge setHidden:collapsed || ![e->badge length]];
+	NSStackView *row = [NSStackView stackViewWithViews:@[i, l_title, l_badge]];
+	[row setSpacing:6];
+	[row setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[l_title setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[v addSubview:row];
+	[NSLayoutConstraint activateConstraints:@[[row.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:2],
+		[row.trailingAnchor constraintLessThanOrEqualToAnchor:v.trailingAnchor constant:-2], [row.centerYAnchor constraintEqualToAnchor:v.centerYAnchor],
+		[i.widthAnchor constraintEqualToConstant:18], [i.heightAnchor constraintEqualToConstant:18]]];
+	[v setToolTip:collapsed ? e->title : nil];
+	[v setAccessibilityLabel:e->title];
+	return v;
+}
+/* A click chooses at once; the arrow keys only move (Return or Space chooses). */
+- (void)tableViewSelectionDidChange:(NSNotification *)n
+{
+	(void)n;
+	NSEventType t = [[NSApp currentEvent] type];
+	if (s_suppress || (t != NSEventTypeLeftMouseDown && t != NSEventTypeLeftMouseUp)) return;
+	NSInteger r = [self selectedRow];
+	if (r >= 0 && !entries[(NSUInteger)r]->heading) sga_nav_chosen(self, entries[(NSUInteger)r]->page);
+}
+- (void)keyDown:(NSEvent *)e
+{
+	BOOL l_choose = [e keyCode] == 36 || [e keyCode] == 76 || [[e charactersIgnoringModifiers] isEqualToString:@" "];
+	NSInteger r = [self selectedRow];
+	if (l_choose && r >= 0 && !entries[(NSUInteger)r]->heading) { sga_nav_chosen(self, entries[(NSUInteger)r]->page); return; }
+	[super keyDown:e];
+}
+@end
+
+static SGANavList *sga_nav_list_new(int a_owner, BOOL a_full)
+{
+	(void)a_full;
+	SGANavList *l = [[SGANavList alloc] init];
+	l->owner = a_owner;
+	l->entries = [NSMutableArray array];
+	NSTableColumn *k = [[NSTableColumn alloc] initWithIdentifier:@"sga_nav"];
+	[l addTableColumn:k];
+	[l setHeaderView:nil];
+	[l setStyle:NSTableViewStyleSourceList];
+	[l setRowHeight:26];
+	[l setDataSource:l];
+	[l setDelegate:l];
+	return l;
+}
+static void sga_nav_list_reload(SGANavList *l) { s_suppress++; [l reloadData]; s_suppress--; }
+static void sga_nav_list_select(SGANavList *l, int a_page)
+{
+	for (NSUInteger r = 0; r < [l->entries count]; r++)
+		if (!l->entries[r]->heading && l->entries[r]->page == a_page) {
+			s_suppress++;
+			[l selectRowIndexes:[NSIndexSet indexSetWithIndex:r] byExtendingSelection:NO];
+			s_suppress--;
+			return;
+		}
+}
+static NSScrollView *sga_nav_scroll(SGANavList *l)
+{
+	NSScrollView *s = [[NSScrollView alloc] init];
+	[s setDocumentView:l];
+	[s setHasVerticalScroller:YES];
+	[s setDrawsBackground:NO];
+	return s;
+}
+
+/* Tabs on a side: the titles kept in step with the tab view's pages. */
+static void sga_tabs_titles_sync(SGATabs *t)
+{
+	if (!t->titles) return;
+	[t->titles->entries removeAllObjects];
+	for (NSInteger k = 0; k < [t numberOfTabViewItems]; k++) {
+		SGANavEntry *e = [[SGANavEntry alloc] init];
+		e->page = sga_tab_page(t, k);
+		e->title = [[t tabViewItemAtIndex:k] label];
+		[t->titles->entries addObject:e];
+	}
+	[t->titles->entries sortUsingComparator:^NSComparisonResult(SGANavEntry *a, SGANavEntry *b) { return a->page < b->page ? NSOrderedAscending : NSOrderedDescending; }];
+	sga_nav_list_reload(t->titles);
+	sga_nav_list_select(t->titles, sga_tabs_selected(sga_id_of(t)));
+}
+
+/* 0 none, 1 top, 2 bottom, 3 left, 4 right. No event. */
+void sga_tabs_set_position(int a_tabs, int a_position)
+{
+	SGATabs *t = sga_get(a_tabs);
+	t->position = a_position;
+	[t setTabViewType:a_position == 1 ? NSTopTabsBezelBorder : a_position == 2 ? NSBottomTabsBezelBorder : a_position == 0 ? NSNoTabsNoBorder : NSNoTabsBezelBorder];
+	if (a_position == 3 || a_position == 4) {
+		if (!t->strip) {
+			t->titles = sga_nav_list_new(a_tabs, NO);
+			t->strip = sga_nav_scroll(t->titles);
+			[t->strip setTranslatesAutoresizingMaskIntoConstraints:YES];
+			[t addSubview:t->strip];
+		}
+		sga_tabs_titles_sync(t);
+	} else if (t->strip) {
+		[t->strip removeFromSuperview];
+		t->strip = nil;
+		t->titles = nil;
+	}
+	[t setNeedsLayout:YES];
+}
+
+/* The sidebar: a navigation list beside a tabless NSTabView of the pages, and a collapse
+   button at the list's foot. 46 a page chosen by the user, 47 collapsed or expanded. */
+@interface SGASidebar : NSView
+{
+@public
+	SGANavList *list;
+	NSScrollView *strip;
+	NSTabView *pages;
+	NSButton *toggle;
+	BOOL collapsible, collapsed;
+	NSLayoutConstraint *width;
+	int count;
+}
+@end
+@implementation SGASidebar
+- (void)toggled:(NSButton *)b { (void)b; sga_sidebar_set_collapsed(sga_id_of(self), !collapsed); sga_push(47, sga_id_of(self), 0, collapsed ? 1 : 0, 0); sga_wake(); }
+@end
+
+int sga_sidebar(void)
+{
+	SGASidebar *s = [[SGASidebar alloc] initWithFrame:NSZeroRect];
+	int l_id = sga_keep(s);
+	s->list = sga_nav_list_new(l_id, YES);
+	s->strip = sga_nav_scroll(s->list);
+	s->pages = [[NSTabView alloc] init];
+	[s->pages setTabViewType:NSNoTabsNoBorder];
+	s->toggle = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"sidebar.left" accessibilityDescription:@"Collapse"] target:s action:@selector(toggled:)];
+	[s->toggle setBordered:NO];
+	[s->toggle setHidden:YES];
+	for (NSView *v in @[s->strip, s->pages, s->toggle]) { [v setTranslatesAutoresizingMaskIntoConstraints:NO]; [s addSubview:v]; }
+	s->width = [s->strip.widthAnchor constraintEqualToConstant:180];
+	[NSLayoutConstraint activateConstraints:@[
+		[s->strip.leadingAnchor constraintEqualToAnchor:s.leadingAnchor], [s->strip.topAnchor constraintEqualToAnchor:s.topAnchor],
+		[s->strip.bottomAnchor constraintEqualToAnchor:s->toggle.topAnchor constant:-4], s->width,
+		[s->toggle.leadingAnchor constraintEqualToAnchor:s.leadingAnchor constant:8], [s->toggle.bottomAnchor constraintEqualToAnchor:s.bottomAnchor constant:-6],
+		[s->pages.leadingAnchor constraintEqualToAnchor:s->strip.trailingAnchor constant:8], [s->pages.trailingAnchor constraintEqualToAnchor:s.trailingAnchor],
+		[s->pages.topAnchor constraintEqualToAnchor:s.topAnchor], [s->pages.bottomAnchor constraintEqualToAnchor:s.bottomAnchor]]];
+	return l_id;
+}
+
+static SGASidebar *sga_sidebar_of(int a_id) { id s = sga_get(a_id); return [s isKindOfClass:[SGASidebar class]] ? s : nil; }
+
+void sga_sidebar_extend(int a_id, int a_page, const char *a_title)
+{
+	SGASidebar *s = sga_sidebar_of(a_id);
+	if (!s) return;
+	NSView *v = sga_get(a_page);
+	NSView *l_holder = [[NSView alloc] init];
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[l_holder addSubview:v];
+	sga_pin_page(v, l_holder);
+	NSTabViewItem *i = [[NSTabViewItem alloc] initWithIdentifier:nil];
+	[i setView:l_holder];
+	s_suppress++;
+	[s->pages addTabViewItem:i];
+	s_suppress--;
+	SGANavEntry *e = [[SGANavEntry alloc] init];
+	e->page = ++s->count;
+	e->title = sga_string(a_title);
+	[s->list->entries addObject:e];
+	sga_nav_list_reload(s->list);
+	if (s->count == 1) sga_nav_list_select(s->list, 1);
+}
+
+void sga_sidebar_add_heading(int a_id, const char *a_text)
+{
+	SGASidebar *s = sga_sidebar_of(a_id);
+	if (!s) return;
+	SGANavEntry *e = [[SGANavEntry alloc] init];
+	e->heading = YES;
+	e->title = sga_string(a_text);
+	[s->list->entries addObject:e];
+	sga_nav_list_reload(s->list);
+}
+
+static SGANavEntry *sga_sidebar_entry(SGASidebar *s, int a_page)
+{
+	for (SGANavEntry *e in s->list->entries) if (!e->heading && e->page == a_page) return e;
+	return nil;
+}
+
+void sga_sidebar_set_icon(int a_id, int i, const char *a_name) { SGASidebar *s = sga_sidebar_of(a_id); SGANavEntry *e = s ? sga_sidebar_entry(s, i) : nil; if (e) { e->icon = sga_string(a_name); sga_nav_list_reload(s->list); sga_nav_list_select(s->list, sga_sidebar_selected(a_id)); } }
+void sga_sidebar_set_badge(int a_id, int i, const char *a_text) { SGASidebar *s = sga_sidebar_of(a_id); SGANavEntry *e = s ? sga_sidebar_entry(s, i) : nil; if (e) { e->badge = sga_string(a_text); sga_nav_list_reload(s->list); sga_nav_list_select(s->list, sga_sidebar_selected(a_id)); } }
+
+/* Quiet: page `i' shows and is highlighted. */
+void sga_sidebar_select(int a_id, int i)
+{
+	SGASidebar *s = sga_sidebar_of(a_id);
+	if (!s || i < 1 || i > s->count) return;
+	s_suppress++;
+	[s->pages selectTabViewItemAtIndex:i - 1];
+	s_suppress--;
+	sga_nav_list_select(s->list, i);
+}
+
+int sga_sidebar_selected(int a_id)
+{
+	SGASidebar *s = sga_sidebar_of(a_id);
+	NSTabViewItem *i = s ? [s->pages selectedTabViewItem] : nil;
+	return i ? (int)[s->pages indexOfTabViewItem:i] + 1 : 0;
+}
+
+void sga_sidebar_set_collapsible(int a_id, int a_on) { SGASidebar *s = sga_sidebar_of(a_id); if (s) { s->collapsible = a_on != 0; [s->toggle setHidden:!s->collapsible]; } }
+
+void sga_sidebar_set_collapsed(int a_id, int a_on)
+{
+	SGASidebar *s = sga_sidebar_of(a_id);
+	if (!s) return;
+	s->collapsed = a_on != 0;
+	s->list->collapsed = s->collapsed;
+	[s->width setConstant:s->collapsed ? 44 : 180];
+	[s->toggle setImage:[NSImage imageWithSystemSymbolName:s->collapsed ? @"sidebar.right" : @"sidebar.left" accessibilityDescription:s->collapsed ? @"Expand" : @"Collapse"]];
+	int l_page = sga_sidebar_selected(a_id);
+	sga_nav_list_reload(s->list);
+	sga_nav_list_select(s->list, l_page);
+}
+
+int sga_sidebar_is_collapsed(int a_id) { SGASidebar *s = sga_sidebar_of(a_id); return s && s->collapsed ? 1 : 0; }
+
+/* As the user: page `a_page' clicked in the sidebar (46). */
+static void sga_sidebar_user_choose(int a_id, int a_page)
+{
+	SGASidebar *s = sga_sidebar_of(a_id);
+	if (s) sga_nav_chosen(s->list, a_page);
+}
+
+/* A navigation list's choice: a sidebar shows the page and sends 46; tabs on a side select
+   the page as a tab's click does (13, through the tab view's delegate). */
+static void sga_nav_chosen(SGANavList *l, int a_page)
+{
+	id o = sga_get(l->owner);
+	if ([o isKindOfClass:[SGASidebar class]]) {
+		SGASidebar *s = o;
+		if (a_page < 1 || a_page > s->count) return;
+		s_suppress++;
+		[s->pages selectTabViewItemAtIndex:a_page - 1];
+		s_suppress--;
+		sga_nav_list_select(l, a_page);
+		sga_push(46, l->owner, a_page, 0, 0);
+		sga_wake();
+	} else if ([o isKindOfClass:[SGATabs class]]) {
+		NSTabView *t = o;
+		if (a_page >= 1 && a_page <= [t numberOfTabViewItems]) [t selectTabViewItemAtIndex:sga_tab_item(t, a_page)];
+		sga_nav_list_select(l, a_page);
+	}
+}
+
+/* As the user: the sidebar's collapse button (47). */
+void sga_test_toggle_sidebar(int a_id) { SGASidebar *s = sga_sidebar_of(a_id); if (s) [s toggled:s->toggle]; }
+
+/* Which page the user sees: a tab view's or a sidebar's. */
+int sga_test_page_shown(int a_id)
+{
+	if (sga_sidebar_of(a_id)) return sga_sidebar_selected(a_id);
+	return [sga_get(a_id) isKindOfClass:[NSTabView class]] ? sga_tabs_selected(a_id) : 0;
+}
+
+static void sga_tabs_titles_follow(NSTabView *t) { if ([t isKindOfClass:[SGATabs class]] && ((SGATabs *)t)->titles) sga_tabs_titles_sync((SGATabs *)t); }

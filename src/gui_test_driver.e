@@ -723,6 +723,42 @@ feature -- User actions
 			Result := backend.from_c (backend.test_cell_note (a_table.id))
 		end
 
+	choose_path_part (a_crumbs: GUI_PATH_CONTROL; a_part: INTEGER)
+			-- Click part `a_part', as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_choose (a_crumbs.id, a_part)
+			settle
+		end
+
+	toggle_sidebar (a_sidebar: GUI_SIDEBAR)
+			-- Press the sidebar's collapse button, as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_toggle_sidebar (a_sidebar.id)
+			settle
+		end
+
+	page_shown (a_widget: GUI_CONTAINER): INTEGER
+			-- The page the user sees in `a_widget' (tabs or a sidebar).
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.test_page_shown (a_widget.id)
+		end
+
+	choose_sidebar_page (a_sidebar: GUI_SIDEBAR; a_page: INTEGER)
+			-- Click page `a_page''s title, as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_choose (a_sidebar.id, a_page)
+			settle
+		end
+
 	located_row (a_widget: GUI_WIDGET; a_row: INTEGER): INTEGER
 			-- The row a drop at the middle of row `a_row' (a list row, tree node or token) lands on.
 		require

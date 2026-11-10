@@ -1707,6 +1707,188 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_tabs_positions
+			-- 1t: tabs on any side, or none (a page stack the program switches).
+		local
+			l_window: GUI_WINDOW
+			l_tabs: GUI_TABS
+		do
+			create l_window.make ("Tab sides", 420, 260)
+			create l_tabs.make
+			l_tabs.extend (create {GUI_LABEL}.make ("General settings"), "General")
+			l_tabs.extend (create {GUI_LABEL}.make ("Advanced settings"), "Advanced")
+			l_window.set_content (l_tabs)
+			l_window.show
+			settle_window
+			assert ("top at first", l_tabs.tab_position = l_tabs.Tabs_top)
+			across <<l_tabs.Tabs_left, l_tabs.Tabs_bottom, l_tabs.Tabs_right, l_tabs.Tabs_none, l_tabs.Tabs_top>> as ic loop
+				l_tabs.set_tab_position (ic)
+				settle_window
+				assert ("position " + ic.out, l_tabs.tab_position = ic and driver.page_shown (l_tabs) = l_tabs.selected_index)
+			end
+			l_tabs.set_tab_position (l_tabs.Tabs_left)
+			driver.choose_page (l_tabs, 2)
+			assert ("the user's choice on the left", driver.page_shown (l_tabs) = 2 and l_tabs.page_changed_actions.fire_count = 1)
+			l_tabs.set_tab_position (l_tabs.Tabs_none)
+			l_tabs.select_page (1)
+			assert ("a page stack switches from code", driver.page_shown (l_tabs) = 1)
+			l_window.close
+		end
+
+	test_sidebar_navigation
+			-- 1t: pages beside their titles, headings not counted; the user's choice and
+			-- collapse fire, code is quiet; badges and icons take.
+		local
+			l_window: GUI_WINDOW
+			l_side: GUI_SIDEBAR
+			l_chosen, l_folded: ARRAYED_LIST [STRING]
+		do
+			create l_chosen.make (2)
+			create l_folded.make (2)
+			create l_window.make ("Sidebar", 560, 360)
+			create l_side.make
+			l_side.add_heading ("Library")
+			l_side.extend (create {GUI_LABEL}.make ("Every book"), "Books")
+			l_side.extend (create {GUI_LABEL}.make ("Everyone"), "Authors")
+			l_side.add_heading ("Settings")
+			l_side.extend (create {GUI_LABEL}.make ("Your account"), "Account")
+			l_side.set_page_icon (1, "folder")
+			l_side.set_page_badge (2, "12")
+			l_side.set_collapsible (True)
+			l_side.page_changed_actions.extend (agent (p: INTEGER; t: ARRAYED_LIST [STRING]) do t.extend (p.out) end (?, l_chosen))
+			l_side.collapse_actions.extend (agent (c: BOOLEAN; t: ARRAYED_LIST [STRING]) do t.extend (c.out) end (?, l_folded))
+			l_window.set_content (l_side)
+			l_window.show
+			settle_window
+			assert ("three pages, the first shown", l_side.page_count = 3 and l_side.selected_index = 1 and driver.page_shown (l_side) = 1)
+			assert ("titles", l_side.page_title (3).same_string ("Account"))
+			driver.choose_sidebar_page (l_side, 3)
+			assert ("the user chose Account", l_side.selected_index = 3 and driver.page_shown (l_side) = 3
+				and l_chosen.count = 1 and l_chosen [1].same_string ("3"))
+			l_side.select_page (2)
+			assert ("quietly", driver.page_shown (l_side) = 2 and l_chosen.count = 1)
+			l_side.collapse
+			assert ("collapsed quietly", l_side.is_collapsed and l_folded.is_empty)
+			l_side.expand
+			driver.toggle_sidebar (l_side)
+			assert ("the user collapsed it", l_side.is_collapsed and l_folded.count = 1 and l_folded [1].same_string ("True"))
+			driver.toggle_sidebar (l_side)
+			assert ("and opened it", not l_side.is_collapsed and l_folded.count = 2 and l_folded [2].same_string ("False"))
+			assert ("still on Authors", driver.page_shown (l_side) = 2)
+			l_window.close
+		end
+
+	test_wizard_steps
+			-- 1t: Next asks the step's check; Back stops at the first step; Finish on the last
+			-- runs finish_actions; Cancel runs cancel_actions; go_to_step is quiet.
+		local
+			l_window: GUI_WINDOW
+			l_wizard: GUI_WIZARD
+			l_ok: CELL [BOOLEAN]
+			l_told: ARRAYED_LIST [STRING]
+		do
+			create l_ok.put (False)
+			create l_told.make (4)
+			create l_window.make ("Wizard", 480, 320)
+			create l_wizard.make
+			l_wizard.extend_step (create {GUI_LABEL}.make ("Welcome"), "Welcome")
+			l_wizard.extend_step (create {GUI_LABEL}.make ("Your address"), "Address")
+			l_wizard.extend_step (create {GUI_LABEL}.make ("All done"), "Confirm")
+			l_wizard.set_can_advance (2, agent (c: CELL [BOOLEAN]): BOOLEAN do Result := c.item end (l_ok))
+			l_wizard.step_changed_actions.extend (agent (s: INTEGER; t: ARRAYED_LIST [STRING]) do t.extend ("step " + s.out) end (?, l_told))
+			l_wizard.finish_actions.extend (agent (t: ARRAYED_LIST [STRING]) do t.extend ("finish") end (l_told))
+			l_wizard.cancel_actions.extend (agent (t: ARRAYED_LIST [STRING]) do t.extend ("cancel") end (l_told))
+			l_window.set_content (l_wizard)
+			l_window.show
+			settle_window
+			assert ("step 1, Back off", l_wizard.step = 1 and l_wizard.step_count = 3 and not l_wizard.back_button.is_enabled)
+			driver.perform_click (l_wizard.next_button)
+			assert ("on to step 2", l_wizard.step = 2 and l_wizard.back_button.is_enabled and l_told.count = 1 and l_told [1].same_string ("step 2"))
+			driver.perform_click (l_wizard.next_button)
+			assert ("the check holds it", l_wizard.step = 2 and l_told.count = 1)
+			l_ok.put (True)
+			driver.perform_click (l_wizard.next_button)
+			assert ("step 3, Finish", l_wizard.step = 3 and l_wizard.next_button.text.same_string ("Finish"))
+			driver.perform_click (l_wizard.next_button)
+			assert ("finished", l_told.count = 3 and l_told [3].same_string ("finish"))
+			driver.perform_click (l_wizard.back_button)
+			assert ("back to 2", l_wizard.step = 2 and l_wizard.next_button.text.same_string ("Next"))
+			l_wizard.go_to_step (1)
+			assert ("quietly", l_wizard.step = 1 and l_told.count = 4)
+			driver.perform_click (l_wizard.cancel_button)
+			assert ("cancelled", l_told.count = 5 and l_told [5].same_string ("cancel"))
+			l_window.close
+		end
+
+	test_pagination_pages
+			-- 1t: the first, the last and the siblings get buttons with gaps between; the
+			-- user's buttons move and fire; set_page is quiet; the ends disable.
+		local
+			l_window: GUI_WINDOW
+			l_pages: GUI_PAGINATION
+			l_told: ARRAYED_LIST [INTEGER]
+		do
+			create l_told.make (4)
+			create l_window.make ("Pages", 480, 100)
+			create l_pages.make
+			l_pages.page_actions.extend (agent (p: INTEGER; t: ARRAYED_LIST [INTEGER]) do t.extend (p) end (?, l_told))
+			l_window.set_content (l_pages)
+			l_window.show
+			settle_window
+			l_pages.set_page_count (20)
+			assert ("1 2 3 4 5 gap 20: " + shown (l_pages), shown (l_pages).same_string ("1 2 3 4 5 . 20"))
+			assert ("Previous off at 1", not l_pages.previous_button.is_enabled and l_pages.next_button.is_enabled)
+			l_pages.set_page (10)
+			assert ("1 gap 9 10 11 gap 20: " + shown (l_pages), shown (l_pages).same_string ("1 . 9 10 11 . 20") and l_told.is_empty)
+			driver.perform_click (l_pages.next_button)
+			assert ("next: 11", l_pages.page = 11 and l_told.count = 1 and l_told [1] = 11)
+			if attached l_pages.button_for (20) as al_last then
+				driver.perform_click (al_last)
+			end
+			assert ("the last: " + shown (l_pages), l_pages.page = 20 and shown (l_pages).same_string ("1 . 16 17 18 19 20")
+				and not l_pages.next_button.is_enabled and l_told.count = 2)
+			assert ("its own button off", attached l_pages.button_for (20) as al_b and then not al_b.is_enabled)
+			driver.perform_click (l_pages.previous_button)
+			assert ("back to 19", l_pages.page = 19 and l_told.count = 3)
+			l_pages.set_page_count (4)
+			assert ("few pages, all shown: " + shown (l_pages), shown (l_pages).same_string ("1 2 3 4") and l_pages.page = 4)
+			l_window.close
+		end
+
+	test_breadcrumbs_any_parts
+			-- 1t: a path control shows any parts, exactly, and a click names the part.
+		local
+			l_window: GUI_WINDOW
+			l_crumbs: GUI_PATH_CONTROL
+			l_chosen: CELL [INTEGER]
+		do
+			create l_chosen.put (0)
+			create l_window.make ("Crumbs", 480, 100)
+			create l_crumbs.make
+			l_crumbs.set_parts (<<"Library", "Old Testament", "Genesis">>)
+			l_crumbs.selection_actions.extend (agent (p: INTEGER; c: CELL [INTEGER]) do c.put (p) end (?, l_chosen))
+			l_window.set_content (l_crumbs)
+			l_window.show
+			settle_window
+			assert ("three parts: " + l_crumbs.part_count.out, l_crumbs.part_count = 3 and l_crumbs.path = Void)
+			assert ("exact", l_crumbs.part (1).same_string ("Library") and l_crumbs.part (3).same_string ("Genesis"))
+			driver.choose_path_part (l_crumbs, 2)
+			assert ("the user chose Old Testament", l_chosen.item = 2)
+			l_crumbs.set_parts (<<"Home">>)
+			assert ("one now", l_crumbs.part_count = 1)
+			l_window.close
+		end
+
+	shown (a_pages: GUI_PAGINATION): STRING
+			-- The pagination's items, gaps as ".".
+		do
+			create Result.make (24)
+			across a_pages.shown_pages as ic loop
+				if not Result.is_empty then Result.append_character (' ') end
+				if ic = 0 then Result.append_character ('.') else Result.append_integer (ic) end
+			end
+		end
+
 	test_rating_set_silently_and_user_emits
 		local
 			l_window: GUI_WINDOW

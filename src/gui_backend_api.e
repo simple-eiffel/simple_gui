@@ -392,6 +392,71 @@ feature -- Windows and containers
 		deferred
 		end
 
+	tabs_set_position (a_tabs, a_position: INTEGER)
+			-- 1t: 0 none, 1 top, 2 bottom, 3 left, 4 right.
+		deferred
+		end
+
+	sidebar: INTEGER
+			-- 1t: pages one at a time beside a list of their titles.
+		deferred
+		end
+
+	sidebar_extend (a_sidebar, a_page: INTEGER; a_title: POINTER)
+			-- The first page added is shown.
+		deferred
+		end
+
+	sidebar_add_heading (a_sidebar: INTEGER; a_text: POINTER)
+			-- A group heading before the next page: not selectable, not counted.
+		deferred
+		end
+
+	sidebar_set_icon (a_sidebar, i: INTEGER; a_name: POINTER)
+		deferred
+		end
+
+	sidebar_set_badge (a_sidebar, i: INTEGER; a_text: POINTER)
+		deferred
+		end
+
+	sidebar_select (a_sidebar, i: INTEGER)
+			-- Quiet.
+		deferred
+		end
+
+	sidebar_selected (a_sidebar: INTEGER): INTEGER
+		deferred
+		end
+
+	sidebar_set_collapsible (a_sidebar: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	sidebar_set_collapsed (a_sidebar: INTEGER; a_on: BOOLEAN)
+			-- Quiet: icons only, titles as tooltips.
+		deferred
+		end
+
+	sidebar_is_collapsed (a_sidebar: INTEGER): BOOLEAN
+		deferred
+		end
+
+	path_control_set_parts (an_id: INTEGER; a_parts: POINTER)
+			-- 1t: any parts, joined by U+001F.
+		deferred
+		end
+
+	test_toggle_sidebar (a_sidebar: INTEGER)
+			-- As the user pressing the collapse button: 47.
+		deferred
+		end
+
+	test_page_shown (an_id: INTEGER): INTEGER
+			-- The page the user sees in tabs or a sidebar, from the native control.
+		deferred
+		end
+
 	test_locate_row (an_id, a_row: INTEGER): INTEGER
 			-- The row a drop's locating finds at the middle of row `a_row''s place on screen: a
 			-- list's row, a tree's node number, a token field's token; 0 when it finds none.

@@ -435,3 +435,19 @@ void sga_test_edit_cell(int a_id, int a_row, int a_column, const char *a_text);
 void sga_test_cancel_edit(int a_id, int a_row, int a_column);
 const char *sga_test_cell_text(int a_id, int a_row, int a_column);
 const char *sga_test_cell_note(int a_id);
+
+/* 1t: navigation */
+void sga_tabs_set_position(int a_tabs, int a_position);
+int sga_sidebar(void);
+void sga_sidebar_extend(int a_id, int a_page, const char *a_title);
+void sga_sidebar_add_heading(int a_id, const char *a_text);
+void sga_sidebar_set_icon(int a_id, int i, const char *a_name);
+void sga_sidebar_set_badge(int a_id, int i, const char *a_text);
+void sga_sidebar_select(int a_id, int i);
+int sga_sidebar_selected(int a_id);
+void sga_sidebar_set_collapsible(int a_id, int a_on);
+void sga_sidebar_set_collapsed(int a_id, int a_on);
+int sga_sidebar_is_collapsed(int a_id);
+void sga_path_control_set_parts(int a_id, const char *a_parts);
+void sga_test_toggle_sidebar(int a_id);
+int sga_test_page_shown(int a_id);
