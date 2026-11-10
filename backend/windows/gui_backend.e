@@ -1792,9 +1792,9 @@ feature -- Controls
 
 	widget_set_drop_target (an_id: INTEGER; an_internal, a_files, a_text: BOOLEAN)
 			-- The widget takes the pick token only while Eiffel has named it (`pick_ok'); files
-			-- from Explorer arrive through SW's files hook (1q-b). Text from other programs is
-			-- kept as a capability here; receiving it needs OLE drag and drop in simple_shell,
-			-- which 1q-c brings with dragging out.
+			-- from Explorer arrive through SW's files hook (1q-b), text from other programs
+			-- through its text hook, the window taking text by OLE (simple_shell 1.40.0) while
+			-- any widget does.
 		do
 			if attached widget (an_id) as al_w then
 				if an_internal then
@@ -1804,6 +1804,11 @@ feature -- Controls
 					al_w.set_files_hook (agent outside_files (an_id, ?))
 				else
 					al_w.set_files_hook (Void)
+				end
+				if a_text then
+					al_w.set_text_drop_hook (agent outside_text (an_id, ?))
+				else
+					al_w.set_text_drop_hook (Void)
 				end
 			end
 			if a_files then
@@ -1815,6 +1820,35 @@ feature -- Controls
 				takes_outside.force (takes_outside.item (an_id) | 2, an_id)
 			else
 				takes_outside.force (takes_outside.item (an_id) & 1, an_id)
+			end
+			tell_window_takes_text
+		end
+
+	tell_window_takes_text
+			-- The open window takes text from other programs while any widget does.
+		local
+			l_any: BOOLEAN
+		do
+			across takes_outside as ic until l_any loop
+				l_any := ic & 2 /= 0
+			end
+			if attached open_window as al_w and then al_w.is_window_open and then al_w.accepts_text /= l_any then
+				al_w.set_accepts_text (l_any)
+			end
+		end
+
+	outside_text (an_id: INTEGER; a_text: STRING_32)
+			-- Text from another program landed on widget `an_id' (SW's text hook).
+		do
+			dropped_text.force (a_text, an_id)
+			push (33, an_id, 2, 0, 0)
+		end
+
+	drag_out_ended (an_id, a_how: INTEGER)
+			-- SW's drag out of widget `an_id' ended: 34 unless it landed on one of our windows.
+		do
+			if a_how /= {SHELL_WINDOW}.Drag_landed_here then
+				push (34, an_id, a_how, 0, 0)
 			end
 		end
 
@@ -1846,10 +1880,19 @@ feature -- Controls
 		end
 
 	test_drop_text (an_id: INTEGER; a_text: POINTER)
+			-- Through the window's real OLE drop target when it is open (simple_shell's
+			-- `simulate_drag_in' at the widget's middle), else straight to event 33.
 		do
 			if takes_outside.item (an_id) & 2 /= 0 then
-				dropped_text.force (from_c (a_text), an_id)
-				push (33, an_id, 2, 0, 0)
+				if attached widget (an_id) as al_w and then attached open_window as al_win
+					and then al_win.is_window_open and then al_win.accepts_text
+				then
+					al_win.simulate_drag_in ((al_w.x + al_w.width / 2.0).truncated_to_integer,
+						(al_w.y + al_w.height / 2.0).truncated_to_integer, from_c (a_text), {STRING_32} "")
+				else
+					dropped_text.force (from_c (a_text), an_id)
+					push (33, an_id, 2, 0, 0)
+				end
 			end
 		end
 
@@ -1864,6 +1907,10 @@ feature -- Controls
 				drag_out_data.remove (an_id)
 			else
 				drag_out_data.force ([l_text, l_paths], an_id)
+			end
+			if attached widget (an_id) as al_w then
+				al_w.set_drag_out (l_text, l_paths)
+				al_w.set_drag_out_ended_hook (agent drag_out_ended (an_id, ?))
 			end
 		end
 
@@ -4583,6 +4630,7 @@ feature {NONE} -- Implementation
 			a_w.set_close_requests_are_events (True)
 			a_w.shell_open_window (a_w.title, a_w.win_x, a_w.win_y, a_w.win_w, a_w.win_h)
 			open_window := a_w
+			tell_window_takes_text
 			a_w.request_render
 			apply_pending_positions
 			if last_positions_moved then
