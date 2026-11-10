@@ -299,6 +299,132 @@ feature -- Context menu
 			set: context_menu = a_menu
 		end
 
+feature -- Pick and drop (1q)
+
+	pebble: detachable ANY
+			-- What a pick lifts from this widget: `pebble_function''s answer, or the pebble set.
+		do
+			if attached pebble_function as al_f then
+				Result := al_f.item ([])
+			else
+				Result := pebble_item
+			end
+		end
+
+	pebble_function: detachable FUNCTION [detachable ANY]
+			-- Computes the pebble when a pick starts.
+
+	is_pebble_source: BOOLEAN
+			-- Can a pick start on this widget?
+		do
+			Result := pebble_item /= Void or pebble_function /= Void or has_row_pebbles
+		end
+
+	has_row_pebbles: BOOLEAN
+			-- Do this widget's rows carry pebbles of their own (GUI_ROW_SOURCE)?
+		do
+		end
+
+	pick_mode: INTEGER
+			-- How the user picks from this widget: `Pick_drag' (the default), `Pick_click' or
+			-- `Pick_menu'.
+		do
+			Result := pick_mode_set.max (Pick_drag)
+		end
+
+	Pick_drag: INTEGER = 1
+			-- Press, move, release on the target.
+	Pick_click: INTEGER = 2
+			-- EiffelStudio's: a secondary click picks, a line follows the pointer, a click drops;
+			-- Escape or a secondary click cancels.
+	Pick_menu: INTEGER = 3
+			-- A secondary click opens a menu of the targets that take the pebble.
+
+	drop_actions: GUI_DROP_ACTIONS
+			-- What a drop on this widget runs, by the pebble's type.
+		do
+			if attached drop_actions_made as al_d then
+				Result := al_d
+			else
+				create Result.make (id)
+				drop_actions_made := Result
+			end
+		end
+
+	has_drop_actions: BOOLEAN
+			-- Is this widget a drop target?
+		do
+			Result := attached drop_actions_made as al_d and then al_d.count > 0
+		end
+
+	last_drop_row: INTEGER
+			-- The row the last drop on this widget landed on (0: not on a row). Read it in a
+			-- drop action.
+
+	set_pebble (a_pebble: detachable ANY)
+			-- Let a pick lift `a_pebble' (Void: this widget is no source, unless its rows are).
+		require
+			gui_thread: is_gui_thread
+		do
+			pebble_item := a_pebble
+			pebble_function := Void
+			tell_pick
+		ensure
+			set: pebble = a_pebble
+		end
+
+	set_pebble_function (a_function: detachable FUNCTION [detachable ANY])
+			-- Compute the pebble with `a_function' when a pick starts.
+		require
+			gui_thread: is_gui_thread
+		do
+			pebble_function := a_function
+			pebble_item := Void
+			tell_pick
+		ensure
+			set: pebble_function = a_function
+		end
+
+	set_pick_mode (a_mode: INTEGER)
+		require
+			gui_thread: is_gui_thread
+			known: a_mode >= Pick_drag and a_mode <= Pick_menu
+		do
+			pick_mode_set := a_mode
+			tell_pick
+		ensure
+			set: pick_mode = a_mode
+		end
+
+feature {GUI_APPLICATION} -- Pick and drop
+
+	pebble_at_row (a_row: INTEGER): detachable ANY
+			-- The pebble a pick on row `a_row' lifts (0: the widget itself).
+		do
+			Result := pebble
+		end
+
+	set_last_drop_row (a_row: INTEGER)
+		do
+			last_drop_row := a_row
+		ensure
+			set: last_drop_row = a_row
+		end
+
+feature {NONE} -- Pick and drop
+
+	pebble_item: detachable ANY
+
+	pick_mode_set: INTEGER
+
+	drop_actions_made: detachable GUI_DROP_ACTIONS
+
+	tell_pick
+			-- Tell the backend whether and how a pick starts here.
+		do
+			backend.widget_set_pick (id, pick_mode, is_pebble_source, has_row_pebbles)
+		end
+
 feature -- Text direction
 
 	base_direction: INTEGER

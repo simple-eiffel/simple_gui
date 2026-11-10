@@ -20,7 +20,7 @@ class
 	GUI_TABLE
 
 inherit
-	GUI_WIDGET
+	GUI_ROW_SOURCE
 		redefine
 			dispatch
 		end

@@ -9,7 +9,7 @@ class
 	GUI_LIST
 
 inherit
-	GUI_WIDGET
+	GUI_ROW_SOURCE
 		redefine
 			dispatch
 		end

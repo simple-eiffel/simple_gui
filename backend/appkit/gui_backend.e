@@ -1000,6 +1000,46 @@ feature -- Common widget state
 		alias "sga_test_press_shortcut($a_window, (const char *) $a_shortcut);"
 		end
 
+	widget_set_pick (an_id, a_mode: INTEGER; a_is_source, a_by_row: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_widget_set_pick($an_id, $a_mode, $a_is_source ? 1 : 0, $a_by_row ? 1 : 0);"
+		end
+
+	widget_set_drop_target (an_id: INTEGER; an_internal, a_files, a_text: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_widget_set_drop_target($an_id, $an_internal ? 1 : 0, $a_files ? 1 : 0, $a_text ? 1 : 0);"
+		end
+
+	pick_targets (a_source: INTEGER; a_ids: POINTER; a_count: INTEGER; a_labels: POINTER)
+		external "C blocking inline use %"simple_gui_appkit.h%""
+		alias "sga_pick_targets($a_source, (const int *) $a_ids, $a_count, (const char *) $a_labels);"
+		end
+
+	pick_cancel
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_pick_cancel();"
+		end
+
+	test_pick (a_source, a_row: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_pick($a_source, $a_row);"
+		end
+
+	test_drop (a_target, a_row: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_drop($a_target, $a_row);"
+		end
+
+	test_cancel_pick
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_cancel_pick();"
+		end
+
+	test_is_accepting (a_target: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_is_accepting($a_target) ? EIF_TRUE : EIF_FALSE;"
+		end
+
 	spinner: INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_spinner();"

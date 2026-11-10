@@ -833,6 +833,47 @@ feature -- Controls
 		alias "return (EIF_POINTER) sg_field_error_shown($an_id);"
 		end
 
+	widget_set_pick (an_id, a_mode: INTEGER; a_is_source, a_by_row: BOOLEAN)
+			-- 1q: a GtkDragSource and a secondary-click gesture on the widget (made once).
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_widget_set_pick($an_id, $a_mode, $a_is_source ? 1 : 0, $a_by_row ? 1 : 0);"
+		end
+
+	widget_set_drop_target (an_id: INTEGER; an_internal, a_files, a_text: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_widget_set_drop_target($an_id, $an_internal ? 1 : 0, $a_files ? 1 : 0, $a_text ? 1 : 0);"
+		end
+
+	pick_targets (a_source: INTEGER; a_ids: POINTER; a_count: INTEGER; a_labels: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_pick_targets($a_source, (const int *) $a_ids, $a_count, (const char *) $a_labels);"
+		end
+
+	pick_cancel
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_pick_cancel();"
+		end
+
+	test_pick (a_source, a_row: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_pick($a_source, $a_row);"
+		end
+
+	test_drop (a_target, a_row: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_drop($a_target, $a_row);"
+		end
+
+	test_cancel_pick
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_cancel_pick();"
+		end
+
+	test_is_accepting (a_target: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_is_accepting($a_target) ? EIF_TRUE : EIF_FALSE;"
+		end
+
 	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
 			-- 1l: a label in the window's overlay (sg_pill_set).
 		external "C inline use %"simple_gui_gtk.h%""

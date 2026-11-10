@@ -56,6 +56,7 @@ feature -- Lifecycle and loop
 				end
 			end
 			fire_due_timers
+			check_pick_menu
 			check_rows_wanted
 		end
 
@@ -119,6 +120,7 @@ feature -- Windows and containers
 				-- the window's heartbeat and fast tick time the drawn views (1i)
 			l_w.set_on_tick (agent on_window_tick)
 			l_w.set_on_shell_event (agent on_window_shell_event)
+			l_w.set_on_pick_cancelled (agent pick_cancelled)
 			if forced_dark_set then
 				l_w.set_theme (themed (forced_dark))
 			end
@@ -1770,6 +1772,102 @@ feature -- Controls
 			then
 				al_l.extend_selection (a_row)
 				changed
+			end
+		end
+
+	widget_set_pick (an_id, a_mode: INTEGER; a_is_source, a_by_row: BOOLEAN)
+			-- 1q: SW's pick gestures on the widget (a drag, or a secondary click for the click
+			-- and menu modes), its pebble a token answered by `pick_started'.
+		do
+			pick_modes.force (a_mode, an_id)
+			if attached widget (an_id) as al_w then
+				al_w.set_pick_gestures (a_is_source and a_mode = 1, a_is_source and a_mode >= 2)
+				if a_is_source then
+					al_w.set_pebble_hook (agent pick_started (an_id, a_mode, a_by_row, ?, ?))
+				else
+					al_w.set_pebble_hook (Void)
+				end
+			end
+		end
+
+	widget_set_drop_target (an_id: INTEGER; an_internal, a_files, a_text: BOOLEAN)
+			-- The widget takes the pick token only while Eiffel has named it (`pick_ok').
+		do
+			if an_internal and then attached widget (an_id) as al_w then
+				al_w.set_drop_hooks (agent pick_accepts (an_id, ?, ?, ?), agent pick_received (an_id, ?, ?, ?))
+			end
+		end
+
+	pick_targets (a_source: INTEGER; a_ids: POINTER; a_count: INTEGER; a_labels: POINTER)
+		local
+			l_ids: MANAGED_POINTER
+			l_labels: LIST [STRING_32]
+			l_menu: SW_MENU
+			i: INTEGER
+		do
+			if pick_source = a_source then
+				pick_ok.wipe_out
+					-- the shared side always passes a buffer of at least one INTEGER_32
+				create l_ids.share_from_pointer (a_ids, a_count.max (1) * 4)
+				from i := 0 until i >= a_count loop
+					pick_ok.force (l_ids.read_integer_32 (i * 4), l_ids.read_integer_32 (i * 4))
+					i := i + 1
+				end
+				if pick_mode = 3 and then attached widget (a_source) as al_src and then attached window_of (al_src) as al_win then
+						-- a menu of the targets in place of the line
+					al_win.cancel_pick_quietly
+					l_labels := from_c (a_labels).split ('%N')
+					create l_menu.make
+					from i := 1 until i > a_count loop
+						l_menu.add_item (if l_labels.valid_index (i) and then not l_labels [i].is_empty then l_labels [i] else {STRING_32} "?" end,
+							"", True, agent pick_chosen (l_ids.read_integer_32 ((i - 1) * 4)))
+						i := i + 1
+					end
+					pick_menu_window := al_win
+					al_win.open_menu_at (l_menu, al_win.last_pointer_x, al_win.last_pointer_y)
+				end
+				changed
+			end
+		end
+
+	pick_cancel
+		do
+			if attached widget (pick_source) as al_src and then attached window_of (al_src) as al_win then
+				al_win.cancel_pick_quietly
+			end
+			pick_clear
+		end
+
+	test_pick (a_source, a_row: INTEGER)
+		do
+			pick_begin (a_source, pick_modes.item (a_source).max (1), a_row)
+		end
+
+	test_drop (a_target, a_row: INTEGER)
+		do
+			if pick_source > 0 then
+				if pick_ok.has (a_target) then
+					push (31, a_target, a_row, 0, 0)
+				else
+					push (32, pick_source, 0, 0, 0)
+				end
+				pick_cancel
+			end
+		end
+
+	test_cancel_pick
+		do
+			if pick_source > 0 then
+				push (32, pick_source, 0, 0, 0)
+				pick_cancel
+			end
+		end
+
+	test_is_accepting (a_target: INTEGER): BOOLEAN
+			-- Through the widget's own hook, as SW asks it during a pick.
+		do
+			if attached widget (a_target) as al_w then
+				Result := pick_source > 0 and then al_w.accepts_pebble_at (pick_token, al_w.x + 1.0, al_w.y + 1.0)
 			end
 		end
 
@@ -3928,6 +4026,112 @@ feature {NONE} -- Forms (1p)
 	c_caps_lock_on: INTEGER
 		external "C inline use <windows.h>"
 		alias "return (GetKeyState (VK_CAPITAL) & 1) ? 1 : 0;"
+		end
+
+feature {NONE} -- Pick and drop (1q)
+
+	pick_source: INTEGER
+			-- The widget a pick lifted from; 0 when none is on.
+
+	pick_mode: INTEGER
+
+	pick_token: STRING_32
+			-- What SW carries for a pick; the pebble itself stays in Eiffel's GUI_APPLICATION.
+		once ("OBJECT")
+			Result := {STRING_32} "sg-pebble"
+		end
+
+	pick_ok: HASH_TABLE [INTEGER, INTEGER]
+			-- The targets Eiffel named for the pick on now.
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	pick_modes: HASH_TABLE [INTEGER, INTEGER]
+			-- Each source's pick mode, by widget id.
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	pick_menu_window: detachable GUI_SW_WINDOW
+			-- The window showing a menu-mode pick's menu.
+
+	pick_begin (a_source, a_mode, a_row: INTEGER)
+		do
+			pick_clear
+			pick_source := a_source
+			pick_mode := a_mode
+			push (30, a_source, a_row, 0, 0)
+		end
+
+	pick_clear
+		do
+			pick_source := 0
+			pick_mode := 0
+			pick_ok.wipe_out
+			pick_menu_window := Void
+		ensure
+			none: pick_source = 0 and pick_ok.is_empty
+		end
+
+	pick_started (a_source, a_mode: INTEGER; a_by_row: BOOLEAN; a_x, a_y: REAL_64): detachable ANY
+			-- SW asks for the source's pebble: report event 30 and carry the token.
+		local
+			l_row: INTEGER
+		do
+			if a_by_row then
+				l_row := row_at_point (a_source, a_y)
+			end
+			pick_begin (a_source, a_mode, l_row)
+			Result := pick_token
+		end
+
+	pick_accepts (a_target: INTEGER; a_pebble: ANY; a_x, a_y: REAL_64): BOOLEAN
+		do
+			Result := a_pebble = pick_token and then pick_source > 0 and then pick_ok.has (a_target)
+		end
+
+	pick_received (a_target: INTEGER; a_pebble: ANY; a_x, a_y: REAL_64)
+		do
+			if pick_accepts (a_target, a_pebble, a_x, a_y) then
+				push (31, a_target, row_at_point (a_target, a_y), 0, 0)
+				pick_clear
+			end
+		end
+
+	pick_chosen (a_target: INTEGER)
+			-- A target chosen from the menu mode's menu.
+		do
+			if pick_source > 0 then
+				push (31, a_target, 0, 0, 0)
+				pick_clear
+			end
+		end
+
+	pick_cancelled
+			-- SW_WINDOW's notice: the pick ended with the pebble going nowhere.
+		do
+			if pick_source > 0 and then pick_menu_window = Void then
+				push (32, pick_source, 0, 0, 0)
+				pick_clear
+			end
+		end
+
+	check_pick_menu
+			-- A menu-mode menu closed with no choice is a cancel.
+		do
+			if pick_source > 0 and then attached pick_menu_window as al_w and then al_w.open_popup = Void then
+				push (32, pick_source, 0, 0, 0)
+				pick_clear
+			end
+		end
+
+	row_at_point (an_id: INTEGER; a_y: REAL_64): INTEGER
+			-- The list row under window y `a_y'; 0 for none or another kind of widget.
+		do
+			if attached {SW_LIST} widget (an_id) as al_list then
+				Result := al_list.row_at (a_y)
+			end
 		end
 
 feature {NONE} -- Reference pills (1l)

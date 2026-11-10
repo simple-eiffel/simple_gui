@@ -277,6 +277,15 @@ void sga_list_scroll_to_row(int a_id, int a_row);
 void sga_table_scroll_to_row(int a_id, int a_row);
 void sga_test_press_shortcut(int a_window, const char *a_shortcut);
 
+/* 1q-a: pick and drop (events 30 picked, 31 dropped, 32 cancelled) */
+void sga_widget_set_pick(int a_id, int a_mode, int a_is_source, int a_by_row);   /* 1 drag, 2 click, 3 menu */
+void sga_widget_set_drop_target(int a_id, int an_internal, int a_files, int a_text);
+void sga_pick_targets(int a_source, const int *a_ids, int a_count, const char *a_labels);   /* labels newline-separated */
+void sga_pick_cancel(void);
+void sga_test_pick(int a_source, int a_row);
+void sga_test_drop(int a_target, int a_row);
+void sga_test_cancel_pick(void);
+int sga_test_is_accepting(int a_target);
 /* 1p: forms */
 int sga_password_field(void);   /* a field's set, get and events; 12 for the eye */
 void sga_password_set_revealed(int a_id, int a_on);

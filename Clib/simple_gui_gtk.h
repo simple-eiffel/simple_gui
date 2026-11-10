@@ -4515,4 +4515,365 @@ static void sg_test_extend_list_selection(int id, int row) {
     if (r) gtk_list_box_select_row(sg_list_box(id), r);
 }
 
+/* ---------- 1q-a: pick and drop. A pick start pushes 30 (source, row); Eiffel answers with
+   sg_pick_targets (the widgets that take the pebble, and their labels) or sg_pick_cancel. Only
+   those targets light (CSS sg-drop-ok) and take a drop, which pushes 31 (target, row); a cancel
+   pushes 32. Nothing here calls into Eiffel. Modes: 1 drag (GtkDragSource / GtkDropTarget,
+   the content a token, the pebble stays in Eiffel), 2 click (a secondary click picks, a line in
+   the window overlay follows the pointer, the next click drops), 3 menu (a popover of the
+   targets). ---------- */
+__attribute__((weak)) unsigned char sg_pick_ok[SG_MAX] = {0};
+__attribute__((weak)) int sg_pick_on = 0, sg_pick_source = 0, sg_pick_mode = 0;
+__attribute__((weak)) double sg_pick_x0 = 0, sg_pick_y0 = 0, sg_pick_x1 = 0, sg_pick_y1 = 0;
+__attribute__((weak)) GtkWidget *sg_pick_window = NULL;
+__attribute__((weak)) GtkWidget *sg_pick_menu = NULL;
+__attribute__((weak)) GdkDrag *sg_pick_drag = NULL;
+__attribute__((weak)) int sg_pick_css_done = 0;
+
+/* The widget that takes the gestures: a list's GtkListBox, else the registered widget. */
+static GtkWidget *sg_pick_widget(int id) {
+    GtkWidget *l = g_object_get_data(G_OBJECT(sg_w[id]), "sg-list");
+    return l ? l : sg_w[id];
+}
+/* The row (from 1) of widget `id' at (x, y) in sg_pick_widget's coordinates; 0 for none. */
+static int sg_pick_row_at(int id, double x, double y) {
+    GtkWidget *l = g_object_get_data(G_OBJECT(sg_w[id]), "sg-list");
+    GtkListBoxRow *r;
+    (void) x;
+    if (l && (r = gtk_list_box_get_row_at_y(GTK_LIST_BOX(l), (int) y))) return gtk_list_box_row_get_index(r) + 1;
+    return 0;
+}
+static void sg_pick_css(void) {
+    GtkCssProvider *p;
+    if (sg_pick_css_done) return;
+    sg_pick_css_done = 1;
+    p = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(p,
+        ".sg-drop-ok { outline: 2px dashed #3584e4; outline-offset: -2px; }"
+        " .sg-drop-hover { outline: 2px solid #3584e4; outline-offset: -2px; background-color: rgba(53,132,228,0.10); }");
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(p),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(p);
+}
+/* Back to rest: no target lit, no line, no menu. */
+static void sg_pick_clear(void) {
+    int i;
+    for (i = 1; i < SG_MAX; i++) {
+        if (sg_pick_ok[i]) {
+            sg_pick_ok[i] = 0;
+            if (sg_w[i]) {
+                gtk_widget_remove_css_class(sg_pick_widget(i), "sg-drop-ok");
+                gtk_widget_remove_css_class(sg_pick_widget(i), "sg-drop-hover");
+            }
+        }
+    }
+    if (sg_pick_window) {
+        GtkWidget *line = g_object_get_data(G_OBJECT(sg_pick_window), "sg-pick-line");
+        if (line) gtk_widget_set_visible(line, FALSE);
+    }
+    if (sg_pick_menu) {
+        GtkWidget *m = sg_pick_menu;
+        sg_pick_menu = NULL;
+        gtk_popover_popdown(GTK_POPOVER(m));
+    }
+    sg_pick_on = 0;
+    sg_pick_source = 0;
+    sg_pick_drag = NULL;
+}
+/* The registered widget (and row) under window point (x, y), if it takes the pebble; 0 if none. */
+static int sg_pick_target_at(GtkWidget *win, double x, double y, int *row) {
+    GtkWidget *w = gtk_widget_pick(win, x, y, GTK_PICK_DEFAULT);
+    *row = 0;
+    for (; w; w = gtk_widget_get_parent(w)) {
+        int id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "sg-id"));
+        if (id > 0 && id < SG_MAX && sg_pick_ok[id]) {
+            graphene_point_t p = GRAPHENE_POINT_INIT((float) x, (float) y), q;
+            if (gtk_widget_compute_point(win, sg_pick_widget(id), &p, &q)) *row = sg_pick_row_at(id, q.x, q.y);
+            return id;
+        }
+    }
+    return 0;
+}
+static void sg_pick_start(int id, int row, int mode) {
+    sg_pick_clear();
+    sg_pick_css();
+    sg_pick_on = 1;
+    sg_pick_source = id;
+    sg_pick_mode = mode;
+    sg_push(30, id, row, 0);
+}
+
+/* --- click mode: the line, and the window's next click --- */
+static void sg_pick_line_draw(GtkDrawingArea *a, cairo_t *cr, int w, int h, gpointer d) {
+    (void) a; (void) w; (void) h; (void) d;
+    if (!sg_pick_on) return;
+    cairo_set_source_rgba(cr, 0.21, 0.52, 0.89, 0.9);
+    cairo_set_line_width(cr, 2.0);
+    cairo_move_to(cr, sg_pick_x0, sg_pick_y0);
+    cairo_line_to(cr, sg_pick_x1, sg_pick_y1);
+    cairo_stroke(cr);
+    cairo_arc(cr, sg_pick_x0, sg_pick_y0, 4.0, 0, 2 * G_PI);
+    cairo_fill(cr);
+}
+static void sg_pick_on_motion(GtkEventControllerMotion *c, double x, double y, gpointer d) {
+    GtkWidget *line = d;
+    (void) c;
+    if (sg_pick_on && sg_pick_mode == 2) {
+        sg_pick_x1 = x; sg_pick_y1 = y;
+        gtk_widget_queue_draw(line);
+    }
+}
+static void sg_pick_on_window_press(GtkGestureClick *g, int n, double x, double y, gpointer d) {
+    GtkWidget *win = d;
+    int target, row;
+    (void) n;
+    if (!sg_pick_on || sg_pick_mode != 2 || win != sg_pick_window) return;
+    if (gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(g)) == GDK_BUTTON_PRIMARY
+        && (target = sg_pick_target_at(win, x, y, &row)) > 0) {
+        sg_push(31, target, row, 0);
+    } else {
+        sg_push(32, sg_pick_source, 0, 0);
+    }
+    gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_CLAIMED);
+    sg_pick_clear();
+}
+static gboolean sg_pick_on_key(GtkEventControllerKey *k, guint keyval, guint code, GdkModifierType m, gpointer d) {
+    (void) k; (void) code; (void) m; (void) d;
+    if (sg_pick_on && keyval == GDK_KEY_Escape) {
+        sg_push(32, sg_pick_source, 0, 0);
+        sg_pick_clear();
+        return TRUE;
+    }
+    return FALSE;
+}
+/* The window a click-mode pick runs in: a line over its content, and its gestures (made once). */
+static void sg_pick_hook_window(GtkWidget *win) {
+    GtkOverlay *o = g_object_get_data(G_OBJECT(win), "sg-overlay");
+    GtkWidget *line;
+    GtkGesture *g;
+    GtkEventController *c;
+    if (!o || g_object_get_data(G_OBJECT(win), "sg-pick-line")) return;
+    line = gtk_drawing_area_new();
+    gtk_widget_set_can_target(line, FALSE);
+    gtk_widget_set_halign(line, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(line, GTK_ALIGN_FILL);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(line), sg_pick_line_draw, NULL, NULL);
+    gtk_widget_set_visible(line, FALSE);
+    gtk_overlay_add_overlay(o, line);
+    g_object_set_data(G_OBJECT(win), "sg-pick-line", line);
+    g = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(g), 0);
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(g), GTK_PHASE_CAPTURE);
+    g_signal_connect(g, "pressed", G_CALLBACK(sg_pick_on_window_press), win);
+    gtk_widget_add_controller(win, GTK_EVENT_CONTROLLER(g));
+    c = gtk_event_controller_motion_new();
+    g_signal_connect(c, "motion", G_CALLBACK(sg_pick_on_motion), line);
+    gtk_widget_add_controller(win, c);
+    c = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(c, GTK_PHASE_CAPTURE);
+    g_signal_connect(c, "key-pressed", G_CALLBACK(sg_pick_on_key), NULL);
+    gtk_widget_add_controller(win, c);
+}
+/* A secondary click on a click- or menu-mode source starts the pick (before any context menu). */
+static void sg_pick_on_secondary(GtkGestureClick *g, int n, double x, double y, gpointer d) {
+    int id = GPOINTER_TO_INT(d), mode;
+    GtkWidget *src = sg_w[id], *win;
+    (void) n;
+    if (!src || !GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-src"))) return;
+    mode = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-mode"));
+    if (mode != 2 && mode != 3) return;
+    if (sg_pick_on) return;   /* the window's press handler takes the second click */
+    gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_CLAIMED);
+    win = GTK_WIDGET(gtk_widget_get_root(src));
+    sg_pick_start(id, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-row")) ? sg_pick_row_at(id, x, y) : 0, mode);
+    sg_pick_window = win;
+    {
+        graphene_point_t p = GRAPHENE_POINT_INIT((float) x, (float) y), q;
+        if (win && gtk_widget_compute_point(sg_pick_widget(id), win, &p, &q)) {
+            sg_pick_x0 = sg_pick_x1 = q.x; sg_pick_y0 = sg_pick_y1 = q.y;
+        }
+    }
+    g_object_set_data(G_OBJECT(src), "sg-pick-at-x", GINT_TO_POINTER((int) x));
+    g_object_set_data(G_OBJECT(src), "sg-pick-at-y", GINT_TO_POINTER((int) y));
+}
+
+/* --- drag mode --- */
+static GdkContentProvider *sg_pick_on_prepare(GtkDragSource *s, double x, double y, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    GtkWidget *src = sg_w[id];
+    (void) s;
+    if (!src || !GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-src"))
+        || GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-mode")) != 1) return NULL;
+    sg_pick_start(id, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-row")) ? sg_pick_row_at(id, x, y) : 0, 1);
+    sg_pick_window = GTK_WIDGET(gtk_widget_get_root(src));
+    return gdk_content_provider_new_typed(G_TYPE_STRING, "sg-pebble");
+}
+static void sg_pick_on_drag_begin(GtkDragSource *s, GdkDrag *drag, gpointer d) {
+    (void) s; (void) d;
+    sg_pick_drag = drag;
+}
+static void sg_pick_on_drag_end(GtkDragSource *s, GdkDrag *drag, gboolean del, gpointer d) {
+    (void) s; (void) drag; (void) del; (void) d;
+    if (sg_pick_on && sg_pick_mode == 1) {   /* not taken by one of our targets */
+        sg_push(32, sg_pick_source, 0, 0);
+        sg_pick_clear();
+    }
+}
+static gboolean sg_pick_on_accept(GtkDropTarget *t, GdkDrop *drop, gpointer d) {
+    (void) t; (void) drop; (void) d;
+    return sg_pick_on && sg_pick_mode == 1;
+}
+static GdkDragAction sg_pick_on_enter(GtkDropTarget *t, double x, double y, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    (void) t; (void) x; (void) y;
+    if (sg_pick_on && sg_pick_ok[id]) {
+        gtk_widget_add_css_class(sg_pick_widget(id), "sg-drop-hover");
+        return GDK_ACTION_COPY;
+    }
+    return 0;
+}
+static void sg_pick_on_leave(GtkDropTarget *t, gpointer d) {
+    (void) t;
+    gtk_widget_remove_css_class(sg_pick_widget(GPOINTER_TO_INT(d)), "sg-drop-hover");
+}
+static gboolean sg_pick_on_drop(GtkDropTarget *t, const GValue *v, double x, double y, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    (void) t; (void) v;
+    if (!sg_pick_on || !sg_pick_ok[id]) return FALSE;
+    sg_push(31, id, sg_pick_row_at(id, x, y), 0);
+    sg_pick_clear();
+    return TRUE;
+}
+
+static void sg_widget_set_pick(int id, int mode, int is_source, int by_row) {
+    GtkWidget *w = sg_w[id], *e = sg_pick_widget(id);
+    g_object_set_data(G_OBJECT(w), "sg-pick-mode", GINT_TO_POINTER(mode));
+    g_object_set_data(G_OBJECT(w), "sg-pick-src", GINT_TO_POINTER(is_source));
+    g_object_set_data(G_OBJECT(w), "sg-pick-row", GINT_TO_POINTER(by_row));
+    if (is_source && !g_object_get_data(G_OBJECT(w), "sg-pick-hooked")) {
+        GtkDragSource *s = gtk_drag_source_new();
+        GtkGesture *g = gtk_gesture_click_new();
+        gtk_drag_source_set_actions(s, GDK_ACTION_COPY);
+        g_signal_connect(s, "prepare", G_CALLBACK(sg_pick_on_prepare), GINT_TO_POINTER(id));
+        g_signal_connect(s, "drag-begin", G_CALLBACK(sg_pick_on_drag_begin), NULL);
+        g_signal_connect(s, "drag-end", G_CALLBACK(sg_pick_on_drag_end), NULL);
+        gtk_widget_add_controller(e, GTK_EVENT_CONTROLLER(s));
+        gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(g), GDK_BUTTON_SECONDARY);
+        gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(g), GTK_PHASE_CAPTURE);
+        g_signal_connect(g, "pressed", G_CALLBACK(sg_pick_on_secondary), GINT_TO_POINTER(id));
+        gtk_widget_add_controller(e, GTK_EVENT_CONTROLLER(g));
+        g_object_set_data(G_OBJECT(w), "sg-pick-hooked", GINT_TO_POINTER(1));
+    }
+}
+static void sg_widget_set_drop_target(int id, int internal, int files, int text) {
+    GtkWidget *w = sg_w[id];
+    (void) files; (void) text;   /* 1q-b */
+    if (internal && !g_object_get_data(G_OBJECT(w), "sg-drop-hooked")) {
+        GtkDropTarget *t = gtk_drop_target_new(G_TYPE_STRING, GDK_ACTION_COPY);
+        g_signal_connect(t, "accept", G_CALLBACK(sg_pick_on_accept), NULL);
+        g_signal_connect(t, "enter", G_CALLBACK(sg_pick_on_enter), GINT_TO_POINTER(id));
+        g_signal_connect(t, "motion", G_CALLBACK(sg_pick_on_enter), GINT_TO_POINTER(id));
+        g_signal_connect(t, "leave", G_CALLBACK(sg_pick_on_leave), GINT_TO_POINTER(id));
+        g_signal_connect(t, "drop", G_CALLBACK(sg_pick_on_drop), GINT_TO_POINTER(id));
+        gtk_widget_add_controller(sg_pick_widget(id), GTK_EVENT_CONTROLLER(t));
+        g_object_set_data(G_OBJECT(w), "sg-drop-hooked", GINT_TO_POINTER(1));
+    }
+}
+
+/* --- menu mode --- */
+static void sg_pick_on_menu_choice(GtkButton *b, gpointer d) {
+    int target = GPOINTER_TO_INT(d);
+    (void) b;
+    if (sg_pick_on) {
+        sg_push(31, target, 0, 0);
+        sg_pick_clear();
+    }
+}
+static gboolean sg_pick_unparent_later(gpointer d) {
+    gtk_widget_unparent(GTK_WIDGET(d));
+    g_object_unref(d);
+    return G_SOURCE_REMOVE;
+}
+static void sg_pick_on_menu_closed(GtkPopover *p, gpointer d) {
+    (void) d;
+    if (sg_pick_menu == GTK_WIDGET(p) && sg_pick_on) {   /* closed with no choice */
+        sg_pick_menu = NULL;
+        sg_push(32, sg_pick_source, 0, 0);
+        sg_pick_clear();
+    }
+    /* not inside its own `closed': GTK still uses the popover after the signal */
+    g_idle_add(sg_pick_unparent_later, g_object_ref(p));
+}
+static void sg_pick_show_menu(int count, const int *ids, const char *labels) {
+    GtkWidget *src = sg_pick_widget(sg_pick_source), *pop = gtk_popover_new(),
+              *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gchar **names = g_strsplit(labels ? labels : "", "\n", -1);
+    GdkRectangle at;
+    int i;
+    for (i = 0; i < count; i++) {
+        GtkWidget *b = gtk_button_new_with_label(names[i] && *names[i] ? names[i] : "?");
+        gtk_widget_add_css_class(b, "flat");
+        g_signal_connect(b, "clicked", G_CALLBACK(sg_pick_on_menu_choice), GINT_TO_POINTER(ids[i]));
+        gtk_box_append(GTK_BOX(box), b);
+    }
+    g_strfreev(names);
+    gtk_popover_set_child(GTK_POPOVER(pop), box);
+    gtk_widget_set_parent(pop, src);
+    at.x = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[sg_pick_source]), "sg-pick-at-x"));
+    at.y = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[sg_pick_source]), "sg-pick-at-y"));
+    at.width = at.height = 1;
+    gtk_popover_set_pointing_to(GTK_POPOVER(pop), &at);
+    g_signal_connect(pop, "closed", G_CALLBACK(sg_pick_on_menu_closed), NULL);
+    sg_pick_menu = pop;
+    gtk_popover_popup(GTK_POPOVER(pop));
+}
+
+/* Eiffel's answer to 30. */
+static void sg_pick_targets(int source, const int *ids, int count, const char *labels) {
+    int i;
+    if (!sg_pick_on || source != sg_pick_source) return;
+    for (i = 0; i < count; i++) {
+        if (ids[i] > 0 && ids[i] < SG_MAX && sg_w[ids[i]]) {
+            sg_pick_ok[ids[i]] = 1;
+            gtk_widget_add_css_class(sg_pick_widget(ids[i]), "sg-drop-ok");
+        }
+    }
+    if (sg_pick_mode == 2 && sg_pick_window) {
+        sg_pick_hook_window(sg_pick_window);
+        {
+            GtkWidget *line = g_object_get_data(G_OBJECT(sg_pick_window), "sg-pick-line");
+            if (line) { gtk_widget_set_visible(line, TRUE); gtk_widget_queue_draw(line); }
+        }
+    } else if (sg_pick_mode == 3) {
+        sg_pick_show_menu(count, ids, labels);
+    }
+}
+static void sg_pick_cancel(void) {
+    if (sg_pick_drag) gdk_drag_drop_done(sg_pick_drag, FALSE);
+    sg_pick_clear();
+}
+
+/* --- as a user would (tests) --- */
+static void sg_test_pick(int source, int row) {
+    int mode = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[source]), "sg-pick-mode"));
+    sg_pick_start(source, row, mode > 0 ? mode : 1);
+    sg_pick_window = GTK_WIDGET(gtk_widget_get_root(sg_w[source]));
+}
+static void sg_test_drop(int target, int row) {
+    if (!sg_pick_on) return;
+    if (target > 0 && target < SG_MAX && sg_pick_ok[target]) sg_push(31, target, row, 0);
+    else sg_push(32, sg_pick_source, 0, 0);
+    sg_pick_clear();
+}
+static void sg_test_cancel_pick(void) {
+    if (sg_pick_on) {
+        sg_push(32, sg_pick_source, 0, 0);
+        sg_pick_clear();
+    }
+}
+static int sg_test_is_accepting(int target) {
+    return sg_pick_on && target > 0 && target < SG_MAX && sg_pick_ok[target]
+        && gtk_widget_has_css_class(sg_pick_widget(target), "sg-drop-ok");
+}
+
 #endif
