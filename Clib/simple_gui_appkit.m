@@ -625,11 +625,13 @@ void sga_window_set_content(int a_window, int a_child)
 		if ([v contentHuggingPriorityForOrientation:o] >= NSLayoutPriorityWindowSizeStayPut)
 			[v setContentHuggingPriority:NSLayoutPriorityWindowSizeStayPut - 1 forOrientation:o];
 	[l_content addSubview:v];
-	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:l_content.bottomAnchor constant:-l_content->bottom_bar];
+	/* a group box as the whole content keeps the containers' 12 from the window's edges */
+	CGFloat m = [v isKindOfClass:[NSBox class]] ? 12 : 0;
+	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:l_content.bottomAnchor constant:-l_content->bottom_bar - m];
 	[NSLayoutConstraint activateConstraints:@[
-		[v.leadingAnchor constraintEqualToAnchor:l_content.leadingAnchor],
-		[v.trailingAnchor constraintEqualToAnchor:l_content.trailingAnchor],
-		[v.topAnchor constraintEqualToAnchor:l_content.topAnchor],
+		[v.leadingAnchor constraintEqualToAnchor:l_content.leadingAnchor constant:m],
+		[v.trailingAnchor constraintEqualToAnchor:l_content.trailingAnchor constant:-m],
+		[v.topAnchor constraintEqualToAnchor:l_content.topAnchor constant:m],
 		l_bottom]];
 	if (!s_content_bottom) s_content_bottom = [NSMutableDictionary dictionary];
 	s_content_bottom[@(a_window)] = l_bottom;
@@ -1162,6 +1164,10 @@ void sga_splitter_set_pane(int a_splitter, int a_pane, int a_child)
 	NSView *l_holder = [s arrangedSubviews][(NSUInteger)(a_pane - 1)];
 	NSView *v = sga_get(a_child);
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	/* as a window's content: a lone label in a pane must not pull the window to its height */
+	for (NSInteger o = 0; o < 2; o++)
+		if ([v contentHuggingPriorityForOrientation:o] >= NSLayoutPriorityWindowSizeStayPut)
+			[v setContentHuggingPriority:NSLayoutPriorityWindowSizeStayPut - 1 forOrientation:o];
 	[l_holder addSubview:v];
 	[NSLayoutConstraint activateConstraints:@[
 		[v.leadingAnchor constraintEqualToAnchor:l_holder.leadingAnchor], [v.trailingAnchor constraintEqualToAnchor:l_holder.trailingAnchor],
@@ -2886,7 +2892,36 @@ int sga_group_box(const char *a_title)
 	return sga_keep(b);
 }
 
-void sga_group_box_set_title(int a_id, const char *a_title) { [(NSBox *)sga_get(a_id) setTitle:sga_string(a_title)]; }
+/* An NSBox places its content view by frame and does not size itself from that view's
+   constraints, so a box given no height by its container (a window's whole content, say)
+   came out as tall as its content alone, its title drawn over it. The child is pinned to
+   the box itself instead, by the insets the box's own layout gives (title, border and
+   content margins, measured on a sample frame), plus 4. */
+static void sga_group_box_pin(NSBox *b)
+{
+	NSView *c = [b contentView];
+	NSView *v = [[c subviews] firstObject];
+	if (!v) return;
+	NSRect l_was = [b frame];
+	[b setFrame:NSMakeRect(0, 0, 400, 400)];
+	NSRect f = [c frame];   /* in the box's (unflipped) coordinates */
+	[b setFrame:l_was];
+	CGFloat l_top = 400 - NSMaxY(f), l_bottom = NSMinY(f), l_start = NSMinX(f), l_end = 400 - NSMaxX(f);
+	for (NSLayoutConstraint *k in [[b constraints] copy]) if ([[k identifier] isEqualToString:@"sga_group_pin"]) [k setActive:NO];
+	NSArray<NSLayoutConstraint *> *l_pins = @[
+		[v.leadingAnchor constraintEqualToAnchor:b.leadingAnchor constant:l_start + 4],
+		[v.trailingAnchor constraintEqualToAnchor:b.trailingAnchor constant:-(l_end + 4)],
+		[v.topAnchor constraintEqualToAnchor:b.topAnchor constant:l_top + 4],
+		/* the box may be taller than its content (a window or stack gives it room) */
+		[v.bottomAnchor constraintLessThanOrEqualToAnchor:b.bottomAnchor constant:-(l_bottom + 4)]];
+	NSLayoutConstraint *l_snug = [v.bottomAnchor constraintEqualToAnchor:b.bottomAnchor constant:-(l_bottom + 4)];
+	[l_snug setPriority:NSLayoutPriorityDefaultLow];
+	l_pins = [l_pins arrayByAddingObject:l_snug];
+	for (NSLayoutConstraint *k in l_pins) [k setIdentifier:@"sga_group_pin"];
+	[NSLayoutConstraint activateConstraints:l_pins];
+}
+
+void sga_group_box_set_title(int a_id, const char *a_title) { NSBox *b = sga_get(a_id); [b setTitle:sga_string(a_title)]; sga_group_box_pin(b); }
 
 void sga_group_box_set_content(int a_id, int a_child)
 {
@@ -2896,11 +2931,7 @@ void sga_group_box_set_content(int a_id, int a_child)
 	for (NSView *l_old in [[c subviews] copy]) [l_old removeFromSuperview];
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
 	[c addSubview:v];
-	[NSLayoutConstraint activateConstraints:@[
-		[v.leadingAnchor constraintEqualToAnchor:c.leadingAnchor constant:4],
-		[v.trailingAnchor constraintEqualToAnchor:c.trailingAnchor constant:-4],
-		[v.topAnchor constraintEqualToAnchor:c.topAnchor constant:4],
-		[v.bottomAnchor constraintEqualToAnchor:c.bottomAnchor constant:-4]]];
+	sga_group_box_pin(b);
 }
 
 /* An expander: a disclosure triangle with a title, and the content it shows or hides

@@ -82,7 +82,9 @@ feature {NONE} -- Basics
 			l_stack.extend (create {GUI_SEPARATOR}.make_horizontal)
 			l_stack.extend (create {GUI_LABEL}.make ("Below the line"))
 			shoot ("separator", "Separator", 260, 120, l_stack)
-			create l_image.make_from_file (create {PATH}.make_from_string ("docs/gallery/macos/showcase_3_canvas.png"))
+				-- the showcase's canvas page, found from the output folder (docs/guide/images/<platform>)
+				-- so a run that does not start in the repository finds it too
+			create l_image.make_from_file (folder.extended ("..").extended ("..").extended ("..").extended ("gallery").extended ("macos").extended ("showcase_3_canvas.png"))
 			l_image.set_accessible_label ("A drawing")
 			shoot ("image", "Image", 320, 220, l_image)
 			shoot_window
