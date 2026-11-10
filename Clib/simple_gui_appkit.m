@@ -1270,8 +1270,8 @@ static void sga_nav_list_reload(SGANavList *l);
 {
 	NSRect r = [super contentRect];
 	if (position == 3 || position == 4) {
-		CGFloat w = 140;
-		r = [self bounds];
+		CGFloat w = 140, m = 12;   /* the strip, then a margin around the page, as top tabs leave */
+		r = NSInsetRect([self bounds], m, m);
 		r.size.width -= w;
 		if (position == 3) r.origin.x += w;
 	}
