@@ -197,6 +197,7 @@ feature -- Windows and containers
 					end
 				end
 				floats.wipe_out
+				release_picture_loaders (al_w)
 				al_w.close
 				al_w.shell_turn_pending
 			end
@@ -1292,18 +1293,47 @@ feature -- Controls
 	image_set_file (an_id: INTEGER; a_path: POINTER): BOOLEAN
 			-- PNG, JPEG, GIF, BMP, TGA, PSD, HDR and PNM files.
 		local
-			l_file: RAW_FILE
 			l_m: MANAGED_POINTER
 		do
-			create l_file.make_with_name (from_c (a_path))
-			if attached {SW_IMAGE} widget (an_id) and then l_file.exists and then l_file.is_readable
-				and then l_file.count > 0
-			then
-				l_file.open_read
-				create l_m.make (l_file.count)
-				l_file.read_to_managed_pointer (l_m, 0, l_file.count)
-				l_file.close
-				Result := image_set_bytes (an_id, l_m.item, l_m.count)
+			l_m := (create {GUI_DECODED_PICTURE}.make_empty).file_bytes (from_c (a_path))
+			if attached {SW_IMAGE} widget (an_id) and then attached l_m as al_m then
+				Result := image_set_bytes (an_id, al_m.item, al_m.count)
+			end
+		end
+
+	decoded_file (a_path: READABLE_STRING_GENERAL): detachable CAIRO_SURFACE
+			-- The picture file `a_path' on this thread, PNG through cairo else simple_stb; Void
+			-- when it is missing or will not decode. The grid view uses it when it has no worker.
+		do
+			if attached (create {GUI_DECODED_PICTURE}.make_empty).file_bytes (a_path) as al_m then
+				Result := decoded (al_m)
+			end
+		end
+
+	picture_loaders: ARRAYED_LIST [GUI_PICTURE_LOADER]
+			-- One per grid view; released when a window closes over the grid.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	release_picture_loaders (a_window: SW_WINDOW)
+			-- Let go the workers of the grids in `a_window' (they restart on the next request).
+		do
+			across picture_loaders as ic loop
+				if ic.is_started and then is_in_window (ic.grid, a_window) then
+					ic.release
+				end
+			end
+		end
+
+	is_in_window (a_widget: SW_WIDGET; a_window: SW_WINDOW): BOOLEAN
+			-- Is `a_widget' under `a_window''s root?
+		local
+			l_w: detachable SW_WIDGET
+		do
+			from l_w := a_widget until l_w = Void or Result loop
+				Result := l_w = a_window.root
+				l_w := l_w.parent
 			end
 		end
 
@@ -1329,41 +1359,14 @@ feature -- Controls
 			has_bytes: a_bytes.count > 0
 		local
 			l_png: CAIRO_SURFACE
-			l_stb: SIMPLE_STB
-			l_img: STB_IMAGE
-			l_src, l_dst: MANAGED_POINTER
-			l_x, l_y, l_at: INTEGER
-			r, g, b, a: NATURAL_32
+			l_picture: GUI_DECODED_PICTURE
 		do
 			create l_png.make_from_png_data (a_bytes)
 			if l_png.is_valid then
 				Result := l_png
 			else
-				create l_stb.make
-				l_img := l_stb.load_rgba_from_memory (a_bytes)
-				if l_img.is_valid and then l_img.width > 0 and then l_img.height > 0 then
-					create l_png.make (l_img.width, l_img.height)
-					if l_png.is_valid then
-						l_png.flush.do_nothing
-						create l_src.share_from_pointer (l_img.data, l_img.width * l_img.height * 4)
-						create l_dst.share_from_pointer (l_png.data, l_png.stride * l_img.height)
-						from l_y := 0 until l_y >= l_img.height loop
-							from l_x := 0 until l_x >= l_img.width loop
-								l_at := (l_y * l_img.width + l_x) * 4
-								a := l_src.read_natural_8 (l_at + 3).to_natural_32
-								r := l_src.read_natural_8 (l_at).to_natural_32 * a // 255
-								g := l_src.read_natural_8 (l_at + 1).to_natural_32 * a // 255
-								b := l_src.read_natural_8 (l_at + 2).to_natural_32 * a // 255
-								l_dst.put_natural_32 ((a |<< 24) | (r |<< 16) | (g |<< 8) | b, l_y * l_png.stride + l_x * 4)
-								l_x := l_x + 1
-							end
-							l_y := l_y + 1
-						end
-						l_png.mark_dirty.do_nothing
-						Result := l_png
-					end
-				end
-				l_img.destroy
+				create l_picture.make_from_bytes (a_bytes)
+				Result := l_picture.to_surface
 			end
 		end
 
@@ -3465,9 +3468,15 @@ feature -- Path controls, continued
 			-- 1v-a: SW_GRID_VIEW, a drawn grid; 50 is the user's selection, 51 an activation.
 		local
 			l_g: SW_GRID_VIEW
+			l_loader: GUI_PICTURE_LOADER
 		do
 			create l_g.make (240.0)
 			Result := register (l_g)
+				-- every format, decoded off the GUI thread by a worker processor
+			create l_loader.make (l_g, agent changed)
+			picture_loaders.extend (l_loader)
+			l_g.set_picture_loader (agent l_loader.request)
+			l_g.set_picture_decoder (agent decoded_file)
 			l_g.set_on_select (agent (an_id, i: INTEGER) do push (50, an_id, i, 0, 0) end (Result, ?))
 			l_g.set_on_activate (agent (an_id, i: INTEGER) do push (51, an_id, i, 0, 0) end (Result, ?))
 		end
