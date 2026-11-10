@@ -326,6 +326,12 @@ feature -- Windows and containers
 		alias "sg_test_toggle_splitter_pane($a_splitter, $a_pane);"
 		end
 
+	test_locate_row (an_id, a_row: INTEGER): INTEGER
+			-- 1q-c.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_locate_row($an_id, $a_row);"
+		end
+
 	splitter (a_vertical: BOOLEAN): INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_splitter($a_vertical ? 1 : 0);"

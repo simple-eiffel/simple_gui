@@ -98,6 +98,31 @@ feature -- Element change
 			end
 		end
 
+feature -- Locating
+
+	token_at (a_px, a_py: REAL_64): INTEGER
+			-- The token whose chip is under (`a_px', `a_py'); 0 for none.
+		local
+			i: INTEGER
+		do
+			from i := 1 until i > tokens.count or i > children.count or Result > 0 loop
+				if children.i_th (i).contains (a_px, a_py) then
+					Result := i
+				end
+				i := i + 1
+			end
+		ensure
+			in_range: Result >= 0 and Result <= tokens.count
+		end
+
+	chip_middle (i: INTEGER): TUPLE [x, y: REAL_64]
+			-- The middle of token `i''s chip.
+		require
+			valid: i >= 1 and i <= tokens.count and i <= children.count
+		do
+			Result := [children.i_th (i).x + children.i_th (i).width / 2, children.i_th (i).y + children.i_th (i).height / 2]
+		end
+
 feature {NONE} -- Implementation
 
 	rebuild

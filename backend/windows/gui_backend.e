@@ -597,6 +597,34 @@ feature -- Windows and containers
 			end
 		end
 
+	test_locate_row (an_id, a_row: INTEGER): INTEGER
+			-- `row_at_point' at the middle of row `a_row''s place.
+		local
+			l_y, l_end: REAL_64
+		do
+			if attached {GUI_SW_TOKEN_FIELD} widget (an_id) as al_t then
+				if a_row >= 1 and a_row <= al_t.tokens.count and a_row <= al_t.children.count then
+					Result := row_at_point (an_id, al_t.chip_middle (a_row).x, al_t.chip_middle (a_row).y)
+				end
+			elseif attached {SW_LIST} widget (an_id) as al_list then
+				l_y := al_list.y + (a_row - 1) * al_list.row_height - al_list.scroll_y + al_list.row_height / 2
+				Result := row_at_point (an_id, al_list.x + al_list.width / 2, l_y)
+			elseif attached {SW_TREE [INTEGER]} widget (an_id) as al_tree then
+					-- the first point down the tree whose row is `a_row', then its row's middle
+				from
+					l_y := al_tree.y
+					l_end := al_tree.y + al_tree.height
+				until
+					l_y > l_end or Result = a_row
+				loop
+					if row_at_point (an_id, al_tree.x + al_tree.width / 2, l_y) = a_row then
+						Result := a_row
+					end
+					l_y := l_y + 2.0
+				end
+			end
+		end
+
 	test_drag_dock_edge (a_dock, a_side, a_size: INTEGER)
 			-- As the user's drag: the size taken, and the change reported as the host reports a
 			-- drag (35).
@@ -4669,7 +4697,7 @@ feature {NONE} -- Pick and drop (1q)
 			l_row: INTEGER
 		do
 			if a_by_row then
-				l_row := row_at_point (a_source, a_y)
+				l_row := row_at_point (a_source, a_x, a_y)
 			end
 			pick_begin (a_source, a_mode, l_row)
 			Result := pick_token
@@ -4683,7 +4711,7 @@ feature {NONE} -- Pick and drop (1q)
 	pick_received (a_target: INTEGER; a_pebble: ANY; a_x, a_y: REAL_64)
 		do
 			if pick_accepts (a_target, a_pebble, a_x, a_y) then
-				push (31, a_target, row_at_point (a_target, a_y), 0, 0)
+				push (31, a_target, row_at_point (a_target, a_x, a_y), 0, 0)
 				pick_clear
 			end
 		end
@@ -4917,13 +4945,15 @@ feature {NONE} -- Pick and drop (1q)
 			end
 		end
 
-	row_at_point (an_id: INTEGER; a_y: REAL_64): INTEGER
-			-- The list row, or the tree's node number (1q-c), under window y `a_y'; 0 for none
-			-- or another kind of widget.
+	row_at_point (an_id: INTEGER; a_x, a_y: REAL_64): INTEGER
+			-- The list row, the tree's node number or the token (1q-c) under window point
+			-- (`a_x', `a_y'); 0 for none or another kind of widget.
 		local
 			r: INTEGER
 		do
-			if attached {SW_LIST} widget (an_id) as al_list then
+			if attached {GUI_SW_TOKEN_FIELD} widget (an_id) as al_t then
+				Result := al_t.token_at (a_x, a_y)
+			elseif attached {SW_LIST} widget (an_id) as al_list then
 				Result := al_list.row_at (a_y)
 			elseif attached {SW_TREE [INTEGER]} widget (an_id) as al_tree then
 				r := al_tree.row_at (a_y)

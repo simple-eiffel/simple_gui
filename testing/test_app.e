@@ -113,6 +113,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_dock_layout_round_trip, "dock_layout_round_trip")
 				run_test (agent t.test_dock_floats_hides_and_maximizes, "dock_floats_hides_and_maximizes")
 				run_test (agent t.test_dock_layout_keeps_1r_b_states, "dock_layout_keeps_1r_b_states")
+				run_test (agent t.test_drops_find_rows_by_place, "drops_find_rows_by_place")
 				run_test (agent t.test_splitter_panes_collapse, "splitter_panes_collapse")
 				run_test (agent t.test_dock_panel_fields, "dock_panel_fields")
 				run_test (agent t.test_password_field_reveals_and_hides, "password_field_reveals_and_hides")
