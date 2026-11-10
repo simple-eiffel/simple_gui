@@ -3579,24 +3579,6 @@ void sga_test_drop(int a_target, int a_row) { if (s_pick_state == 2) sga_pick_dr
 void sga_test_cancel_pick(void) { if (s_pick_state) { sga_pick_end(); sga_push(32, 0, 0, 0, 0); } }
 int sga_test_is_accepting(int a_target) { return s_pick_state == 2 && [s_pick_targets containsObject:@(a_target)] ? 1 : 0; }
 
-/* ----------------------------------------------------------------- common */
-
-void sga_set_enabled(int a_id, int a_on)
-{
-	id o = sga_core(a_id);
-	if ([o isKindOfClass:[SGASpin class]]) {
-		[((SGASpin *)o)->field setEnabled:a_on != 0];
-		[((SGASpin *)o)->stepper setEnabled:a_on != 0];
-	}
-	if ([o isKindOfClass:[SGARadioGroup class]]) for (NSButton *b in [(SGARadioGroup *)o arrangedSubviews]) [b setEnabled:a_on != 0];
-	if ([o isKindOfClass:[SGAExpander class]]) {
-		[((SGAExpander *)o)->triangle setEnabled:a_on != 0];
-		[((SGAExpander *)o)->title setEnabled:a_on != 0];
-	}
-	if ([o isKindOfClass:[NSControl class]]) [(NSControl *)o setEnabled:a_on != 0];
-	[[s_toolbar_item objectForKey:o] setEnabled:a_on != 0];
-}
-
 /* ---------------------------------------------- 1o: feedback and messages */
 
 /* A spinner: AppKit's spinning progress indicator, hidden while it does not turn. */
