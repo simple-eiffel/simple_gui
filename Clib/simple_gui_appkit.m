@@ -5820,3 +5820,540 @@ const char *sga_describe_accessibility(int a_window)
 	for (id c in [[w contentView] accessibilityChildren]) sga_describe(c, 1, 0, l_text);
 	return sga_return(Kind_tree, l_text);
 }
+
+/* ------------------------------------------------------------- 1r-a: the dock */
+
+/* A center widget with tool panels docked on its four sides. The dock lays itself out: the
+   top and bottom sides span the whole width, the left and right sit between them beside the
+   center. Each side shows its visible panels stacked along its long axis (down on the left
+   and right, across on the top and bottom), each under a title, or as tabs, one at a time.
+   A side with no visible panel takes no room. The edge between a side and the center drags
+   to resize it, the center keeping at least 120 points each way; a double click on the edge,
+   or the side's chevron, collapses it to a strip naming its panels, and a press on a name
+   expands it showing that panel. The user's acts are events: 35 an edge dragged (a side,
+   b size; a queued 35 for the same side is replaced while dragging), 36 a side collapsed or
+   expanded (b = 1 collapsed), 37 a tab chosen (b = the panel's index). Code changes nothing
+   to the queue. Indices are the shared class's: the panel's place in `panels', from 1. */
+
+#define SGA_DOCK_STRIP 22
+#define SGA_DOCK_EDGE 6      /* the edge's grab, centered on the 1-point line */
+#define SGA_DOCK_MIN_CENTER 120
+
+/* Replace the last queued event of `a_type' for `a_id' whose `a' is `a_a', else add one. */
+static void sga_push_replacing(int a_type, int a_id, int a_a, int a_b)
+{
+	for (int i = s_head; i != s_tail; i = (i + 1) % SGA_QUEUE)
+		if (s_events[i].type == a_type && s_events[i].id == a_id && s_events[i].a == a_a) { s_events[i].b = a_b; return; }
+	sga_push(a_type, a_id, a_a, a_b, 0);
+}
+
+@class SGADock;
+
+@interface SGADockPanel : NSObject
+{
+@public
+	int widget;          /* the panel's content widget */
+	int side;            /* 1 left, 2 right, 3 top, 4 bottom */
+	BOOL shown;
+	NSString *key, *title;
+	NSView *box;         /* a title over the content, when stacked */
+	NSTextField *header;
+	NSLayoutConstraint *under_header, *at_top;   /* the content's top: under the title, or at the box's top (tabbed) */
+}
+@end
+@implementation SGADockPanel
+@end
+
+static void sga_dock_press_name(SGADock *d, SGADockPanel *p);
+
+@interface SGADockStrip : NSView
+{
+@public
+	__weak SGADock *dock;
+	int side;
+	NSMutableArray<NSValue *> *rects;   /* each name's rectangle, in the panels' order on the side */
+}
+@end
+
+@interface SGADock : NSView <NSTabViewDelegate>
+{
+@public
+	NSView *center;
+	NSMutableArray<SGADockPanel *> *panels;          /* the shared class's order */
+	NSMutableArray<SGADockPanel *> *order[5];        /* each side's order */
+	NSView *side_view[5];                            /* what the side shows: a stack or a tab view */
+	NSTabView *tabs[5];
+	NSStackView *stack[5];
+	SGADockStrip *strip[5];
+	NSButton *chevron[5];
+	BOOL tabbed[5], collapsed[5];
+	int size[5];
+	int dragging;          /* the side whose edge is being dragged, 0 none */
+}
+- (void)rebuild:(int)a_side;
+@end
+
+static BOOL sga_dock_long_vertical(int a_side) { return a_side <= 2; }
+
+static NSArray<SGADockPanel *> *sga_dock_visible(SGADock *d, int a_side)
+{
+	NSMutableArray *r = [NSMutableArray array];
+	for (SGADockPanel *p in d->order[a_side]) if (p->shown) [r addObject:p];
+	return r;
+}
+
+/* The room a side takes across: none when it shows nothing, the strip when collapsed. */
+static CGFloat sga_dock_depth(SGADock *d, int a_side)
+{
+	if (![sga_dock_visible(d, a_side) count]) return 0;
+	return d->collapsed[a_side] ? SGA_DOCK_STRIP : d->size[a_side];
+}
+
+@implementation SGADockStrip
+- (BOOL)isFlipped { return YES; }
+- (void)drawRect:(NSRect)r
+{
+	(void)r;
+	[[NSColor windowBackgroundColor] setFill];
+	NSRectFill([self bounds]);
+	NSDictionary *l_att = @{NSFontAttributeName: [NSFont systemFontOfSize:11], NSForegroundColorAttributeName: [NSColor secondaryLabelColor]};
+	rects = [NSMutableArray array];
+	CGFloat at = 6;
+	BOOL l_down = sga_dock_long_vertical(side);
+	for (SGADockPanel *p in sga_dock_visible(dock, side)) {
+		NSSize s = [p->title sizeWithAttributes:l_att];
+		NSRect l_rect = l_down ? NSMakeRect(0, at, SGA_DOCK_STRIP, s.width + 12) : NSMakeRect(at, 0, s.width + 12, SGA_DOCK_STRIP);
+		[rects addObject:[NSValue valueWithRect:l_rect]];
+		if (l_down) {
+			NSGraphicsContext *g = [NSGraphicsContext currentContext];
+			[g saveGraphicsState];
+			NSAffineTransform *t = [NSAffineTransform transform];
+			[t translateXBy:NSMidX(l_rect) - s.height / 2 yBy:NSMaxY(l_rect) - 6];
+			[t rotateByDegrees:-90];
+			[t concat];
+			[p->title drawAtPoint:NSZeroPoint withAttributes:l_att];
+			[g restoreGraphicsState];
+		} else
+			[p->title drawAtPoint:NSMakePoint(NSMinX(l_rect) + 6, (SGA_DOCK_STRIP - s.height) / 2) withAttributes:l_att];
+		at += (l_down ? l_rect.size.height : l_rect.size.width) + 4;
+	}
+}
+- (void)mouseDown:(NSEvent *)e
+{
+	NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
+	NSArray<SGADockPanel *> *l_shown = sga_dock_visible(dock, side);
+	for (NSUInteger i = 0; i < [rects count] && i < [l_shown count]; i++)
+		if (NSPointInRect(p, [rects[i] rectValue])) { sga_dock_press_name(dock, l_shown[i]); return; }
+}
+- (NSString *)accessibilityRole { return NSAccessibilityGroupRole; }
+- (NSString *)accessibilityLabel { return @"Collapsed panels"; }
+@end
+
+static void sga_dock_select_silently(SGADock *d, SGADockPanel *p);
+
+/* As the user: expand the panel's side showing it (36), and choose its tab (37) when the side
+   is tabbed and it was not the one showing. */
+static void sga_dock_press_name(SGADock *d, SGADockPanel *p)
+{
+	int l_side = p->side;
+	if (d->collapsed[l_side]) {
+		d->collapsed[l_side] = NO;
+		[d rebuild:l_side];
+		sga_push(36, sga_id_of(d), l_side, 0, 0);
+	}
+	if (d->tabbed[l_side] && [[d->tabs[l_side] selectedTabViewItem] identifier] != p) {
+		sga_dock_select_silently(d, p);
+		sga_push(37, sga_id_of(d), l_side, (int)[d->panels indexOfObjectIdenticalTo:p] + 1, 0);
+	}
+	sga_wake();
+}
+
+static void sga_dock_select_silently(SGADock *d, SGADockPanel *p)
+{
+	NSTabView *t = d->tabs[p->side];
+	NSInteger i = [t indexOfTabViewItemWithIdentifier:p];
+	if (i == NSNotFound) return;
+	s_suppress++;
+	[t selectTabViewItemAtIndex:i];
+	s_suppress--;
+}
+
+@implementation SGADock
+- (BOOL)isFlipped { return YES; }
+- (NSSize)intrinsicContentSize { return NSMakeSize(NSViewNoIntrinsicMetric, NSViewNoIntrinsicMetric); }
+
+/* The rectangle each side, the center and each edge's grab take now. */
+- (NSRect)rectOf:(int)a_side
+{
+	NSRect b = [self bounds];
+	CGFloat t = sga_dock_depth(self, 3), bo = sga_dock_depth(self, 4), l = sga_dock_depth(self, 1), r = sga_dock_depth(self, 2);
+	CGFloat tl = t > 0 ? 1 : 0, bl = bo > 0 ? 1 : 0, ll = l > 0 ? 1 : 0, rl = r > 0 ? 1 : 0;
+	/* The center keeps 120 points each way: sides give way in proportion (their sizes kept). */
+	CGFloat l_over = (t + tl + bo + bl) - (b.size.height - SGA_DOCK_MIN_CENTER);
+	if (l_over > 0 && t + bo > 0) { CGFloat k = fmax(0, 1 - l_over / (t + bo)); t = floor(t * k); bo = floor(bo * k); }
+	l_over = (l + ll + r + rl) - (b.size.width - SGA_DOCK_MIN_CENTER);
+	if (l_over > 0 && l + r > 0) { CGFloat k = fmax(0, 1 - l_over / (l + r)); l = floor(l * k); r = floor(r * k); }
+	CGFloat l_mid_top = t + tl, l_mid_h = fmax(0, b.size.height - t - tl - bo - bl);
+	switch (a_side) {
+		case 3: return NSMakeRect(0, 0, b.size.width, t);
+		case 4: return NSMakeRect(0, b.size.height - bo, b.size.width, bo);
+		case 1: return NSMakeRect(0, l_mid_top, l, l_mid_h);
+		case 2: return NSMakeRect(b.size.width - r, l_mid_top, r, l_mid_h);
+		default: return NSMakeRect(l + ll, l_mid_top, fmax(0, b.size.width - l - ll - r - rl), l_mid_h);
+	}
+}
+- (NSRect)edgeOf:(int)a_side
+{
+	if (!sga_dock_depth(self, a_side) || collapsed[a_side]) return NSZeroRect;
+	NSRect s = [self rectOf:a_side];
+	CGFloat h = SGA_DOCK_EDGE / 2.0;
+	switch (a_side) {
+		case 1: return NSMakeRect(NSMaxX(s) - h + 0.5, NSMinY(s), SGA_DOCK_EDGE, s.size.height);
+		case 2: return NSMakeRect(NSMinX(s) - h - 0.5, NSMinY(s), SGA_DOCK_EDGE, s.size.height);
+		case 3: return NSMakeRect(0, NSMaxY(s) - h + 0.5, s.size.width, SGA_DOCK_EDGE);
+		default: return NSMakeRect(0, NSMinY(s) - h - 0.5, s.size.width, SGA_DOCK_EDGE);
+	}
+}
+- (void)layout
+{
+	[super layout];
+	[center setFrame:[self rectOf:0]];
+	for (int s = 1; s <= 4; s++) {
+		NSRect f = [self rectOf:s];
+		BOOL l_any = f.size.width > 0 && f.size.height > 0;
+		[side_view[s] setHidden:!l_any || collapsed[s]];
+		[strip[s] setHidden:!l_any || !collapsed[s]];
+		[chevron[s] setHidden:!l_any || collapsed[s]];
+		[side_view[s] setFrame:f];
+		[strip[s] setFrame:f];
+		[strip[s] setNeedsDisplay:YES];
+		/* the chevron at the side's corner nearest the center's top */
+		NSRect c = NSMakeRect(s == 2 ? NSMinX(f) + 2 : NSMaxX(f) - 18, NSMinY(f) + 2, 16, 16);
+		[chevron[s] setFrame:c];
+	}
+	[[self window] invalidateCursorRectsForView:self];
+	[self setNeedsDisplay:YES];
+}
+- (void)drawRect:(NSRect)r
+{
+	(void)r;
+	[[NSColor separatorColor] setFill];
+	for (int s = 1; s <= 4; s++) {
+		if (!sga_dock_depth(self, s)) continue;
+		NSRect f = [self rectOf:s];
+		switch (s) {
+			case 1: NSRectFill(NSMakeRect(NSMaxX(f), NSMinY(f), 1, f.size.height)); break;
+			case 2: NSRectFill(NSMakeRect(NSMinX(f) - 1, NSMinY(f), 1, f.size.height)); break;
+			case 3: NSRectFill(NSMakeRect(0, NSMaxY(f), f.size.width, 1)); break;
+			default: NSRectFill(NSMakeRect(0, NSMinY(f) - 1, f.size.width, 1)); break;
+		}
+	}
+}
+- (void)resetCursorRects
+{
+	for (int s = 1; s <= 4; s++) {
+		NSRect e = [self edgeOf:s];
+		if (!NSIsEmptyRect(e)) [self addCursorRect:e cursor:s <= 2 ? [NSCursor resizeLeftRightCursor] : [NSCursor resizeUpDownCursor]];
+	}
+}
+/* Edges take the press; everything else belongs to the views under it. */
+- (NSView *)hitTest:(NSPoint)p
+{
+	NSPoint l_local = [self convertPoint:p fromView:[self superview]];
+	for (int s = 1; s <= 4; s++) if (NSPointInRect(l_local, [self edgeOf:s])) return self;
+	return [super hitTest:p];
+}
+/* The size a side gets for an edge at `a_at' (dock coordinates), within the center's minimum. */
+- (int)sizeFor:(int)a_side at:(NSPoint)a_at
+{
+	NSRect b = [self bounds];
+	CGFloat v;
+	switch (a_side) {
+		case 1: v = a_at.x; break;
+		case 2: v = b.size.width - a_at.x; break;
+		case 3: v = a_at.y; break;
+		default: v = b.size.height - a_at.y; break;
+	}
+	CGFloat l_room = a_side <= 2 ? b.size.width - sga_dock_depth(self, a_side == 1 ? 2 : 1) - 2 : b.size.height - sga_dock_depth(self, a_side == 3 ? 4 : 3) - 2;
+	return (int)lround(fmax(SGA_DOCK_STRIP + 8, fmin(v, l_room - SGA_DOCK_MIN_CENTER)));
+}
+- (void)userSized:(int)a_side to:(int)a_size
+{
+	if (size[a_side] == a_size) return;
+	size[a_side] = a_size;
+	[self setNeedsLayout:YES];
+	sga_push_replacing(35, sga_id_of(self), a_side, a_size);
+	sga_wake();
+}
+- (void)mouseDown:(NSEvent *)e
+{
+	NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
+	dragging = 0;
+	for (int s = 1; s <= 4; s++) if (NSPointInRect(p, [self edgeOf:s])) dragging = s;
+	if (!dragging) return;
+	if ([e clickCount] == 2) {   /* a double click on the edge collapses the side */
+		collapsed[dragging] = YES;
+		[self setNeedsLayout:YES];
+		sga_push(36, sga_id_of(self), dragging, 1, 0);
+		sga_wake();
+		dragging = 0;
+	}
+}
+- (void)mouseDragged:(NSEvent *)e
+{
+	if (!dragging) return;
+	[self userSized:dragging to:[self sizeFor:dragging at:[self convertPoint:[e locationInWindow] fromView:nil]]];
+	[self layoutSubtreeIfNeeded];
+}
+- (void)mouseUp:(NSEvent *)e { (void)e; dragging = 0; }
+- (void)chevronPressed:(NSButton *)b
+{
+	int s = (int)[b tag];
+	collapsed[s] = YES;
+	[self setNeedsLayout:YES];
+	sga_push(36, sga_id_of(self), s, 1, 0);
+	sga_wake();
+}
+/* A tab chosen by the user: 37 with the panel's index. */
+- (void)tabView:(NSTabView *)t didSelectTabViewItem:(NSTabViewItem *)i
+{
+	(void)t;
+	SGADockPanel *p = [i identifier];
+	if (s_suppress || !p) return;
+	sga_push(37, sga_id_of(self), p->side, (int)[panels indexOfObjectIdenticalTo:p] + 1, 0);
+	sga_wake();
+}
+/* Put side `a_side''s visible panels in its stack or its tabs, in its order. */
+- (void)rebuild:(int)a_side
+{
+	NSArray<SGADockPanel *> *l_shown = sga_dock_visible(self, a_side);
+	SGADockPanel *l_active = tabbed[a_side] ? [[tabs[a_side] selectedTabViewItem] identifier] : nil;
+	for (SGADockPanel *p in order[a_side]) [p->box removeFromSuperview];
+	s_suppress++;
+	while ([tabs[a_side] numberOfTabViewItems]) [tabs[a_side] removeTabViewItem:[tabs[a_side] tabViewItemAtIndex:0]];
+	for (NSView *v in [[stack[a_side] arrangedSubviews] copy]) [stack[a_side] removeArrangedSubview:v];
+	for (SGADockPanel *p in l_shown) {
+		[p->header setHidden:tabbed[a_side]];
+		/* the tab names a tabbed panel: its content takes the title's room */
+		[p->under_header setActive:!tabbed[a_side]];
+		[p->at_top setActive:tabbed[a_side]];
+		if (tabbed[a_side]) {
+			NSTabViewItem *i = [[NSTabViewItem alloc] initWithIdentifier:p];
+			[i setLabel:p->title];
+			[i setView:p->box];
+			[tabs[a_side] addTabViewItem:i];
+		} else {
+			[stack[a_side] addArrangedSubview:p->box];
+			/* across the whole side: the stack itself only places along its axis */
+			[(sga_dock_long_vertical(a_side) ? [p->box.widthAnchor constraintEqualToAnchor:stack[a_side].widthAnchor]
+				: [p->box.heightAnchor constraintEqualToAnchor:stack[a_side].heightAnchor]) setActive:YES];
+		}
+	}
+	if (l_active && [l_shown containsObject:l_active]) [tabs[a_side] selectTabViewItemWithIdentifier:l_active];
+	s_suppress--;
+	side_view[a_side] = tabbed[a_side] ? tabs[a_side] : stack[a_side];
+	[tabs[a_side] setHidden:!tabbed[a_side]];
+	[stack[a_side] setHidden:tabbed[a_side]];
+	[strip[a_side] setNeedsDisplay:YES];
+	[self setNeedsLayout:YES];
+}
+@end
+
+int sga_dock(int a_center)
+{
+	SGADock *d = [[SGADock alloc] initWithFrame:NSMakeRect(0, 0, 600, 400)];
+	d->panels = [NSMutableArray array];
+	d->center = sga_get(a_center);
+	[d->center setTranslatesAutoresizingMaskIntoConstraints:YES];
+	[d addSubview:d->center];
+	for (int s = 1; s <= 4; s++) {
+		d->order[s] = [NSMutableArray array];
+		d->size[s] = s <= 2 ? 200 : 140;
+		d->tabs[s] = [[NSTabView alloc] initWithFrame:NSZeroRect];
+		[d->tabs[s] setDelegate:d];
+		[d->tabs[s] setTranslatesAutoresizingMaskIntoConstraints:YES];
+		[d->tabs[s] setHidden:YES];
+		d->stack[s] = [[NSStackView alloc] initWithFrame:NSZeroRect];
+		[d->stack[s] setOrientation:sga_dock_long_vertical(s) ? NSUserInterfaceLayoutOrientationVertical : NSUserInterfaceLayoutOrientationHorizontal];
+		[d->stack[s] setDistribution:NSStackViewDistributionFillEqually];
+		[d->stack[s] setAlignment:sga_dock_long_vertical(s) ? NSLayoutAttributeWidth : NSLayoutAttributeHeight];
+		[d->stack[s] setSpacing:1];
+		[d->stack[s] setTranslatesAutoresizingMaskIntoConstraints:YES];
+		d->side_view[s] = d->stack[s];
+		d->strip[s] = [[SGADockStrip alloc] initWithFrame:NSZeroRect];
+		d->strip[s]->dock = d;
+		d->strip[s]->side = s;
+		[d->strip[s] setHidden:YES];
+		NSString *l_symbol = s == 1 ? @"chevron.left" : s == 2 ? @"chevron.right" : s == 3 ? @"chevron.up" : @"chevron.down";
+		d->chevron[s] = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:l_symbol accessibilityDescription:@"Collapse"] target:d action:@selector(chevronPressed:)];
+		[d->chevron[s] setBordered:NO];
+		[d->chevron[s] setTag:s];
+		[d->chevron[s] setTranslatesAutoresizingMaskIntoConstraints:YES];
+		[d->chevron[s] setToolTip:@"Collapse"];
+		[d addSubview:d->stack[s]];
+		[d addSubview:d->tabs[s]];
+		[d addSubview:d->strip[s]];
+		[d addSubview:d->chevron[s]];
+	}
+	return sga_keep(d);
+}
+
+static SGADock *sga_dock_of(int a_dock) { id d = sga_get(a_dock); return [d isKindOfClass:[SGADock class]] ? d : nil; }
+static SGADockPanel *sga_dock_panel(SGADock *d, int an_index) { return d && an_index >= 1 && an_index <= (int)[d->panels count] ? d->panels[(NSUInteger)an_index - 1] : nil; }
+static BOOL sga_dock_side_ok(int a_side) { return a_side >= 1 && a_side <= 4; }
+
+void sga_dock_add(int a_dock, int a_widget, int a_side, const char *a_key, const char *a_title)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	if (!d || !sga_dock_side_ok(a_side)) return;
+	SGADockPanel *p = [[SGADockPanel alloc] init];
+	p->widget = a_widget;
+	p->side = a_side;
+	p->shown = YES;
+	p->key = sga_string(a_key);
+	p->title = sga_string(a_title);
+	p->header = [NSTextField labelWithString:p->title];
+	[p->header setFont:[NSFont boldSystemFontOfSize:11]];
+	[p->header setTextColor:[NSColor secondaryLabelColor]];
+	NSView *v = sga_get(a_widget);
+	NSView *b = [[NSView alloc] initWithFrame:NSZeroRect];
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[p->header setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[b addSubview:p->header];
+	[b addSubview:v];
+	/* The title top-left (clear of the side's chevron); the content fills the rest. */
+	p->under_header = [v.topAnchor constraintEqualToAnchor:p->header.bottomAnchor constant:4];
+	p->at_top = [v.topAnchor constraintEqualToAnchor:b.topAnchor constant:4];
+	[NSLayoutConstraint activateConstraints:@[
+		[p->header.topAnchor constraintEqualToAnchor:b.topAnchor constant:4],
+		[p->header.leadingAnchor constraintEqualToAnchor:b.leadingAnchor constant:6],
+		[p->header.trailingAnchor constraintLessThanOrEqualToAnchor:b.trailingAnchor constant:-22],
+		p->under_header,
+		[v.leadingAnchor constraintEqualToAnchor:b.leadingAnchor constant:6],
+		[v.trailingAnchor constraintEqualToAnchor:b.trailingAnchor constant:-6],
+		[v.bottomAnchor constraintEqualToAnchor:b.bottomAnchor constant:-4]]];
+	[v setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationVertical];
+	[v setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[b setAccessibilityLabel:p->title];
+	p->box = b;
+	[d->panels addObject:p];
+	[d->order[a_side] addObject:p];
+	[d rebuild:a_side];
+}
+
+void sga_dock_move(int a_dock, int an_index, int a_side, int a_position)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (!p || !sga_dock_side_ok(a_side)) return;
+	int l_old = p->side;
+	[d->order[l_old] removeObjectIdenticalTo:p];
+	NSUInteger l_at = (NSUInteger)MAX(0, MIN(a_position - 1, (int)[d->order[a_side] count]));
+	[d->order[a_side] insertObject:p atIndex:l_at];
+	p->side = a_side;
+	[d rebuild:l_old];
+	if (l_old != a_side) [d rebuild:a_side];
+}
+
+void sga_dock_remove(int a_dock, int an_index)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (!p) return;
+	[d->order[p->side] removeObjectIdenticalTo:p];
+	[d->panels removeObjectIdenticalTo:p];
+	[p->box removeFromSuperview];
+	[d rebuild:p->side];
+}
+
+/* The panel's title: its header, its tab, its name in the strip. */
+void sga_dock_set_title(int a_dock, int an_index, const char *a_title)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (!p) return;
+	p->title = sga_string(a_title);
+	[p->header setStringValue:p->title];
+	[p->box setAccessibilityLabel:p->title];
+	NSInteger i = [d->tabs[p->side] indexOfTabViewItemWithIdentifier:p];
+	if (i != NSNotFound) [[d->tabs[p->side] tabViewItemAtIndex:i] setLabel:p->title];
+	[d->strip[p->side] setNeedsDisplay:YES];
+}
+
+void sga_dock_set_tabbed(int a_dock, int a_side, int a_on)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	if (!d || !sga_dock_side_ok(a_side) || d->tabbed[a_side] == (a_on != 0)) return;
+	d->tabbed[a_side] = a_on != 0;
+	[d rebuild:a_side];
+}
+
+/* Silently: show the panel's tab (a tabbed side). */
+void sga_dock_activate(int a_dock, int an_index)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (p && d->tabbed[p->side]) sga_dock_select_silently(d, p);
+}
+
+void sga_dock_set_size(int a_dock, int a_side, int a_px)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	if (!d || !sga_dock_side_ok(a_side) || a_px <= 0) return;
+	d->size[a_side] = a_px;
+	[d setNeedsLayout:YES];
+}
+
+int sga_dock_size(int a_dock, int a_side)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	return d && sga_dock_side_ok(a_side) ? d->size[a_side] : 0;
+}
+
+void sga_dock_collapse(int a_dock, int a_side, int a_on)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	if (!d || !sga_dock_side_ok(a_side)) return;
+	d->collapsed[a_side] = a_on != 0;
+	[d setNeedsLayout:YES];
+}
+
+void sga_dock_show_panel(int a_dock, int an_index, int a_on)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (!p || p->shown == (a_on != 0)) return;
+	p->shown = a_on != 0;
+	[d rebuild:p->side];
+}
+
+/* As the user: the edge of `a_side' dragged to `a_px' (within the center's minimum), a press
+   on panel `an_index''s name in its side's strip, a click on its tab. */
+void sga_test_drag_dock_edge(int a_dock, int a_side, int a_px)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	if (!d || !sga_dock_side_ok(a_side) || !sga_dock_depth(d, a_side) || d->collapsed[a_side]) return;
+	[d layoutSubtreeIfNeeded];
+	NSRect b = [d bounds];
+	NSPoint at = a_side == 1 ? NSMakePoint(a_px, 0) : a_side == 2 ? NSMakePoint(b.size.width - a_px, 0)
+		: a_side == 3 ? NSMakePoint(0, a_px) : NSMakePoint(0, b.size.height - a_px);
+	[d userSized:a_side to:[d sizeFor:a_side at:at]];
+	[d layoutSubtreeIfNeeded];
+}
+
+void sga_test_press_dock_strip(int a_dock, int an_index)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (p && p->shown && d->collapsed[p->side]) sga_dock_press_name(d, p);
+}
+
+void sga_test_click_dock_tab(int a_dock, int an_index)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (!p || !p->shown || !d->tabbed[p->side]) return;
+	NSTabView *t = d->tabs[p->side];
+	NSInteger i = [t indexOfTabViewItemWithIdentifier:p];
+	if (i != NSNotFound && [t selectedTabViewItem] != [t tabViewItemAtIndex:i]) [t selectTabViewItemAtIndex:i];   /* the delegate sends 37 */
+}
