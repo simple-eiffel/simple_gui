@@ -82,8 +82,6 @@ Every creation procedure requires `is_gui_thread` and `has_application`; every c
 | Native control | A `GtkBox` with a CSS class for the kind (`GtkInfoBar` is deprecated), holding an icon, a label, the action buttons and a flat close button | A styled `NSView` | `SW_INFO_BAR`, with the kind's wash color, a glyph, a label, `SW_BUTTON` actions and a close glyph |
 | Looks or behaves differently | The label does not shorten its text. The accessibility role is set to `alert` on the box. | The same banner, drawn from the kind's colors. | The action buttons are quiet buttons in a row, and the close button is hidden until `set_closable (True)`. |
 
-The macOS column follows the design for that platform; the AppKit side is still to be written.
-
 ## Design guidance
 
 - Match the kind to the message: information for news, success for a finished task, warning for something that may go wrong, error for something that did.

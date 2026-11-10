@@ -69,8 +69,6 @@ Inherited: `set_accessible_label`, `set_tooltip`, `show`, `hide` and the rest of
 | Native control | `GtkSpinner`, 20 by 20 logical pixels, aligned to the start | `NSProgressIndicator`, spinning style | `SW_SPINNER`, a drawn ring of size 20 |
 | Looks or behaves differently | Keeps its small size and does not stretch. | The same small wheel. | The ring turns on the windows' fast timer, which is paced up while a spinner is turning. |
 
-The macOS column follows the design for that platform; the AppKit side is still to be written.
-
 ## Design guidance
 
 - Show the spinner only while work runs, and `stop` it when the work ends or fails. A wheel that turns forever with nothing behind it is worse than none.

@@ -38,6 +38,9 @@ feature {NONE} -- Initialization
 				shoot_menus
 				shoot_drawing
 				shoot_advanced
+				shoot_forms
+				shoot_icons_and_feedback
+				shoot_moving
 				print ("guide gallery: " + saved.out + " pictures in " + folder.name.to_string_8 + "%N")
 			else
 				print ("guide gallery: no display%N")
@@ -404,6 +407,231 @@ feature {NONE} -- Advanced
 			l_rich.set_text_color (18, 27, 0xCC3300)
 			shoot ("rich-text-area", "Rich text area", 360, 120, l_rich)
 			-- The popover is a window of its own, outside a window's snapshot: its picture is taken by hand.
+		end
+
+feature {NONE} -- Forms (1p)
+
+	shoot_forms
+		local
+			l_stack: GUI_STACK
+			l_when: GUI_DATE_TIME_PICKER
+			l_month: GUI_MONTH_PICKER
+			l_secret: GUI_PASSWORD_FIELD
+			l_price: GUI_RANGE_SLIDER
+			l_file: GUI_FILE_FIELD
+			l_email, l_city: GUI_TEXT_FIELD
+		do
+			create l_stack.make_vertical
+			create l_when.make
+			l_when.set_accessible_label ("Starts at")
+			l_when.set_date_time (2026, 11, 9, 17, 5)
+			l_stack.extend (create {GUI_LABEL}.make ("Starts at"))
+			l_stack.extend (l_when)
+			shoot ("date-time-picker", "Meeting", 400, 140, l_stack)
+			create l_stack.make_vertical
+			create l_month.make
+			l_month.set_accessible_label ("Report month")
+			l_month.set_month (2026, 11)
+			l_stack.extend (create {GUI_LABEL}.make ("Report month"))
+			l_stack.extend (l_month)
+			shoot ("month-picker", "Report", 360, 140, l_stack)
+			create l_stack.make_vertical
+			create l_secret.make
+			l_secret.set_accessible_label ("Password")
+			l_secret.set_text ("correct horse")
+			l_stack.extend (create {GUI_LABEL}.make ("Password"))
+			l_stack.extend (l_secret)
+			shoot ("password-field", "Password", 360, 140, l_stack)
+			create l_stack.make_vertical
+			create l_price.make (0, 100)
+			l_price.set_accessible_label ("Price range")
+			l_price.set_range (20, 75)
+			l_stack.extend (create {GUI_LABEL}.make ("Price: $20 to $75"))
+			l_stack.extend (l_price)
+			shoot ("range-slider", "Price", 360, 160, l_stack)
+			create l_stack.make_vertical
+			create l_file.make_open ("Transcript", <<"txt", "md">>)
+			l_file.set_path (create {PATH}.make_from_string ("Documents/sermon-notes.txt"))
+			l_stack.extend (create {GUI_LABEL}.make ("Transcript"))
+			l_stack.extend (l_file)
+			shoot ("file-field", "File field", 440, 140, l_stack)
+			create l_stack.make_vertical
+			create l_email.make
+			l_email.set_accessible_label ("Email")
+			l_email.set_validation (l_email.Validate_email)
+			l_email.set_text ("larry@")
+			l_email.validate
+			create l_city.make
+			l_city.set_accessible_label ("City")
+			l_city.set_suggestions (<<"Atlanta", "Austin", "Boston">>)
+			l_city.set_text ("Atlanta")
+			l_stack.set_spacing (8)
+			l_stack.extend (create {GUI_LABEL}.make ("Email"))
+			l_stack.extend (l_email)
+				-- the note sits under the field, over the gap: leave it room
+			l_stack.extend (create {GUI_LABEL}.make (" "))
+			l_stack.extend (create {GUI_LABEL}.make ("City"))
+			l_stack.extend (l_city)
+			shoot ("validation-and-suggestions", "Form", 380, 240, l_stack)
+		end
+
+feature {NONE} -- Icons and feedback (1n, 1o)
+
+	shoot_icons_and_feedback
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_save, l_delete, l_settings, l_inbox, l_upload: GUI_BUTTON
+			l_tabs: GUI_TABS
+			l_bar: GUI_INFO_BAR
+			l_spinner: GUI_SPINNER
+			l_hint: GUI_LABEL
+		do
+			create l_stack.make_vertical
+			create l_save.make ("Save")
+			l_save.set_style (l_save.Style_suggested)
+			l_save.set_icon ("save")
+			create l_delete.make ("Delete")
+			l_delete.set_style (l_delete.Style_destructive)
+			l_delete.set_icon ("delete")
+			create l_settings.make ("")
+			l_settings.set_style (l_settings.Style_flat)
+			l_settings.set_icon ("settings")
+			l_settings.set_accessible_label ("Settings")
+			create l_inbox.make ("Inbox")
+			l_inbox.set_style (l_inbox.Style_pill)
+			l_inbox.set_icon ("mail")
+			l_inbox.set_badge ("3")
+			create l_upload.make ("Upload")
+			l_upload.set_icon ("upload")
+			l_upload.set_busy (True)
+			create l_tabs.make
+			l_tabs.extend (create {GUI_LABEL}.make ("Mail page"), "Mail")
+			l_tabs.extend (create {GUI_LABEL}.make ("News page"), "News")
+			l_tabs.set_page_icon (1, "mail")
+			l_tabs.set_page_badge (2, "5")
+			create l_hint.make ("Styles, icons, badges and busy:")
+			l_stack.extend (l_hint)
+			l_stack.extend (l_save)
+			l_stack.extend (l_delete)
+			l_stack.extend (l_settings)
+			l_stack.extend (l_inbox)
+			l_stack.extend (l_upload)
+			l_stack.extend (l_tabs)
+				-- Shown in its own window, made key: macOS draws the suggested and destructive
+				-- tints only in the key window.
+			create l_window.make ("Icons", 420, 320)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle
+			driver.focus (l_hint)
+			save ("icons-and-badges", l_window)
+			create l_stack.make_vertical
+			create l_bar.make ({GUI_INFO_BAR}.Kind_info, "A new version is ready.")
+			l_bar.add_action ("Update").do_nothing
+			l_bar.set_closable (True)
+			l_stack.extend (l_bar)
+			l_stack.extend (create {GUI_LABEL}.make ("Version 1.4 is running."))
+			shoot ("info-bar", "Info bar", 460, 180, l_stack)
+			create l_stack.make_vertical
+			create l_spinner.make
+			l_spinner.set_accessible_label ("Loading")
+			l_spinner.start
+			l_stack.extend (l_spinner)
+			l_stack.extend (create {GUI_LABEL}.make ("Loading the chapters..."))
+			shoot ("spinner", "Spinner", 320, 140, l_stack)
+			create l_window.make ("Toasts", 420, 200)
+			create l_stack.make_vertical
+			l_stack.extend (create {GUI_BUTTON}.make ("Delete the note"))
+			l_stack.extend (create {GUI_BUTTON}.make ("Notify me"))
+			l_window.set_content (l_stack)
+			l_window.show
+			settle
+			l_window.show_toast_with_action ("Note deleted", "Undo", agent do end)
+			save ("toasts-and-notifications", l_window)
+		end
+
+feature {NONE} -- Moving things (1q)
+
+	shoot_moving
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_source, l_texts, l_numbers, l_box, l_status: GUI_LABEL
+			l_books: GUI_LIST
+			l_outline: GUI_TREE
+			l_tags: GUI_TOKEN_FIELD
+			l_row: GUI_STACK
+			l_law: INTEGER
+		do
+				-- Pick and drop: the note is in flight, and only the target that takes text lights.
+			create l_window.make ("Pick and drop", 380, 220)
+			create l_stack.make_vertical
+			create l_source.make ("Romans 8:28")
+			l_source.set_pebble ({STRING_32} "Romans 8:28")
+			create l_texts.make ("Takes verses")
+			l_texts.drop_actions.extend (agent (a_verse: STRING_32) do end)
+			create l_numbers.make ("Takes numbers")
+			l_numbers.drop_actions.extend (agent (a_number: INTEGER_REF) do end)
+			l_stack.extend (l_source)
+			l_stack.extend (l_texts)
+			l_stack.extend (l_numbers)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle
+			driver.pick (l_source, 0)
+			save ("pick-and-drop", l_window)
+			driver.cancel_pick
+				-- Drag and drop between programs: a file has just come in.
+			create l_window.make ("Drop box", 400, 220)
+			create l_stack.make_vertical
+			create l_box.make ("Drop files or text here")
+			create l_status.make ("")
+			l_box.file_drop_actions.extend (agent (a_paths: ARRAYED_LIST [PATH]; a_s: GUI_LABEL)
+				do
+					if attached a_paths.first.entry as al_name then
+						a_s.set_text ({STRING_32} "Dropped: " + al_name.name)
+					end
+				end (?, l_status))
+			create l_source.make ("Drag me to Finder")
+			l_source.set_drag_out (create {GUI_DRAG_DATA}.make_text ("John 3:16"))
+			l_stack.extend (l_box)
+			l_stack.extend (l_source)
+			l_stack.extend (l_status)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle
+			driver.drop_files (l_box, <<create {PATH}.make_from_string ("Documents/sermon-notes.txt")>>)
+			save ("drag-and-drop-between-programs", l_window)
+				-- Reordering: a row on its way to a new place in its own list.
+			create l_window.make ("Reordering", 460, 300)
+			create l_stack.make_vertical
+			create l_books.make
+			across <<"Genesis", "Exodus", "Leviticus", "Numbers">> as ic loop l_books.extend (ic) end
+			l_books.set_reorderable (True)
+			create l_outline.make
+			l_outline.add_root ("Old Testament")
+			l_law := l_outline.last_node
+			l_outline.add_child (l_law, "Law")
+			l_outline.add_child (l_law, "Prophets")
+			l_outline.add_root ("New Testament")
+			l_outline.add_child (l_outline.last_node, "Gospels")
+			l_outline.set_reorderable (True)
+			l_outline.expand (l_law)
+			create l_tags.make
+			across <<"grace", "faith", "hope">> as ic loop l_tags.extend_token (ic) end
+			l_tags.set_tokens_movable (True)
+			create l_row.make_horizontal
+			l_row.extend_stretching (l_books)
+			l_row.extend_stretching (l_outline)
+			l_stack.extend_stretching (l_row)
+			l_stack.extend (l_tags)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle
+			driver.pick (l_books, 1)
+			save ("reordering", l_window)
+			driver.cancel_pick
 		end
 
 feature {NONE} -- Implementation
