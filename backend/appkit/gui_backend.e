@@ -1063,6 +1063,77 @@ feature -- Common widget state
 		alias "sga_test_drag_out_ended($an_id, $a_how);"
 		end
 
+	dock (a_center: INTEGER): INTEGER
+			-- 1r-a: the dock lays out its sides and center itself.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_dock($a_center);"
+		end
+
+	dock_add (a_dock, a_content, a_side: INTEGER; a_key, a_title: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_add($a_dock, $a_content, $a_side, (const char *) $a_key, (const char *) $a_title);"
+		end
+
+	dock_move (a_dock, an_index, a_side, a_position: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_move($a_dock, $an_index, $a_side, $a_position);"
+		end
+
+	dock_remove (a_dock, an_index: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_remove($a_dock, $an_index);"
+		end
+
+	dock_set_title (a_dock, an_index: INTEGER; a_title: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_set_title($a_dock, $an_index, (const char *) $a_title);"
+		end
+
+	dock_set_tabbed (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_set_tabbed($a_dock, $a_side, $a_on ? 1 : 0);"
+		end
+
+	dock_activate (a_dock, an_index: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_activate($a_dock, $an_index);"
+		end
+
+	dock_set_size (a_dock, a_side, a_size: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_set_size($a_dock, $a_side, $a_size);"
+		end
+
+	dock_size (a_dock, a_side: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_dock_size($a_dock, $a_side);"
+		end
+
+	dock_collapse (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_collapse($a_dock, $a_side, $a_on ? 1 : 0);"
+		end
+
+	dock_show_panel (a_dock, an_index: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_show_panel($a_dock, $an_index, $a_on ? 1 : 0);"
+		end
+
+	test_drag_dock_edge (a_dock, a_side, a_size: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_drag_dock_edge($a_dock, $a_side, $a_size);"
+		end
+
+	test_press_dock_strip (a_dock, an_index: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_press_dock_strip($a_dock, $an_index);"
+		end
+
+	test_click_dock_tab (a_dock, an_index: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_click_dock_tab($a_dock, $an_index);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"
