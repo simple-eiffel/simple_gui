@@ -2289,6 +2289,11 @@ void sga_date_picker_set(int a_id, int a_value)
 	SGADatePicker *p = sga_get(a_id);
 	[p setDateValue:sga_date_of(p, a_value)];
 	p->last = sga_date_value(p);
+	if (p->kind == 2) {   /* 1p: date and time keep date * 10000 + time */
+		NSDateComponents *k = [[NSCalendar calendarWithIdentifier:NSCalendarIdentifierGregorian] components:NSCalendarUnitHour | NSCalendarUnitMinute fromDate:[p dateValue]];
+		p->last = p->last * 10000 + [k hour] * 60 + [k minute];
+	}
+	else if (p->kind == 3) p->last = p->last / 100;
 }
 
 int sga_date_picker_value(int a_id) { return (int)sga_date_value(sga_get(a_id)); }

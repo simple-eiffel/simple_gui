@@ -2365,6 +2365,9 @@ feature -- Forms (1p)
 			driver.set_month (l_month, 2027, 3)
 			assert ("emitted", l_when.change_actions.fire_count = 1 and l_month.change_actions.fire_count = 1)
 			assert ("read back", l_when.hour = 9 and l_month.month = 3)
+			l_when.set_date (2027, 1, 2)
+			assert ("inherited date", l_when.year = 2027 and l_when.month = 1 and l_when.day = 2 and l_when.hour = 9 and l_when.minute = 30)
+			assert ("inherited silent", l_when.change_actions.fire_count = 1)
 			l_window.close
 		end
 
