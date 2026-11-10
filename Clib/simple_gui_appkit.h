@@ -433,3 +433,5 @@ void sga_table_set_shown_rows(int a_id, const char *a_rows);
 int sga_table_shown_count(int a_id);
 void sga_test_edit_cell(int a_id, int a_row, int a_column, const char *a_text);
 void sga_test_cancel_edit(int a_id, int a_row, int a_column);
+const char *sga_test_cell_text(int a_id, int a_row, int a_column);
+const char *sga_test_cell_note(int a_id);

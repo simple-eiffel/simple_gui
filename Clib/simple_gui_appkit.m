@@ -7737,3 +7737,13 @@ void sga_test_cancel_edit(int a_id, int a_row, int a_column)
 	NSTextField *f = [t viewAtColumn:a_column - 1 row:v makeIfNecessary:NO];
 	if (f) [t control:f textView:(NSTextView *)[[t window] fieldEditor:NO forObject:f] doCommandBySelector:@selector(cancelOperation:)];
 }
+
+/* What cell (row, column) shows now, by model row; and the refusal note showing ("" none). */
+const char *sga_test_cell_text(int a_id, int a_row, int a_column)
+{
+	SGAGridTable *t = s_inner[a_id];
+	NSInteger m = a_row - 1;
+	NSArray<NSString *> *l_row = m < 0 ? nil : t->source_on ? t->cache[@(m)] : (m < (NSInteger)[t->data count] ? t->data[(NSUInteger)m] : nil);
+	return sga_return(Kind_field, a_column >= 1 && (NSUInteger)a_column <= [l_row count] ? l_row[(NSUInteger)a_column - 1] : @"");
+}
+const char *sga_test_cell_note(int a_id) { SGAGridTable *t = s_inner[a_id]; return sga_return(Kind_label, t->note ? [t->note stringValue] : @""); }
