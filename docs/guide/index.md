@@ -19,23 +19,29 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 
 ## Input
 - [Text field](text-field.md): one line of text
+- [Password field](password-field.md): hidden text, with a show and hide button
+- [File field](file-field.md): a path, and a Choose button for the file dialog
+- [Validation and suggestions](validation-and-suggestions.md): checks and error messages on a field, and completions as the user types
 - [Text area](text-area.md): several lines of text
 - [Search field](search-field.md): text to search for
 - [Combo box](combo-box.md): text typed or picked from options
 - [Spin box](spin-box.md): an exact whole number
 - [Slider](slider.md): a number chosen by dragging
+- [Range slider](range-slider.md): a low and a high number, chosen by dragging two thumbs
 - [Color chooser](color-chooser.md): a color
 
 ## Choice
-- [Dropdown](dropdown.md): one of many, in little room
+- [Dropdown](dropdown.md): one of many, in little room, with group headers and separators
 - [Radio group](radio-group.md): one of a few, all in view
 - [Segmented control](segmented.md): one of a few short choices, joined
 - [Switch](switch.md): a setting that takes effect at once
-- [List](list.md): one of a list of texts
+- [List](list.md): one or several of a list of texts, which can be reordered
 
 ## Date and time
 - [Date picker](date-picker.md): a date, typed or stepped
 - [Time picker](time-picker.md): a time of day
+- [Date and time picker](date-time-picker.md): a date and a time of day together
+- [Month picker](month-picker.md): a month of a year
 - [Calendar](calendar.md): a date from a month grid
 
 ## Containers
@@ -49,8 +55,13 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 
 ## Tables and trees
 - [Table](table.md): rows and columns, filled or lazy (100,000 rows and more)
-- [Tree](tree.md): a hierarchy
+- [Tree](tree.md): a hierarchy, whose nodes can be moved
 - [Tree table](tree-table.md): a hierarchy with columns
+
+## Drag and drop
+- [Pick and drop](pick-and-drop.md): move an object from one widget to another, with typed targets
+- [Drag and drop between programs](drag-and-drop-between-programs.md): files and text dragged in from other programs, and dragged out to them
+- [Reordering](reordering.md): move list rows, tree nodes and tokens by dragging
 
 ## Feedback
 - [Progress bar](progress-bar.md): how far along a task is

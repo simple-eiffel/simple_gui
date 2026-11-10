@@ -67,10 +67,14 @@ The field shows one token, "draft", and the label reads "1 tag". Type `work, urg
 | `remove_token (i)` | Remove token `i`; `1 <= i` and `i <= count`. Fires nothing. |
 | `wipe_out` | Remove every token. Fires nothing. |
 | `change_actions` | Agents run when the user adds or removes tokens. |
+| `put_token (a_text, i)` | Puts a token at place `i` (`count + 1`: the end). `a_text` is not empty and `1 <= i` and `i <= count + 1`. Fires nothing. |
+| `set_tokens_movable (a_on)`, `are_tokens_movable` | Let the user drag tokens to other places, in this field or in another movable one. See [Reordering](reordering.md). |
 
 The rest are the [common features](widget.md).
 
 **Events:** `change_actions` fire, with no arguments, when the user's typing or deleting changes the list of tokens. Read `tokens` in the agent. `extend_token`, `remove_token` and `wipe_out` never fire them.
+
+**Moving tokens.** After `set_tokens_movable (True)` the user can drag a token onto another token to take its place, or elsewhere on a movable field to send it to the end, and a token can go from one movable field to another. Each field that changes runs its `change_actions`. See [Reordering](reordering.md); tokens are also pebbles for [pick and drop](pick-and-drop.md).
 
 **Accessibility:** the field's role is `text-box`, and each token is a `button` named by its text. The field has no visible label of its own: give it `set_accessible_label` ("To", "Tags"), and put a [label](label.md) beside it.
 

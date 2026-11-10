@@ -60,10 +60,19 @@ A window opens with a list of three books, none selected, and the line "Pick a b
 | `select_row (i)` | Selects row `i`, with no event. Requires 1 <= `i` <= `count`. Ensures `selected_index = i`. |
 | `clear_selection` | Selects nothing. Ensures `selected_index = 0`. |
 | `selection_actions` | `GUI_ACTIONS [TUPLE [row: INTEGER]]`: run when the user selects a row. |
+| `set_multiple_selection (a_on)` | Lets the user select several rows at once (Command or Control, and Shift, with a click), or goes back to one. Requires `is_gui_thread`. Ensures `is_multiple_selection = a_on`. |
+| `is_multiple_selection` | May the user select several rows? |
+| `selected_rows` | Every selected row, in order, as an `ARRAYED_LIST [INTEGER]`. Ensures every number is in 1 to `count`. |
+| `set_reorderable (a_on)`, `is_reorderable`, `reorder_actions`, `move_row (a_from, a_to)` | Let the user move rows by dragging. See [Reordering](reordering.md). |
+| `set_row_pebble_function (a_function)` | Lets each row carry a pebble for [pick and drop](pick-and-drop.md). A drop on the list sets `last_drop_row`. |
 
 Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the rest of the [common features](widget.md).
 
 **Events:** `selection_actions` fires with the row number when the user selects a row. Rows are 1-based; check for 0, which is sent when the user clears the selection (Linux and macOS; on Windows a click always selects a row). A list reports a selection only when it changes: choosing the row that is already selected sends nothing. `select_row` and `scroll_to_row` never fire it: its postcondition is `selection_actions.fire_count = old selection_actions.fire_count`.
+
+**Several rows.** After `set_multiple_selection (True)` the user can select more than one row, with Command or Control and Shift. Read all of them with `selected_rows`, for example when the user presses a button such as **Delete**. `selection_actions` still run with one number: the first selected row, or 0 when none is. They run when the selection changes, so use them to learn that the selection changed and read `selected_rows` for what it is. `selected_index` is the single-selection feature; in this mode use `selected_rows`. On Linux, turning the mode on clears the selection.
+
+**Moving rows, and pick and drop.** A list can let the user reorder its rows by dragging: see [Reordering](reordering.md). Its rows can also be sources and targets for [pick and drop](pick-and-drop.md), and a list can take files and text from other programs: see [Drag and drop between programs](drag-and-drop-between-programs.md).
 
 **Accessibility:** the role is `list`, and each row is a `list-item` read by its text. The list has no visible text of its own, so give it `set_accessible_label` with what the rows are ("Books", "Recent files").
 
@@ -82,6 +91,8 @@ Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the res
 - After `select_row`, call `scroll_to_row` with the same row when a long list may have it out of view. It leaves the selection alone.
 - Read `selected_index` when the user presses a button such as **Open**, rather than acting on every selection change.
 - Add a [context menu](widget.md) for actions on a row (rename, delete) with `set_context_menu`.
+- Turn on `set_multiple_selection` only when an action works on several rows (delete, move, export). Show the count of selected rows near the button that acts on them.
+- Turn on `set_reorderable` only when the order is the user's to decide, and keep **Move up** and **Move down** buttons beside it (see [Reordering](reordering.md)).
 
 ## Gallery
 
