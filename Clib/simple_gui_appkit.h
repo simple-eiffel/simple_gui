@@ -414,3 +414,24 @@ void sga_dock_set_panel_pill(int a_dock, int an_index, const char *a_code);
 const char *sga_test_panel_tab_text(int a_dock, int an_index);
 const char *sga_test_panel_tab_tooltip(int a_dock, int an_index);
 int sga_test_locate_row(int a_id, int a_row);
+
+/* 1s: rich list rows, filtering, sorting */
+void sga_list_extend_rich(int a_id, const char *a_title, const char *a_subtitle, const char *an_icon, int a_badge, int a_flags);
+void sga_list_set_checked(int a_id, int a_row, int a_on);
+int sga_list_is_checked(int a_id, int a_row);
+void sga_list_remove(int a_id, int a_row);
+void sga_list_reorder(int a_id, const char *an_order);
+void sga_list_set_filter(int a_id, const char *a_text);
+int sga_list_shown_count(int a_id);
+void sga_test_check_row(int a_id, int a_row);
+void sga_test_close_row(int a_id, int a_row);
+void sga_table_set_column_editor(int a_id, int a_column, int a_kind, const char *an_options);
+const char *sga_table_take_edit(int a_id);
+void sga_table_refuse_edit(int a_id, int a_row, int a_column, const char *a_message);
+void sga_table_set_filter(int a_id, const char *a_text, int a_columns);
+void sga_table_set_shown_rows(int a_id, const char *a_rows);
+int sga_table_shown_count(int a_id);
+void sga_test_edit_cell(int a_id, int a_row, int a_column, const char *a_text);
+void sga_test_cancel_edit(int a_id, int a_row, int a_column);
+const char *sga_test_cell_text(int a_id, int a_row, int a_column);
+const char *sga_test_cell_note(int a_id);

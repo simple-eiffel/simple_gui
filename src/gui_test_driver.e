@@ -660,6 +660,69 @@ feature -- User actions
 			settle
 		end
 
+	check_row (a_list: GUI_LIST; a_row: INTEGER)
+			-- Press row `a_row''s check box, as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_check_row (a_list.id, a_row)
+			settle
+		end
+
+	close_row (a_list: GUI_LIST; a_row: INTEGER)
+		require
+			has_application: has_application
+		do
+			backend.test_close_row (a_list.id, a_row)
+			settle
+		end
+
+	row_check_shown (a_list: GUI_LIST; a_row: INTEGER): BOOLEAN
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.list_is_checked (a_list.id, a_row)
+		end
+
+	edit_cell (a_table: GUI_TABLE; a_row, a_column: INTEGER; a_text: READABLE_STRING_GENERAL)
+			-- Edit the cell to `a_text' and commit it, as the user would.
+		require
+			has_application: has_application
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_text)
+			backend.test_edit_cell (a_table.id, a_row, a_column, l_c.item)
+			settle
+		end
+
+	cancel_edit (a_table: GUI_TABLE; a_row, a_column: INTEGER)
+		require
+			has_application: has_application
+		do
+			backend.test_cancel_edit (a_table.id, a_row, a_column)
+			settle
+		end
+
+	cell_shown (a_table: GUI_TABLE; a_row, a_column: INTEGER): STRING_32
+			-- What the cell shows.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_cell_text (a_table.id, a_row, a_column))
+		end
+
+	cell_note (a_table: GUI_TABLE): STRING_32
+			-- The refusal note showing; empty: none.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_cell_note (a_table.id))
+		end
+
 	located_row (a_widget: GUI_WIDGET; a_row: INTEGER): INTEGER
 			-- The row a drop at the middle of row `a_row' (a list row, tree node or token) lands on.
 		require

@@ -186,6 +186,9 @@ feature -- Element change
 			row_source := a_cells
 			source_count := a_count
 			backend.table_set_source (id, a_count)
+			if not filter_text.is_empty then
+				apply_filter
+			end
 		ensure
 			has_row_source: has_row_source
 			counted: row_count = a_count
@@ -201,6 +204,9 @@ feature -- Element change
 		do
 			source_count := a_count
 			backend.table_set_row_count (id, a_count)
+			if not filter_text.is_empty then
+				apply_filter
+			end
 		ensure
 			counted: row_count = a_count
 		end
@@ -213,6 +219,9 @@ feature -- Element change
 			has_row_source: has_row_source
 		do
 			backend.table_forget_rows (id)
+			if not filter_text.is_empty then
+				apply_filter
+			end
 		end
 
 	refresh_row (r: INTEGER)
@@ -293,13 +302,172 @@ feature -- Element change
 			set: sort_column = c and is_sort_ascending = a_ascending
 		end
 
+feature -- Editing cells (1s)
+
+	Edit_none: INTEGER = 0
+	Edit_text: INTEGER = 1
+	Edit_check: INTEGER = 2
+			-- A check box; the cell's text is "1" or "0".
+	Edit_choice: INTEGER = 3
+			-- A dropdown of the column's choices.
+
+	column_editor (c: INTEGER): INTEGER
+		require
+			valid: 1 <= c and c <= column_count
+		do
+			if attached editors.item (c) as al_e then
+				Result := al_e.kind
+			end
+		ensure
+			known: Result >= Edit_none and Result <= Edit_choice
+		end
+
+	set_column_editor (c, a_kind: INTEGER)
+			-- Let the user edit column `c''s cells as text or a check box (or not). A double
+			-- click, F2 or Return edits; Return or leaving commits; Escape cancels; a check cell
+			-- commits on its click.
+		require
+			gui_thread: is_gui_thread
+			valid: 1 <= c and c <= column_count
+			kind: a_kind = Edit_none or a_kind = Edit_text or a_kind = Edit_check
+		local
+			l_c: C_STRING
+		do
+			editors.force ([a_kind, create {ARRAYED_LIST [STRING_32]}.make (0)], c)
+			l_c := backend.to_c ("")
+			backend.table_set_column_editor (id, c, a_kind, l_c.item)
+		ensure
+			set: column_editor (c) = a_kind
+		end
+
+	set_column_choices (c: INTEGER; a_choices: ARRAY [READABLE_STRING_GENERAL])
+			-- Column `c''s cells are chosen from `a_choices' with a dropdown; a choice commits at once.
+		require
+			gui_thread: is_gui_thread
+			valid: 1 <= c and c <= column_count
+			has_choices: not a_choices.is_empty
+		local
+			l_list: ARRAYED_LIST [STRING_32]
+			l_c: C_STRING
+		do
+			create l_list.make (a_choices.count)
+			across a_choices as ic loop
+				l_list.extend (ic.to_string_32)
+			end
+			editors.force ([Edit_choice, l_list], c)
+			l_c := backend.to_c (joined (l_list))
+			backend.table_set_column_editor (id, c, Edit_choice, l_c.item)
+		ensure
+			set: column_editor (c) = Edit_choice
+		end
+
+	set_cell_validator (c: INTEGER; a_validator: FUNCTION [INTEGER, STRING_32, detachable STRING_32])
+			-- Before an edit of column `c' is kept, `a_validator' sees its row and new text: a
+			-- message refuses it (the cell keeps its old text and shows the message under it
+			-- until the next edit in this table); Void accepts it.
+		require
+			valid: 1 <= c and c <= column_count
+		do
+			validators.force (a_validator, c)
+		end
+
+	cell_edit_actions: GUI_ACTIONS [TUPLE [row, column: INTEGER; text: STRING_32]]
+			-- Run after the user's edit was accepted. A held table already shows and holds the
+			-- new text; a lazy table's program updates its row source.
+		do
+			if attached cell_edit_actions_made as al_a then
+				Result := al_a
+			else
+				create Result.make
+				cell_edit_actions_made := Result
+			end
+		end
+
+feature -- Filtering (1s)
+
+	filter_text: STRING_32
+		attribute
+			create Result.make_empty
+		end
+
+	filter_columns: ARRAYED_LIST [INTEGER]
+			-- The columns the filter looks in; empty: all.
+		attribute
+			create Result.make (0)
+		end
+
+	set_filter (a_text: READABLE_STRING_GENERAL)
+			-- Show only the rows with a cell (in `filter_columns') containing `a_text', ignoring
+			-- case; empty shows every row. Row numbers stay the table's own; a selected row the
+			-- filter hides is deselected, with the selection event.
+		require
+			gui_thread: is_gui_thread
+		do
+			filter_text := a_text.to_string_32
+			apply_filter
+		ensure
+			set: filter_text.same_string_general (a_text)
+		end
+
+	set_filter_columns (a_columns: ARRAY [INTEGER])
+		require
+			gui_thread: is_gui_thread
+			valid: across a_columns as ic all 1 <= ic and ic <= column_count and ic <= 31 end
+		do
+			create filter_columns.make (a_columns.count)
+			across a_columns as ic loop
+				filter_columns.extend (ic)
+			end
+			apply_filter
+		end
+
+	filter_with (a_search: GUI_SEARCH_FIELD)
+			-- Filter by `a_search''s text as it is typed.
+		require
+			gui_thread: is_gui_thread
+		do
+			a_search.change_actions.extend (agent follow (a_search))
+			set_filter (a_search.text)
+		end
+
+	set_shown_rows (a_rows: ARRAY [INTEGER])
+			-- A lazy table shows only `a_rows' (empty: all), for a program with its own index.
+		require
+			gui_thread: is_gui_thread
+			has_row_source: has_row_source
+			valid: across a_rows as ic all 1 <= ic and ic <= row_count end
+		local
+			l_joined: STRING_32
+			l_c: C_STRING
+		do
+			create l_joined.make (a_rows.count * 4)
+			across a_rows as ic loop
+				if not l_joined.is_empty then
+					l_joined.append_character (',')
+				end
+				l_joined.append_integer (ic)
+			end
+			l_c := backend.to_c (l_joined)
+			backend.table_set_shown_rows (id, l_c.item)
+		end
+
+	shown_count: INTEGER
+			-- How many rows show.
+		do
+			Result := backend.table_shown_count (id)
+		ensure
+			in_range: 0 <= Result and Result <= row_count
+		end
+
 feature {GUI_APPLICATION} -- Events
 
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)
 		local
 			l_ascending: BOOLEAN
 		do
-			if a_type = 16 then
+			if a_type = 45 then
+				take_edit (a_a, a_b)
+			elseif a_type = 16 then
 				answer_rows_wanted (a_a, a_b)
 			elseif a_type = 4 then
 				selection_actions.call ([a_a])
@@ -314,6 +482,96 @@ feature {GUI_APPLICATION} -- Events
 feature {NONE} -- Implementation
 
 	titles: ARRAYED_LIST [STRING_32]
+
+	editors: HASH_TABLE [TUPLE [kind: INTEGER; choices: ARRAYED_LIST [STRING_32]], INTEGER]
+			-- Each edited column's editor, by column.
+		attribute
+			create Result.make (2)
+		end
+
+	validators: HASH_TABLE [FUNCTION [INTEGER, STRING_32, detachable STRING_32], INTEGER]
+		attribute
+			create Result.make (2)
+		end
+
+	cell_edit_actions_made: detachable like cell_edit_actions
+
+	take_edit (r, c: INTEGER)
+			-- The user committed an edit of cell (`r', `c'): refuse it if its validator says so,
+			-- else keep it and tell `cell_edit_actions'.
+		local
+			l_text: STRING_32
+			l_c: C_STRING
+		do
+			l_text := backend.from_c (backend.table_take_edit (id))
+			if 1 <= r and r <= row_count and 1 <= c and c <= column_count then
+				if attached validators.item (c) as al_v and then attached al_v.item ([r, l_text]) as al_message then
+					l_c := backend.to_c (al_message)
+					backend.table_refuse_edit (id, r, c, l_c.item)
+				else
+					if not has_row_source then
+						rows [r] [c] := l_text
+					end
+					if attached cell_edit_actions_made as al_a then
+						al_a.call ([r, c, l_text])
+					end
+				end
+			end
+		end
+
+	follow (a_search: GUI_SEARCH_FIELD)
+		do
+			set_filter (a_search.text)
+		end
+
+	apply_filter
+			-- The backend filters held rows; a lazy table's rows are asked for here, and the
+			-- backend told which to show.
+		local
+			l_mask, r: INTEGER
+			l_needle, l_joined: STRING_32
+			l_c: C_STRING
+		do
+			across filter_columns as ic loop
+				l_mask := l_mask | (1 |<< (ic - 1))
+			end
+			if attached row_source as al_source then
+				create l_joined.make (0)
+				if not filter_text.is_empty then
+					l_needle := filter_text.as_lower
+					from r := 1 until r > source_count loop
+						if row_matches (source_cells (al_source, r), l_needle) then
+							if not l_joined.is_empty then
+								l_joined.append_character (',')
+							end
+							l_joined.append_integer (r)
+						end
+						r := r + 1
+					end
+					if l_joined.is_empty then
+						l_joined.append_character ('-')   -- none shows (a non-digit, so no row)
+					end
+				end
+				l_c := backend.to_c (l_joined)
+				backend.table_set_shown_rows (id, l_c.item)
+			else
+				l_c := backend.to_c (filter_text)
+				backend.table_set_filter (id, l_c.item, l_mask)
+			end
+		end
+
+	row_matches (a_cells: ARRAYED_LIST [STRING_32]; a_needle: STRING_32): BOOLEAN
+			-- Does a cell in `filter_columns' contain `a_needle' (already lower case)?
+		local
+			c: INTEGER
+		do
+			from c := 1 until c > a_cells.count or Result loop
+				if filter_columns.is_empty or else filter_columns.has (c) then
+					Result := a_cells [c].as_lower.has_substring (a_needle)
+				end
+				c := c + 1
+			end
+		end
 
 	rows: ARRAYED_LIST [ARRAYED_LIST [STRING_32]]
 
