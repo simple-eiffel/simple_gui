@@ -49,7 +49,6 @@ feature -- Element change
 		local
 			l_piece: STRING_32
 			i: INTEGER
-			l_b: GUI_SW_LINK_BUTTON
 		do
 			path_text := a_path.to_string_32
 			parts.wipe_out
@@ -72,6 +71,26 @@ feature -- Element change
 			if not l_piece.is_empty then
 				parts.extend (l_piece)
 			end
+			show_parts
+		end
+
+	set_parts (a_parts: READABLE_STRING_GENERAL)
+			-- Any parts (1t breadcrumbs), joined by U+001F, shown as they are.
+		do
+			path_text := {STRING_32} ""
+			parts.wipe_out
+			across a_parts.to_string_32.split ('%/31/') as ic loop
+				parts.extend (ic)
+			end
+			show_parts
+		end
+
+	show_parts
+			-- A link button per part, chevrons between.
+		local
+			i: INTEGER
+			l_b: GUI_SW_LINK_BUTTON
+		do
 			children.wipe_out
 			from i := 1 until i > parts.count loop
 				if i > 1 then
@@ -81,6 +100,14 @@ feature -- Element change
 				put (l_b)
 				i := i + 1
 			end
+		end
+
+	press_part (i: INTEGER)
+			-- As the user clicking part `i'.
+		require
+			valid: 1 <= i and i <= parts.count
+		do
+			report (i)
 		end
 
 feature -- Accessibility
