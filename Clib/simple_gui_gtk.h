@@ -5235,6 +5235,19 @@ static void sg_sidebar_extend(int id, int page, const char *title) {
     { int i = 0; while ((k = gtk_list_box_get_row_at_index(sg_side_list(id), i++))) if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(k), "sg-page")) > 0) n++; }
     g_utf8_strncpy(first, title, 1);
     letter = gtk_label_new(first);
+    {   /* collapsed, a page with no icon shows its first letter in a small circle */
+        static int css_done = 0;
+        if (!css_done) {
+            GtkCssProvider *p = gtk_css_provider_new();
+            css_done = 1;
+            gtk_css_provider_load_from_string(p, "label.sg-side-letter { min-width: 20px; min-height: 20px; border-radius: 10px; "
+                "background-color: alpha(currentColor, 0.15); font-size: smaller; font-weight: bold; }");
+            gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(p), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+            g_object_unref(p);
+        }
+        gtk_widget_add_css_class(letter, "sg-side-letter");
+        gtk_label_set_xalign(GTK_LABEL(letter), 0.5);
+    }
     gtk_widget_set_visible(icon, FALSE);
     gtk_widget_set_visible(letter, FALSE);
     gtk_label_set_xalign(GTK_LABEL(label), 0.0);

@@ -2700,6 +2700,15 @@ feature -- Controls
 			end
 		end
 
+	path_control_set_parts (an_id: INTEGER; a_parts: POINTER)
+			-- 1t.
+		do
+			if attached {GUI_SW_PATH_CONTROL} widget (an_id) as al_p then
+				al_p.set_parts (from_c (a_parts))
+				changed
+			end
+		end
+
 	path_control_count (an_id: INTEGER): INTEGER
 		do
 			if attached {GUI_SW_PATH_CONTROL} widget (an_id) as al_p then
@@ -2986,6 +2995,112 @@ feature -- Controls
 		do
 			if attached {SW_TABS} widget (a_tabs) as al_t then
 				Result := al_t.selected_index
+			end
+		end
+
+	tabs_set_position (a_tabs, a_position: INTEGER)
+			-- 1t: SW_TABS' strip placement (the same numbers).
+		do
+			if attached {SW_TABS} widget (a_tabs) as al_t and then a_position >= 0 and then a_position <= 4 then
+				al_t.set_strip_position (a_position)
+				changed
+			end
+		end
+
+	sidebar: INTEGER
+			-- 1t: SW_SIDEBAR; the user's page is 46, the collapse button 47.
+		local
+			l_s: SW_SIDEBAR
+		do
+			create l_s.make
+			Result := register (l_s)
+			l_s.set_on_page_change (agent (an_id, p: INTEGER) do push (46, an_id, p, 0, 0) end (Result, ?))
+			l_s.set_on_collapse_change (agent (an_id: INTEGER; c: BOOLEAN) do push (47, an_id, 0, c.to_integer, 0) end (Result, ?))
+		end
+
+	sidebar_extend (a_sidebar, a_page: INTEGER; a_title: POINTER)
+		do
+			if attached {SW_SIDEBAR} widget (a_sidebar) as al_s and then attached widget (a_page) as al_page then
+				al_s.extend (al_page, from_c (a_title))
+				changed
+			end
+		end
+
+	sidebar_add_heading (a_sidebar: INTEGER; a_text: POINTER)
+		do
+			if attached {SW_SIDEBAR} widget (a_sidebar) as al_s then
+				al_s.add_heading (from_c (a_text))
+				changed
+			end
+		end
+
+	sidebar_set_icon (a_sidebar, i: INTEGER; a_name: POINTER)
+		do
+			if attached {SW_SIDEBAR} widget (a_sidebar) as al_s and then i >= 1 and then i <= al_s.page_count then
+				al_s.set_page_icon (i, from_c (a_name))
+				changed
+			end
+		end
+
+	sidebar_set_badge (a_sidebar, i: INTEGER; a_text: POINTER)
+		do
+			if attached {SW_SIDEBAR} widget (a_sidebar) as al_s and then i >= 1 and then i <= al_s.page_count then
+				al_s.set_page_badge (i, from_c (a_text))
+				changed
+			end
+		end
+
+	sidebar_select (a_sidebar, i: INTEGER)
+		do
+			if attached {SW_SIDEBAR} widget (a_sidebar) as al_s and then i >= 1 and then i <= al_s.page_count then
+				al_s.select_page (i)
+				changed
+			end
+		end
+
+	sidebar_selected (a_sidebar: INTEGER): INTEGER
+		do
+			if attached {SW_SIDEBAR} widget (a_sidebar) as al_s then
+				Result := al_s.selected_page
+			end
+		end
+
+	sidebar_set_collapsible (a_sidebar: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_SIDEBAR} widget (a_sidebar) as al_s then
+				al_s.set_collapsible (a_on)
+				changed
+			end
+		end
+
+	sidebar_set_collapsed (a_sidebar: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_SIDEBAR} widget (a_sidebar) as al_s then
+				if a_on then al_s.collapse else al_s.expand end
+				changed
+			end
+		end
+
+	sidebar_is_collapsed (a_sidebar: INTEGER): BOOLEAN
+		do
+			Result := attached {SW_SIDEBAR} widget (a_sidebar) as al_s and then al_s.is_collapsed
+		end
+
+	test_toggle_sidebar (a_sidebar: INTEGER)
+		do
+			if attached {SW_SIDEBAR} widget (a_sidebar) as al_s then
+				al_s.press_collapse_button
+				changed
+			end
+		end
+
+	test_page_shown (an_id: INTEGER): INTEGER
+			-- The page SW shows in tabs or a sidebar.
+		do
+			if attached {SW_TABS} widget (an_id) as al_t then
+				Result := al_t.selected_index
+			elseif attached {SW_SIDEBAR} widget (an_id) as al_s then
+				Result := al_s.selected_page
 			end
 		end
 
@@ -4126,6 +4241,10 @@ feature -- Test doors (act on the widget as a user would)
 		do
 			if attached {SW_TEXT_LIST} widget (an_id) as al_l and then a_row >= 1 and then a_row <= al_l.count then
 				al_l.select_row (a_row)
+			elseif attached {GUI_SW_PATH_CONTROL} widget (an_id) as al_p and then a_row >= 1 and then a_row <= al_p.parts.count then
+				al_p.press_part (a_row)
+			elseif attached {SW_SIDEBAR} widget (an_id) as al_side and then a_row >= 1 and then a_row <= al_side.page_count then
+				al_side.press_page (a_row)
 			elseif attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (an_id) as al_g and then a_row >= 1 and then a_row <= al_g.rows.count then
 				quiet := quiet + 1
 				al_g.select_model_row_quietly (0, False)
