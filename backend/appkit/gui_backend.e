@@ -398,6 +398,12 @@ feature -- Controls
 		alias "sga_tree_add($a_tree, $a_node, $a_parent, (const char *) $a_text);"
 		end
 
+	tree_move (a_tree, a_node, a_parent, a_position: INTEGER)
+			-- 1q-c: with its subtree, silently.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_tree_move($a_tree, $a_node, $a_parent, $a_position);"
+		end
+
 	tree_set_expanded (a_tree, a_node: INTEGER; a_on: BOOLEAN)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_tree_set_expanded($a_tree, $a_node, $a_on ? 1 : 0);"

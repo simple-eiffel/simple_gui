@@ -1645,6 +1645,29 @@ void sga_tree_add(int a_id, int a_node, int a_parent, const char *a_text)
 	s_suppress--;
 }
 
+/* 1q-c: move `a_node' with its subtree under `a_parent' (0: the top level) as child number
+   `a_position' there (1-based, counted after taking it out); silent. Never under itself. */
+void sga_tree_move(int a_id, int a_node, int a_parent, int a_position)
+{
+	SGATree *t = s_inner[a_id];
+	SGANode *n = sga_tree_node(t, a_node), *p = sga_tree_node(t, a_parent);
+	if (!n) return;
+	for (SGANode *q = p; q; q = q->parent) if (q == n) return;
+	NSMutableArray<SGANode *> *l_from = n->parent ? n->parent->children : t->roots, *l_to = p ? p->children : t->roots;
+	NSUInteger l_old = [l_from indexOfObjectIdenticalTo:n];
+	if (l_old == NSNotFound) return;
+	SGANode *l_old_parent = n->parent;
+	[l_from removeObjectAtIndex:l_old];
+	NSUInteger l_new = (NSUInteger)MAX(0, MIN(a_position - 1, (int)[l_to count]));
+	[l_to insertObject:n atIndex:l_new];
+	n->parent = p;
+	s_suppress++;
+	[t beginUpdates];
+	[t moveItemAtIndex:(NSInteger)l_old inParent:l_old_parent toIndex:(NSInteger)l_new inParent:p];
+	[t endUpdates];
+	s_suppress--;
+}
+
 void sga_tree_set_expanded(int a_id, int a_node, int a_on)
 {
 	SGATree *t = s_inner[a_id];

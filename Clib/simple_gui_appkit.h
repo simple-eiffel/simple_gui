@@ -93,6 +93,7 @@ void sga_table_forget_row(int a_id, int a_row);
 void sga_table_scroll_to(int a_id, int a_row);
 int sga_tree(void);   /* selection 4 (a = node), expansion 15 (a = node, b = 1 expanded) */
 void sga_tree_add(int a_id, int a_node, int a_parent, const char *a_text);   /* nodes numbered 1, 2, 3... by the caller; parent 0: a root */
+void sga_tree_move(int a_id, int a_node, int a_parent, int a_position);   /* 1q-c: with its subtree; position 1-based after taking it out */
 void sga_tree_set_expanded(int a_id, int a_node, int a_on);   /* no event */
 int sga_tree_is_expanded(int a_id, int a_node);
 void sga_tree_select(int a_id, int a_node);   /* 0 clears; expands the ancestors; no event */
