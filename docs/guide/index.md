@@ -49,7 +49,9 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - [Grid](grid.md): widgets in rows and columns
 - [Splitter](splitter.md): two panes the user resizes
 - [Docking](docking.md): tool panels around a document, which the user arranges
-- [Tabs](tabs.md): pages, one at a time
+- [Tabs](tabs.md): pages, one at a time, with the tabs on any side
+- [Sidebar](sidebar.md): pages beside a list of their titles, collapsible to icons
+- [Wizard](wizard.md): steps in order, with Back, Next and Finish
 - [Scroll area](scroll-area.md): a part of something larger
 - [Group box](group-box.md): a titled frame
 - [Expander](expander.md): content the user shows or hides
@@ -86,7 +88,8 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 ## Advanced
 - [Popover](popover.md): a transient panel pointing at a control
 - [Token field](token-field.md): items typed as chips
-- [Path control](path-control.md): a path as clickable parts
+- [Path control](path-control.md): a path, or any breadcrumbs, as clickable parts
+- [Pagination](pagination.md): previous, page numbers with gaps, next
 - [Rating](rating.md): stars
 - [Rich text area](rich-text-area.md): styled text
 

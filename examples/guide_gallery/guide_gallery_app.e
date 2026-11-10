@@ -43,6 +43,7 @@ feature {NONE} -- Initialization
 				shoot_moving
 				shoot_docking
 				shoot_rich_lists_and_tables
+				shoot_navigation
 				print ("guide gallery: " + saved.out + " pictures in " + folder.name.to_string_8 + "%N")
 			else
 				print ("guide gallery: no display%N")
@@ -721,6 +722,50 @@ feature {NONE} -- Moving things (1q)
 			settle
 			driver.edit_cell (l_table, 3, 2, "sixteen")
 			save ("table-editing", l_window)
+		end
+
+	shoot_navigation
+			-- 1t: tabs on the left, a sidebar, a wizard on its second step, pagination,
+			-- breadcrumbs of any parts.
+		local
+			l_tabs: GUI_TABS
+			l_side: GUI_SIDEBAR
+			l_wizard: GUI_WIZARD
+			l_pages: GUI_PAGINATION
+			l_crumbs: GUI_PATH_CONTROL
+			l_window: GUI_WINDOW
+		do
+			create l_tabs.make
+			l_tabs.extend (create {GUI_LABEL}.make ("General settings"), "General")
+			l_tabs.extend (create {GUI_LABEL}.make ("Advanced settings"), "Advanced")
+			l_tabs.extend (create {GUI_LABEL}.make ("Accounts"), "Accounts")
+			l_tabs.set_tab_position (l_tabs.Tabs_left)
+			shoot ("tabs-left", "Tabs on the left", 380, 180, l_tabs)
+			create l_side.make
+			l_side.add_heading ("Library")
+			l_side.extend (create {GUI_LABEL}.make ("Every book in the library"), "Books")
+			l_side.extend (create {GUI_LABEL}.make ("Everyone who wrote them"), "Authors")
+			l_side.add_heading ("Settings")
+			l_side.extend (create {GUI_LABEL}.make ("Your name and email"), "Account")
+			l_side.set_page_icon (1, "folder")
+			l_side.set_page_badge (2, "12")
+			l_side.set_collapsible (True)
+			shoot ("sidebar", "Settings", 480, 260, l_side)
+			create l_wizard.make
+			l_wizard.extend_step (create {GUI_LABEL}.make ("Welcome. This takes a minute."), "Welcome")
+			l_wizard.extend_step (create {GUI_TEXT_FIELD}.make, "Your name")
+			l_wizard.extend_step (create {GUI_LABEL}.make ("Press Finish to sign up."), "Confirm")
+			l_wizard.go_to_step (2)
+			shoot ("wizard", "Sign up", 420, 220, l_wizard)
+			create l_pages.make
+			l_pages.set_page_count (20)
+			l_pages.set_page (10)
+			create l_window.make ("Results", 420, 80)
+			l_window.set_content (l_pages)
+			save ("pagination", l_window)
+			create l_crumbs.make
+			l_crumbs.set_parts (<<"Library", "Old Testament", "Genesis">>)
+			shoot ("path-control-parts", "Breadcrumbs", 420, 80, l_crumbs)
 		end
 
 feature {NONE} -- Implementation

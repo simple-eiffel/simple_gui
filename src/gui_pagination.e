@@ -51,12 +51,12 @@ feature {NONE} -- Initialization
 			create page_actions.make
 			create slots.make (slot_count)
 			create gaps.make (slot_count)
-			create previous_button.make ("‹")
-			create next_button.make ("›")
+			create previous_button.make ({STRING_32} "%/8249/")
+			create next_button.make ({STRING_32} "%/8250/")
 			from i := 1 until i > slot_count loop
 				create l_b.make ("0")
 				slots.extend (l_b)
-				create l_gap.make ("…")
+				create l_gap.make ({STRING_32} "%/8230/")
 				gaps.extend (l_gap)
 				i := i + 1
 			end

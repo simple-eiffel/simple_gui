@@ -65,6 +65,7 @@ The control shows the current folder as parts, from the root on. Click one of th
 | `part_count` | How many parts are shown. The platform may add a part that names the root, as "Macintosh HD". |
 | `part (i)` | Part `i`'s text, counting from the root; `1 <= i` and `i <= part_count`. |
 | `selection_actions` | Agents run with `[part]` when the user clicks a part. |
+| `set_parts (a_parts)` | Breadcrumbs for anything: shows `a_parts`, any texts, as they are ("Library", "Old Testament", "Genesis"). Afterward `path` is Void and `part_count = a_parts.count`. Fires nothing. |
 
 The rest are the [common features](widget.md).
 
@@ -91,3 +92,4 @@ The rest are the [common features](widget.md).
 | Linux | macOS | Windows |
 |---|---|---|
 | ![path-control on Linux](images/linux/path-control.png) | ![path-control on macOS](images/macos/path-control.png) | ![path-control on Windows](images/windows/path-control.png) |
+| ![breadcrumbs on Linux](images/linux/path-control-parts.png) | ![breadcrumbs on macOS](images/macos/path-control-parts.png) | ![breadcrumbs on Windows](images/windows/path-control-parts.png) |
