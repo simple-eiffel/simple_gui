@@ -277,6 +277,17 @@ void sga_list_scroll_to_row(int a_id, int a_row);
 void sga_table_scroll_to_row(int a_id, int a_row);
 void sga_test_press_shortcut(int a_window, const char *a_shortcut);
 
+/* 1n: icons, styles, badges, busy */
+void sga_button_set_icon(int a_id, const char *a_name);   /* GUI_ICON's names; "" removes */
+void sga_button_set_style(int a_id, int a_style);   /* 0 normal, 1 suggested, 2 destructive, 3 flat, 4 pill */
+void sga_button_set_busy(int a_id, int a_on);
+void sga_menu_set_item_icon(int a_item_id, const char *a_name);
+void sga_tabs_set_page_icon(int a_tabs, int a_page, const char *a_name);
+void sga_tabs_set_page_badge(int a_tabs, int a_page, const char *a_text);
+void sga_widget_set_badge(int a_id, const char *a_text, int a_kind);   /* 0 none, 1 text, 2 dot */
+const char *sga_test_button_icon(int a_id);
+const char *sga_test_badge_shown(int a_id);
+
 /* Appearance */
 int sga_is_dark(void);
 void sga_set_dark(int a_on);

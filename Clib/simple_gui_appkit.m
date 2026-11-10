@@ -452,9 +452,12 @@ static void sga_pill_place(SGAPill *p)
 }
 
 /* Pills whose widget joined a window since: placed now (window shown, content set). */
+static void sga_badges_sync(void);   /* 1n */
+
 static void sga_pills_sync(void)
 {
 	for (SGAPill *p in [s_pills allValues]) if (![p superview]) sga_pill_place(p);
+	sga_badges_sync();
 }
 
 void sga_pill_set(int a_id, const char *a_code, const char *a_tip, int a_corner)
@@ -3346,6 +3349,202 @@ void sga_follow_system_appearance(void)
 /* A list's or table's row brought into view, quietly (the selection stays). */
 void sga_list_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
 void sga_table_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
+
+/* ------------------------------------------- 1n: icons, styles, badges, busy */
+
+/* GUI_ICON's neutral names as SF Symbols. */
+static NSString *sga_symbol_of(NSString *a_name)
+{
+	static NSDictionary<NSString *, NSString *> *l_map;
+	if (!l_map) l_map = @{
+		@"add": @"plus", @"remove": @"minus", @"close": @"xmark", @"check": @"checkmark",
+		@"chevron-right": @"chevron.right", @"chevron-left": @"chevron.left", @"chevron-up": @"chevron.up", @"chevron-down": @"chevron.down",
+		@"back": @"chevron.backward", @"forward": @"chevron.forward", @"search": @"magnifyingglass", @"settings": @"gearshape",
+		@"delete": @"trash", @"edit": @"pencil", @"folder": @"folder", @"document": @"doc", @"open": @"folder.badge.plus",
+		@"save": @"square.and.arrow.down", @"copy": @"doc.on.doc", @"cut": @"scissors", @"paste": @"doc.on.clipboard",
+		@"undo": @"arrow.uturn.backward", @"redo": @"arrow.uturn.forward", @"refresh": @"arrow.clockwise",
+		@"play": @"play.fill", @"pause": @"pause.fill", @"stop": @"stop.fill", @"more": @"ellipsis", @"menu": @"line.3.horizontal",
+		@"info": @"info.circle", @"warning": @"exclamationmark.triangle", @"error": @"xmark.octagon", @"help": @"questionmark.circle",
+		@"star": @"star", @"picture": @"photo", @"home": @"house", @"user": @"person", @"mail": @"envelope",
+		@"calendar": @"calendar", @"clock": @"clock", @"lock": @"lock", @"bell": @"bell",
+		@"download": @"arrow.down.circle", @"upload": @"arrow.up.circle", @"print": @"printer",
+		@"filter": @"line.3.horizontal.decrease", @"sort": @"arrow.up.arrow.down"};
+	return l_map[a_name];
+}
+
+static NSImage *sga_icon_image(NSString *a_name)
+{
+	NSString *l_symbol = sga_symbol_of(a_name);
+	return l_symbol ? [NSImage imageWithSystemSymbolName:l_symbol accessibilityDescription:a_name] : nil;
+}
+
+static NSMutableDictionary<NSNumber *, NSString *> *s_button_icons;   /* button id -> icon name (kept while busy) */
+static NSMutableDictionary<NSNumber *, NSProgressIndicator *> *s_busy;
+
+static void sga_button_show_icon(int a_id)
+{
+	NSButton *b = sga_core(a_id);
+	NSString *l_name = s_button_icons[@(a_id)];
+	NSImage *i = [l_name length] && !s_busy[@(a_id)] ? sga_icon_image(l_name) : nil;
+	[b setImage:i];
+	[b setImagePosition:i ? ([[b title] length] ? NSImageLeading : NSImageOnly) : NSNoImage];
+}
+
+void sga_button_set_icon(int a_id, const char *a_name)
+{
+	if (!s_button_icons) s_button_icons = [NSMutableDictionary dictionary];
+	s_button_icons[@(a_id)] = sga_string(a_name);
+	sga_button_show_icon(a_id);
+}
+
+/* 0 normal, 1 suggested (the accent's tint), 2 destructive (red, and AppKit's destructive
+   flag), 3 flat (no border), 4 pill (the capsule inline bezel). */
+void sga_button_set_style(int a_id, int a_style)
+{
+	NSButton *b = sga_core(a_id);
+	[b setBordered:a_style != 3];
+	[b setBezelStyle:a_style == 4 ? NSBezelStyleInline : NSBezelStylePush];
+	[b setBezelColor:a_style == 1 ? [NSColor controlAccentColor] : a_style == 2 ? [NSColor systemRedColor] : nil];
+	[b setHasDestructiveAction:a_style == 2];
+	[b invalidateIntrinsicContentSize];
+}
+
+/* Busy: a small spinner where the icon was (the shared class disables the button). */
+void sga_button_set_busy(int a_id, int a_on)
+{
+	NSButton *b = sga_core(a_id);
+	if (!s_busy) s_busy = [NSMutableDictionary dictionary];
+	NSProgressIndicator *s = s_busy[@(a_id)];
+	if (a_on && !s) {
+		s = [[NSProgressIndicator alloc] init];
+		[s setStyle:NSProgressIndicatorStyleSpinning];
+		[s setControlSize:NSControlSizeSmall];
+		[s setTranslatesAutoresizingMaskIntoConstraints:NO];
+		[b addSubview:s];
+		[NSLayoutConstraint activateConstraints:@[[s.leadingAnchor constraintEqualToAnchor:b.leadingAnchor constant:8],
+			[s.centerYAnchor constraintEqualToAnchor:b.centerYAnchor], [s.widthAnchor constraintEqualToConstant:14], [s.heightAnchor constraintEqualToConstant:14]]];
+		[s startAnimation:nil];
+		s_busy[@(a_id)] = s;
+	} else if (!a_on && s) {
+		[s stopAnimation:nil];
+		[s removeFromSuperview];
+		[s_busy removeObjectForKey:@(a_id)];
+	}
+	sga_button_show_icon(a_id);
+	if (a_on && [[b title] length] && ![b image]) {
+		/* room for the spinner before the title */
+		[b setImage:[[NSImage alloc] initWithSize:NSMakeSize(16, 14)]];
+		[b setImagePosition:NSImageLeading];
+	}
+}
+
+const char *sga_test_button_icon(int a_id) { return sga_return(Kind_label, s_busy[@(a_id)] ? @"" : (s_button_icons[@(a_id)] ?: @"")); }
+
+static NSMenuItem *sga_find_numbered_anywhere(int a_id);
+void sga_menu_set_item_icon(int a_item_id, const char *a_name)
+{
+	NSMenuItem *i = sga_find_numbered_anywhere(a_item_id);
+	[i setImage:[sga_string(a_name) length] ? sga_icon_image(sga_string(a_name)) : nil];
+}
+
+/* Tabs: AppKit's tab view draws no item images and has no badges: a badge is added to the
+   tab's label, "News (5)". */
+static NSInteger sga_tab_item(NSTabView *t, int a_page);
+static NSMutableDictionary<NSValue *, NSString *> *s_tab_titles;   /* item -> its own label */
+
+/* AppKit's tab view draws no tab images, and an item given one loses its label: the icon is
+   recorded only (the tab keeps its text). */
+static NSMutableDictionary<NSValue *, NSString *> *s_tab_icons;
+
+void sga_tabs_set_page_icon(int a_tabs, int a_page, const char *a_name)
+{
+	NSTabView *t = sga_get(a_tabs);
+	if (!s_tab_icons) s_tab_icons = [NSMutableDictionary dictionary];
+	s_tab_icons[[NSValue valueWithNonretainedObject:[t tabViewItemAtIndex:sga_tab_item(t, a_page)]]] = sga_string(a_name);
+}
+
+void sga_tabs_set_page_badge(int a_tabs, int a_page, const char *a_text)
+{
+	NSTabView *t = sga_get(a_tabs);
+	NSTabViewItem *i = [t tabViewItemAtIndex:sga_tab_item(t, a_page)];
+	NSValue *k = [NSValue valueWithNonretainedObject:i];
+	if (!s_tab_titles) s_tab_titles = [NSMutableDictionary dictionary];
+	if (!s_tab_titles[k]) s_tab_titles[k] = [i label];
+	NSString *l_text = sga_string(a_text);
+	[i setLabel:[l_text length] ? [NSString stringWithFormat:@"%@ (%@)", s_tab_titles[k], l_text] : s_tab_titles[k]];
+}
+
+/* A badge: a small red bubble (the text) or dot at the widget's trailing top corner, over the
+   window's content, always shown; held by constraints as the pills are. */
+@interface SGABadge : NSTextField
+{
+@public
+	int target;
+	int kind;   /* 1 text, 2 dot */
+	NSArray<NSLayoutConstraint *> *placing;
+}
+@end
+@implementation SGABadge
+- (BOOL)isAccessibilityElement { return NO; }
+@end
+
+static NSMutableDictionary<NSNumber *, SGABadge *> *s_badges;
+
+static void sga_badge_place(SGABadge *b)
+{
+	NSView *t = s_margins[b->target][0] ? s_inner[b->target] : sga_get(b->target);
+	NSView *c = [[t window] contentView];
+	if (![t isKindOfClass:[NSView class]] || !c || ![t isDescendantOf:c]) return;
+	if ([b superview] != c) { [b removeFromSuperview]; [c addSubview:b positioned:NSWindowAbove relativeTo:nil]; }
+	if (b->placing) [NSLayoutConstraint deactivateConstraints:b->placing];
+	b->placing = @[[b.centerXAnchor constraintEqualToAnchor:t.trailingAnchor constant:-4], [b.centerYAnchor constraintEqualToAnchor:t.topAnchor constant:2]];
+	[NSLayoutConstraint activateConstraints:b->placing];
+}
+
+static void sga_badges_sync(void) { for (SGABadge *b in [s_badges allValues]) if (![b superview]) sga_badge_place(b); }
+
+void sga_widget_set_badge(int a_id, const char *a_text, int a_kind)
+{
+	if (!s_badges) s_badges = [NSMutableDictionary dictionary];
+	SGABadge *b = s_badges[@(a_id)];
+	if (a_kind == 0) {
+		if (b) { if (b->placing) [NSLayoutConstraint deactivateConstraints:b->placing]; [b removeFromSuperview]; [s_badges removeObjectForKey:@(a_id)]; }
+		return;
+	}
+	if (!b) {
+		b = [SGABadge labelWithString:@""];
+		[b setTranslatesAutoresizingMaskIntoConstraints:NO];
+		[b setFont:[NSFont boldSystemFontOfSize:[NSFont smallSystemFontSize] - 1]];
+		[b setTextColor:[NSColor whiteColor]];
+		[b setAlignment:NSTextAlignmentCenter];
+		[b setDrawsBackground:YES];
+		[b setBackgroundColor:[NSColor systemRedColor]];
+		[b setWantsLayer:YES];
+		[[b layer] setMasksToBounds:YES];
+		b->target = a_id;
+		s_badges[@(a_id)] = b;
+	}
+	b->kind = a_kind;
+	if (a_kind == 2) {
+		[b setStringValue:@""];
+		[[b layer] setCornerRadius:4];
+		[NSLayoutConstraint deactivateConstraints:[b constraints]];
+		[NSLayoutConstraint activateConstraints:@[[b.widthAnchor constraintEqualToConstant:8], [b.heightAnchor constraintEqualToConstant:8]]];
+	} else {
+		[b setStringValue:[NSString stringWithFormat:@" %@ ", sga_string(a_text)]];
+		[[b layer] setCornerRadius:7.5];
+		[NSLayoutConstraint deactivateConstraints:[b constraints]];
+		[NSLayoutConstraint activateConstraints:@[[b.heightAnchor constraintEqualToConstant:15], [b.widthAnchor constraintGreaterThanOrEqualToConstant:15]]];
+	}
+	sga_badge_place(b);
+}
+
+const char *sga_test_badge_shown(int a_id)
+{
+	SGABadge *b = s_badges[@(a_id)];
+	NSString *s = !b ? @"" : b->kind == 2 ? @"•" : [[b stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+	return sga_return(Kind_label, s);
+}
 
 /* ----------------------------------------------------------------- common */
 
