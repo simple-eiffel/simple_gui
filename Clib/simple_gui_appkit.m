@@ -5883,6 +5883,7 @@ static void sga_push_replacing(int a_type, int a_id, int a_a, int a_b)
 static void sga_dock_press_name(SGADock *d, SGADockPanel *p);
 static void sga_dock_slide_out(SGADock *d, SGADockPanel *p);
 static void sga_dock_slide_back_later(SGADock *d);
+static void sga_dock_slide_back(SGADock *d);
 static void sga_dock_toggle_center_as_user(SGADock *d);
 static void sga_dock_float_as_user(SGADock *d, SGADockPanel *p, BOOL a_on);
 static void sga_dock_track_panel(SGADock *d, SGADockPanel *p, NSEvent *e);
@@ -6741,6 +6742,11 @@ void sga_dock_collapse(int a_dock, int a_side, int a_on)
 	SGADock *d = sga_dock_of(a_dock);
 	if (!d || !sga_dock_side_ok(a_side)) return;
 	d->collapsed[a_side] = a_on != 0;
+	/* 1r-b: expanding a side also pins it (the shared expand_side ends auto-hide) */
+	if (!a_on && d->auto_hide[a_side]) {
+		if (d->slid && d->slid->side == a_side) sga_dock_slide_back(d);
+		d->auto_hide[a_side] = NO;
+	}
 	[d setNeedsLayout:YES];
 }
 
