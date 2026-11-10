@@ -1470,6 +1470,122 @@ feature -- Common widget state
 		alias "return (EIF_POINTER) sga_test_help_tip_shown();"
 		end
 
+	grid_view: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_grid_view();"
+		end
+
+	grid_view_extend (an_id: INTEGER; a_title, a_picture, an_icon: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_grid_view_extend($an_id, (const char *) $a_title, (const char *) $a_picture, (const char *) $an_icon);"
+		end
+
+	grid_view_set_subtitle (an_id, i: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_grid_view_set_subtitle($an_id, $i, (const char *) $a_text);"
+		end
+
+	grid_view_remove (an_id, i: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_grid_view_remove($an_id, $i);"
+		end
+
+	grid_view_wipe_out (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_grid_view_wipe_out($an_id);"
+		end
+
+	grid_view_set_item_size (an_id, a_width, a_height: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_grid_view_set_item_size($an_id, $a_width, $a_height);"
+		end
+
+	grid_view_set_spacing (an_id, a_spacing: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_grid_view_set_spacing($an_id, $a_spacing);"
+		end
+
+	grid_view_set_multiple (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_grid_view_set_multiple($an_id, $a_on ? 1 : 0);"
+		end
+
+	grid_view_select (an_id, i: INTEGER; an_extend: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_grid_view_select($an_id, $i, $an_extend ? 1 : 0);"
+		end
+
+	grid_view_selected_count (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_grid_view_selected_count($an_id);"
+		end
+
+	grid_view_selected_at (an_id, k: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_grid_view_selected_at($an_id, $k);"
+		end
+
+	grid_view_scroll_to (an_id, i: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_grid_view_scroll_to($an_id, $i);"
+		end
+
+	grid_view_set_filter (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_grid_view_set_filter($an_id, (const char *) $a_text);"
+		end
+
+	grid_view_shown_count (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_grid_view_shown_count($an_id);"
+		end
+
+	test_activate_item (an_id, i: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_activate_item($an_id, $i);"
+		end
+
+	test_item_picture_ready (an_id, i: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_item_picture_ready($an_id, $i) != 0;"
+		end
+
+	path_control_set_chevrons (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1p-b: the "›" after each part a button (53); the space after them 54.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_path_control_set_chevrons($an_id, $a_on ? 1 : 0);"
+		end
+
+	path_control_set_root_icon (an_id: INTEGER; a_name: POINTER)
+			-- 1p-b: an icon in front of part 1 (empty for none).
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_path_control_set_root_icon($an_id, (const char *) $a_name);"
+		end
+
+	widget_focus (an_id: INTEGER)
+			-- 1p-b: the keyboard focus to the widget.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_widget_focus($an_id);"
+		end
+
+	test_press_chevron (an_id, a_part: INTEGER)
+			-- As the user pressing the "›" after `a_part': 53.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_press_chevron($an_id, $a_part);"
+		end
+
+	test_press_path_space (an_id: INTEGER)
+			-- As the user clicking the space after the parts: 54.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_press_path_space($an_id);"
+		end
+
+	test_field_escape (an_id: INTEGER)
+			-- As the user pressing Escape in the field: 55 (or the suggestion list closes).
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_field_escape($an_id);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

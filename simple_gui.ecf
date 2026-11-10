@@ -41,6 +41,8 @@
 		</external_linker_flag>
 		<library name="base" location="$ISE_LIBRARY\library\base\base.ecf"/>
 		<library name="simple_cairo" location="$SIMPLE_EIFFEL\simple_cairo\simple_cairo.ecf"/>
+		<!-- GUI_PREFERENCES keeps its values as JSON (1v-d) -->
+		<library name="simple_json" location="$SIMPLE_EIFFEL\simple_json\simple_json.ecf"/>
 		<!-- Windows: simple_widgets (the Cairo look) on simple_shell -->
 		<library name="simple_widgets" location="$SIMPLE_EIFFEL\simple_widgets\simple_widgets.ecf">
 			<condition>
