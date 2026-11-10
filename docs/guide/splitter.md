@@ -60,10 +60,13 @@ A window opens with a list of three books on the leading side, 180 logical pixel
 | `set_position (a_position)` | Moves the divider to `a_position` logical pixels from the leading edge (or the top), as far as the panes allow. Requires `a_position >= 0`. No event. |
 | `is_vertical` | Are the panes stacked (rather than side by side)? |
 | `children`, `count`, `has (a_widget)` | The panes' widgets (from `GUI_CONTAINER`); a splitter holds at most two. |
+| `set_collapsible (a_pane, on)`, `is_collapsible (a_pane)` | Lets pane `a_pane` (1 leading or top, 2 trailing or bottom) collapse: a button on the divider, or a double click on it, gives its room to the other pane. |
+| `collapse_pane (a_pane)`, `expand_pane (a_pane)`, `is_pane_collapsed (a_pane)` | The same from code, quietly. `collapse_pane` requires the pane to be collapsible and the other one open; `expand_pane` puts the divider back where it was. |
+| `collapse_actions` | `GUI_ACTIONS [TUPLE [pane: INTEGER; is_collapsed: BOOLEAN]]`: run when the user collapses or opens a pane. |
 
 Inherited: `set_base_direction`, `show`, `hide` and the rest of the [common features](widget.md).
 
-**Events:** none. `set_position` fires nothing, and the user's drag has no event: read `position` when you need it (for example, to save it when the window closes).
+**Events:** `set_position` fires nothing, and the user's drag has no event: read `position` when you need it (for example, to save it when the window closes). `collapse_actions` runs when the user collapses or opens a collapsible pane; dragging the divider can open a collapsed pane but never collapses one.
 
 **Accessibility:** a screen reader goes through the panes; the divider itself is the toolkit's. On macOS and Windows the splitter reads as `generic`, which `describe_accessibility` skips; on Linux GTK gives it the role `group`. Label the panes' contents, not the splitter.
 

@@ -48,6 +48,7 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - [Stack](stack.md): widgets in a row or a column
 - [Grid](grid.md): widgets in rows and columns
 - [Splitter](splitter.md): two panes the user resizes
+- [Docking](docking.md): tool panels around a document, which the user arranges
 - [Tabs](tabs.md): pages, one at a time
 - [Scroll area](scroll-area.md): a part of something larger
 - [Group box](group-box.md): a titled frame

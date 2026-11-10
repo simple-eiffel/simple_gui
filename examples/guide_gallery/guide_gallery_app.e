@@ -41,6 +41,7 @@ feature {NONE} -- Initialization
 				shoot_forms
 				shoot_icons_and_feedback
 				shoot_moving
+				shoot_docking
 				print ("guide gallery: " + saved.out + " pictures in " + folder.name.to_string_8 + "%N")
 			else
 				print ("guide gallery: no display%N")
@@ -632,6 +633,43 @@ feature {NONE} -- Moving things (1q)
 			driver.pick (l_books, 1)
 			save ("reordering", l_window)
 			driver.cancel_pick
+		end
+
+	shoot_docking
+			-- The docking page's workbench: Files and Outline stacked on the left, Search
+			-- tabbed along the bottom, Properties on the right, a text area in the middle.
+		local
+			l_window: GUI_WINDOW
+			l_dock: GUI_DOCK
+			l_center: GUI_TEXT_AREA
+			l_list: GUI_LIST
+			l_files, l_outline, l_search, l_output, l_props: GUI_DOCK_PANEL
+		do
+			create l_window.make ("Workbench", 760, 460)
+			create l_center.make
+			l_center.set_text ("class WORKBENCH%N%Ncreate%N    make%N%Nfeature%N%N    make%N        do%N        end%N%Nend")
+			create l_dock.make (l_center)
+			create l_list.make
+			l_list.extend ("workbench.e")
+			l_list.extend ("search_panel.e")
+			l_list.extend ("workbench.ecf")
+			create l_files.make ("files", "Files", l_list)
+			create l_outline.make ("outline", "Outline", create {GUI_LABEL}.make ("make"))
+			create l_search.make ("search", "Search", create {GUI_LABEL}.make ("2 matches for %"make%""))
+			create l_output.make ("output", "Output", create {GUI_LABEL}.make ("System Recompiled."))
+			create l_props.make ("props", "Properties", create {GUI_LABEL}.make ("Name: make"))
+			l_props.set_short_title ("Props")
+			l_dock.add_panel (l_files, l_dock.Side_left)
+			l_dock.add_panel (l_outline, l_dock.Side_left)
+			l_dock.add_panel (l_search, l_dock.Side_bottom)
+			l_dock.add_panel (l_output, l_dock.Side_bottom)
+			l_dock.add_panel (l_props, l_dock.Side_right)
+			l_dock.set_tabbed (l_dock.Side_bottom, True)
+			l_window.set_content (l_dock)
+			l_dock.set_side_size (l_dock.Side_left, 180)
+			l_dock.set_side_size (l_dock.Side_right, 160)
+			l_dock.set_side_size (l_dock.Side_bottom, 110)
+			save ("docking", l_window)
 		end
 
 feature {NONE} -- Implementation
