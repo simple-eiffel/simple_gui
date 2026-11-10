@@ -6137,20 +6137,56 @@ int sga_test_context_menu(int a_id, int a_item)
 void sga_test_request_close(int a_window) { [(NSWindow *)sga_get(a_window) performClose:nil]; }
 void sga_test_auto_cancel_dialogs(int a_ms) { s_auto_cancel_ms = a_ms; }
 
-int sga_snapshot(int a_window, const char *a_path)
+/* A window's frame view as an image (device pixels), in its own appearance. */
+static NSBitmapImageRep *sga_window_image(NSWindow *w)
 {
-	NSWindow *w = sga_get(a_window);
 	NSView *v = [[w contentView] superview];
-	__block int l_ok = 0;
+	__block NSBitmapImageRep *r = nil;
 	[v layoutSubtreeIfNeeded];
 	[v setNeedsDisplay:YES];
 	[v displayIfNeeded];
 	[[w effectiveAppearance] performAsCurrentDrawingAppearance:^{
-		NSBitmapImageRep *r = [v bitmapImageRepForCachingDisplayInRect:[v bounds]];
+		r = [v bitmapImageRepForCachingDisplayInRect:[v bounds]];
 		[v cacheDisplayInRect:[v bounds] toBitmapImageRep:r];
-		l_ok = [[r representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:sga_string(a_path) atomically:YES] ? 1 : 0;
 	}];
-	return l_ok;
+	return r;
+}
+
+static NSPopover *s_help_popover;
+static NSPopover *sga_shown_help_popover(void) { return [s_help_popover isShown] ? s_help_popover : nil; }
+
+/* The window as the user sees it: a dialog shown as a sheet is rendered in its parent; the
+   parent's attached sheet and a help popover over it are drawn where they show (each is a
+   window of its own, outside the frame view's own drawing). */
+int sga_snapshot(int a_window, const char *a_path)
+{
+	NSWindow *w = sga_get(a_window);
+	if ([w isSheet] && [w sheetParent]) w = [w sheetParent];
+	NSBitmapImageRep *l_base = sga_window_image(w);
+	NSMutableArray<NSWindow *> *l_over = [NSMutableArray array];
+	if ([w attachedSheet] && [[w attachedSheet] isVisible]) [l_over addObject:[w attachedSheet]];
+	NSWindow *l_pop = [[[sga_shown_help_popover() contentViewController] view] window];
+	if (l_pop && [l_pop isVisible]) [l_over addObject:l_pop];
+	if (![l_over count]) return [[l_base representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:sga_string(a_path) atomically:YES] ? 1 : 0;
+	NSRect b = [w frame];
+	double k = (double)[l_base pixelsWide] / NSWidth(b);
+	NSBitmapImageRep *r = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:[l_base pixelsWide] pixelsHigh:[l_base pixelsHigh]
+		bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+	[NSGraphicsContext saveGraphicsState];
+	[NSGraphicsContext setCurrentContext:[NSGraphicsContext graphicsContextWithBitmapImageRep:r]];
+	[l_base drawInRect:NSMakeRect(0, 0, [l_base pixelsWide], [l_base pixelsHigh])];
+	for (NSWindow *o in l_over) {
+		NSBitmapImageRep *l_img = sga_window_image(o);
+		NSRect f = [o frame];
+		NSRect at = NSMakeRect((NSMinX(f) - NSMinX(b)) * k, (NSMinY(f) - NSMinY(b)) * k, NSWidth(f) * k, NSHeight(f) * k);
+		if (o == [w attachedSheet]) {   /* a sheet's own backing: the window background behind it */
+			[[NSColor windowBackgroundColor] setFill];
+			[[NSBezierPath bezierPathWithRoundedRect:at xRadius:10 * k yRadius:10 * k] fill];
+		}
+		[l_img drawInRect:at fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:NO hints:nil];
+	}
+	[NSGraphicsContext restoreGraphicsState];
+	return [[r representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:sga_string(a_path) atomically:YES] ? 1 : 0;
 }
 
 /* What an assistive client reads, walked from the window: one "role: name" line per
@@ -8347,7 +8383,6 @@ static void sga_help_watch(void)
 	}];
 }
 
-static NSPopover *s_help_popover;
 static NSString *s_help_text;
 /* The default help: the text in a popover at the widget. */
 void sga_help_show_tip(int a_widget, const char *a_text)
