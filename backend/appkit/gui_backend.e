@@ -1523,6 +1523,8 @@ feature -- Common widget state
 	test_caret_to (an_id, a_line, a_column: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_caret_to($an_id, $a_line, $a_column);"
+		end
+
 	grid_view: INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_grid_view();"

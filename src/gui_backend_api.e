@@ -444,6 +444,9 @@ feature -- Windows and containers
 
 	test_caret_to (an_id, a_line, a_column: INTEGER)
 			-- As the user moving the caret: 52.
+		deferred
+		end
+
 	grid_view: INTEGER
 			-- 1v-a: items in a flowing grid of cells (120 by 120 until set).
 		deferred

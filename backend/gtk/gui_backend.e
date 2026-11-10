@@ -684,6 +684,8 @@ feature -- Windows and containers
 			-- 1v-b.
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_test_caret_to($an_id, $a_line, $a_column);"
+		end
+
 	grid_view: INTEGER
 			-- 1v-a.
 		external "C inline use %"simple_gui_gtk.h%""

@@ -749,6 +749,9 @@ feature -- User actions
 			has_application: has_application
 		do
 			backend.test_caret_to (an_editor.id, a_line, a_column)
+			settle
+		end
+
 	choose_grid_item (a_grid: GUI_GRID_VIEW; i: INTEGER)
 			-- Click item `i', as the user would: 50.
 		require
