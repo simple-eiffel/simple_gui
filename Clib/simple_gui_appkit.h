@@ -468,3 +468,16 @@ void sga_test_press_dialog_button_later(int a_dialog, int n, int a_ms);
 const char *sga_test_dialog_button_order(int a_dialog);
 void sga_test_press_help(int a_window);
 const char *sga_test_help_tip_shown(void);
+
+/* 1v-b: the code editor */
+int sga_code_editor(void);
+void sga_code_set_line_numbers(int a_id, int a_on);
+void sga_code_set_indent(int a_id, int a_tab_width, int a_spaces);
+int sga_text_line_count(int a_id);
+int sga_text_caret_line(int a_id);
+int sga_text_caret_column(int a_id);
+const char *sga_text_line_text(int a_id, int n);
+void sga_text_go_to_line(int a_id, int n);
+void sga_text_replace_range(int a_id, int a_start, int an_end, const char *a_text);
+void sga_test_type_into_code(int a_id, const char *a_text);
+void sga_test_caret_to(int a_id, int a_line, int a_column);

@@ -1470,6 +1470,61 @@ feature -- Common widget state
 		alias "return (EIF_POINTER) sga_test_help_tip_shown();"
 		end
 
+	code_editor: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_code_editor();"
+		end
+
+	code_set_line_numbers (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_set_line_numbers($an_id, $a_on ? 1 : 0);"
+		end
+
+	code_set_indent (an_id, a_tab_width: INTEGER; a_spaces: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_set_indent($an_id, $a_tab_width, $a_spaces ? 1 : 0);"
+		end
+
+	text_line_count (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_text_line_count($an_id);"
+		end
+
+	text_caret_line (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_text_caret_line($an_id);"
+		end
+
+	text_caret_column (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_text_caret_column($an_id);"
+		end
+
+	text_line_text (an_id, n: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_text_line_text($an_id, $n);"
+		end
+
+	text_go_to_line (an_id, n: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_text_go_to_line($an_id, $n);"
+		end
+
+	text_replace_range (an_id, a_start, an_end: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_text_replace_range($an_id, $a_start, $an_end, (const char *) $a_text);"
+		end
+
+	test_type_into_code (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_type_into_code($an_id, (const char *) $a_text);"
+		end
+
+	test_caret_to (an_id, a_line, a_column: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_caret_to($an_id, $a_line, $a_column);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"
