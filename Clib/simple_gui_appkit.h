@@ -468,3 +468,21 @@ void sga_test_press_dialog_button_later(int a_dialog, int n, int a_ms);
 const char *sga_test_dialog_button_order(int a_dialog);
 void sga_test_press_help(int a_window);
 const char *sga_test_help_tip_shown(void);
+
+/* 1v-a: the grid view */
+int sga_grid_view(void);
+void sga_grid_view_extend(int a_id, const char *a_title, const char *a_picture, const char *an_icon);
+void sga_grid_view_set_subtitle(int a_id, int i, const char *a_text);
+void sga_grid_view_remove(int a_id, int i);
+void sga_grid_view_wipe_out(int a_id);
+void sga_grid_view_set_item_size(int a_id, int w, int h);
+void sga_grid_view_set_spacing(int a_id, int s);
+void sga_grid_view_set_multiple(int a_id, int a_on);
+void sga_grid_view_select(int a_id, int i, int an_extend);
+int sga_grid_view_selected_count(int a_id);
+int sga_grid_view_selected_at(int a_id, int k);
+void sga_grid_view_scroll_to(int a_id, int i);
+void sga_grid_view_set_filter(int a_id, const char *a_text);
+int sga_grid_view_shown_count(int a_id);
+void sga_test_activate_item(int a_id, int i);
+int sga_test_item_picture_ready(int a_id, int i);
