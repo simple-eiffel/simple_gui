@@ -3347,6 +3347,233 @@ void sga_follow_system_appearance(void)
 void sga_list_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
 void sga_table_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
 
+/* ------------------------------------------------- 1q-a: pick and drop */
+
+/* Picks follow spec 1q's protocol: the gesture's start sends event 30 (id = source, a = row
+   or node, 0 for the widget); Eiffel answers with `sga_pick_targets' (only those widgets
+   light as taking the pebble) or `sga_pick_cancel'; a drop sends 31 (id = target, a = row),
+   a cancel 32. AppKit's drag session must be begun inside the mouse event with its data in
+   hand, and the targets come back later through the queue, so an in-application pick is
+   tracked here with a local event monitor:
+   - drag (1): a press on a source and a move of 4 points picks; the release drops on the
+     accepting widget under the pointer, anywhere else it cancels;
+   - click (2): a right click picks; a line follows the pointer; a click drops; Escape or a
+     right click cancels;
+   - menu (3): a right click picks; a menu of the accepting targets' labels opens; choosing
+     one drops there, dismissing it cancels. */
+@interface SGAPickLine : NSView
+{
+@public
+	NSPoint from, to;
+}
+@end
+@implementation SGAPickLine
+- (BOOL)isFlipped { return YES; }
+- (NSView *)hitTest:(NSPoint)p { (void)p; return nil; }
+- (void)drawRect:(NSRect)r
+{
+	(void)r;
+	NSBezierPath *l = [NSBezierPath bezierPath];
+	[l moveToPoint:from]; [l lineToPoint:to]; [l setLineWidth:2];
+	CGFloat l_dash[] = {6, 4}; [l setLineDash:l_dash count:2 phase:0];
+	[[NSColor controlAccentColor] setStroke]; [l stroke];
+	[[NSColor controlAccentColor] setFill];
+	[[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(from.x - 4, from.y - 4, 8, 8)] fill];
+}
+@end
+
+static NSMutableDictionary<NSNumber *, NSNumber *> *s_pick_sources;   /* id -> mode + 4 * by_row */
+static NSMutableSet<NSNumber *> *s_drop_targets;
+static id s_pick_monitor;
+static int s_pick_state;   /* 0 idle, 1 asked (30 sent), 2 in flight */
+static int s_pick_source, s_pick_mode;
+static BOOL s_pick_test;   /* started by test_pick: no menu, no line */
+static NSArray<NSNumber *> *s_pick_targets;
+static NSArray<NSString *> *s_pick_labels;
+static NSPoint s_press_point;
+static int s_press_source, s_press_row;
+static SGAPickLine *s_pick_line;
+
+/* The registered widget at window point `p' (walking up from the view hit), and the row or
+   node under it when it is a list, table or tree. */
+static int sga_widget_at(NSWindow *w, NSPoint p, int *a_row)
+{
+	NSView *v = [[[w contentView] superview] hitTest:p];
+	*a_row = 0;
+	while (v) {
+		int l_id = sga_id_of(v);
+		if (l_id) {
+			id c = sga_core(l_id);
+			if ([c isKindOfClass:[NSTableView class]]) {
+				NSInteger r = [(NSTableView *)c rowAtPoint:[(NSView *)c convertPoint:p fromView:nil]];
+				if (r >= 0) *a_row = [c isKindOfClass:[SGATree class]] ? ((SGANode *)[(SGATree *)c itemAtRow:r])->number : (int)r + 1;
+			}
+			return l_id;
+		}
+		v = [v superview];
+	}
+	return 0;
+}
+
+static void sga_pick_light(BOOL a_on)
+{
+	for (NSNumber *k in s_pick_targets) {
+		NSView *v = sga_get([k intValue]);
+		if (![v isKindOfClass:[NSView class]]) continue;
+		[v setWantsLayer:YES];
+		[[v layer] setBorderColor:[[NSColor systemGreenColor] CGColor]];
+		[[v layer] setBorderWidth:a_on ? 2 : 0];
+	}
+}
+
+static void sga_pick_end(void)
+{
+	sga_pick_light(NO);
+	[s_pick_line removeFromSuperview];
+	s_pick_state = 0;
+	s_pick_targets = nil;
+	s_pick_labels = nil;
+	s_pick_test = NO;
+	[[NSCursor arrowCursor] set];
+}
+
+static void sga_pick_drop_at(int a_target, int a_row)
+{
+	BOOL l_takes = [s_pick_targets containsObject:@(a_target)];
+	sga_pick_end();
+	sga_push(l_takes ? 31 : 32, l_takes ? a_target : 0, l_takes ? a_row : 0, 0, 0);
+}
+
+static void sga_pick_start(int a_source, int a_row, NSPoint a_from, NSWindow *w)
+{
+	NSNumber *k = s_pick_sources[@(a_source)];
+	s_pick_source = a_source;
+	s_pick_mode = k ? [k intValue] % 4 : 1;
+	s_pick_state = 1;
+	if (!s_pick_test && s_pick_mode == 2 && w) {
+		if (!s_pick_line) s_pick_line = [[SGAPickLine alloc] initWithFrame:NSZeroRect];
+		NSView *c = [[w contentView] superview];
+		[s_pick_line setFrame:[c bounds]];
+		s_pick_line->from = [c convertPoint:a_from fromView:nil];
+		s_pick_line->to = s_pick_line->from;
+		[c addSubview:s_pick_line positioned:NSWindowAbove relativeTo:nil];
+	}
+	sga_push(30, a_source, a_row, 0, 0);
+}
+
+static NSEvent *sga_pick_watch(NSEvent *e)
+{
+	NSWindow *w = [e window];
+	if (!w) return e;
+	NSPoint p = [e locationInWindow];
+	int l_row = 0, l_id;
+	NSEventType t = [e type];
+	if (s_pick_state == 0) {
+		if (t == NSEventTypeLeftMouseDown) {
+			l_id = sga_widget_at(w, p, &l_row);
+			NSNumber *k = s_pick_sources[@(l_id)];
+			s_press_source = k && [k intValue] % 4 == 1 ? l_id : 0;
+			s_press_row = [k intValue] / 4 ? l_row : 0;
+			s_press_point = p;
+		} else if (t == NSEventTypeLeftMouseDragged && s_press_source && hypot(p.x - s_press_point.x, p.y - s_press_point.y) > 4) {
+			int l_source = s_press_source;
+			s_press_source = 0;
+			sga_pick_start(l_source, s_press_row, s_press_point, w);
+			return nil;
+		} else if (t == NSEventTypeRightMouseDown) {
+			l_id = sga_widget_at(w, p, &l_row);
+			NSNumber *k = s_pick_sources[@(l_id)];
+			if (k && [k intValue] % 4 >= 2) { sga_pick_start(l_id, [k intValue] / 4 ? l_row : 0, p, w); return nil; }
+		}
+		return e;
+	}
+	/* A pick is on: the pointer, the drop, the cancel. */
+	if (t == NSEventTypeLeftMouseDragged || t == NSEventTypeMouseMoved) {
+		if (s_pick_line && [s_pick_line superview]) { s_pick_line->to = [s_pick_line convertPoint:p fromView:nil]; [s_pick_line setNeedsDisplay:YES]; }
+		l_id = sga_widget_at(w, p, &l_row);
+		[([s_pick_targets containsObject:@(l_id)] ? [NSCursor dragCopyCursor] : [NSCursor operationNotAllowedCursor]) set];
+		return nil;
+	}
+	if ((t == NSEventTypeLeftMouseUp && s_pick_mode == 1) || (t == NSEventTypeLeftMouseDown && s_pick_mode == 2)) {
+		l_id = sga_widget_at(w, p, &l_row);
+		sga_pick_drop_at(l_id, l_row);
+		return nil;
+	}
+	if ((t == NSEventTypeRightMouseDown && s_pick_mode == 2) || (t == NSEventTypeKeyDown && [e keyCode] == 53)) {
+		sga_pick_end();
+		sga_push(32, 0, 0, 0, 0);
+		return nil;
+	}
+	return t == NSEventTypeLeftMouseUp || t == NSEventTypeLeftMouseDown ? nil : e;
+}
+
+static void sga_pick_watch_start(void)
+{
+	if (!s_pick_monitor)
+		s_pick_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskLeftMouseDragged
+			| NSEventMaskLeftMouseUp | NSEventMaskRightMouseDown | NSEventMaskMouseMoved | NSEventMaskKeyDown
+			handler:^NSEvent *(NSEvent *e) { return sga_pick_watch(e); }];
+}
+
+void sga_widget_set_pick(int a_id, int a_mode, int a_is_source, int a_by_row)
+{
+	if (!s_pick_sources) s_pick_sources = [NSMutableDictionary dictionary];
+	if (a_is_source) s_pick_sources[@(a_id)] = @(a_mode + 4 * (a_by_row ? 1 : 0)); else [s_pick_sources removeObjectForKey:@(a_id)];
+	sga_pick_watch_start();
+}
+
+void sga_widget_set_drop_target(int a_id, int an_internal, int a_files, int a_text)
+{
+	(void)a_files; (void)a_text;   /* files and text from other programs: 1q-b */
+	if (!s_drop_targets) s_drop_targets = [NSMutableSet set];
+	if (an_internal) [s_drop_targets addObject:@(a_id)]; else [s_drop_targets removeObject:@(a_id)];
+	sga_pick_watch_start();
+}
+
+@interface SGAPickMenuTarget : NSObject
+@end
+@implementation SGAPickMenuTarget
+- (void)chosen:(NSMenuItem *)i { sga_pick_drop_at((int)[i tag], 0); }
+@end
+
+void sga_pick_targets(int a_source, const int *a_ids, int a_count, const char *a_labels)
+{
+	(void)a_source;
+	NSMutableArray *l_ids = [NSMutableArray array];
+	for (int i = 0; i < a_count; i++) [l_ids addObject:@(a_ids[i])];
+	s_pick_targets = l_ids;
+	s_pick_labels = a_labels && strlen(a_labels) ? [sga_string(a_labels) componentsSeparatedByString:@"\n"] : @[];
+	s_pick_state = 2;
+	sga_pick_light(YES);
+	if (s_pick_mode == 3 && !s_pick_test) {
+		/* The target menu, at the pointer: choosing drops there; dismissing it cancels. */
+		static SGAPickMenuTarget *s_menu_target;
+		if (!s_menu_target) s_menu_target = [[SGAPickMenuTarget alloc] init];
+		NSMenu *m = [[NSMenu alloc] init];
+		for (NSUInteger k = 0; k < [l_ids count]; k++) {
+			NSString *l_label = k < [s_pick_labels count] && [s_pick_labels[k] length] ? s_pick_labels[k] : [NSString stringWithFormat:@"Target %lu", (unsigned long)k + 1];
+			NSMenuItem *i = [m addItemWithTitle:l_label action:@selector(chosen:) keyEquivalent:@""];
+			[i setTarget:s_menu_target];
+			[i setTag:[l_ids[k] integerValue]];
+		}
+		BOOL l_chosen = [m popUpMenuPositioningItem:nil atLocation:[NSEvent mouseLocation] inView:nil];
+		if (!l_chosen && s_pick_state == 2) { sga_pick_end(); sga_push(32, 0, 0, 0, 0); }
+	}
+}
+
+void sga_pick_cancel(void) { sga_pick_end(); }
+
+/* As a user: a pick started on `a_source' (row `a_row'); a drop on `a_target'; a cancel. */
+void sga_test_pick(int a_source, int a_row)
+{
+	s_pick_test = YES;
+	sga_pick_start(a_source, a_row, NSZeroPoint, nil);
+}
+
+void sga_test_drop(int a_target, int a_row) { if (s_pick_state == 2) sga_pick_drop_at(a_target, a_row); }
+void sga_test_cancel_pick(void) { if (s_pick_state) { sga_pick_end(); sga_push(32, 0, 0, 0, 0); } }
+int sga_test_is_accepting(int a_target) { return s_pick_state == 2 && [s_pick_targets containsObject:@(a_target)] ? 1 : 0; }
+
 /* ----------------------------------------------------------------- common */
 
 void sga_set_enabled(int a_id, int a_on)
