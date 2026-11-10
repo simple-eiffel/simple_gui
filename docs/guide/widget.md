@@ -50,9 +50,15 @@ The button starts dimmed and comes on with the first edit in the field. Resting 
 | `set_tooltip (a_text)` | Shows `a_text` when the pointer rests on the widget; an empty text removes the tooltip. Ensures `tooltip` is `a_text`. |
 | `context_menu` | The menu a secondary click shows, or `Void`. |
 | `set_context_menu (a_menu)` | Shows `a_menu` on a secondary click on this widget. Requires `a_menu.is_context` (make it with `app.menu.new_context_menu`); ensures `context_menu = a_menu`. |
+| `badge` | The badge shown at the trailing top corner: `Void` for none, an empty text for a dot, otherwise its text. |
+| `set_badge (a_text)` | Shows a small red bubble with `a_text` (not empty, at most 8 characters). |
+| `set_badge_dot` | Shows a small red dot with no text. |
+| `clear_badge` | Removes the badge. Ensures `badge = Void`. |
 | `base_direction` | `Direction_auto`, `Direction_left_to_right` or `Direction_right_to_left`. |
 | `has_own_direction` | Was the direction set on this widget, so a container's does not override it? |
 | `set_base_direction (a_direction)` | Sets this widget's direction; a container passes it on to children that have not set their own. Requires `is_valid_direction (a_direction)`; ensures `base_direction = a_direction` and `has_own_direction`. |
+
+Badges are described in [Icons and badges](icons-and-badges.md).
 
 Every command requires `is_gui_thread`: call it only from the GUI processor, never from a worker (a worker uses `GUI_APPLICATION.mailbox`).
 

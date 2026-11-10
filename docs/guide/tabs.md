@@ -53,6 +53,8 @@ A window opens with three tabs, **General**, **Appearance** and **Updates**, wit
 | `selected_index` | The page shown, or 0 when there are no pages. |
 | `page_title (i)` | The title on tab `i`. Requires 1 <= `i` <= `count`. |
 | `set_page_title (i, a_title)` | Retitles tab `i`, for example when the language changes. Requires 1 <= `i` <= `count` and a non-empty `a_title`. |
+| `set_page_icon (i, a_name)` | Shows icon `a_name` before tab `i`'s title. Requires 1 <= `i` <= `count` and a name from `GUI_ICON`. See [Icons and badges](icons-and-badges.md). |
+| `set_page_badge (i, a_text)` | Shows `a_text` as a badge on tab `i`; an empty text removes it. Requires 1 <= `i` <= `count` and `a_text.count <= 8`. See [Icons and badges](icons-and-badges.md). |
 | `page_changed_actions` | `GUI_ACTIONS [TUPLE [page: INTEGER]]`: run when the user chooses another page. |
 | `children`, `count`, `has (a_widget)` | The pages, in order (from `GUI_CONTAINER`). |
 

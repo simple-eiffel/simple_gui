@@ -10,6 +10,7 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - [Common features](widget.md): enabling, showing, size, accessibility, tooltips, context menus, direction
 - [Label](label.md): text the user reads
 - [Button](button.md): an action
+- [Icons and badges](icons-and-badges.md): icon names, button styles, badges, a busy button
 - [Check box](check-box.md): an option, on or off
 - [Separator](separator.md): a line between groups
 - [Image](image.md): a picture from a file or PNG bytes
@@ -55,6 +56,9 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - [Progress bar](progress-bar.md): how far along a task is
 - [Level bar](level-bar.md): how full something is
 - [Status bar](status-bar.md): one line at the window's bottom
+- [Spinner](spinner.md): a turning wheel for work with no known end
+- [Info bar](info-bar.md): a banner in the window, with actions and a close button
+- [Toasts and notifications](toasts-and-notifications.md): short messages that close by themselves, and desktop notifications
 
 ## Menus and toolbars
 - [Menus](menus.md): the menu bar, standard items, shortcuts, context menus
