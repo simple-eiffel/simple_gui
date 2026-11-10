@@ -391,3 +391,15 @@ void sga_dock_show_panel(int a_dock, int an_index, int a_on);
 void sga_test_drag_dock_edge(int a_dock, int a_side, int a_px);
 void sga_test_press_dock_strip(int a_dock, int an_index);
 void sga_test_click_dock_tab(int a_dock, int an_index);
+
+/* 1r-b: floating, auto-hide, a maximized center, moving by drag */
+void sga_dock_float(int a_dock, int an_index, int a_on);
+void sga_dock_set_auto_hide(int a_dock, int a_side, int a_on);
+void sga_dock_maximize_center(int a_dock, int a_on);
+void sga_dock_float_frame(int a_dock, int an_index, int x, int y, int w, int h);
+int sga_dock_float_frame_field(int a_dock, int an_index, int a_field);
+void sga_test_float_by_user(int a_dock, int an_index);
+void sga_test_close_floating(int a_dock, int an_index);
+void sga_test_drag_panel(int a_dock, int an_index, int a_side, int a_position);
+int sga_test_slide_out(int a_dock, int an_index);
+void sga_test_toggle_center(int a_dock);

@@ -5872,12 +5872,21 @@ static void sga_push_replacing(int a_type, int a_id, int a_a, int a_b)
 	NSView *box;         /* a title over the content, when stacked */
 	NSTextField *header;
 	NSLayoutConstraint *under_header, *at_top;   /* the content's top: under the title, or at the box's top (tabbed) */
+	BOOL floating;       /* 1r-b: in a window of its own, still keeping its side and place */
+	NSPanel *float_win;
+	NSRect float_frame;  /* logical units, from the dock window's top-left; empty until first floated */
 }
 @end
 @implementation SGADockPanel
 @end
 
 static void sga_dock_press_name(SGADock *d, SGADockPanel *p);
+static void sga_dock_slide_out(SGADock *d, SGADockPanel *p);
+static void sga_dock_slide_back_later(SGADock *d);
+static void sga_dock_toggle_center_as_user(SGADock *d);
+static void sga_dock_float_as_user(SGADock *d, SGADockPanel *p, BOOL a_on);
+static void sga_dock_track_panel(SGADock *d, SGADockPanel *p, NSEvent *e);
+void sga_dock_set_auto_hide(int a_dock, int a_side, int a_on);
 
 @interface SGADockStrip : NSView
 {
@@ -5888,7 +5897,7 @@ static void sga_dock_press_name(SGADock *d, SGADockPanel *p);
 }
 @end
 
-@interface SGADock : NSView <NSTabViewDelegate>
+@interface SGADock : NSView <NSTabViewDelegate, NSWindowDelegate>
 {
 @public
 	NSView *center;
@@ -5902,6 +5911,15 @@ static void sga_dock_press_name(SGADock *d, SGADockPanel *p);
 	BOOL tabbed[5], collapsed[5];
 	int size[5];
 	int dragging;          /* the side whose edge is being dragged, 0 none */
+	/* 1r-b */
+	BOOL auto_hide[5];     /* the side stands as its strip; a panel slides out over the center */
+	BOOL center_max;       /* every side folded away, the center takes the dock */
+	NSButton *pin[5], *strip_pin[5];
+	SGADockPanel *slid;    /* the panel slid out of an auto-hide strip, nil none */
+	NSView *slide_view;    /* holds it, over the center */
+	NSTimer *slide_timer;  /* the rest before sliding out, or the wait before sliding back */
+	SGADockPanel *resting; /* the name the pointer rests on */
+	NSView *drop_mark;     /* where a dragged panel would land */
 }
 - (void)rebuild:(int)a_side;
 @end
@@ -5911,15 +5929,15 @@ static BOOL sga_dock_long_vertical(int a_side) { return a_side <= 2; }
 static NSArray<SGADockPanel *> *sga_dock_visible(SGADock *d, int a_side)
 {
 	NSMutableArray *r = [NSMutableArray array];
-	for (SGADockPanel *p in d->order[a_side]) if (p->shown) [r addObject:p];
+	for (SGADockPanel *p in d->order[a_side]) if (p->shown && !p->floating) [r addObject:p];
 	return r;
 }
 
 /* The room a side takes across: none when it shows nothing, the strip when collapsed. */
 static CGFloat sga_dock_depth(SGADock *d, int a_side)
 {
-	if (![sga_dock_visible(d, a_side) count]) return 0;
-	return d->collapsed[a_side] ? SGA_DOCK_STRIP : d->size[a_side];
+	if (d->center_max || ![sga_dock_visible(d, a_side) count]) return 0;
+	return d->collapsed[a_side] || d->auto_hide[a_side] ? SGA_DOCK_STRIP : d->size[a_side];
 }
 
 @implementation SGADockStrip
@@ -5951,13 +5969,46 @@ static CGFloat sga_dock_depth(SGADock *d, int a_side)
 		at += (l_down ? l_rect.size.height : l_rect.size.width) + 4;
 	}
 }
-- (void)mouseDown:(NSEvent *)e
+- (SGADockPanel *)nameAt:(NSEvent *)e
 {
 	NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
 	NSArray<SGADockPanel *> *l_shown = sga_dock_visible(dock, side);
 	for (NSUInteger i = 0; i < [rects count] && i < [l_shown count]; i++)
-		if (NSPointInRect(p, [rects[i] rectValue])) { sga_dock_press_name(dock, l_shown[i]); return; }
+		if (NSPointInRect(p, [rects[i] rectValue])) return l_shown[i];
+	return nil;
 }
+- (void)mouseDown:(NSEvent *)e
+{
+	SGADockPanel *p = [self nameAt:e];
+	if (!p) return;
+	if (dock->auto_hide[side]) sga_dock_slide_out(dock, p); else sga_dock_press_name(dock, p);
+}
+/* 1r-b: resting on a name for 0.4 s slides it out; leaving lets it slide back. */
+- (void)updateTrackingAreas
+{
+	[super updateTrackingAreas];
+	for (NSTrackingArea *a in [[self trackingAreas] copy]) [self removeTrackingArea:a];
+	[self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+		options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:self userInfo:nil]];
+}
+- (void)mouseMoved:(NSEvent *)e
+{
+	if (!dock->auto_hide[side]) return;
+	SGADockPanel *p = [self nameAt:e];
+	if (p == dock->resting) return;
+	dock->resting = p;
+	[dock->slide_timer invalidate];
+	dock->slide_timer = nil;
+	if (p && p != dock->slid) {
+		__weak SGADock *d = dock;
+		dock->slide_timer = [NSTimer scheduledTimerWithTimeInterval:0.4 repeats:NO block:^(NSTimer *t) {
+			(void)t;
+			SGADock *l_d = d;
+			if (l_d && l_d->resting) sga_dock_slide_out(l_d, l_d->resting);
+		}];
+	}
+}
+- (void)mouseExited:(NSEvent *)e { (void)e; dock->resting = nil; sga_dock_slide_back_later(dock); }
 - (NSString *)accessibilityRole { return NSAccessibilityGroupRole; }
 - (NSString *)accessibilityLabel { return @"Collapsed panels"; }
 @end
@@ -6017,7 +6068,7 @@ static void sga_dock_select_silently(SGADock *d, SGADockPanel *p)
 }
 - (NSRect)edgeOf:(int)a_side
 {
-	if (!sga_dock_depth(self, a_side) || collapsed[a_side]) return NSZeroRect;
+	if (!sga_dock_depth(self, a_side) || collapsed[a_side] || auto_hide[a_side]) return NSZeroRect;
 	NSRect s = [self rectOf:a_side];
 	CGFloat h = SGA_DOCK_EDGE / 2.0;
 	switch (a_side) {
@@ -6033,16 +6084,33 @@ static void sga_dock_select_silently(SGADock *d, SGADockPanel *p)
 	[center setFrame:[self rectOf:0]];
 	for (int s = 1; s <= 4; s++) {
 		NSRect f = [self rectOf:s];
-		BOOL l_any = f.size.width > 0 && f.size.height > 0;
-		[side_view[s] setHidden:!l_any || collapsed[s]];
-		[strip[s] setHidden:!l_any || !collapsed[s]];
-		[chevron[s] setHidden:!l_any || collapsed[s]];
+		BOOL l_any = f.size.width > 0 && f.size.height > 0, l_folded = collapsed[s] || auto_hide[s];
+		[side_view[s] setHidden:!l_any || l_folded];
+		[strip[s] setHidden:!l_any || !l_folded];
+		[chevron[s] setHidden:!l_any || l_folded];
+		[pin[s] setHidden:!l_any || l_folded];
+		[strip_pin[s] setHidden:!l_any || !auto_hide[s]];
 		[side_view[s] setFrame:f];
 		[strip[s] setFrame:f];
 		[strip[s] setNeedsDisplay:YES];
-		/* the chevron at the side's corner nearest the center's top */
+		/* the chevron and the pin at the side's corner nearest the center's top */
 		NSRect c = NSMakeRect(s == 2 ? NSMinX(f) + 2 : NSMaxX(f) - 18, NSMinY(f) + 2, 16, 16);
 		[chevron[s] setFrame:c];
+		[pin[s] setFrame:NSOffsetRect(c, s == 2 ? 18 : -18, 0)];
+		/* the strip's pin at its far end */
+		[strip_pin[s] setFrame:sga_dock_long_vertical(s) ? NSMakeRect(NSMinX(f) + 3, NSMaxY(f) - 19, 16, 16) : NSMakeRect(NSMaxX(f) - 19, NSMinY(f) + 3, 16, 16)];
+	}
+	/* A slid-out panel lies over the center at its side's size, without moving it. */
+	[slide_view setHidden:slid == nil];
+	if (slid) {
+		NSRect c = [self rectOf:0];
+		int k = slid->side, l_depth = (int)fmin(size[k], (k <= 2 ? c.size.width : c.size.height));
+		NSRect r = k == 1 ? NSMakeRect(NSMinX(c), NSMinY(c), l_depth, c.size.height)
+			: k == 2 ? NSMakeRect(NSMaxX(c) - l_depth, NSMinY(c), l_depth, c.size.height)
+			: k == 3 ? NSMakeRect(NSMinX(c), NSMinY(c), c.size.width, l_depth)
+			: NSMakeRect(NSMinX(c), NSMaxY(c) - l_depth, c.size.width, l_depth);
+		[slide_view setFrame:r];
+		[slid->box setFrame:[slide_view bounds]];
 	}
 	[[self window] invalidateCursorRectsForView:self];
 	[self setNeedsDisplay:YES];
@@ -6069,12 +6137,37 @@ static void sga_dock_select_silently(SGADock *d, SGADockPanel *p)
 		if (!NSIsEmptyRect(e)) [self addCursorRect:e cursor:s <= 2 ? [NSCursor resizeLeftRightCursor] : [NSCursor resizeUpDownCursor]];
 	}
 }
-/* Edges take the press; everything else belongs to the views under it. */
+/* Edges take the press, and so does the center's frame (a 3-point band inside it where no
+   side's edge is); everything else belongs to the views under it. */
+- (BOOL)onCenterFrame:(NSPoint)a_local
+{
+	NSRect c = [self rectOf:0];
+	return NSPointInRect(a_local, c) && !NSPointInRect(a_local, NSInsetRect(c, 3, 3));
+}
 - (NSView *)hitTest:(NSPoint)p
 {
 	NSPoint l_local = [self convertPoint:p fromView:[self superview]];
 	for (int s = 1; s <= 4; s++) if (NSPointInRect(l_local, [self edgeOf:s])) return self;
+	if ([self onCenterFrame:l_local]) return self;
 	return [super hitTest:p];
+}
+/* The panel whose title (stacked) is under `a_local', or nil. */
+- (SGADockPanel *)headerAt:(NSPoint)a_local
+{
+	for (SGADockPanel *p in panels)
+		if (p->shown && !p->floating && ![p->header isHidden] && [p->header window] == [self window]) {
+			NSRect r = [self convertRect:NSInsetRect([p->header bounds], -4, -3) fromView:p->header];
+			if (NSPointInRect(a_local, r)) return p;
+		}
+	return nil;
+}
+- (void)togglePin:(NSButton *)b
+{
+	int k = (int)[b tag];
+	BOOL l_on = !auto_hide[k];
+	sga_dock_set_auto_hide((int)sga_id_of(self), k, l_on);
+	sga_push(39, sga_id_of(self), k, l_on ? 1 : 0, 0);
+	sga_wake();
 }
 /* The size a side gets for an edge at `a_at' (dock coordinates), within the center's minimum. */
 - (int)sizeFor:(int)a_side at:(NSPoint)a_at
@@ -6103,7 +6196,17 @@ static void sga_dock_select_silently(SGADock *d, SGADockPanel *p)
 	NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
 	dragging = 0;
 	for (int s = 1; s <= 4; s++) if (NSPointInRect(p, [self edgeOf:s])) dragging = s;
-	if (!dragging) return;
+	if (!dragging && [self onCenterFrame:p]) {
+		if ([e clickCount] == 2) sga_dock_toggle_center_as_user(self);
+		return;
+	}
+	if (!dragging) {
+		/* a panel's title: a double click floats it, a drag moves it */
+		SGADockPanel *h = [self headerAt:p];
+		if (h && [e clickCount] == 2) sga_dock_float_as_user(self, h, YES);
+		else if (h) sga_dock_track_panel(self, h, e);
+		return;
+	}
 	if ([e clickCount] == 2) {   /* a double click on the edge collapses the side */
 		collapsed[dragging] = YES;
 		[self setNeedsLayout:YES];
@@ -6172,6 +6275,287 @@ static void sga_dock_select_silently(SGADock *d, SGADockPanel *p)
 }
 @end
 
+
+/* ------------------------------------------------------------- 1r-b: the dock, further */
+
+/* A side's tabs: a double click on a tab floats its panel; a drag on a tab moves it (the
+   tab view tracks presses itself, so the press is looked ahead of, as in #72). */
+@interface SGADockTabs : NSTabView
+{
+@public
+	__weak SGADock *dock;
+}
+@end
+@implementation SGADockTabs
+- (void)mouseDown:(NSEvent *)e
+{
+	NSPoint p = [self convertPoint:[e locationInWindow] fromView:nil];
+	NSTabViewItem *i = [self tabViewItemAtPoint:p];
+	SGADockPanel *l_panel = [i identifier];
+	if (!l_panel || !dock) { [super mouseDown:e]; return; }
+	if ([e clickCount] == 2) { sga_dock_float_as_user(dock, l_panel, YES); return; }
+	for (;;) {
+		NSEvent *n = [NSApp nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp
+			untilDate:[NSDate distantFuture] inMode:NSEventTrackingRunLoopMode dequeue:NO];
+		if (!n || [n type] == NSEventTypeLeftMouseUp) break;
+		[NSApp nextEventMatchingMask:NSEventMaskLeftMouseDragged untilDate:[NSDate distantPast] inMode:NSEventTrackingRunLoopMode dequeue:YES];
+		NSPoint q = [n locationInWindow], o = [e locationInWindow];
+		if (hypot(q.x - o.x, q.y - o.y) > 4) { sga_dock_track_panel(dock, l_panel, n); return; }
+	}
+	[super mouseDown:e];
+}
+@end
+
+/* What lies over the center while a panel is slid out: leaving it lets it slide back. */
+@interface SGADockSlide : NSView
+{
+@public
+	__weak SGADock *dock;
+}
+@end
+@implementation SGADockSlide
+- (void)updateTrackingAreas
+{
+	[super updateTrackingAreas];
+	for (NSTrackingArea *a in [[self trackingAreas] copy]) [self removeTrackingArea:a];
+	[self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+		options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect owner:self userInfo:nil]];
+}
+- (void)mouseEntered:(NSEvent *)e { (void)e; [dock->slide_timer invalidate]; dock->slide_timer = nil; }
+- (void)mouseExited:(NSEvent *)e { (void)e; sga_dock_slide_back_later(dock); }
+- (void)drawRect:(NSRect)r { (void)r; [[NSColor windowBackgroundColor] setFill]; NSRectFill([self bounds]); }
+@end
+
+static int sga_dock_index_of(SGADock *d, SGADockPanel *p) { return (int)[d->panels indexOfObjectIdenticalTo:p] + 1; }
+
+/* Slide `p' out over the center (its side in auto-hide), or back. */
+static void sga_dock_slide_out(SGADock *d, SGADockPanel *p)
+{
+	[d->slide_timer invalidate];
+	d->slide_timer = nil;
+	if (d->slid == p) return;
+	if (d->slid) { SGADockPanel *l_old = d->slid; d->slid = nil; [l_old->box removeFromSuperview]; [d rebuild:l_old->side]; }
+	if (!p || !d->auto_hide[p->side] || !p->shown || p->floating) { [d setNeedsLayout:YES]; return; }
+	[p->box removeFromSuperview];
+	[p->header setHidden:NO];
+	[p->under_header setActive:YES];
+	[p->at_top setActive:NO];
+	[p->box setTranslatesAutoresizingMaskIntoConstraints:YES];
+	[d->slide_view addSubview:p->box];
+	d->slid = p;
+	[d addSubview:d->slide_view positioned:NSWindowAbove relativeTo:nil];
+	[d setNeedsLayout:YES];
+	[d layoutSubtreeIfNeeded];
+}
+
+static void sga_dock_slide_back(SGADock *d)
+{
+	if (!d->slid) return;
+	SGADockPanel *p = d->slid;
+	d->slid = nil;
+	[p->box removeFromSuperview];
+	[p->box setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[d rebuild:p->side];
+}
+
+/* After 0.5 s, unless the pointer came back or the focus is inside the slid-out panel. */
+static void sga_dock_slide_back_later(SGADock *d)
+{
+	if (!d || !d->slid) return;
+	[d->slide_timer invalidate];
+	__weak SGADock *w = d;
+	d->slide_timer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:NO block:^(NSTimer *t) {
+		(void)t;
+		SGADock *l_d = w;
+		if (!l_d || !l_d->slid) return;
+		id f = [[l_d window] firstResponder];
+		if ([f isKindOfClass:[NSView class]] && [(NSView *)f isDescendantOf:l_d->slid->box]) return;
+		NSPoint m = [l_d->slide_view convertPoint:[[l_d window] mouseLocationOutsideOfEventStream] fromView:nil];
+		if (NSPointInRect(m, [l_d->slide_view bounds])) return;
+		sga_dock_slide_back(l_d);
+	}];
+}
+
+/* The dock window's top-left, in screen points, and back. */
+static NSRect sga_dock_screen_of(SGADock *d, NSRect a_frame)
+{
+	NSRect w = [[d window] frame];
+	return NSMakeRect(NSMinX(w) + a_frame.origin.x, NSMaxY(w) - a_frame.origin.y - a_frame.size.height, a_frame.size.width, a_frame.size.height);
+}
+static NSRect sga_dock_relative_of(SGADock *d, NSRect a_screen)
+{
+	NSRect w = [[d window] frame];
+	return NSMakeRect(NSMinX(a_screen) - NSMinX(w), NSMaxY(w) - NSMaxY(a_screen), a_screen.size.width, a_screen.size.height);
+}
+
+/* Float `p' in a window of its own (titled with its title, over the dock's window), or dock it
+   again where it was. Silent. */
+static void sga_dock_float_panel(SGADock *d, SGADockPanel *p, BOOL a_on)
+{
+	if (!p || p->floating == a_on) return;
+	if (a_on) {
+		if (d->slid == p) sga_dock_slide_back(d);
+		NSSize l_docked = [p->box frame].size;
+		if (l_docked.width < 80 || l_docked.height < 60) l_docked = NSMakeSize(fmax(d->size[p->side], 200), 300);
+		p->floating = YES;
+		[d rebuild:p->side];
+		[p->box removeFromSuperview];
+		if (NSIsEmptyRect(p->float_frame)) {   /* the first float: over the middle of the dock's window */
+			NSRect w = [[d window] frame];
+			p->float_frame = NSMakeRect((w.size.width - l_docked.width) / 2, (w.size.height - l_docked.height) / 2, l_docked.width, l_docked.height);
+		}
+		NSUInteger l_style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable | NSWindowStyleMaskUtilityWindow;
+		NSPanel *w = [[NSPanel alloc] initWithContentRect:[NSPanel contentRectForFrameRect:sga_dock_screen_of(d, p->float_frame) styleMask:l_style]
+			styleMask:l_style backing:NSBackingStoreBuffered defer:NO];
+		[w setReleasedWhenClosed:NO];
+		[w setFloatingPanel:NO];
+		[w setHidesOnDeactivate:NO];
+		[w setTitle:p->title];
+		[w setFrame:sga_dock_screen_of(d, p->float_frame) display:NO];
+		[p->header setHidden:YES];
+		[p->under_header setActive:NO];
+		[p->at_top setActive:YES];
+		[p->box setTranslatesAutoresizingMaskIntoConstraints:YES];
+		[p->box setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+		[p->box setFrame:[[w contentView] bounds]];
+		[[w contentView] addSubview:p->box];
+		[w setDelegate:d];
+		p->float_win = w;
+		[w orderFront:nil];
+	} else {
+		NSPanel *w = p->float_win;
+		if (w) p->float_frame = sga_dock_relative_of(d, [w frame]);
+		p->float_win = nil;
+		[w setDelegate:nil];
+		[p->box removeFromSuperview];
+		[w close];
+		[p->box setAutoresizingMask:NSViewNotSizable];
+		[p->box setTranslatesAutoresizingMaskIntoConstraints:NO];
+		p->floating = NO;
+		[d rebuild:p->side];
+	}
+}
+
+static void sga_dock_float_as_user(SGADock *d, SGADockPanel *p, BOOL a_on)
+{
+	if (!p || p->floating == a_on) return;
+	sga_dock_float_panel(d, p, a_on);
+	sga_push(38, sga_id_of(d), sga_dock_index_of(d, p), a_on ? 1 : 0, 0);
+	sga_wake();
+}
+
+static void sga_dock_toggle_center_as_user(SGADock *d)
+{
+	d->center_max = !d->center_max;
+	sga_dock_slide_back(d);
+	[d setNeedsLayout:YES];
+	sga_push(40, sga_id_of(d), 0, d->center_max ? 1 : 0, 0);
+	sga_wake();
+}
+
+/* Where a panel held at `a' (dock coordinates) would land: a side and a place on it (from
+   1), YES; or NO, nowhere (a drop there floats it). A side's own room, or for a side that
+   takes none, a 28-point band along the dock's edge there. */
+static BOOL sga_dock_landing(SGADock *d, SGADockPanel *a_held, NSPoint a, int *a_side, int *a_position, NSRect *a_mark)
+{
+	NSRect b = [d bounds];
+	for (int k = 1; k <= 4; k++) {
+		NSRect r = [d rectOf:k];
+		BOOL l_room = r.size.width > 0 && r.size.height > 0 && !d->collapsed[k] && !d->auto_hide[k];
+		if (!l_room) r = k == 1 ? NSMakeRect(0, 0, 28, b.size.height) : k == 2 ? NSMakeRect(b.size.width - 28, 0, 28, b.size.height)
+			: k == 3 ? NSMakeRect(0, 0, b.size.width, 28) : NSMakeRect(0, b.size.height - 28, b.size.width, 28);
+		if (!NSPointInRect(a, r)) continue;
+		NSMutableArray<SGADockPanel *> *l_on = [NSMutableArray arrayWithArray:sga_dock_visible(d, k)];
+		[l_on removeObjectIdenticalTo:a_held];
+		int l_place = (int)[l_on count] + 1;
+		NSRect l_mark = r;
+		if (l_room && !d->tabbed[k]) {
+			/* before the first panel whose middle is past the pointer, along the side */
+			for (NSUInteger i = 0; i < [l_on count]; i++) {
+				NSRect f = [d convertRect:[l_on[i]->box bounds] fromView:l_on[i]->box];
+				BOOL l_before = sga_dock_long_vertical(k) ? a.y < NSMidY(f) : a.x < NSMidX(f);
+				if (l_before) {
+					l_place = (int)i + 1;
+					l_mark = sga_dock_long_vertical(k) ? NSMakeRect(NSMinX(r), NSMinY(f) - 2, r.size.width, 4) : NSMakeRect(NSMinX(f) - 2, NSMinY(r), 4, r.size.height);
+					break;
+				}
+			}
+		}
+		/* the place counts the held panel out when it is already on that side (shared order) */
+		*a_side = k;
+		*a_position = l_place;
+		*a_mark = l_mark;
+		return YES;
+	}
+	return NO;
+}
+
+/* The user drags panel `p' (from its title or its tab): sides and gaps light where it would
+   land; a drop there moves it (41), anywhere else floats it (38). */
+static void sga_dock_track_panel(SGADock *d, SGADockPanel *p, NSEvent *e)
+{
+	int l_side = 0, l_place = 0;
+	NSRect l_mark;
+	[d->drop_mark setHidden:YES];
+	[d addSubview:d->drop_mark positioned:NSWindowAbove relativeTo:nil];
+	NSEvent *n = e;
+	for (;;) {
+		NSPoint a = [d convertPoint:[n locationInWindow] fromView:nil];
+		if (sga_dock_landing(d, p, a, &l_side, &l_place, &l_mark)) { [d->drop_mark setFrame:l_mark]; [d->drop_mark setHidden:NO]; }
+		else { l_side = 0; [d->drop_mark setHidden:YES]; }
+		[[NSCursor closedHandCursor] set];
+		n = [NSApp nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp untilDate:[NSDate distantFuture] inMode:NSEventTrackingRunLoopMode dequeue:YES];
+		if (!n || [n type] == NSEventTypeLeftMouseUp) break;
+	}
+	[d->drop_mark setHidden:YES];
+	[[NSCursor arrowCursor] set];
+	if (n) {
+		NSPoint a = [d convertPoint:[n locationInWindow] fromView:nil];
+		if (!sga_dock_landing(d, p, a, &l_side, &l_place, &l_mark)) { sga_dock_float_as_user(d, p, YES); return; }
+		NSUInteger l_now = [d->order[p->side] indexOfObjectIdenticalTo:p];
+		if (l_side == p->side && (int)l_now + 1 == l_place) return;
+		sga_dock_move(sga_id_of(d), sga_dock_index_of(d, p), l_side, l_place);
+		sga_push(41, sga_id_of(d), sga_dock_index_of(d, p), l_side, l_place);
+		sga_wake();
+	}
+}
+
+@implementation SGADock (SGADockFloating)
+/* The user closes a floating window: the panel docks again (38, b = 0); it is not hidden. */
+- (BOOL)windowShouldClose:(NSWindow *)w
+{
+	for (SGADockPanel *p in panels) if (p->float_win == w) { sga_dock_float_as_user(self, p, NO); return NO; }
+	return YES;
+}
+- (void)windowDidMove:(NSNotification *)n { [self keepFrameOf:[n object]]; }
+- (void)windowDidResize:(NSNotification *)n { [self keepFrameOf:[n object]]; }
+- (void)keepFrameOf:(NSWindow *)w
+{
+	for (SGADockPanel *p in panels) if (p->float_win == w) p->float_frame = sga_dock_relative_of(self, [w frame]);
+}
+@end
+
+/* The primary modifier+Shift+F12 toggles the maximized center of the key window's dock. */
+static SGADock *sga_dock_in(NSView *v)
+{
+	if ([v isKindOfClass:[SGADock class]]) return (SGADock *)v;
+	for (NSView *c in [v subviews]) { SGADock *d = sga_dock_in(c); if (d) return d; }
+	return nil;
+}
+static void sga_dock_watch_keys(void)
+{
+	static id s_dock_keys;
+	if (s_dock_keys) return;
+	s_dock_keys = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *e) {
+		NSEventModifierFlags f = [e modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask;
+		if ([e keyCode] == 111 && (f & NSEventModifierFlagCommand) && (f & NSEventModifierFlagShift)) {
+			SGADock *d = sga_dock_in([[e window] contentView]);
+			if (d) { sga_dock_toggle_center_as_user(d); return nil; }
+		}
+		return e;
+	}];
+}
+
 int sga_dock(int a_center)
 {
 	SGADock *d = [[SGADock alloc] initWithFrame:NSMakeRect(0, 0, 600, 400)];
@@ -6182,7 +6566,8 @@ int sga_dock(int a_center)
 	for (int s = 1; s <= 4; s++) {
 		d->order[s] = [NSMutableArray array];
 		d->size[s] = s <= 2 ? 200 : 140;
-		d->tabs[s] = [[NSTabView alloc] initWithFrame:NSZeroRect];
+		d->tabs[s] = [[SGADockTabs alloc] initWithFrame:NSZeroRect];
+		((SGADockTabs *)d->tabs[s])->dock = d;
 		[d->tabs[s] setDelegate:d];
 		[d->tabs[s] setTranslatesAutoresizingMaskIntoConstraints:YES];
 		[d->tabs[s] setHidden:YES];
@@ -6205,9 +6590,35 @@ int sga_dock(int a_center)
 		[d->chevron[s] setToolTip:@"Collapse"];
 		[d addSubview:d->stack[s]];
 		[d addSubview:d->tabs[s]];
+		d->pin[s] = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"pin" accessibilityDescription:@"Auto-hide"] target:d action:@selector(togglePin:)];
+		d->strip_pin[s] = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"pin.slash" accessibilityDescription:@"Keep open"] target:d action:@selector(togglePin:)];
+		for (NSButton *b in @[d->pin[s], d->strip_pin[s]]) {
+			[b setBordered:NO];
+			[b setTag:s];
+			[b setTranslatesAutoresizingMaskIntoConstraints:YES];
+			[b setHidden:YES];
+		}
+		[d->pin[s] setToolTip:@"Auto-hide"];
+		[d->strip_pin[s] setToolTip:@"Keep open"];
 		[d addSubview:d->strip[s]];
 		[d addSubview:d->chevron[s]];
+		[d addSubview:d->pin[s]];
+		[d addSubview:d->strip_pin[s]];
 	}
+	SGADockSlide *l_slide = [[SGADockSlide alloc] initWithFrame:NSZeroRect];
+	l_slide->dock = d;
+	[l_slide setWantsLayer:YES];
+	[[l_slide layer] setShadowOpacity:0.3];
+	[[l_slide layer] setShadowRadius:6];
+	[l_slide setHidden:YES];
+	d->slide_view = l_slide;
+	d->drop_mark = [[NSView alloc] initWithFrame:NSZeroRect];
+	[d->drop_mark setWantsLayer:YES];
+	[[d->drop_mark layer] setBackgroundColor:[[[NSColor controlAccentColor] colorWithAlphaComponent:0.35] CGColor]];
+	[d->drop_mark setHidden:YES];
+	[d addSubview:d->slide_view];
+	[d addSubview:d->drop_mark];
+	sga_dock_watch_keys();
 	return sga_keep(d);
 }
 
@@ -6273,6 +6684,8 @@ void sga_dock_remove(int a_dock, int an_index)
 	SGADock *d = sga_dock_of(a_dock);
 	SGADockPanel *p = sga_dock_panel(d, an_index);
 	if (!p) return;
+	if (p->floating) sga_dock_float_panel(d, p, NO);
+	if (d->slid == p) sga_dock_slide_back(d);
 	[d->order[p->side] removeObjectIdenticalTo:p];
 	[d->panels removeObjectIdenticalTo:p];
 	[p->box removeFromSuperview];
@@ -6369,4 +6782,93 @@ void sga_test_click_dock_tab(int a_dock, int an_index)
 	NSTabView *t = d->tabs[p->side];
 	NSInteger i = [t indexOfTabViewItemWithIdentifier:p];
 	if (i != NSNotFound && [t selectedTabViewItem] != [t tabViewItemAtIndex:i]) [t selectTabViewItemAtIndex:i];   /* the delegate sends 37 */
+}
+
+/* 1r-b backend: silent. */
+void sga_dock_float(int a_dock, int an_index, int a_on)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	sga_dock_float_panel(d, sga_dock_panel(d, an_index), a_on != 0);
+}
+
+void sga_dock_set_auto_hide(int a_dock, int a_side, int a_on)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	if (!d || !sga_dock_side_ok(a_side) || d->auto_hide[a_side] == (a_on != 0)) return;
+	if (d->slid && d->slid->side == a_side) sga_dock_slide_back(d);
+	d->auto_hide[a_side] = a_on != 0;
+	[d->strip[a_side] setNeedsDisplay:YES];
+	[d setNeedsLayout:YES];
+}
+
+void sga_dock_maximize_center(int a_dock, int a_on)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	if (!d) return;
+	d->center_max = a_on != 0;
+	sga_dock_slide_back(d);
+	[d setNeedsLayout:YES];
+}
+
+/* A floating panel's frame, in logical units from the dock window's top-left. */
+void sga_dock_float_frame(int a_dock, int an_index, int x, int y, int w, int h)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (!p || w <= 0 || h <= 0) return;
+	p->float_frame = NSMakeRect(x, y, w, h);
+	if (p->float_win) [p->float_win setFrame:sga_dock_screen_of(d, p->float_frame) display:YES];
+}
+
+int sga_dock_float_frame_field(int a_dock, int an_index, int a_field)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (!p) return 0;
+	if (p->float_win) p->float_frame = sga_dock_relative_of(d, [p->float_win frame]);
+	NSRect f = p->float_frame;
+	return (int)lround(a_field == 1 ? f.origin.x : a_field == 2 ? f.origin.y : a_field == 3 ? f.size.width : f.size.height);
+}
+
+/* As the user: a double click on a panel's tab or title, closing its floating window, a
+   drag of it to a side and place, resting on its name in an auto-hide strip (answers
+   whether it slid out), the center's double click. */
+void sga_test_float_by_user(int a_dock, int an_index)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (p && p->shown) sga_dock_float_as_user(d, p, YES);
+}
+
+void sga_test_close_floating(int a_dock, int an_index)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (p && p->float_win) [d windowShouldClose:p->float_win];
+}
+
+void sga_test_drag_panel(int a_dock, int an_index, int a_side, int a_position)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (!p || !sga_dock_side_ok(a_side)) return;
+	if (p->floating) sga_dock_float_panel(d, p, NO);
+	sga_dock_move(a_dock, an_index, a_side, a_position);
+	sga_push(41, a_dock, an_index, a_side, a_position);
+	sga_wake();
+}
+
+int sga_test_slide_out(int a_dock, int an_index)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	SGADockPanel *p = sga_dock_panel(d, an_index);
+	if (!p) return 0;
+	sga_dock_slide_out(d, p);
+	return d->slid == p ? 1 : 0;
+}
+
+void sga_test_toggle_center(int a_dock)
+{
+	SGADock *d = sga_dock_of(a_dock);
+	if (d) sga_dock_toggle_center_as_user(d);
 }
