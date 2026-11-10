@@ -65,6 +65,16 @@ A window opens with a list of three books, none selected, and the line "Pick a b
 | `selected_rows` | Every selected row, in order, as an `ARRAYED_LIST [INTEGER]`. Ensures every number is in 1 to `count`. |
 | `set_reorderable (a_on)`, `is_reorderable`, `reorder_actions`, `move_row (a_from, a_to)` | Let the user move rows by dragging. See [Reordering](reordering.md). |
 | `set_row_pebble_function (a_function)` | Lets each row carry a pebble for [pick and drop](pick-and-drop.md). A drop on the list sets `last_drop_row`. |
+| `extend_rich (a_row)` | Adds a copy of a `GUI_LIST_ROW` at the end: a title, and optionally a dimmer second line, an icon, a count badge, a check box and a close button. Plain `extend` rows sit beside rich ones. Ensures `count = old count + 1`. |
+| `row (i)` | Row `i`'s parts as a `GUI_LIST_ROW` (a plain row has only its title). `i_th (i)` is its title. |
+| `remove_row (i)` | Takes row `i` out, with no event; the rows after it move up one. Ensures `count = old count - 1`. |
+| `set_row_checked (i, a_on)`, `is_row_checked (i)` | Checks or unchecks row `i`'s box, with no event. Requires the row to be checkable. |
+| `row_check_actions` | `GUI_ACTIONS [TUPLE [row: INTEGER; is_checked: BOOLEAN]]`: run when the user checks or unchecks a row (its box, or Space on the selected row). |
+| `row_close_actions` | `GUI_ACTIONS [TUPLE [row: INTEGER; title: STRING_32]]`: run after the user closed a row (its close button, or Delete on the selected row). The row is already gone; the arguments say which it was. |
+| `set_filter (a_text)`, `filter_text`, `shown_count` | Shows only the rows whose title contains `a_text`, ignoring case (empty: all). Row numbers stay the list's own. A selected row the filter hides is deselected, and `selection_actions` run with 0. |
+| `filter_with (a_search)` | Filters by a [search field](search-field.md)'s text as the user types. |
+| `sort (a_ascending)`, `is_in_order (a_ascending)` | Orders the rows by title, ignoring case; equal titles keep their order, and the selection stays with its row. No event. Ensures `is_in_order (a_ascending)`. |
+| `set_sort_on_extend (a_on, a_ascending)` | Keeps the rows sorted as they are added (and sorts them now). |
 
 Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the rest of the [common features](widget.md).
 
@@ -74,6 +84,24 @@ Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the res
 
 **Moving rows, and pick and drop.** A list can let the user reorder its rows by dragging: see [Reordering](reordering.md). Its rows can also be sources and targets for [pick and drop](pick-and-drop.md), and a list can take files and text from other programs: see [Drag and drop between programs](drag-and-drop-between-programs.md).
 
+**Rich rows.** A `GUI_LIST_ROW` describes a row before it goes in:
+
+```eiffel
+create l_row.make ("Write the sermon")
+l_row.set_subtitle ("Due Friday")
+l_row.set_icon_name ("document")
+l_row.set_badge (3)
+l_row.set_checkable (True)
+l_row.set_closable (True)
+tasks.extend_rich (l_row)
+tasks.row_check_actions.extend (agent mark_done)       -- (row, is_checked)
+tasks.row_close_actions.extend (agent forget_task)     -- (row it was, title)
+```
+
+The list keeps a copy, so change a row in the list through `set_row_checked`. A row with a subtitle is two lines tall; a list may make all its rows that tall. Space on the selected row toggles its check and Delete closes it (Command and Backspace on macOS), as a click on the box or the close button does.
+
+**Filtering and sorting.** `set_filter` hides the rows that don't match and `filter_with` ties it to a search field. Hidden rows keep their numbers, so `selected_index`, `i_th` and every event still speak of the list's own rows; `shown_count` says how many show. `sort` reorders the rows themselves and keeps the selection with its row.
+
 **Accessibility:** the role is `list`, and each row is a `list-item` read by its text. The list has no visible text of its own, so give it `set_accessible_label` with what the rows are ("Books", "Recent files").
 
 ## On each platform
@@ -81,7 +109,7 @@ Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the res
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkListBox` (single selection, `boxed-list` style) in a `GtkScrolledWindow` | `NSTableView` with one column and no header, inset style, in a bordered `NSScrollView` | `SW_TEXT_LIST`: a drawn list that names its rows for screen readers |
-| Looks or behaves differently | At least 80 pixels tall. A cleared selection sends row 0. | A cleared selection sends row 0. | Starts 120 pixels tall. A click always selects a row, so the user has no way to clear the selection and row 0 does not arrive. |
+| Looks or behaves differently | At least 80 pixels tall. A cleared selection sends row 0. Rich rows are a box of `GtkCheckButton`, labels (the subtitle `dim-label`), an icon, a badge and a flat close button; GtkListBox's own filter hides rows. | A cleared selection sends row 0. Rich rows are table cell views; Command and Backspace closes a row. | Starts 120 pixels tall. A click always selects a row, so the user has no way to clear the selection and row 0 does not arrive. Rich rows are drawn; while any row has a subtitle, every row is two lines tall. |
 
 ## Design guidance
 
@@ -98,4 +126,5 @@ Inherited: `set_accessible_label`, `set_context_menu`, `set_tooltip` and the res
 
 | Linux | macOS | Windows |
 |---|---|---|
+| ![rich rows on Linux](images/linux/list-rich.png) | ![rich rows on macOS](images/macos/list-rich.png) | ![rich rows on Windows](images/windows/list-rich.png) |
 | ![list on Linux](images/linux/list.png) | ![list on macOS](images/macos/list.png) | ![list on Windows](images/windows/list.png) |

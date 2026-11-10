@@ -42,6 +42,7 @@ feature {NONE} -- Initialization
 				shoot_icons_and_feedback
 				shoot_moving
 				shoot_docking
+				shoot_rich_lists_and_tables
 				print ("guide gallery: " + saved.out + " pictures in " + folder.name.to_string_8 + "%N")
 			else
 				print ("guide gallery: no display%N")
@@ -670,6 +671,56 @@ feature {NONE} -- Moving things (1q)
 			l_dock.set_side_size (l_dock.Side_right, 160)
 			l_dock.set_side_size (l_dock.Side_bottom, 110)
 			save ("docking", l_window)
+		end
+
+	shoot_rich_lists_and_tables
+			-- 1s: rich list rows, and a table with a text, a check and a choice column whose
+			-- last edit was refused.
+		local
+			l_list: GUI_LIST
+			l_row: GUI_LIST_ROW
+			l_table: GUI_TABLE
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+		do
+			create l_list.make
+			l_list.set_accessible_label ("Tasks")
+			create l_row.make ("Write the sermon")
+			l_row.set_subtitle ("Due Friday")
+			l_row.set_checkable (True)
+			l_row.set_badge (3)
+			l_list.extend_rich (l_row)
+			create l_row.make ("Call the printer")
+			l_row.set_subtitle ("Bulletins for Sunday")
+			l_row.set_checkable (True)
+			l_row.set_checked (True)
+			l_row.set_closable (True)
+			l_list.extend_rich (l_row)
+			create l_row.make ("Order the books")
+			l_row.set_subtitle ("Twelve copies")
+			l_row.set_checkable (True)
+			l_row.set_closable (True)
+			l_list.extend_rich (l_row)
+			create l_stack.make_vertical
+			l_stack.extend_stretching (l_list)
+			shoot ("list-rich", "Tasks", 320, 220, l_stack)
+			create l_table.make (<<"Book", "Chapters", "Read", "Testament">>)
+			l_table.extend_row (<<"Genesis", "50", "1", "Old">>)
+			l_table.extend_row (<<"Mark", "16", "0", "New">>)
+			l_table.extend_row (<<"Romans", "16", "1", "New">>)
+			l_table.set_column_editor (2, l_table.Edit_text)
+			l_table.set_column_editor (3, l_table.Edit_check)
+			l_table.set_column_choices (4, <<"Old", "New">>)
+			l_table.set_cell_validator (2, agent (r: INTEGER; t: STRING_32): detachable STRING_32
+				do
+					if not t.is_integer then Result := {STRING_32} "A whole number, please" end
+				end)
+			create l_window.make ("Books", 440, 220)
+			l_window.set_content (l_table)
+			l_window.show
+			settle
+			driver.edit_cell (l_table, 3, 2, "sixteen")
+			save ("table-editing", l_window)
 		end
 
 feature {NONE} -- Implementation

@@ -2049,6 +2049,25 @@ static void sg_table_note_clear(int id) {
     GtkWidget *note = g_object_get_data(G_OBJECT(sg_w[id]), "sg-cell-note");
     if (note) gtk_widget_set_visible(note, FALSE);
 }
+static gboolean sg_table_note_place(gpointer d) {
+    int id = GPOINTER_TO_INT(d), row, col, at;
+    GtkWidget *note = sg_w[id] ? g_object_get_data(G_OBJECT(sg_w[id]), "sg-cell-note") : NULL, *cell;
+    GtkOverlay *o = sg_w[id] ? sg_pill_overlay(sg_w[id]) : NULL;
+    graphene_rect_t b;
+    if (!note || !o || !gtk_widget_get_visible(note)) return G_SOURCE_REMOVE;
+    row = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(note), "sg-note-row"));
+    col = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(note), "sg-note-col"));
+    at = sg_table_pos_of(id, row);
+    cell = at >= 0 ? g_hash_table_lookup(sg_table_cells(id), SG_CELL_KEY(at, col - 1)) : NULL;
+    if (cell && gtk_widget_compute_bounds(cell, GTK_WIDGET(o), &b)) {
+        gtk_widget_set_margin_start(note, (int) b.origin.x);
+        gtk_widget_set_margin_top(note, (int) (b.origin.y + b.size.height));
+    } else if (gtk_widget_compute_bounds(sg_w[id], GTK_WIDGET(o), &b)) {
+        gtk_widget_set_margin_start(note, (int) b.origin.x);   /* the cell is out of sight: under the table */
+        gtk_widget_set_margin_top(note, (int) (b.origin.y + b.size.height));
+    }
+    return G_SOURCE_REMOVE;
+}
 static void sg_table_note_show(int id, int row, int col, const char *message) {
     GtkWidget *note = g_object_get_data(G_OBJECT(sg_w[id]), "sg-cell-note"), *cell;
     GtkOverlay *o = sg_pill_overlay(sg_w[id]);
@@ -2073,12 +2092,13 @@ static void sg_table_note_show(int id, int row, int col, const char *message) {
         g_object_set_data(G_OBJECT(sg_w[id]), "sg-cell-note", note);
     }
     gtk_label_set_text(GTK_LABEL(note), message);
-    cell = at >= 0 ? g_hash_table_lookup(sg_table_cells(id), SG_CELL_KEY(at, col - 1)) : NULL;
-    if (!(cell && gtk_widget_compute_bounds(cell, GTK_WIDGET(o), &b)) && !gtk_widget_compute_bounds(sg_w[id], GTK_WIDGET(o), &b))
-        b.origin.x = b.origin.y = b.size.height = 0;
-    gtk_widget_set_margin_start(note, (int) b.origin.x);
-    gtk_widget_set_margin_top(note, (int) (b.origin.y + b.size.height));
+    g_object_set_data(G_OBJECT(note), "sg-note-row", GINT_TO_POINTER(row));
+    g_object_set_data(G_OBJECT(note), "sg-note-col", GINT_TO_POINTER(col));
     gtk_widget_set_visible(note, TRUE);
+    /* the refusal spliced the row back, so its cells are bound again only on the next frame:
+       place the note under the cell once they are */
+    g_timeout_add(30, sg_table_note_place, GINT_TO_POINTER(id));
+    (void) cell; (void) b; (void) at;
 }
 static void sg_table_commit(int id, int row, int col, const char *text) {
     GtkStringList *rows = GTK_STRING_LIST(g_object_get_data(G_OBJECT(sg_w[id]), "sg-rows"));
