@@ -325,6 +325,7 @@ feature -- Windows and containers
 				create l_host.make (al_c)
 				Result := register (l_host)
 				l_host.set_on_layout_change (agent dock_layout_changed (Result))
+				l_host.set_on_float_request (agent dock_float_requested (Result, ?))
 				dock_seen.force (dock_state (l_host), Result)
 			else
 				Result := register (Void)
@@ -342,12 +343,18 @@ feature -- Windows and containers
 		end
 
 	dock_move (a_dock, an_index, a_side, a_position: INTEGER)
-			-- simple_widgets keeps a zone's panels in the order they were added, so the position
-			-- is not honored yet on Windows.
+			-- At `a_position' among the zone's panels (simple_widgets keeps an order per zone).
+		local
+			l_zone, l_room: INTEGER
 		do
 			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count then
+				l_zone := dock_zone (a_side)
+				l_room := al_h.all_panels_in (l_zone).count
+				if al_h.panels.i_th (an_index).zone /= l_zone then
+					l_room := l_room + 1
+				end
 				dock_quiet := dock_quiet + 1
-				al_h.move_panel (an_index, dock_zone (a_side))
+				al_h.move_panel_to (an_index, l_zone, a_position.max (1).min (l_room))
 				dock_quiet := dock_quiet - 1
 				dock_settled (a_dock, al_h)
 			end
@@ -449,6 +456,107 @@ feature -- Windows and containers
 				end
 				dock_quiet := dock_quiet - 1
 				dock_settled (a_dock, al_h)
+			end
+		end
+
+	dock_float (a_dock, an_index: INTEGER; a_on: BOOLEAN)
+			-- 1r-b: a floating window (SW_WINDOW's, GW-22) at the panel's frame, or back.
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count then
+				dock_quiet := dock_quiet + 1
+				if a_on and not al_h.is_floating (an_index) then
+					dock_float_now (a_dock, al_h, an_index)
+				elseif not a_on and al_h.is_floating (an_index) then
+					dock_redock_now (al_h, an_index)
+				end
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+			end
+		end
+
+	dock_float_frame (a_dock, an_index, a_x, a_y, a_width, a_height: INTEGER)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count then
+				dock_frames.force ([a_x, a_y, a_width, a_height], al_h.panels.i_th (an_index).key)
+			end
+		end
+
+	dock_float_frame_field (a_dock, an_index, a_field: INTEGER): INTEGER
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count
+				and then attached dock_frames.item (al_h.panels.i_th (an_index).key) as al_f
+			then
+				inspect a_field
+				when 1 then Result := al_f.x
+				when 2 then Result := al_f.y
+				when 3 then Result := al_f.w
+				else Result := al_f.h
+				end
+			end
+		end
+
+	dock_set_auto_hide (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h then
+				dock_quiet := dock_quiet + 1
+				al_h.set_auto_hide (dock_zone (a_side), a_on)
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+			end
+		end
+
+	dock_maximize_center (a_dock: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h then
+				dock_quiet := dock_quiet + 1
+				if a_on then al_h.maximize_center else al_h.restore_center end
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+			end
+		end
+
+	test_float_by_user (a_dock, an_index: INTEGER)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count
+				and then not al_h.is_floating (an_index)
+			then
+				dock_float_requested (a_dock, an_index)
+			end
+		end
+
+	test_close_floating (a_dock, an_index: INTEGER)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count
+				and then al_h.is_floating (an_index)
+			then
+				dock_float_closed (a_dock, al_h.panels.i_th (an_index).key)
+			end
+		end
+
+	test_drag_panel (a_dock, an_index, a_side, a_position: INTEGER)
+		do
+			dock_move (a_dock, an_index, a_side, a_position)
+			push (41, a_dock, an_index, a_side, a_position)
+		end
+
+	test_slide_out (a_dock, an_index: INTEGER): BOOLEAN
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count
+				and then al_h.is_panel_visible (an_index) and then al_h.is_auto_hide (al_h.panels.i_th (an_index).zone)
+			then
+				dock_quiet := dock_quiet + 1
+				al_h.slide_out (an_index)
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+				Result := al_h.slid_out_panel = an_index
+			end
+		end
+
+	test_toggle_center (a_dock: INTEGER)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h then
+				dock_maximize_center (a_dock, not al_h.is_center_maximized)
+				push (40, a_dock, 0, al_h.is_center_maximized.to_integer, 0)
 			end
 		end
 
@@ -4505,6 +4613,94 @@ feature {NONE} -- Pick and drop (1q)
 			end
 		end
 
+	dock_frames: HASH_TABLE [TUPLE [x, y, w, h: INTEGER], STRING_32]
+			-- Each panel's floating frame by key, logical units relative to the dock's window.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	dock_float_now (a_dock: INTEGER; a_host: SW_DOCK_HOST; an_index: INTEGER)
+			-- Tear the panel out into a floating window at its frame (the first time, over the
+			-- middle of the window at its docked size).
+		local
+			l_key, l_title: STRING_32
+			l_rect: TUPLE [rx, ry, rw, rh: REAL_64]
+			l_float: SW_FLOATING_WINDOW
+			x, y, w, h: INTEGER
+		do
+			if attached open_window as al_win and then al_win.is_window_open then
+				l_key := a_host.panels.i_th (an_index).key.twin
+				l_title := a_host.panels.i_th (an_index).title.twin
+				l_rect := a_host.zone_rect (a_host.panels.i_th (an_index).zone)
+				if attached dock_frames.item (l_key) as al_f and then al_f.w > 0 and then al_f.h > 0 then
+					x := device (al_f.x).max (0); y := device (al_f.y).max (0); w := device (al_f.w); h := device (al_f.h)
+				else
+					w := l_rect.rw.truncated_to_integer.max (320)
+					h := l_rect.rh.truncated_to_integer.max (200) + 32
+					x := ((al_win.win_w - w) // 2).max (0); y := ((al_win.win_h - h) // 2).max (0)
+					dock_frames.force ([logical (a_host, x), logical (a_host, y), logical (a_host, w), logical (a_host, h)], l_key)
+				end
+				a_host.float_panel (an_index)
+				l_float := al_win.float_widget (a_host.panels.i_th (an_index).content, l_title, al_win.win_x + x, al_win.win_y + y, w, h)
+				if l_float.is_open then
+					l_float.set_on_close_request (agent dock_float_closed (a_dock, l_key))
+					dock_floats.force (l_float, l_key)
+				else
+					a_host.redock_panel (an_index)
+				end
+			end
+		end
+
+	dock_floats: HASH_TABLE [SW_FLOATING_WINDOW, STRING_32]
+			-- The floating window of each floating panel, by key.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	dock_redock_now (a_host: SW_DOCK_HOST; an_index: INTEGER)
+		local
+			l_key: STRING_32
+		do
+			l_key := a_host.panels.i_th (an_index).key.twin
+			if attached open_window as al_win and then attached dock_floats.item (l_key) as al_f then
+				dock_floats.remove (l_key)
+				al_win.dock_floating (a_host, l_key, al_f)
+			elseif a_host.is_floating (an_index) then
+				a_host.redock_panel (an_index)
+			end
+		end
+
+	dock_float_requested (a_dock, an_index: INTEGER)
+			-- The user's double click on a tab or title bar: float it, 38 (index, 1).
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then not al_h.is_floating (an_index) then
+				dock_quiet := dock_quiet + 1
+				dock_float_now (a_dock, al_h, an_index)
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+				if al_h.is_floating (an_index) then
+					push (38, a_dock, an_index, 1, 0)
+				end
+			end
+		end
+
+	dock_float_closed (a_dock: INTEGER; a_key: STRING_32)
+			-- The user closed a floating panel's window: it docks again, 38 (index, 0).
+		local
+			l_index: INTEGER
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h then
+				l_index := al_h.panel_by_key (a_key)
+				if l_index > 0 and then al_h.is_floating (l_index) then
+					dock_quiet := dock_quiet + 1
+					dock_redock_now (al_h, l_index)
+					dock_quiet := dock_quiet - 1
+					dock_settled (a_dock, al_h)
+					push (38, a_dock, l_index, 0, 0)
+				end
+			end
+		end
+
 	dock_zone (a_side: INTEGER): INTEGER
 			-- simple_gui's side (1 left, 2 right, 3 top, 4 bottom) as SW_DOCK_HOST's zone.
 		do
@@ -4534,22 +4730,23 @@ feature {NONE} -- Pick and drop (1q)
 			create Result.make (4)
 		end
 
-	dock_seen: HASH_TABLE [TUPLE [fractions: ARRAY [REAL_64]; folded: ARRAY [BOOLEAN]; actives: ARRAY [INTEGER]], INTEGER]
+	dock_seen: HASH_TABLE [TUPLE [fractions: ARRAY [REAL_64]; folded: ARRAY [BOOLEAN]; actives: ARRAY [INTEGER]; hidden: ARRAY [BOOLEAN]], INTEGER]
 			-- Each dock's state as last reported, to tell what the user changed.
 		once ("OBJECT")
 			create Result.make (2)
 		end
 
-	dock_state (a_host: SW_DOCK_HOST): TUPLE [fractions: ARRAY [REAL_64]; folded: ARRAY [BOOLEAN]; actives: ARRAY [INTEGER]]
+	dock_state (a_host: SW_DOCK_HOST): TUPLE [fractions: ARRAY [REAL_64]; folded: ARRAY [BOOLEAN]; actives: ARRAY [INTEGER]; hidden: ARRAY [BOOLEAN]]
 		local
 			z: INTEGER
 		do
 			Result := [create {ARRAY [REAL_64]}.make_filled (0.0, 1, 4), create {ARRAY [BOOLEAN]}.make_filled (False, 1, 4),
-				create {ARRAY [INTEGER]}.make_filled (0, 1, 4)]
+				create {ARRAY [INTEGER]}.make_filled (0, 1, 4), create {ARRAY [BOOLEAN]}.make_filled (False, 1, 4)]
 			from z := 1 until z > 4 loop
 				Result.fractions [z] := a_host.fraction (z)
 				Result.folded [z] := a_host.is_collapsed (z)
 				Result.actives [z] := a_host.active_panel (z)
+				Result.hidden [z] := a_host.is_auto_hide (z)
 				z := z + 1
 			end
 		end
@@ -4604,6 +4801,9 @@ feature {NONE} -- Pick and drop (1q)
 						end
 						if l_now.folded [z] /= al_was.folded [z] then
 							push (36, a_dock, dock_side (z), l_now.folded [z].to_integer, 0)
+						end
+						if l_now.hidden [z] /= al_was.hidden [z] then
+							push (39, a_dock, dock_side (z), l_now.hidden [z].to_integer, 0)
 						end
 						if l_now.actives [z] /= al_was.actives [z] and then l_now.actives [z] > 0 and then al_h.is_tabbed (z) then
 							push (37, a_dock, dock_side (z), l_now.actives [z], 0)

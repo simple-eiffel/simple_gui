@@ -1134,6 +1134,56 @@ feature -- Common widget state
 		alias "sga_test_click_dock_tab($a_dock, $an_index);"
 		end
 
+	dock_float (a_dock, an_index: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_float($a_dock, $an_index, $a_on ? 1 : 0);"
+		end
+
+	dock_float_frame (a_dock, an_index, a_x, a_y, a_width, a_height: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_float_frame($a_dock, $an_index, $a_x, $a_y, $a_width, $a_height);"
+		end
+
+	dock_float_frame_field (a_dock, an_index, a_field: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_dock_float_frame_field($a_dock, $an_index, $a_field);"
+		end
+
+	dock_set_auto_hide (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_set_auto_hide($a_dock, $a_side, $a_on ? 1 : 0);"
+		end
+
+	dock_maximize_center (a_dock: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dock_maximize_center($a_dock, $a_on ? 1 : 0);"
+		end
+
+	test_float_by_user (a_dock, an_index: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_float_by_user($a_dock, $an_index);"
+		end
+
+	test_close_floating (a_dock, an_index: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_close_floating($a_dock, $an_index);"
+		end
+
+	test_drag_panel (a_dock, an_index, a_side, a_position: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_drag_panel($a_dock, $an_index, $a_side, $a_position);"
+		end
+
+	test_slide_out (a_dock, an_index: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_slide_out($a_dock, $an_index) != 0;"
+		end
+
+	test_toggle_center (a_dock: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_toggle_center($a_dock);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

@@ -40,6 +40,7 @@ feature {NONE} -- Initialization
 			on_side [Side_bottom] := create {ARRAYED_LIST [GUI_DOCK_PANEL]}.make (2)
 			create tabbed.make_filled (False, Side_left, Side_bottom)
 			create collapsed.make_filled (False, Side_left, Side_bottom)
+			create auto_hidden.make_filled (False, Side_left, Side_bottom)
 			create layout_actions.make
 			center := a_center
 			register (backend.dock (a_center.id))
@@ -285,16 +286,123 @@ feature -- Element change
 			side: is_side (a_side)
 		do
 			collapsed [a_side] := False
+			auto_hidden [a_side] := False
 			backend.dock_collapse (id, a_side, False)
 		ensure
 			opened: not is_collapsed (a_side)
+			pinned: not is_auto_hide (a_side)
+		end
+
+feature -- Floating, auto-hide, the maximized center (1r-b)
+
+	float_panel (a_panel: GUI_DOCK_PANEL)
+			-- Put `a_panel' in a window of its own, keeping its side and place; no event.
+		require
+			gui_thread: is_gui_thread
+			here: a_panel.dock = Current
+		do
+			if not a_panel.is_floating then
+				a_panel.put_floating (True)
+				backend.dock_float (id, index_of (a_panel), True)
+			end
+		ensure
+			floating: a_panel.is_floating
+			same_side: a_panel.side = old a_panel.side
+		end
+
+	redock_panel (a_panel: GUI_DOCK_PANEL)
+			-- Put a floating `a_panel' back in its side and place; no event.
+		require
+			gui_thread: is_gui_thread
+			here: a_panel.dock = Current
+		do
+			if a_panel.is_floating then
+				a_panel.put_floating (False)
+				backend.dock_float (id, index_of (a_panel), False)
+			end
+		ensure
+			docked: not a_panel.is_floating
+		end
+
+	floating_frame (a_panel: GUI_DOCK_PANEL): TUPLE [x, y, width, height: INTEGER]
+			-- Where `a_panel''s window stands (or last stood), in logical units relative to the
+			-- dock's window.
+		require
+			here: a_panel.dock = Current
+		local
+			i: INTEGER
+		do
+			i := index_of (a_panel)
+			Result := [backend.dock_float_frame_field (id, i, 1), backend.dock_float_frame_field (id, i, 2),
+				backend.dock_float_frame_field (id, i, 3), backend.dock_float_frame_field (id, i, 4)]
+		end
+
+	set_floating_frame (a_panel: GUI_DOCK_PANEL; a_x, a_y, a_width, a_height: INTEGER)
+			-- Stand `a_panel''s window there (now if floating, else when it floats). Wayland places
+			-- no program's windows, so there only the size is taken.
+		require
+			gui_thread: is_gui_thread
+			here: a_panel.dock = Current
+			sized: a_width > 0 and a_height > 0
+		do
+			backend.dock_float_frame (id, index_of (a_panel), a_x, a_y, a_width, a_height)
+		end
+
+	is_auto_hide (a_side: INTEGER): BOOLEAN
+		require
+			side: is_side (a_side)
+		do
+			Result := auto_hidden [a_side]
+		end
+
+	set_auto_hide (a_side: INTEGER; a_on: BOOLEAN)
+			-- Stand `a_side' as its strip, its panels sliding out over the center on a rest or a
+			-- press (`a_on'), or pin it open again; no event.
+		require
+			gui_thread: is_gui_thread
+			side: is_side (a_side)
+		do
+			auto_hidden [a_side] := a_on
+			if a_on then
+				collapsed [a_side] := False
+			end
+			backend.dock_set_auto_hide (id, a_side, a_on)
+		ensure
+			set: is_auto_hide (a_side) = a_on
+			not_folded: a_on implies not is_collapsed (a_side)
+		end
+
+	is_center_maximized: BOOLEAN
+
+	maximize_center
+			-- Fold every side away, remembered, so the center takes the dock; floating panels
+			-- stay floating. No event.
+		require
+			gui_thread: is_gui_thread
+		do
+			is_center_maximized := True
+			backend.dock_maximize_center (id, True)
+		ensure
+			maximized: is_center_maximized
+		end
+
+	restore_center
+			-- Give every side back its fold, auto-hide and size; no event.
+		require
+			gui_thread: is_gui_thread
+		do
+			is_center_maximized := False
+			backend.dock_maximize_center (id, False)
+		ensure
+			restored: not is_center_maximized
 		end
 
 feature -- Layouts
 
 	layout: STRING_32
-			-- The arrangement as text: each side's size, tabs, collapse and active panel, and
-			-- each panel's side, place and visibility, by key.
+			-- The arrangement as text: each side's size, tabs, collapse, active panel and
+			-- auto-hide; each panel's side, place and visibility, by key; each floating panel's
+			-- frame; whether the center is maximized.
 		local
 			s: INTEGER
 		do
@@ -306,30 +414,44 @@ feature -- Layouts
 				if attached active [s] as al_a and then al_a.side = s then
 					Result.append (al_a.key)
 				end
+				Result.append ("%T" + auto_hidden [s].to_integer.out)
 				Result.append_character ('%N')
 				across on_side [s] as ic loop
 					Result.append ({STRING_32} "panel " + s.out + "%T" + ic.is_visible.to_integer.out + "%T" + ic.key + "%N")
 				end
 				s := s + 1
 			end
+			across panels as ic loop
+				if ic.is_floating then
+					Result.append ({STRING_32} "float " + floating_frame (ic).x.out + "%T" + floating_frame (ic).y.out + "%T"
+						+ floating_frame (ic).width.out + "%T" + floating_frame (ic).height.out + "%T" + ic.key + "%N")
+				end
+			end
+			if is_center_maximized then
+				Result.append ("center maximized%N")
+			end
 		end
 
 	restore_layout (a_text: READABLE_STRING_GENERAL): BOOLEAN
 			-- Arrange as `a_text' (from `layout') says, and answer True; when it names a panel
 			-- this dock lacks or is not a layout, change nothing and answer False. Panels it does
-			-- not name keep their places, after the named ones. No event.
+			-- not name keep their places, after the named ones. A 1r-a layout (no auto-hide, no
+			-- floating, no center line) restores as it did. No event.
 		require
 			gui_thread: is_gui_thread
 		local
-			l_sides: ARRAY [TUPLE [size, tabs, folded: INTEGER; active: STRING_32]]
+			l_sides: ARRAY [TUPLE [size, tabs, folded: INTEGER; active: STRING_32; hidden: INTEGER]]
 			l_panels: ARRAYED_LIST [TUPLE [side, shown: INTEGER; panel: GUI_DOCK_PANEL]]
+			l_floats: ARRAYED_LIST [TUPLE [x, y, w, h: INTEGER; panel: GUI_DOCK_PANEL]]
+			l_maximized: BOOLEAN
 			l_ok: BOOLEAN
 			l_fields: LIST [STRING_32]
 			l_line: STRING_32
 			s, l_pos: INTEGER
 		do
-			create l_sides.make_filled ([0, 0, 0, {STRING_32} ""], Side_left, Side_bottom)
+			create l_sides.make_filled ([0, 0, 0, {STRING_32} "", 0], Side_left, Side_bottom)
 			create l_panels.make (panels.count)
+			create l_floats.make (2)
 			l_ok := True
 			across a_text.to_string_32.split ('%N') as ic loop
 				l_line := ic.twin
@@ -337,11 +459,12 @@ feature -- Layouts
 				if l_ok and not l_line.is_empty then
 					if l_line.starts_with ("side ") then
 						l_fields := l_line.substring (6, l_line.count).split ('%T')
-						if l_fields.count = 5 and then l_fields [1].is_integer and then is_side (l_fields [1].to_integer)
+						if (l_fields.count = 5 or l_fields.count = 6) and then l_fields [1].is_integer and then is_side (l_fields [1].to_integer)
 							and then l_fields [2].is_integer and then l_fields [3].is_integer and then l_fields [4].is_integer
+							and then (l_fields.count = 5 or else l_fields [6].is_integer)
 						then
 							l_sides [l_fields [1].to_integer] := [l_fields [2].to_integer.max (0), l_fields [3].to_integer,
-								l_fields [4].to_integer, l_fields [5].twin]
+								l_fields [4].to_integer, l_fields [5].twin, if l_fields.count = 6 then l_fields [6].to_integer else 0 end]
 						else
 							l_ok := False
 						end
@@ -355,6 +478,19 @@ feature -- Layouts
 						else
 							l_ok := False
 						end
+					elseif l_line.starts_with ("float ") then
+						l_fields := l_line.substring (7, l_line.count).split ('%T')
+						if l_fields.count = 5 and then l_fields [1].is_integer and then l_fields [2].is_integer
+							and then l_fields [3].is_integer and then l_fields [4].is_integer
+							and then l_fields [3].to_integer > 0 and then l_fields [4].to_integer > 0
+							and then attached panel_by_key (l_fields [5]) as al_p
+						then
+							l_floats.extend ([l_fields [1].to_integer, l_fields [2].to_integer, l_fields [3].to_integer, l_fields [4].to_integer, al_p])
+						else
+							l_ok := False
+						end
+					elseif l_line.same_string ("center maximized") then
+						l_maximized := True
 					elseif not l_line.same_string ("dock 1") then
 						l_ok := False
 					end
@@ -385,8 +521,19 @@ feature -- Layouts
 						activate_panel (al_a)
 					end
 					if l_sides [s].folded = 1 then collapse_side (s) else expand_side (s) end
+					set_auto_hide (s, l_sides [s].hidden = 1)
 					s := s + 1
 				end
+				across panels as ic loop
+					if not across l_floats as ic_f some ic_f.panel = ic end then
+						redock_panel (ic)
+					end
+				end
+				across l_floats as ic loop
+					set_floating_frame (ic.panel, ic.x, ic.y, ic.w, ic.h)
+					float_panel (ic.panel)
+				end
+				if l_maximized then maximize_center elseif is_center_maximized then restore_center end
 			end
 			Result := l_ok
 		end
@@ -428,7 +575,9 @@ feature {GUI_APPLICATION} -- Events
 
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)
 			-- 35 an edge dragged (side, size), 36 a side collapsed or expanded (side, 1 or 0),
-			-- 37 a tab chosen (side, the panel's index).
+			-- 37 a tab chosen (side, the panel's index); 1r-b: 38 a panel floated or docked
+			-- (index, 1 or 0), 39 auto-hide pinned or unpinned (side, 1 or 0), 40 the center
+			-- maximized or restored (b), 41 a panel moved by drag (index, side, position).
 		do
 			inspect a_type
 			when 35 then
@@ -443,6 +592,27 @@ feature {GUI_APPLICATION} -- Events
 					active [a_a] := panels [a_b]
 					layout_actions.call (Void)
 				end
+			when 38 then
+				if panels.valid_index (a_a) then
+					panels [a_a].put_floating (a_b = 1)
+					layout_actions.call (Void)
+				end
+			when 39 then
+				if is_side (a_a) then
+					auto_hidden [a_a] := a_b = 1
+					if a_b = 1 then
+						collapsed [a_a] := False
+					end
+					layout_actions.call (Void)
+				end
+			when 40 then
+				is_center_maximized := a_b = 1
+				layout_actions.call (Void)
+			when 41 then
+				if panels.valid_index (a_a) and then is_side (a_b) then
+					take_moved (panels [a_a], a_b, a_c)
+					layout_actions.call (Void)
+				end
 			else
 			end
 		end
@@ -452,7 +622,23 @@ feature {NONE} -- Implementation
 	on_side: ARRAY [ARRAYED_LIST [GUI_DOCK_PANEL]]
 			-- Each side's panels, in their order on it.
 
-	tabbed, collapsed: ARRAY [BOOLEAN]
+	tabbed, collapsed, auto_hidden: ARRAY [BOOLEAN]
+
+	take_moved (a_panel: GUI_DOCK_PANEL; a_side, a_position: INTEGER)
+			-- The user moved `a_panel' (the backend has already): follow in the books.
+		local
+			l_list: ARRAYED_LIST [GUI_DOCK_PANEL]
+		do
+			on_side [a_panel.side].prune_all (a_panel)
+			l_list := on_side [a_side]
+			if a_position < 1 or a_position > l_list.count then
+				l_list.extend (a_panel)
+			else
+				l_list.go_i_th (a_position)
+				l_list.put_left (a_panel)
+			end
+			a_panel.set_dock (Current, a_side)
+		end
 
 	active: ARRAY [detachable GUI_DOCK_PANEL]
 		attribute
