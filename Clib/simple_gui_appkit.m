@@ -225,11 +225,50 @@ static int s_setting_dark;
 @interface SGATarget : NSObject <NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate, NSTabViewDelegate>
 {
 @public
-	NSMutableDictionary<NSValue *, NSMutableArray<NSString *> *> *rows;
+	NSMutableDictionary<NSValue *, NSMutableArray *> *rows;   /* a list's rows: NSString, or SGARichRow (1s) */
 }
 @end
 
+/* 1s: a filtered list or table shows some of its model's rows. The shown map lists the
+   model rows (from 0) on screen in order; none means every row shows. Every row number the
+   program sees is the model's: the map turns screen rows into model rows and back. */
+static NSMutableDictionary<NSValue *, NSArray<NSNumber *> *> *s_shown;
+static NSArray<NSNumber *> *sga_shown_map(NSTableView *t) { return s_shown[[NSValue valueWithNonretainedObject:t]]; }
+static void sga_set_shown_map(NSTableView *t, NSArray<NSNumber *> *a_map)
+{
+	if (!s_shown) s_shown = [NSMutableDictionary dictionary];
+	if (a_map) s_shown[[NSValue valueWithNonretainedObject:t]] = a_map; else [s_shown removeObjectForKey:[NSValue valueWithNonretainedObject:t]];
+}
+/* The model row (from 0) on screen row `a_view', and the screen row of model row `a_model' (-1: hidden). */
+static NSInteger sga_model_row(NSTableView *t, NSInteger a_view)
+{
+	NSArray<NSNumber *> *m = sga_shown_map(t);
+	return !m || a_view < 0 ? a_view : (a_view < (NSInteger)[m count] ? [m[(NSUInteger)a_view] integerValue] : -1);
+}
+static NSInteger sga_view_row(NSTableView *t, NSInteger a_model)
+{
+	NSArray<NSNumber *> *m = sga_shown_map(t);
+	if (!m || a_model < 0) return a_model;
+	NSUInteger i = [m indexOfObject:@(a_model)];
+	return i == NSNotFound ? -1 : (NSInteger)i;
+}
+
+/* 1s: a rich list row: a title, a dimmer subtitle, an icon, a badge, a check box at the
+   leading edge, a close button at the trailing edge. */
+@interface SGARichRow : NSObject
+{
+@public
+	NSString *title, *subtitle, *icon;
+	int badge;
+	BOOL checkable, checked, closable;
+}
+@end
+@implementation SGARichRow
+@end
+static NSString *sga_row_title(id a_row) { return [a_row isKindOfClass:[SGARichRow class]] ? ((SGARichRow *)a_row)->title : (NSString *)a_row; }
+
 static int sga_tab_page(NSTabView *t, NSInteger an_item);
+static NSView *sga_rich_cell(NSTableView *t, SGARichRow *a_row, NSInteger a_model);
 static BOOL sga_suggest_key(int a_id, SEL a_command);   /* 1p */
 static void sga_suggest_end(int a_id);   /* 1p */
 
@@ -257,23 +296,31 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 	return sga_suggest_key(sga_id_of(c), a_command);
 }
 - (void)textDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
-- (NSMutableArray<NSString *> *)rowsOf:(NSTableView *)t { return rows[[NSValue valueWithNonretainedObject:t]]; }
-- (NSInteger)numberOfRowsInTableView:(NSTableView *)t { return (NSInteger)[[self rowsOf:t] count]; }
+- (NSMutableArray *)rowsOf:(NSTableView *)t { return rows[[NSValue valueWithNonretainedObject:t]]; }
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)t
+{
+	NSArray *m = sga_shown_map(t);
+	return (NSInteger)(m ? [m count] : [[self rowsOf:t] count]);
+}
 - (NSView *)tableView:(NSTableView *)t viewForTableColumn:(NSTableColumn *)c row:(NSInteger)r
 {
-	NSTextField *l_cell = [t makeViewWithIdentifier:@"sga_cell" owner:self];
 	(void)c;
+	NSInteger l_model = sga_model_row(t, r);
+	id l_row = l_model >= 0 && l_model < (NSInteger)[[self rowsOf:t] count] ? [self rowsOf:t][(NSUInteger)l_model] : @"";
+	if ([l_row isKindOfClass:[SGARichRow class]]) return sga_rich_cell(t, l_row, l_model);
+	NSTextField *l_cell = [t makeViewWithIdentifier:@"sga_cell" owner:self];
 	if (!l_cell) { l_cell = [NSTextField labelWithString:@""]; l_cell.identifier = @"sga_cell"; }
-	l_cell.stringValue = [self rowsOf:t][(NSUInteger)r];
+	l_cell.stringValue = l_row;
 	l_cell.alignment = sga_start_alignment(t);
 	return l_cell;
 }
 - (void)tableViewSelectionDidChange:(NSNotification *)n
 {
 	NSTableView *t = [n object];
-	/* A user's emptying of the selection is a selection too: row 0. With several rows (1p), the first. */
+	/* A user's emptying of the selection is a selection too: row 0. With several rows (1p), the
+	   first. Rows are the model's (1s). */
 	NSUInteger l_first = [[t selectedRowIndexes] firstIndex];
-	if (!s_suppress) sga_push(4, sga_id_of(t), l_first == NSNotFound ? 0 : (int)l_first + 1, 0, 0);
+	if (!s_suppress) sga_push(4, sga_id_of(t), l_first == NSNotFound ? 0 : (int)sga_model_row(t, (NSInteger)l_first) + 1, 0, 0);
 }
 - (BOOL)windowShouldClose:(NSWindow *)w { sga_push(6, sga_id_of(w), 0, 0, 0); return NO; }
 - (void)observeValueForKeyPath:(NSString *)p ofObject:(id)o change:(NSDictionary *)ch context:(void *)ctx
@@ -1343,10 +1390,32 @@ void sga_field_set_placeholder(int a_id, const char *a_text)
 }
 @end
 
+/* A list's table (1s): Space toggles the selected row's check box (43); Delete, or
+   Command+Backspace, closes it (44), as their buttons do. */
+static void sga_list_user_check(NSTableView *t, NSInteger a_model);
+static void sga_list_user_close(NSTableView *t, NSInteger a_model);
+@interface SGAListTable : NSTableView
+@end
+@implementation SGAListTable
+- (void)keyDown:(NSEvent *)e
+{
+	NSInteger m = sga_model_row(self, [self selectedRow]);
+	id l_row = m >= 0 ? [s_target rowsOf:self][(NSUInteger)m] : nil;
+	if ([l_row isKindOfClass:[SGARichRow class]]) {
+		SGARichRow *r = l_row;
+		BOOL l_space = [[e charactersIgnoringModifiers] isEqualToString:@" "];
+		BOOL l_delete = [e keyCode] == 117 || ([e keyCode] == 51 && ([e modifierFlags] & NSEventModifierFlagCommand));
+		if (l_space && r->checkable) { sga_list_user_check(self, m); return; }
+		if (l_delete && r->closable) { sga_list_user_close(self, m); return; }
+	}
+	[super keyDown:e];
+}
+@end
+
 int sga_list(void)
 {
 	NSScrollView *l_scroll = [[SGARowsScroll alloc] init];
-	NSTableView *t = [[NSTableView alloc] init];
+	NSTableView *t = [[SGAListTable alloc] init];
 	NSTableColumn *k = [[NSTableColumn alloc] initWithIdentifier:@"sga_column"];
 	[k setResizingMask:NSTableColumnAutoresizingMask];
 	[t addTableColumn:k];
@@ -1364,34 +1433,33 @@ int sga_list(void)
 	return l_id;
 }
 
+static void sga_list_refilter(NSTableView *t);
+
 void sga_list_extend(int a_id, const char *a_text)
 {
 	NSTableView *t = s_inner[a_id];
 	[[s_target rowsOf:t] addObject:sga_string(a_text)];
-	s_suppress++;
-	[t reloadData];
-	s_suppress--;
+	sga_list_refilter(t);
 }
 
 void sga_list_wipe_out(int a_id)
 {
 	NSTableView *t = s_inner[a_id];
 	[[s_target rowsOf:t] removeAllObjects];
-	s_suppress++;
-	[t reloadData];
-	s_suppress--;
+	sga_list_refilter(t);
 }
 
 void sga_list_select(int a_id, int a_row)
 {
 	NSTableView *t = s_inner[a_id];
+	NSInteger v = a_row > 0 ? sga_view_row(t, a_row - 1) : -1;
 	s_suppress++;
-	if (a_row <= 0) [t deselectAll:nil];
-	else [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)(a_row - 1)] byExtendingSelection:NO];
+	if (v < 0) [t deselectAll:nil];
+	else [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] byExtendingSelection:NO];
 	s_suppress--;
 }
 
-int sga_list_selected(int a_id) { return (int)[(NSTableView *)s_inner[a_id] selectedRow] + 1; }
+int sga_list_selected(int a_id) { NSTableView *t = s_inner[a_id]; return (int)sga_model_row(t, [t selectedRow]) + 1; }
 
 /* Tables: an NSTableView subclass that is its own data source and delegate, holding its rows
    (one NSArray of cell texts each). Columns cannot be reordered, so indices stay those of the
@@ -3614,7 +3682,7 @@ void sga_follow_system_appearance(void)
 }
 
 /* A list's or table's row brought into view, quietly (the selection stays). */
-void sga_list_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
+void sga_list_scroll_to_row(int a_id, int a_row) { NSTableView *t = s_inner[a_id]; NSInteger v = sga_view_row(t, a_row - 1); if (v >= 0) [t scrollRowToVisible:v]; }
 void sga_table_scroll_to_row(int a_id, int a_row) { [(NSTableView *)s_inner[a_id] scrollRowToVisible:a_row - 1]; }
 
 /* ------------------------------------------------- 1q-a: pick and drop */
@@ -3730,7 +3798,7 @@ static int sga_widget_at(NSWindow *w, NSPoint p, int *a_row)
 			id c = sga_core(l_id);
 			if ([c isKindOfClass:[NSTableView class]]) {
 				NSInteger r = [(NSTableView *)c rowAtPoint:[(NSView *)c convertPoint:p fromView:nil]];
-				if (r >= 0) *a_row = [c isKindOfClass:[SGATree class]] ? ((SGANode *)[(SGATree *)c itemAtRow:r])->number : (int)r + 1;
+				if (r >= 0) *a_row = [c isKindOfClass:[SGATree class]] ? ((SGANode *)[(SGATree *)c itemAtRow:r])->number : (int)sga_model_row((NSTableView *)c, r) + 1;
 			}
 			if ([c isKindOfClass:[SGATokenField class]]) *a_row = sga_token_at((SGATokenField *)c, [(NSView *)c convertPoint:p fromView:nil]);
 			return l_id;
@@ -4514,14 +4582,17 @@ int sga_list_selected_at(int a_id, int i)
 {
 	NSIndexSet *s = [(NSTableView *)s_inner[a_id] selectedRowIndexes];
 	__block int l_row = 0, k = 0;
-	[s enumerateIndexesUsingBlock:^(NSUInteger r, BOOL *a_stop) { if (++k == i) { l_row = (int)r + 1; *a_stop = YES; } }];
+	NSTableView *t = s_inner[a_id];
+	[s enumerateIndexesUsingBlock:^(NSUInteger r, BOOL *a_stop) { if (++k == i) { l_row = (int)sga_model_row(t, (NSInteger)r) + 1; *a_stop = YES; } }];
 	return l_row;
 }
 
 /* As a user: row `a_row' added to the selection (Command-click). */
 void sga_test_extend_list_selection(int a_id, int a_row)
 {
-	[(NSTableView *)s_inner[a_id] selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)(a_row - 1)] byExtendingSelection:YES];
+	NSTableView *t = s_inner[a_id];
+	NSInteger v = sga_view_row(t, a_row - 1);
+	if (v >= 0) [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] byExtendingSelection:YES];
 }
 
 /* ---------------------------------------------- 1o: feedback and messages */
@@ -5744,8 +5815,9 @@ void sga_test_choose(int a_id, int a_row)
 	}
 	NSTableView *t = s_inner[a_id];
 	/* One step, as a click: replacing the selection sends one selection change (deselecting
-	   first would send two). */
-	[t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)(a_row - 1)] byExtendingSelection:NO];
+	   first would send two). The row is the model's (1s). */
+	NSInteger v = sga_view_row(t, a_row - 1);
+	if (v >= 0) [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] byExtendingSelection:NO];
 }
 
 static id sga_edit_target(SEL a_action);
@@ -7152,7 +7224,8 @@ int sga_test_locate_row(int a_id, int a_row)
 		NSInteger i = n ? [(SGATree *)c rowForItem:n] : -1;
 		if (i >= 0) r = [(SGATree *)c rectOfRow:i];
 	} else if ([c isKindOfClass:[NSTableView class]]) {
-		if (a_row >= 1 && a_row <= [(NSTableView *)c numberOfRows]) r = [(NSTableView *)c rectOfRow:a_row - 1];
+		NSInteger i = a_row >= 1 ? sga_view_row((NSTableView *)c, a_row - 1) : -1;   /* 1s: a model row */
+		if (i >= 0 && i < [(NSTableView *)c numberOfRows]) r = [(NSTableView *)c rectOfRow:i];
 	} else if ([c isKindOfClass:[SGATokenField class]]) {
 		NSArray<NSValue *> *l_rects = sga_token_rects((SGATokenField *)c);
 		if (a_row >= 1 && a_row <= (int)[l_rects count]) r = [l_rects[(NSUInteger)a_row - 1] rectValue];
@@ -7163,3 +7236,228 @@ int sga_test_locate_row(int a_id, int a_row)
 	int l_row = 0;
 	return sga_widget_at([v window], p, &l_row) == a_id ? l_row : 0;
 }
+/* ---------------------------------------------- 1s: rich rows, filtering, sorting (lists) */
+
+/* The filter text of each filtered list. */
+static NSMutableDictionary<NSValue *, NSString *> *s_list_filter;
+
+/* Rebuild the list's shown map from its filter, reload, and keep the selection with its rows:
+   a selected row the filter hides is deselected, with the selection event (4). Rows with a
+   subtitle make the list's rows two lines tall. */
+static void sga_list_refilter(NSTableView *t)
+{
+	NSMutableArray *l_rows = [s_target rowsOf:t];
+	NSMutableIndexSet *l_selected = [NSMutableIndexSet indexSet];
+	[[t selectedRowIndexes] enumerateIndexesUsingBlock:^(NSUInteger v, BOOL *a_stop) { (void)a_stop; NSInteger m = sga_model_row(t, (NSInteger)v); if (m >= 0) [l_selected addIndex:(NSUInteger)m]; }];
+	NSString *f = s_list_filter[[NSValue valueWithNonretainedObject:t]];
+	if ([f length]) {
+		NSMutableArray<NSNumber *> *m = [NSMutableArray array];
+		for (NSUInteger i = 0; i < [l_rows count]; i++)
+			if ([sga_row_title(l_rows[i]) rangeOfString:f options:NSCaseInsensitiveSearch].location != NSNotFound) [m addObject:@(i)];
+		sga_set_shown_map(t, m);
+	} else sga_set_shown_map(t, nil);
+	BOOL l_two = NO;
+	for (id r in l_rows) if ([r isKindOfClass:[SGARichRow class]] && [((SGARichRow *)r)->subtitle length]) l_two = YES;
+	[t setRowHeight:l_two ? 40 : 24];
+	NSMutableIndexSet *l_keep = [NSMutableIndexSet indexSet];
+	__block BOOL l_lost = NO;
+	[l_selected enumerateIndexesUsingBlock:^(NSUInteger m, BOOL *a_stop) {
+		(void)a_stop;
+		NSInteger v = m < [l_rows count] ? sga_view_row(t, (NSInteger)m) : -1;
+		if (v >= 0) [l_keep addIndex:(NSUInteger)v]; else l_lost = YES;
+	}];
+	s_suppress++;
+	[t reloadData];
+	[t selectRowIndexes:l_keep byExtendingSelection:NO];
+	s_suppress--;
+	if (l_lost) {
+		NSUInteger l_first = [l_keep firstIndex];
+		sga_push(4, sga_id_of(t), l_first == NSNotFound ? 0 : (int)sga_model_row(t, (NSInteger)l_first) + 1, 0, 0);
+	}
+}
+
+/* The cell of a rich row: check box, icon, title over subtitle, badge, close button. */
+@interface SGARichCell : NSTableCellView
+{
+@public
+	NSButton *check, *close;
+	NSImageView *icon;
+	NSTextField *title_field, *subtitle_field, *badge_field;
+	__weak NSTableView *table;
+	NSInteger model;
+}
+@end
+@implementation SGARichCell
+- (void)checked:(NSButton *)b { (void)b; sga_list_user_check(table, model); }
+- (void)closed:(NSButton *)b { (void)b; sga_list_user_close(table, model); }
+@end
+
+static NSView *sga_rich_cell(NSTableView *t, SGARichRow *a_row, NSInteger a_model)
+{
+	SGARichCell *c = [t makeViewWithIdentifier:@"sga_rich" owner:s_target];
+	if (!c) {
+		c = [[SGARichCell alloc] initWithFrame:NSZeroRect];
+		c.identifier = @"sga_rich";
+		c->check = [NSButton checkboxWithTitle:@"" target:c action:@selector(checked:)];
+		c->icon = [[NSImageView alloc] init];
+		c->title_field = [NSTextField labelWithString:@""];
+		c->subtitle_field = [NSTextField labelWithString:@""];
+		[c->subtitle_field setTextColor:[NSColor secondaryLabelColor]];
+		[c->subtitle_field setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
+		c->badge_field = [NSTextField labelWithString:@""];
+		[c->badge_field setFont:[NSFont boldSystemFontOfSize:[NSFont smallSystemFontSize]]];
+		[c->badge_field setTextColor:[NSColor whiteColor]];
+		[c->badge_field setWantsLayer:YES];
+		[[c->badge_field layer] setBackgroundColor:[[NSColor systemRedColor] CGColor]];
+		[[c->badge_field layer] setCornerRadius:8];
+		[c->badge_field setAlignment:NSTextAlignmentCenter];
+		c->close = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"xmark.circle.fill" accessibilityDescription:@"Close"] target:c action:@selector(closed:)];
+		[c->close setBordered:NO];
+		NSStackView *l_text = [NSStackView stackViewWithViews:@[c->title_field, c->subtitle_field]];
+		[l_text setOrientation:NSUserInterfaceLayoutOrientationVertical];
+		[l_text setAlignment:NSLayoutAttributeLeading];
+		[l_text setSpacing:0];
+		[c->title_field setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+		NSStackView *l_row = [NSStackView stackViewWithViews:@[c->check, c->icon, l_text, c->badge_field, c->close]];
+		[l_row setSpacing:6];
+		[l_row setTranslatesAutoresizingMaskIntoConstraints:NO];
+		[c addSubview:l_row];
+		[NSLayoutConstraint activateConstraints:@[
+			[l_row.leadingAnchor constraintEqualToAnchor:c.leadingAnchor constant:2], [l_row.trailingAnchor constraintEqualToAnchor:c.trailingAnchor constant:-2],
+			[l_row.centerYAnchor constraintEqualToAnchor:c.centerYAnchor],
+			[c->badge_field.widthAnchor constraintGreaterThanOrEqualToConstant:18], [c->badge_field.heightAnchor constraintEqualToConstant:16],
+			[c->icon.widthAnchor constraintEqualToConstant:16], [c->icon.heightAnchor constraintEqualToConstant:16]]];
+		[l_text setHuggingPriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	}
+	c->table = t;
+	c->model = a_model;
+	[c->check setHidden:!a_row->checkable];
+	[c->check setState:a_row->checked ? NSControlStateValueOn : NSControlStateValueOff];
+	[c->title_field setStringValue:a_row->title];
+	[c->subtitle_field setStringValue:a_row->subtitle ?: @""];
+	[c->subtitle_field setHidden:![a_row->subtitle length]];
+	NSImage *l_image = [a_row->icon length] ? [NSImage imageWithSystemSymbolName:sga_symbol_of(a_row->icon) accessibilityDescription:nil] : nil;
+	[c->icon setImage:l_image];
+	[c->icon setHidden:l_image == nil];
+	[c->badge_field setStringValue:a_row->badge > 0 ? [NSString stringWithFormat:@" %d ", a_row->badge] : @""];
+	[c->badge_field setHidden:a_row->badge <= 0];
+	[c->close setHidden:!a_row->closable];
+	[c setAccessibilityLabel:a_row->title];
+	return c;
+}
+
+/* As the user: a row's check box toggled (43), a row closed: removed, then 44 (the row it was). */
+static void sga_list_user_check(NSTableView *t, NSInteger a_model)
+{
+	id r = a_model >= 0 && a_model < (NSInteger)[[s_target rowsOf:t] count] ? [s_target rowsOf:t][(NSUInteger)a_model] : nil;
+	if (![r isKindOfClass:[SGARichRow class]] || !((SGARichRow *)r)->checkable) return;
+	((SGARichRow *)r)->checked = !((SGARichRow *)r)->checked;
+	NSInteger v = sga_view_row(t, a_model);
+	s_suppress++;
+	if (v >= 0) [t reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] columnIndexes:[NSIndexSet indexSetWithIndex:0]];
+	s_suppress--;
+	sga_push(43, sga_id_of(t), (int)a_model + 1, ((SGARichRow *)r)->checked ? 1 : 0, 0);
+	sga_wake();
+}
+
+static void sga_list_user_close(NSTableView *t, NSInteger a_model)
+{
+	NSMutableArray *l_rows = [s_target rowsOf:t];
+	id r = a_model >= 0 && a_model < (NSInteger)[l_rows count] ? l_rows[(NSUInteger)a_model] : nil;
+	if (![r isKindOfClass:[SGARichRow class]] || !((SGARichRow *)r)->closable) return;
+	[l_rows removeObjectAtIndex:(NSUInteger)a_model];
+	sga_list_refilter(t);
+	sga_push(44, sga_id_of(t), (int)a_model + 1, 0, 0);
+	sga_wake();
+}
+
+/* A rich row (flags: 1 checkable, 2 checked, 4 closable), added last. */
+void sga_list_extend_rich(int a_id, const char *a_title, const char *a_subtitle, const char *an_icon, int a_badge, int a_flags)
+{
+	NSTableView *t = s_inner[a_id];
+	SGARichRow *r = [[SGARichRow alloc] init];
+	r->title = sga_string(a_title);
+	r->subtitle = sga_string(a_subtitle);
+	r->icon = sga_string(an_icon);
+	r->badge = a_badge;
+	r->checkable = (a_flags & 1) != 0;
+	r->checked = (a_flags & 2) != 0;
+	r->closable = (a_flags & 4) != 0;
+	[[s_target rowsOf:t] addObject:r];
+	sga_list_refilter(t);
+}
+
+void sga_list_set_checked(int a_id, int a_row, int a_on)
+{
+	NSTableView *t = s_inner[a_id];
+	NSMutableArray *l_rows = [s_target rowsOf:t];
+	if (a_row < 1 || a_row > (int)[l_rows count] || ![l_rows[(NSUInteger)a_row - 1] isKindOfClass:[SGARichRow class]]) return;
+	((SGARichRow *)l_rows[(NSUInteger)a_row - 1])->checked = a_on != 0;
+	NSInteger v = sga_view_row(t, a_row - 1);
+	s_suppress++;
+	if (v >= 0) [t reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] columnIndexes:[NSIndexSet indexSetWithIndex:0]];
+	s_suppress--;
+}
+
+int sga_list_is_checked(int a_id, int a_row)
+{
+	NSMutableArray *l_rows = [s_target rowsOf:s_inner[a_id]];
+	id r = a_row >= 1 && a_row <= (int)[l_rows count] ? l_rows[(NSUInteger)a_row - 1] : nil;
+	return [r isKindOfClass:[SGARichRow class]] && ((SGARichRow *)r)->checked ? 1 : 0;
+}
+
+void sga_list_remove(int a_id, int a_row)
+{
+	NSTableView *t = s_inner[a_id];
+	NSMutableArray *l_rows = [s_target rowsOf:t];
+	if (a_row < 1 || a_row > (int)[l_rows count]) return;
+	[l_rows removeObjectAtIndex:(NSUInteger)a_row - 1];
+	sga_list_refilter(t);
+}
+
+/* Reorder the rows: `an_order' names the old rows (from 1), in their new order, separated by
+   anything that is not a digit. The selection stays with its rows; no event. */
+void sga_list_reorder(int a_id, const char *an_order)
+{
+	NSTableView *t = s_inner[a_id];
+	NSMutableArray *l_rows = [s_target rowsOf:t];
+	NSMutableArray *l_new = [NSMutableArray array];
+	NSMutableIndexSet *l_selected = [NSMutableIndexSet indexSet];
+	[[t selectedRowIndexes] enumerateIndexesUsingBlock:^(NSUInteger v, BOOL *a_stop) { (void)a_stop; [l_selected addIndex:(NSUInteger)sga_model_row(t, (NSInteger)v)]; }];
+	NSMutableIndexSet *l_now = [NSMutableIndexSet indexSet];
+	NSScanner *k = [NSScanner scannerWithString:sga_string(an_order)];
+	[k setCharactersToBeSkipped:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]];
+	NSInteger n;
+	while ([k scanInteger:&n]) {
+		if (n >= 1 && n <= (NSInteger)[l_rows count]) {
+			if ([l_selected containsIndex:(NSUInteger)n - 1]) [l_now addIndex:[l_new count]];
+			[l_new addObject:l_rows[(NSUInteger)n - 1]];
+		}
+	}
+	if ([l_new count] != [l_rows count]) return;   /* not a permutation: ignored */
+	[l_rows setArray:l_new];
+	s_suppress++;
+	[t deselectAll:nil];
+	s_suppress--;
+	sga_list_refilter(t);
+	NSMutableIndexSet *l_view = [NSMutableIndexSet indexSet];
+	[l_now enumerateIndexesUsingBlock:^(NSUInteger m, BOOL *a_stop) { (void)a_stop; NSInteger v = sga_view_row(t, (NSInteger)m); if (v >= 0) [l_view addIndex:(NSUInteger)v]; }];
+	s_suppress++;
+	[t selectRowIndexes:l_view byExtendingSelection:NO];
+	s_suppress--;
+}
+
+/* Show only the rows whose title holds `a_text' (ignoring case); empty shows all. */
+void sga_list_set_filter(int a_id, const char *a_text)
+{
+	NSTableView *t = s_inner[a_id];
+	if (!s_list_filter) s_list_filter = [NSMutableDictionary dictionary];
+	s_list_filter[[NSValue valueWithNonretainedObject:t]] = sga_string(a_text);
+	sga_list_refilter(t);
+}
+
+int sga_list_shown_count(int a_id) { return (int)[(NSTableView *)s_inner[a_id] numberOfRows]; }
+
+/* As the user: row `a_row''s check box, its close button. */
+void sga_test_check_row(int a_id, int a_row) { sga_list_user_check(s_inner[a_id], a_row - 1); }
+void sga_test_close_row(int a_id, int a_row) { sga_list_user_close(s_inner[a_id], a_row - 1); }
