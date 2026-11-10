@@ -1055,6 +1055,51 @@ feature -- Common widget state
 		alias "sga_test_toast_press($a_window);"
 		end
 
+	button_set_icon (an_id: INTEGER; a_name: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_button_set_icon($an_id, (const char *) $a_name);"
+		end
+
+	button_set_style (an_id, a_style: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_button_set_style($an_id, $a_style);"
+		end
+
+	button_set_busy (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_button_set_busy($an_id, $a_on ? 1 : 0);"
+		end
+
+	menu_set_item_icon (an_item_id: INTEGER; a_name: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_menu_set_item_icon($an_item_id, (const char *) $a_name);"
+		end
+
+	tabs_set_page_icon (a_tabs, a_page: INTEGER; a_name: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_tabs_set_page_icon($a_tabs, $a_page, (const char *) $a_name);"
+		end
+
+	tabs_set_page_badge (a_tabs, a_page: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_tabs_set_page_badge($a_tabs, $a_page, (const char *) $a_text);"
+		end
+
+	widget_set_badge (an_id: INTEGER; a_text: POINTER; a_kind: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_widget_set_badge($an_id, (const char *) $a_text, $a_kind);"
+		end
+
+	test_button_icon (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_test_button_icon($an_id);"
+		end
+
+	test_badge_shown (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_test_badge_shown($an_id);"
+		end
+
 	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_pill_set($an_id, (const char *) $a_code, (const char *) $a_tip, $a_corner);"

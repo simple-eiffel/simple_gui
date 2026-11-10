@@ -406,6 +406,24 @@ feature -- User actions
 			end
 		end
 
+	button_icon (a_button: GUI_BUTTON): STRING_32
+			-- The icon name `a_button' shows now; empty for none.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_button_icon (a_button.id))
+		end
+
+	badge_shown (a_widget: GUI_WIDGET): STRING_32
+			-- The badge `a_widget' shows now: its text, a bullet for a dot, empty for none.
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_badge_shown (a_widget.id))
+		end
+
 	press_info_bar (a_bar: GUI_INFO_BAR; a_number: INTEGER)
 			-- Press action `a_number' of `a_bar' (0: its close button) as a user would.
 		require

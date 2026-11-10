@@ -1066,6 +1066,50 @@ feature -- Common widget state
 		deferred
 		end
 
+	button_set_icon (an_id: INTEGER; a_name: POINTER)
+			-- 1n: icon `a_name' (GUI_ICON's vocabulary) before the button's text; "" removes it.
+		deferred
+		end
+
+	button_set_style (an_id, a_style: INTEGER)
+			-- 0 normal, 1 suggested, 2 destructive, 3 flat, 4 pill.
+		deferred
+		end
+
+	button_set_busy (an_id: INTEGER; a_on: BOOLEAN)
+			-- A spinner in place of the icon (the shared class disables the button).
+		deferred
+		end
+
+	menu_set_item_icon (an_item_id: INTEGER; a_name: POINTER)
+		deferred
+		end
+
+	tabs_set_page_icon (a_tabs, a_page: INTEGER; a_name: POINTER)
+		deferred
+		end
+
+	tabs_set_page_badge (a_tabs, a_page: INTEGER; a_text: POINTER)
+			-- "" removes it.
+		deferred
+		end
+
+	widget_set_badge (an_id: INTEGER; a_text: POINTER; a_kind: INTEGER)
+			-- 0 none, 1 the text in a small red bubble, 2 a dot; at the trailing top corner,
+			-- above everything in the window, always shown.
+		deferred
+		end
+
+	test_button_icon (an_id: INTEGER): POINTER
+			-- The icon name the button shows now; "" for none (tests).
+		deferred
+		end
+
+	test_badge_shown (an_id: INTEGER): POINTER
+			-- The badge widget `an_id' shows now: its text, a bullet for a dot, "" for none (tests).
+		deferred
+		end
+
 	pill_set (an_id: INTEGER; a_code, a_tip: POINTER; a_corner: INTEGER)
 			-- 1l: widget `an_id' wears the reference pill `a_code' at `a_corner' (1 top-left,
 			-- 2 top-right, 3 bottom-left, 4 bottom-right; leading and trailing mirror right to

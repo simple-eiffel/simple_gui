@@ -2046,6 +2046,97 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_every_icon_shows_on_a_button
+			-- 1n: each name in the vocabulary shows on a button and reads back; clearing removes it.
+		local
+			l_window: GUI_WINDOW
+			l_button: GUI_BUTTON
+			l_icons: GUI_ICON
+		do
+			create l_icons
+			create l_window.make ("Icons", 300, 120)
+			create l_button.make ("Icon")
+			l_window.set_content (l_button)
+			l_window.show
+			settle_window
+			across l_icons.names as ic loop
+				l_button.set_icon (ic)
+				assert ("shows " + ic.to_string_8 + ": " + driver.button_icon (l_button).to_string_8, driver.button_icon (l_button).same_string (ic))
+			end
+			l_button.clear_icon
+			assert ("cleared", driver.button_icon (l_button).is_empty and l_button.icon = Void)
+			l_window.close
+		end
+
+	test_styles_badges_and_busy
+			-- 1n: button styles; a badge with text, a dot, and none; a busy button takes no press
+			-- and is enabled again after; a menu item icon; a tab with an icon and a badge.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_save, l_delete, l_flat, l_pill, l_busy: GUI_BUTTON
+			l_tabs: GUI_TABS
+			l_menu: GUI_MENU
+			l_hits: CELL [INTEGER]
+		do
+			create l_hits.put (0)
+			create l_window.make ("Styles", 420, 300)
+			create l_stack.make_vertical
+			create l_save.make ("Save")
+			l_save.set_style (l_save.Style_suggested)
+			l_save.set_icon ("save")
+			create l_delete.make ("Delete")
+			l_delete.set_style (l_delete.Style_destructive)
+			l_delete.set_icon ("delete")
+			create l_flat.make ("")
+			l_flat.set_style (l_flat.Style_flat)
+			l_flat.set_icon ("settings")
+			l_flat.set_accessible_label ("Settings")
+			create l_pill.make ("Inbox")
+			l_pill.set_style (l_pill.Style_pill)
+			l_pill.set_icon ("mail")
+			l_pill.set_badge ("3")
+			create l_busy.make ("Uploading")
+			l_busy.set_icon ("upload")
+			l_busy.click_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_hits))
+			create l_tabs.make
+			l_tabs.extend (create {GUI_LABEL}.make ("Mail"), "Mail")
+			l_tabs.extend (create {GUI_LABEL}.make ("News"), "News")
+			l_tabs.set_page_icon (1, "mail")
+			l_tabs.set_page_badge (2, "5")
+			l_stack.extend (l_save)
+			l_stack.extend (l_delete)
+			l_stack.extend (l_flat)
+			l_stack.extend (l_pill)
+			l_stack.extend (l_busy)
+			l_stack.extend (l_tabs)
+			l_window.set_content (l_stack)
+			l_menu := app.menu.add_menu ("Icons")
+			l_menu.add_item ("Print...", "primary+P", agent do end)
+			l_menu.set_item_icon (l_menu.last_item_id, "print")
+			l_window.show
+			settle_window
+			assert ("styles kept", l_save.style = l_save.Style_suggested and l_delete.style = l_delete.Style_destructive
+				and l_flat.style = l_flat.Style_flat and l_pill.style = l_pill.Style_pill)
+			assert ("a badge: " + driver.badge_shown (l_pill).to_string_8, driver.badge_shown (l_pill).same_string ("3"))
+			l_pill.set_badge_dot
+			assert ("a dot", not driver.badge_shown (l_pill).is_empty and attached l_pill.badge as al_b and then al_b.is_empty)
+			l_busy.set_busy (True)
+			settle_window
+			driver.perform_click (l_busy)
+			assert ("busy takes no press", l_hits.item = 0 and l_busy.is_busy and not l_busy.is_enabled)
+			assert ("png", driver.snapshot (l_window, create {PATH}.make_from_string ("simple_gui_1n_styles.png")))
+			l_busy.set_icon ("download")
+			l_busy.set_busy (False)
+			assert ("enabled again, with the icon set while busy: " + driver.button_icon (l_busy).to_string_8,
+				l_busy.is_enabled and driver.button_icon (l_busy).same_string ("download"))
+			driver.perform_click (l_busy)
+			assert ("pressable again", l_hits.item = 1)
+			l_pill.clear_badge
+			assert ("no badge", driver.badge_shown (l_pill).is_empty)
+			l_window.close
+		end
+
 	test_rich_text_ranges_round_trip
 			-- Formatting from code is silent and reads back; positions count characters, so an
 			-- emoji (two UTF-16 units on macOS and Windows) is one.

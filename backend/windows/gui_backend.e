@@ -1179,6 +1179,114 @@ feature -- Controls
 			end
 		end
 
+	button_set_icon (an_id: INTEGER; a_name: POINTER)
+			-- 1n: the name's SW glyph before the label (`glyph_of').
+		local
+			l_name: STRING_32
+		do
+			l_name := from_c (a_name)
+			if attached {SW_BUTTON} widget (an_id) as al_b then
+				al_b.set_glyph (glyph_of (l_name))
+				if l_name.is_empty then
+					button_icons.remove (an_id)
+				else
+					button_icons.force (l_name, an_id)
+				end
+				changed
+			end
+		end
+
+	button_set_style (an_id, a_style: INTEGER)
+			-- SW_BUTTON's kinds: suggested is primary, destructive danger, flat quiet; a pill is
+			-- a normal button with rounded ends.
+		do
+			if attached {SW_BUTTON} widget (an_id) as al_b then
+				inspect a_style
+				when 1 then al_b.set_kind ({SW_BUTTON}.Kind_primary)
+				when 2 then al_b.set_kind ({SW_BUTTON}.Kind_danger)
+				when 3 then al_b.set_kind ({SW_BUTTON}.Kind_quiet)
+				else al_b.set_kind ({SW_BUTTON}.Kind_normal)
+				end
+				al_b.set_pill (a_style = 4)
+				changed
+			end
+		end
+
+	button_set_busy (an_id: INTEGER; a_on: BOOLEAN)
+			-- The spinner turns on the windows' fast tick while any button is busy.
+		do
+			if attached {SW_BUTTON} widget (an_id) as al_b then
+				al_b.set_busy (a_on)
+				if a_on then
+					busy_buttons.force (an_id, an_id)
+				else
+					busy_buttons.remove (an_id)
+				end
+				pace_fast_timer
+				changed
+			end
+		end
+
+	menu_set_item_icon (an_item_id: INTEGER; a_name: POINTER)
+			-- Kept, and drawn as each menu is built (`build_menu').
+		do
+			menu_item_icons.force (glyph_of (from_c (a_name)), an_item_id)
+		end
+
+	tabs_set_page_icon (a_tabs, a_page: INTEGER; a_name: POINTER)
+		do
+			if attached {SW_TABS} widget (a_tabs) as al_t and then a_page >= 1 and then a_page <= al_t.labels.count then
+				al_t.set_page_glyph (a_page, glyph_of (from_c (a_name)))
+				changed
+			end
+		end
+
+	tabs_set_page_badge (a_tabs, a_page: INTEGER; a_text: POINTER)
+		do
+			if attached {SW_TABS} widget (a_tabs) as al_t and then a_page >= 1 and then a_page <= al_t.labels.count then
+				al_t.set_page_badge (a_page, from_c (a_text))
+				changed
+			end
+		end
+
+	widget_set_badge (an_id: INTEGER; a_text: POINTER; a_kind: INTEGER)
+			-- Kept here and drawn by the widget's window (simple_widgets' widget badges).
+		do
+			inspect a_kind
+			when 1 then widget_badges.force (from_c (a_text), an_id)
+			when 2 then widget_badges.force ({STRING_32} "", an_id)
+			else widget_badges.remove (an_id)
+			end
+			apply_all_pills
+		end
+
+	test_button_icon (an_id: INTEGER): POINTER
+		do
+			if attached button_icons.item (an_id) as al_name then
+				Result := c_text (al_name)
+			else
+				Result := c_text ({STRING_32} "")
+			end
+		end
+
+	test_badge_shown (an_id: INTEGER): POINTER
+			-- What the widget's window draws for it: its text, a bullet for a dot, else empty.
+		local
+			l_shown: STRING_32
+		do
+			create l_shown.make_empty
+			if attached widget (an_id) as al_w and then attached window_of (al_w) as al_win
+				and then al_win.is_window_open and then attached al_win.widget_badge_text (al_w) as al_text
+			then
+				if al_text.is_empty then
+					l_shown := {STRING_32} "%/8226/"
+				else
+					l_shown := al_text
+				end
+			end
+			Result := c_text (l_shown)
+		end
+
 	spinner: INTEGER
 			-- 1o: an SW_SPINNER, turned on the windows' fast tick while it spins.
 		local
@@ -2919,6 +3027,9 @@ feature {NONE} -- Drawn views (1i)
 			-- The host windows' fast timer as last set (0: off).
 
 	Dwell_pace_ms: INTEGER = 50
+
+	Busy_pace_ms: INTEGER = 80
+			-- How often a busy button's spinner turns.
 			-- How finely a pending dwell shot is timed.
 
 	pace_fast_timer
@@ -2927,6 +3038,9 @@ feature {NONE} -- Drawn views (1i)
 		local
 			l_ms: INTEGER
 		do
+			if not busy_buttons.is_empty then
+				l_ms := Busy_pace_ms
+			end
 			if not spinning.is_empty then
 				l_ms := Spin_pace_ms
 			end
@@ -2963,6 +3077,9 @@ feature {NONE} -- Drawn views (1i)
 		do
 			if a_type = 25 then
 				check_drawn_timers
+				if not busy_buttons.is_empty and then attached open_window as al_w and then al_w.is_window_open then
+					al_w.request_render
+				end
 				render_spinning
 			elseif a_type = {SHELL_TRAY}.Event_click and then a_x = {SHELL_TRAY}.Click_balloon and then last_notification_id > 0 then
 				push (28, 0, last_notification_id, 0, 0)
@@ -3251,6 +3368,63 @@ feature {NONE} -- Timers, shortcuts and full screen (1m)
 			]"
 		end
 
+feature {NONE} -- Icons, badges and busy buttons (1n)
+
+	glyph_of (a_name: READABLE_STRING_GENERAL): INTEGER
+			-- The SW glyph drawing icon `a_name' (GUI_ICON's vocabulary); 0 for none.
+		local
+			l_names: ARRAY [STRING_32]
+			l_glyphs: ARRAY [INTEGER]
+			i: INTEGER
+		do
+			l_names := (create {GUI_ICON}).names
+			l_glyphs := <<1, 2, 3, 4, 5, 7, 8, 6, 7, 5, 9, 10, 11, 12, 13, 14, 29, 30, 31, 32, 33, 34, 35, 15,
+				16, 17, 18, 19, 20, 21, 22, 25, 36, 26, 28, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48>>
+			from i := l_names.lower until i > l_names.upper or Result > 0 loop
+				if l_names [i].same_string_general (a_name) then
+					Result := l_glyphs [i - l_names.lower + l_glyphs.lower]
+				end
+				i := i + 1
+			end
+		ensure
+			known: Result >= 0 and Result <= {SW_PAINTER}.Glyph_last
+		end
+
+	button_icons: HASH_TABLE [STRING_32, INTEGER]
+			-- Each button's icon name, for the test driver.
+		once ("OBJECT")
+			create Result.make (8)
+		end
+
+	busy_buttons: HASH_TABLE [INTEGER, INTEGER]
+			-- The buttons busy now.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	menu_item_icons: HASH_TABLE [INTEGER, INTEGER]
+			-- Each menu item's glyph, by item id.
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	widget_badges: HASH_TABLE [STRING_32, INTEGER]
+			-- Each badged widget's text ("" for a dot), by widget id.
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	apply_badges (a_w: GUI_SW_WINDOW)
+			-- `a_w''s badges: one for each badged widget in it.
+		do
+			a_w.widget_badges.wipe_out
+			across widget_badges as ic loop
+				if attached widget (@ic.key) as al_w and then window_of (al_w) = a_w then
+					a_w.set_widget_badge (al_w, ic)
+				end
+			end
+		end
+
 feature {NONE} -- Feedback (1o)
 
 	spinning: HASH_TABLE [INTEGER, INTEGER]
@@ -3323,6 +3497,7 @@ feature {NONE} -- Reference pills (1l)
 				end
 			end
 			a_w.set_reference_marks_shown (pills_are_shown)
+			apply_badges (a_w)
 			if a_w.is_window_open then
 				a_w.request_render
 			end
@@ -3728,6 +3903,9 @@ feature {NONE} -- Implementation
 						Result.add_item (ic.text, l_hint, a_w.can_edit_focused (ic.role), agent a_w.edit_focused (ic.role))
 					else
 						Result.add_item (ic.text, l_hint, True, agent push (5, 0, ic.id, 0, 0))
+					end
+					if menu_item_icons.has (ic.id) then
+						Result.set_item_glyph (Result.items.count, menu_item_icons.item (ic.id))
 					end
 				end
 			end
