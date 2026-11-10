@@ -1395,6 +1395,81 @@ feature -- Common widget state
 		alias "return sga_test_page_shown($an_id);"
 		end
 
+	dialog (a_title: POINTER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_dialog((const char *) $a_title);"
+		end
+
+	dialog_set_content (a_dialog, a_widget: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dialog_set_content($a_dialog, $a_widget);"
+		end
+
+	dialog_add_button (a_dialog: INTEGER; a_text: POINTER; a_role: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_dialog_add_button($a_dialog, (const char *) $a_text, $a_role);"
+		end
+
+	dialog_set_button_enabled (a_dialog, n: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dialog_set_button_enabled($a_dialog, $n, $a_on ? 1 : 0);"
+		end
+
+	dialog_present (a_dialog, a_parent_window: INTEGER; an_app_modal: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dialog_present($a_dialog, $a_parent_window, $an_app_modal ? 1 : 0);"
+		end
+
+	dialog_pump (a_dialog: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dialog_pump($a_dialog);"
+		end
+
+	dialog_close (a_dialog: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_dialog_close($a_dialog);"
+		end
+
+	dialog_is_shown (a_dialog: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_dialog_is_shown($a_dialog) != 0;"
+		end
+
+	help_show_tip (a_widget: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_help_show_tip($a_widget, (const char *) $a_text);"
+		end
+
+	test_press_dialog_button (a_dialog, n: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_press_dialog_button($a_dialog, $n);"
+		end
+
+	test_dialog_key (a_dialog, a_key: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_dialog_key($a_dialog, $a_key);"
+		end
+
+	test_press_dialog_button_later (a_dialog, n, a_ms: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_press_dialog_button_later($a_dialog, $n, $a_ms);"
+		end
+
+	test_dialog_button_order (a_dialog: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_test_dialog_button_order($a_dialog);"
+		end
+
+	test_press_help (a_window: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_press_help($a_window);"
+		end
+
+	test_help_tip_shown: POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_test_help_tip_shown();"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

@@ -279,12 +279,18 @@ static const char *sg_pill_tip_shown(int id) {
 
 /* ---------- windows and containers ---------- */
 
+static gboolean sg_on_window_help_key(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d);
 static int sg_window(const char *title, int w, int h) {
     GtkWidget *win = gtk_window_new();
     int id;
+    GtkEventController *help;
     gtk_window_set_title(GTK_WINDOW(win), title);
     gtk_window_set_default_size(GTK_WINDOW(win), w, h);
     id = sg_reg(win, 1);
+    help = gtk_event_controller_key_new();   /* 1u: F1 asks for help (49) */
+    gtk_event_controller_set_propagation_phase(help, GTK_PHASE_CAPTURE);
+    g_signal_connect(help, "key-pressed", G_CALLBACK(sg_on_window_help_key), NULL);
+    gtk_widget_add_controller(win, help);
     gtk_widget_insert_action_group(win, "app", G_ACTION_GROUP(sg_actions));
     g_signal_connect(win, "close-request", G_CALLBACK(sg_on_close), NULL);
     return id;
@@ -5342,6 +5348,201 @@ static int sg_test_page_shown(int id) {
         return name && name[0] == 'p' ? atoi(name + 1) : 0;
     }
     return 0;
+}
+
+/* ---------- 1u: dialogs (kind 57). A GtkWindow, modal and transient for its parent, holding
+   a box: the content, then a row of buttons in GNOME's order (a destructive button at the
+   leading end, apart; then the others, Cancel, and the default at the trailing end). A press,
+   Return (the default only, never a destructive button), Escape or the close box (Cancel) sends
+   48 with the button; the window stays up until dialog_close: Eiffel's can_close decides. */
+static GtkWidget *sg_dialog_buttons(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-dialog-buttons"); }
+static GPtrArray *sg_dialog_list(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-dialog-list"); }
+static int sg_dialog_with_role(int id, int role) {
+    GPtrArray *l = sg_dialog_list(id);
+    guint i;
+    for (i = 0; i < l->len; i++)
+        if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(g_ptr_array_index(l, i)), "sg-role")) == role) return (int) i + 1;
+    return 0;
+}
+static void sg_dialog_press(int id, int n) {
+    GPtrArray *l = sg_dialog_list(id);
+    if (n >= 1 && (guint) n <= l->len && gtk_widget_get_sensitive(g_ptr_array_index(l, n - 1))) sg_push(48, id, n, 0);
+}
+static void sg_on_dialog_button(GtkButton *b, gpointer d) {
+    sg_dialog_press(GPOINTER_TO_INT(d), GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-num")));
+}
+static void sg_dialog_key(int id, int key) {   /* 1 Return, 2 Escape, 3 the close box */
+    int n = key == 1 ? sg_dialog_with_role(id, 1) : sg_dialog_with_role(id, 2);
+    if (n) sg_dialog_press(id, n);
+}
+static gboolean sg_on_dialog_close(GtkWindow *w, gpointer d) { (void) w; sg_dialog_key(GPOINTER_TO_INT(d), 3); return TRUE; }
+static gboolean sg_on_dialog_keys(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
+    (void) k; (void) code; (void) m;
+    if (key == GDK_KEY_Escape) { sg_dialog_key(GPOINTER_TO_INT(d), 2); return TRUE; }
+    if (key == GDK_KEY_Return || key == GDK_KEY_KP_Enter) {
+        /* Return in a multi-line text belongs to the text */
+        GtkWidget *f = gtk_root_get_focus(GTK_ROOT(sg_w[GPOINTER_TO_INT(d)]));
+        if (f && GTK_IS_TEXT_VIEW(f)) return FALSE;
+        sg_dialog_key(GPOINTER_TO_INT(d), 1);
+        return TRUE;
+    }
+    return FALSE;
+}
+static int sg_dialog(const char *title) {
+    GtkWidget *win = gtk_window_new(), *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12), *content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkEventController *k = gtk_event_controller_key_new();
+    int id;
+    gtk_window_set_title(GTK_WINDOW(win), title);
+    gtk_window_set_modal(GTK_WINDOW(win), TRUE);
+    gtk_window_set_resizable(GTK_WINDOW(win), FALSE);
+    gtk_widget_set_margin_start(box, 18); gtk_widget_set_margin_end(box, 18);
+    gtk_widget_set_margin_top(box, 18); gtk_widget_set_margin_bottom(box, 18);
+    gtk_widget_set_vexpand(content, TRUE);
+    gtk_box_append(GTK_BOX(box), content);
+    gtk_box_append(GTK_BOX(box), row);
+    gtk_window_set_child(GTK_WINDOW(win), box);
+    id = sg_reg(win, 57);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(win), GTK_ACCESSIBLE_PROPERTY_LABEL, title, -1);
+    g_object_set_data(G_OBJECT(win), "sg-dialog-content", content);
+    g_object_set_data(G_OBJECT(win), "sg-dialog-buttons", row);
+    g_object_set_data_full(G_OBJECT(win), "sg-dialog-list", g_ptr_array_new(), (GDestroyNotify) g_ptr_array_unref);
+    g_object_ref_sink(win);   /* kept while hidden, to be shown again */
+    g_signal_connect(win, "close-request", G_CALLBACK(sg_on_dialog_close), GINT_TO_POINTER(id));
+    gtk_event_controller_set_propagation_phase(k, GTK_PHASE_CAPTURE);
+    g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_dialog_keys), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(win, k);
+    return id;
+}
+static void sg_dialog_set_content(int id, int child) {
+    gtk_box_append(GTK_BOX(g_object_get_data(G_OBJECT(sg_w[id]), "sg-dialog-content")), sg_w[child]);
+}
+/* Lay the buttons out in GNOME's order: destructive, a spacer, others, Cancel, default. */
+static void sg_dialog_arrange(int id) {
+    GtkWidget *row = sg_dialog_buttons(id), *c;
+    GPtrArray *l = sg_dialog_list(id);
+    static const int order[] = { 3, 0, 4, 2, 1 };   /* 0: the spacer */
+    guint i, k;
+    while ((c = gtk_widget_get_first_child(row))) {
+        if (g_object_get_data(G_OBJECT(c), "sg-num")) { g_object_ref(c); gtk_box_remove(GTK_BOX(row), c); g_object_set_data(G_OBJECT(c), "sg-held", GINT_TO_POINTER(1)); }
+        else gtk_box_remove(GTK_BOX(row), c);
+    }
+    for (k = 0; k < 5; k++) {
+        if (order[k] == 0) {
+            GtkWidget *s = gtk_label_new("");
+            gtk_widget_set_hexpand(s, TRUE);
+            gtk_box_append(GTK_BOX(row), s);
+            continue;
+        }
+        for (i = 0; i < l->len; i++) {
+            GtkWidget *b = g_ptr_array_index(l, i);
+            if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-role")) == order[k]) {
+                gtk_box_append(GTK_BOX(row), b);
+                if (g_object_get_data(G_OBJECT(b), "sg-held")) { g_object_set_data(G_OBJECT(b), "sg-held", NULL); g_object_unref(b); }
+            }
+        }
+    }
+}
+static int sg_dialog_add_button(int id, const char *text, int role) {
+    GtkWidget *b = gtk_button_new_with_label(text);
+    GPtrArray *l = sg_dialog_list(id);
+    g_ptr_array_add(l, b);
+    g_object_set_data(G_OBJECT(b), "sg-num", GINT_TO_POINTER((int) l->len));
+    g_object_set_data(G_OBJECT(b), "sg-role", GINT_TO_POINTER(role));
+    if (role == 1) gtk_widget_add_css_class(b, "suggested-action");
+    if (role == 3) gtk_widget_add_css_class(b, "destructive-action");
+    g_signal_connect(b, "clicked", G_CALLBACK(sg_on_dialog_button), GINT_TO_POINTER(id));
+    gtk_box_append(GTK_BOX(sg_dialog_buttons(id)), b);
+    sg_dialog_arrange(id);
+    return (int) l->len;
+}
+static void sg_dialog_set_button_enabled(int id, int n, int on) {
+    GPtrArray *l = sg_dialog_list(id);
+    if (n >= 1 && (guint) n <= l->len) gtk_widget_set_sensitive(g_ptr_array_index(l, n - 1), on);
+}
+static void sg_dialog_present(int id, int parent, int app_modal) {
+    GtkWindow *w = GTK_WINDOW(sg_w[id]);
+    int def = sg_dialog_with_role(id, 1);
+    (void) app_modal;   /* a modal GtkWindow already blocks the application's windows */
+    gtk_window_set_transient_for(w, parent > 0 && sg_w[parent] && GTK_IS_WINDOW(sg_w[parent]) ? GTK_WINDOW(sg_w[parent]) : NULL);
+    if (def) gtk_window_set_default_widget(w, g_ptr_array_index(sg_dialog_list(id), def - 1));
+    gtk_window_present(w);
+}
+static void sg_dialog_pump(int id) { (void) id; }
+static void sg_dialog_close(int id) { if (sg_w[id]) gtk_widget_set_visible(sg_w[id], FALSE); }
+static int sg_dialog_is_shown(int id) { return sg_w[id] && gtk_widget_get_visible(sg_w[id]); }
+static void sg_test_press_dialog_button(int id, int n) {
+    GPtrArray *l = sg_dialog_list(id);
+    if (n >= 1 && (guint) n <= l->len) g_signal_emit_by_name(g_ptr_array_index(l, n - 1), "clicked");
+}
+static void sg_test_dialog_key(int id, int key) { sg_dialog_key(id, key); }
+typedef struct { int id, n; } SgLaterPress;
+static gboolean sg_press_later(gpointer d) {
+    SgLaterPress *p = d;
+    if (sg_w[p->id]) sg_test_press_dialog_button(p->id, p->n);
+    g_free(p);
+    return G_SOURCE_REMOVE;
+}
+static void sg_test_press_dialog_button_later(int id, int n, int ms) {
+    SgLaterPress *p = g_new(SgLaterPress, 1);
+    p->id = id; p->n = n;
+    g_timeout_add((guint) ms, sg_press_later, p);
+}
+static const char *sg_test_dialog_button_order(int id) {
+    static GString *s = NULL;
+    GtkWidget *c;
+    if (!s) s = g_string_new(NULL);
+    g_string_truncate(s, 0);
+    for (c = gtk_widget_get_first_child(sg_dialog_buttons(id)); c; c = gtk_widget_get_next_sibling(c)) {
+        int n = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(c), "sg-num"));
+        if (n) { if (s->len) g_string_append_c(s, ','); g_string_append_printf(s, "%d", n); }
+    }
+    return s->str;
+}
+
+/* ---------- 1u: context help. F1 sends 49 with the focused widget (its nearest registered
+   ancestor). The default answer, a pill's tip, shows as a note in the window's overlay under
+   the widget for a few seconds. ---------- */
+static int sg_focused_id(GtkWidget *win) {
+    GtkWidget *f = GTK_IS_ROOT(win) ? gtk_root_get_focus(GTK_ROOT(win)) : NULL;
+    for (; f; f = gtk_widget_get_parent(f)) if (sg_id_of(f) > 0) return sg_id_of(f);
+    return 0;
+}
+static gboolean sg_on_window_help_key(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
+    (void) code; (void) m; (void) d;
+    if (key != GDK_KEY_F1 && key != GDK_KEY_Help) return FALSE;
+    sg_push(49, 0, sg_focused_id(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(k))), 0);
+    return TRUE;
+}
+static void sg_test_press_help(int window) { if (sg_w[window]) sg_push(49, 0, sg_focused_id(sg_w[window]), 0); }
+__attribute__((weak)) GtkWidget *sg_help_note = NULL;
+static gboolean sg_help_note_hide(gpointer d) { (void) d; if (sg_help_note) gtk_widget_set_visible(sg_help_note, FALSE); return G_SOURCE_REMOVE; }
+static void sg_help_show_tip(int widget, const char *text) {
+    GtkOverlay *o = sg_w[widget] ? sg_pill_overlay(sg_w[widget]) : NULL;
+    graphene_rect_t b;
+    if (!o) return;
+    if (sg_help_note && gtk_widget_get_parent(sg_help_note) != GTK_WIDGET(o)) {
+        gtk_overlay_remove_overlay(GTK_OVERLAY(gtk_widget_get_parent(sg_help_note)), sg_help_note);
+    }
+    if (!sg_help_note || !gtk_widget_get_parent(sg_help_note)) {
+        sg_help_note = gtk_label_new("");
+        g_object_add_weak_pointer(G_OBJECT(sg_help_note), (gpointer *) &sg_help_note);
+        gtk_widget_add_css_class(sg_help_note, "osd");
+        gtk_widget_set_can_target(sg_help_note, FALSE);
+        gtk_widget_set_halign(sg_help_note, GTK_ALIGN_START);
+        gtk_widget_set_valign(sg_help_note, GTK_ALIGN_START);
+        gtk_overlay_add_overlay(o, sg_help_note);
+    }
+    gtk_label_set_text(GTK_LABEL(sg_help_note), text);
+    if (gtk_widget_compute_bounds(sg_w[widget], GTK_WIDGET(o), &b)) {
+        gtk_widget_set_margin_start(sg_help_note, (int) b.origin.x);
+        gtk_widget_set_margin_top(sg_help_note, (int) (b.origin.y + b.size.height + 4));
+    }
+    gtk_widget_set_visible(sg_help_note, TRUE);
+    g_timeout_add(6000, sg_help_note_hide, NULL);
+}
+static const char *sg_test_help_tip_shown(void) {
+    return sg_help_note && gtk_widget_get_visible(sg_help_note) ? gtk_label_get_text(GTK_LABEL(sg_help_note)) : "";
 }
 static void sg_test_choose(int id, int row) {
     if (sg_kind[id] == 56) { sg_test_choose_side(id, row); return; }   /* a click on the page's title */

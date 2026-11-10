@@ -408,13 +408,18 @@ int sga_init(const char *a_name, const char *a_id)
 	return NSApp != nil;
 }
 
+static NSWindow *s_modal_window;   /* 1u: the app-modal dialog up, nil none */
 static int sga_run_once(NSDate *a_until)
 {
 	int n = 0;
 	@autoreleasepool {
 		NSEvent *e = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:a_until inMode:NSDefaultRunLoopMode dequeue:YES];
 		if (e) {
-			if ([e type] != NSEventTypeApplicationDefined) [NSApp sendEvent:e];
+			/* 1u: while an app-modal dialog is up, the user's clicks and keys reach it alone */
+			BOOL l_blocked = s_modal_window && [e window] && [e window] != s_modal_window && ![[e window] isKindOfClass:[NSPanel class]]
+				&& ([e type] == NSEventTypeLeftMouseDown || [e type] == NSEventTypeRightMouseDown || [e type] == NSEventTypeKeyDown || [e type] == NSEventTypeOtherMouseDown);
+			if (l_blocked) NSBeep();
+			else if ([e type] != NSEventTypeApplicationDefined) [NSApp sendEvent:e];
 			n = 1;
 		}
 	}
@@ -575,8 +580,10 @@ const char *sga_pill_tip_shown(int a_id)
 
 /* ------------------------------------------------------- windows, layout */
 
+static void sga_help_watch(void);   /* 1u: F1 and Command+? */
 int sga_window(const char *a_title, int a_width, int a_height)
 {
+	sga_help_watch();
 	NSWindow *w = [[NSWindow alloc] initWithContentRect:NSMakeRect(160, 160, a_width, a_height)
 		styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
 		backing:NSBackingStoreBuffered defer:NO];
@@ -8144,3 +8151,230 @@ int sga_test_page_shown(int a_id)
 }
 
 static void sga_tabs_titles_follow(NSTabView *t) { if ([t isKindOfClass:[SGATabs class]] && ((SGATabs *)t)->titles) sga_tabs_titles_sync((SGATabs *)t); }
+
+/* ------------------------------------------------------------ 1u: dialogs and context help */
+
+/* A dialog: an NSPanel holding its content above a row of buttons in the Mac's order:
+   destructive buttons at the leading end, apart; then the others; then Cancel; the default
+   at the trailing end. Return presses the default (never a destructive button), Escape and
+   the close box press Cancel (nothing without one). A press sends 48 (a = the button, from
+   1, in the order added); the program closes it. It shows as a sheet on its parent, or alone,
+   app-modal while the program's run_modal pumps. */
+@interface SGADialog : NSPanel <NSWindowDelegate>
+{
+@public
+	NSView *content_area;
+	NSStackView *row;
+	NSMutableArray<NSButton *> *buttons;   /* in the order added */
+	NSMutableArray<NSNumber *> *roles;     /* 1 default, 2 cancel, 3 destructive, 4 other */
+	NSWindow *parent;
+	NSModalSession session;
+}
+@end
+static int sga_dialog_cancel(SGADialog *d)
+{
+	for (NSUInteger i = 0; i < [d->roles count]; i++) if ([d->roles[i] intValue] == 2 && [d->buttons[i] isEnabled]) return (int)i + 1;
+	return 0;
+}
+@implementation SGADialog
+- (void)pressed:(NSButton *)b { sga_push(48, sga_id_of(self), (int)[b tag], 0, 0); sga_wake(); }
+/* The close box presses Cancel; the program closes the dialog. */
+- (BOOL)windowShouldClose:(NSWindow *)w { (void)w; int n = sga_dialog_cancel(self); if (n) [self pressed:buttons[(NSUInteger)n - 1]]; return NO; }
+- (void)cancelOperation:(id)s { (void)s; int n = sga_dialog_cancel(self); if (n) [self pressed:buttons[(NSUInteger)n - 1]]; }
+- (BOOL)canBecomeKeyWindow { return YES; }
+@end
+
+static void sga_dialog_arrange(SGADialog *d)
+{
+	for (NSView *v in [[d->row arrangedSubviews] copy]) [d->row removeArrangedSubview:v], [v removeFromSuperview];
+	NSView *l_gap = [[NSView alloc] init];
+	[l_gap setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	int l_order[] = {3, 0, 4, 2, 1};   /* destructive, the gap, others, cancel, default */
+	for (int j = 0; j < 5; j++) {
+		if (l_order[j] == 0) { [d->row addArrangedSubview:l_gap]; continue; }
+		for (NSUInteger i = 0; i < [d->buttons count]; i++) if ([d->roles[i] intValue] == l_order[j]) [d->row addArrangedSubview:d->buttons[i]];
+	}
+}
+
+int sga_dialog(const char *a_title)
+{
+	SGADialog *d = [[SGADialog alloc] initWithContentRect:NSMakeRect(0, 0, 380, 160) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable backing:NSBackingStoreBuffered defer:YES];
+	[d setTitle:sga_string(a_title)];
+	[d setReleasedWhenClosed:NO];
+	[d setDelegate:d];
+	[d setHidesOnDeactivate:NO];
+	d->buttons = [NSMutableArray array];
+	d->roles = [NSMutableArray array];
+	d->content_area = [[NSView alloc] init];
+	d->row = [[NSStackView alloc] init];
+	[d->row setSpacing:8];
+	NSView *c = [d contentView];
+	for (NSView *v in @[d->content_area, d->row]) { [v setTranslatesAutoresizingMaskIntoConstraints:NO]; [c addSubview:v]; }
+	[NSLayoutConstraint activateConstraints:@[
+		[d->content_area.topAnchor constraintEqualToAnchor:c.topAnchor constant:20], [d->content_area.leadingAnchor constraintEqualToAnchor:c.leadingAnchor constant:20],
+		[d->content_area.trailingAnchor constraintEqualToAnchor:c.trailingAnchor constant:-20],
+		[d->row.topAnchor constraintEqualToAnchor:d->content_area.bottomAnchor constant:16], [d->row.leadingAnchor constraintEqualToAnchor:c.leadingAnchor constant:20],
+		[d->row.trailingAnchor constraintEqualToAnchor:c.trailingAnchor constant:-20], [d->row.bottomAnchor constraintEqualToAnchor:c.bottomAnchor constant:-20]]];
+	return sga_keep(d);
+}
+
+static SGADialog *sga_dialog_of(int a_id) { id d = sga_get(a_id); return [d isKindOfClass:[SGADialog class]] ? d : nil; }
+
+void sga_dialog_set_content(int a_dialog, int a_widget)
+{
+	SGADialog *d = sga_dialog_of(a_dialog);
+	if (!d) return;
+	for (NSView *v in [[d->content_area subviews] copy]) [v removeFromSuperview];
+	NSView *v = sga_get(a_widget);
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[d->content_area addSubview:v];
+	[NSLayoutConstraint activateConstraints:@[
+		[v.leadingAnchor constraintEqualToAnchor:d->content_area.leadingAnchor], [v.trailingAnchor constraintEqualToAnchor:d->content_area.trailingAnchor],
+		[v.topAnchor constraintEqualToAnchor:d->content_area.topAnchor], [v.bottomAnchor constraintEqualToAnchor:d->content_area.bottomAnchor]]];
+}
+
+/* The button's number, from 1 in the order added. Roles: 1 default, 2 cancel, 3 destructive, 4 other. */
+int sga_dialog_add_button(int a_dialog, const char *a_text, int a_role)
+{
+	SGADialog *d = sga_dialog_of(a_dialog);
+	if (!d) return 0;
+	NSButton *b = [NSButton buttonWithTitle:sga_string(a_text) target:d action:@selector(pressed:)];
+	[b setTag:(NSInteger)[d->buttons count] + 1];
+	if (a_role == 1) [b setKeyEquivalent:@"\r"];
+	if (a_role == 2) [b setKeyEquivalent:@"\x1b"];
+	if (a_role == 3) [b setHasDestructiveAction:YES];
+	[d->buttons addObject:b];
+	[d->roles addObject:@(a_role)];
+	sga_dialog_arrange(d);
+	return (int)[b tag];
+}
+
+void sga_dialog_set_button_enabled(int a_dialog, int n, int a_on)
+{
+	SGADialog *d = sga_dialog_of(a_dialog);
+	if (d && n >= 1 && n <= (int)[d->buttons count]) [d->buttons[(NSUInteger)n - 1] setEnabled:a_on != 0];
+}
+
+/* Show it, never blocking: a sheet on the parent window, or alone (app-modal when asked). */
+void sga_dialog_present(int a_dialog, int a_parent, int an_app_modal)
+{
+	SGADialog *d = sga_dialog_of(a_dialog);
+	if (!d) return;
+	NSWindow *p = a_parent > 0 ? sga_get(a_parent) : nil;
+	[[d contentView] layoutSubtreeIfNeeded];
+	[d setContentSize:[[d contentView] fittingSize]];
+	if (p && [p isVisible]) {
+		d->parent = p;
+		[p beginSheet:d completionHandler:nil];
+	} else {
+		d->parent = nil;
+		[d center];
+		[d makeKeyAndOrderFront:nil];
+		if (an_app_modal) { d->session = [NSApp beginModalSessionForWindow:d]; s_modal_window = d; }
+	}
+}
+
+/* One turn of an app-modal dialog's modal session. */
+void sga_dialog_pump(int a_dialog)
+{
+	SGADialog *d = sga_dialog_of(a_dialog);
+	if (d && d->session) [NSApp runModalSession:d->session];
+}
+
+void sga_dialog_close(int a_dialog)
+{
+	SGADialog *d = sga_dialog_of(a_dialog);
+	if (!d) return;
+	if (d->session) { [NSApp endModalSession:d->session]; d->session = nil; }
+	if (s_modal_window == d) s_modal_window = nil;
+	if (d->parent) { [d->parent endSheet:d]; d->parent = nil; }
+	[d orderOut:nil];
+}
+
+int sga_dialog_is_shown(int a_dialog) { SGADialog *d = sga_dialog_of(a_dialog); return d && [d isVisible] ? 1 : 0; }
+
+/* As the user: a click on button `n' (if enabled); a key (1 Return, 2 Escape, 3 the close box);
+   a click after `a_ms' (while run_modal pumps); the buttons' numbers as shown. */
+void sga_test_press_dialog_button(int a_dialog, int n)
+{
+	SGADialog *d = sga_dialog_of(a_dialog);
+	if (d && n >= 1 && n <= (int)[d->buttons count] && [d->buttons[(NSUInteger)n - 1] isEnabled]) [d pressed:d->buttons[(NSUInteger)n - 1]];
+}
+
+void sga_test_dialog_key(int a_dialog, int a_key)
+{
+	SGADialog *d = sga_dialog_of(a_dialog);
+	if (!d) return;
+	if (a_key == 1) {   /* Return: the enabled default, never a destructive button */
+		for (NSUInteger i = 0; i < [d->roles count]; i++) if ([d->roles[i] intValue] == 1 && [d->buttons[i] isEnabled]) { [d pressed:d->buttons[i]]; return; }
+	} else if (a_key == 2) [d cancelOperation:nil];
+	else if (a_key == 3) [d windowShouldClose:d];
+}
+
+void sga_test_press_dialog_button_later(int a_dialog, int n, int a_ms)
+{
+	NSTimer *t = [NSTimer timerWithTimeInterval:a_ms / 1000.0 repeats:NO block:^(NSTimer *a_timer) { (void)a_timer; sga_test_press_dialog_button(a_dialog, n); }];
+	[[NSRunLoop currentRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
+	[[NSRunLoop currentRunLoop] addTimer:t forMode:NSModalPanelRunLoopMode];
+}
+
+const char *sga_test_dialog_button_order(int a_dialog)
+{
+	SGADialog *d = sga_dialog_of(a_dialog);
+	NSMutableArray<NSString *> *l_numbers = [NSMutableArray array];
+	for (NSView *v in [d->row arrangedSubviews]) if ([v isKindOfClass:[NSButton class]]) [l_numbers addObject:[NSString stringWithFormat:@"%ld", (long)[(NSButton *)v tag]]];
+	return sga_return(Kind_label, [l_numbers componentsJoinedByString:@","]);
+}
+
+/* Context help: F1, or Command+? (the Mac's Help shortcut), asks for help on the focused
+   widget (49, a = its handle; the shared class walks up for the topic). */
+static int sga_focused_widget(NSWindow *w)
+{
+	id f = [w firstResponder];
+	if ([f isKindOfClass:[NSTextView class]] && [(NSTextView *)f isFieldEditor]) f = [(NSTextView *)f delegate];
+	for (NSView *v = [f isKindOfClass:[NSView class]] ? f : nil; v; v = [v superview]) { int k = sga_id_of(v); if (k) return k; }
+	return 0;
+}
+static void sga_help_watch(void)
+{
+	static id s_help_keys;
+	if (s_help_keys) return;
+	s_help_keys = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *e) {
+		BOOL l_f1 = [e keyCode] == 122;
+		BOOL l_cmd_question = ([e modifierFlags] & NSEventModifierFlagCommand) && [[e charactersIgnoringModifiers] isEqualToString:@"?"];
+		if ((l_f1 || l_cmd_question) && [e window]) { sga_push(49, 0, sga_focused_widget([e window]), 0, 0); sga_wake(); return nil; }
+		return e;
+	}];
+}
+
+static NSPopover *s_help_popover;
+static NSString *s_help_text;
+/* The default help: the text in a popover at the widget. */
+void sga_help_show_tip(int a_widget, const char *a_text)
+{
+	NSView *v = sga_get(a_widget);
+	if (![v isKindOfClass:[NSView class]] || ![v window]) return;
+	[s_help_popover close];
+	s_help_text = sga_string(a_text);
+	NSTextField *l = [NSTextField wrappingLabelWithString:s_help_text];
+	[l setPreferredMaxLayoutWidth:280];
+	NSViewController *c = [[NSViewController alloc] init];
+	NSView *box = [[NSView alloc] init];
+	[l setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[box addSubview:l];
+	[NSLayoutConstraint activateConstraints:@[[l.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:12], [l.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-12],
+		[l.topAnchor constraintEqualToAnchor:box.topAnchor constant:10], [l.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-10]]];
+	[c setView:box];
+	s_help_popover = [[NSPopover alloc] init];
+	[s_help_popover setContentViewController:c];
+	[s_help_popover setBehavior:NSPopoverBehaviorTransient];
+	[s_help_popover showRelativeToRect:[v bounds] ofView:v preferredEdge:NSRectEdgeMaxY];
+}
+
+void sga_test_press_help(int a_window)
+{
+	NSWindow *w = sga_get(a_window);
+	if (w) { sga_push(49, 0, sga_focused_widget(w), 0, 0); sga_wake(); }
+}
+
+const char *sga_test_help_tip_shown(void) { return sga_return(Kind_label, [s_help_popover isShown] ? (s_help_text ?: @"") : @""); }

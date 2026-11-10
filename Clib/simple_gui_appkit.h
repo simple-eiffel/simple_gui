@@ -451,3 +451,20 @@ int sga_sidebar_is_collapsed(int a_id);
 void sga_path_control_set_parts(int a_id, const char *a_parts);
 void sga_test_toggle_sidebar(int a_id);
 int sga_test_page_shown(int a_id);
+
+/* 1u: dialogs and context help */
+int sga_dialog(const char *a_title);
+void sga_dialog_set_content(int a_dialog, int a_widget);
+int sga_dialog_add_button(int a_dialog, const char *a_text, int a_role);
+void sga_dialog_set_button_enabled(int a_dialog, int n, int a_on);
+void sga_dialog_present(int a_dialog, int a_parent, int an_app_modal);
+void sga_dialog_pump(int a_dialog);
+void sga_dialog_close(int a_dialog);
+int sga_dialog_is_shown(int a_dialog);
+void sga_help_show_tip(int a_widget, const char *a_text);
+void sga_test_press_dialog_button(int a_dialog, int n);
+void sga_test_dialog_key(int a_dialog, int a_key);
+void sga_test_press_dialog_button_later(int a_dialog, int n, int a_ms);
+const char *sga_test_dialog_button_order(int a_dialog);
+void sga_test_press_help(int a_window);
+const char *sga_test_help_tip_shown(void);

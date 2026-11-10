@@ -732,6 +732,57 @@ feature -- User actions
 			settle
 		end
 
+	press_dialog_button (a_dialog: GUI_DIALOG; n: INTEGER)
+		require
+			has_application: has_application
+		do
+			backend.test_press_dialog_button (a_dialog.id, n)
+			settle
+		end
+
+	press_dialog_key (a_dialog: GUI_DIALOG; a_key: INTEGER)
+			-- 1 Return, 2 Escape, 3 the close box.
+		require
+			has_application: has_application
+			known: a_key >= 1 and a_key <= 3
+		do
+			backend.test_dialog_key (a_dialog.id, a_key)
+			settle
+		end
+
+	press_dialog_button_later (a_dialog: GUI_DIALOG; n, a_ms: INTEGER)
+			-- Press button `n' after `a_ms', so a test can wait in `run_modal'.
+		require
+			has_application: has_application
+		do
+			backend.test_press_dialog_button_later (a_dialog.id, n, a_ms)
+		end
+
+	dialog_button_order (a_dialog: GUI_DIALOG): STRING_32
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_dialog_button_order (a_dialog.id))
+		end
+
+	press_help (a_window: GUI_WINDOW)
+			-- F1 in `a_window', as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_press_help (a_window.id)
+			settle
+		end
+
+	help_tip_shown: STRING_32
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.from_c (backend.test_help_tip_shown)
+		end
+
 	toggle_sidebar (a_sidebar: GUI_SIDEBAR)
 			-- Press the sidebar's collapse button, as the user would.
 		require

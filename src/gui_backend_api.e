@@ -392,6 +392,77 @@ feature -- Windows and containers
 		deferred
 		end
 
+	dialog (a_title: POINTER): INTEGER
+			-- 1u: a modal dialog, not shown.
+		deferred
+		end
+
+	dialog_set_content (a_dialog, a_widget: INTEGER)
+		deferred
+		end
+
+	dialog_add_button (a_dialog: INTEGER; a_text: POINTER; a_role: INTEGER): INTEGER
+			-- Roles: 1 default, 2 cancel, 3 destructive, 4 other; the platform orders them.
+		deferred
+		end
+
+	dialog_set_button_enabled (a_dialog, n: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	dialog_present (a_dialog, a_parent_window: INTEGER; an_app_modal: BOOLEAN)
+			-- Show it, never blocking (`a_parent_window' 0: none). The user's button, Return,
+			-- Escape or close box sends 48 (a = the button).
+		deferred
+		end
+
+	dialog_pump (a_dialog: INTEGER)
+			-- One turn of what keeps an app-modal dialog modal (macOS `runModalSession:'); else nothing.
+		deferred
+		end
+
+	dialog_close (a_dialog: INTEGER)
+		deferred
+		end
+
+	dialog_is_shown (a_dialog: INTEGER): BOOLEAN
+		deferred
+		end
+
+	help_show_tip (a_widget: INTEGER; a_text: POINTER)
+			-- 1u: the default help, a popover at the widget.
+		deferred
+		end
+
+	test_press_dialog_button (a_dialog, n: INTEGER)
+			-- As the user's click on button `n': 48.
+		deferred
+		end
+
+	test_dialog_key (a_dialog, a_key: INTEGER)
+			-- 1 Return, 2 Escape, 3 the close box: 48 with the button it presses, or nothing.
+		deferred
+		end
+
+	test_press_dialog_button_later (a_dialog, n, a_ms: INTEGER)
+		deferred
+		end
+
+	test_dialog_button_order (a_dialog: INTEGER): POINTER
+			-- The buttons' numbers in the order shown, leading to trailing, joined by ",".
+		deferred
+		end
+
+	test_press_help (a_window: INTEGER)
+			-- As F1 in the window: 49 with the focused widget.
+		deferred
+		end
+
+	test_help_tip_shown: POINTER
+			-- The default help popover's text; empty: none.
+		deferred
+		end
+
 	tabs_set_position (a_tabs, a_position: INTEGER)
 			-- 1t: 0 none, 1 top, 2 bottom, 3 left, 4 right.
 		deferred

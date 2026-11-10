@@ -239,6 +239,19 @@ feature -- Reference pill (1l)
 			set: attached pill_code as al_code and then al_code.same_string_general (a_code)
 		end
 
+	help_topic: STRING_32
+			-- What F1 asks help about here (1u): a page name, a URL, an anchor; empty: ask the parent.
+		attribute
+			create Result.make_empty
+		end
+
+	set_help_topic (a_topic: READABLE_STRING_GENERAL)
+		do
+			help_topic := a_topic.to_string_32
+		ensure
+			set: help_topic.same_string_general (a_topic)
+		end
+
 	set_pill_corner (a_corner: INTEGER)
 		require
 			gui_thread: is_gui_thread
