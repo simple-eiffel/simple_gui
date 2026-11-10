@@ -3004,6 +3004,114 @@ feature -- Controls
 			create l_l.make (120.0)
 			Result := register (l_l)
 			l_l.set_on_select (agent report_row (Result, ?))
+			l_l.set_on_row_check (agent (an_id, r: INTEGER; c: BOOLEAN) do push (43, an_id, r, c.to_integer, 0) end (Result, ?, ?))
+			l_l.set_on_row_close (agent (an_id, r: INTEGER) do push (44, an_id, r, 0, 0) end (Result, ?))
+		end
+
+	list_extend_rich (an_id: INTEGER; a_title, a_subtitle, an_icon: POINTER; a_badge, a_flags: INTEGER)
+			-- 1s: SW_TEXT_LIST's row, then its parts.
+		local
+			i: INTEGER
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l then
+				al_l.extend (from_c (a_title))
+				i := al_l.count
+				al_l.set_row_subtitle (i, from_c (a_subtitle))
+				al_l.set_row_icon (i, from_c (an_icon))
+				al_l.set_row_badge (i, a_badge.max (0))
+				al_l.set_row_checkable (i, a_flags & 1 /= 0)
+				al_l.set_row_checked (i, a_flags & 2 /= 0)
+				al_l.set_row_closable (i, a_flags & 4 /= 0)
+				changed
+			end
+		end
+
+	list_set_checked (an_id, a_row: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l and then a_row >= 1 and then a_row <= al_l.count then
+				al_l.set_row_checked (a_row, a_on)
+				changed
+			end
+		end
+
+	list_is_checked (an_id, a_row: INTEGER): BOOLEAN
+		do
+			Result := attached {SW_TEXT_LIST} widget (an_id) as al_l and then a_row >= 1 and then a_row <= al_l.count
+				and then al_l.is_row_checked (a_row)
+		end
+
+	list_remove (an_id, a_row: INTEGER)
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l and then a_row >= 1 and then a_row <= al_l.count then
+				al_l.remove_row (a_row)
+				changed
+			end
+		end
+
+	list_reorder (an_id: INTEGER; an_order: POINTER)
+		local
+			l_order: ARRAY [INTEGER]
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l then
+				l_order := numbers_in (from_c (an_order))
+				if al_l.is_permutation (l_order) then
+					al_l.reorder (l_order)
+					changed
+				end
+			end
+		end
+
+	list_set_filter (an_id: INTEGER; a_text: POINTER)
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l then
+				al_l.set_filter_text (from_c (a_text))
+				changed
+			end
+		end
+
+	list_shown_count (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l then
+				Result := al_l.shown_count
+			end
+		end
+
+	test_check_row (an_id, a_row: INTEGER)
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l and then a_row >= 1 and then a_row <= al_l.count then
+				al_l.press_row_check (a_row)
+				changed
+			end
+		end
+
+	test_close_row (an_id, a_row: INTEGER)
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l and then a_row >= 1 and then a_row <= al_l.count then
+				al_l.press_row_close (a_row)
+				changed
+			end
+		end
+
+	numbers_in (a_text: READABLE_STRING_32): ARRAY [INTEGER]
+			-- The whole numbers in `a_text', in order, whatever separates them.
+		local
+			l_list: ARRAYED_LIST [INTEGER]
+			l_n, i: INTEGER
+			l_in: BOOLEAN
+		do
+			create l_list.make (8)
+			from i := 1 until i > a_text.count + 1 loop
+				if i <= a_text.count and then a_text [i].is_digit then
+					l_n := l_n * 10 + (a_text [i].code - ('0').code)
+					l_in := True
+				elseif l_in then
+					l_list.extend (l_n)
+					l_n := 0
+					l_in := False
+				end
+				i := i + 1
+			end
+			create Result.make_from_array (l_list.to_array)
 		end
 
 	list_extend (an_id: INTEGER; a_text: POINTER)
@@ -3057,6 +3165,160 @@ feature -- Controls
 			table_rows.force (create {ARRAYED_LIST [ARRAY [STRING_32]]}.make (16), Result)
 			g.set_on_header_click (agent report_header (Result, ?, ?))
 			g.set_on_select (agent report_table_select (Result, ?))
+			g.set_on_cell_edit (agent table_cell_edited (Result, ?, ?, ?))
+		end
+
+	table_cell_edited (a_table, a_model, a_column: INTEGER; a_text: STRING_32): detachable STRING_32
+			-- SW_DATA_GRID's edit: accepted for now (a held table shows it) and told (45); the
+			-- program's validator may refuse it after (`table_refuse_edit').
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g then
+				last_edit_old := al_g.cell_text (a_model, a_column).twin
+			end
+			last_edit_text := a_text.twin
+			push (45, a_table, a_model, a_column, 0)
+		end
+
+	last_edit_text: STRING_32
+			-- The text of the edit 45 told of.
+		attribute
+			create Result.make_empty
+		end
+
+	last_edit_old: STRING_32
+			-- The cell's text before it.
+		attribute
+			create Result.make_empty
+		end
+
+	table_set_column_editor (a_table, a_column, a_kind: INTEGER; a_choices: POINTER)
+		local
+			l_choices: ARRAYED_LIST [STRING_32]
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then a_column >= 1 and then a_column <= al_g.columns.count
+				and then a_kind >= 0 and then a_kind <= 3
+			then
+				al_g.set_column_editor (a_column, a_kind)
+				if a_kind = 3 then
+					create l_choices.make (4)
+					across from_c (a_choices).split ('%/31/') as ic loop
+						l_choices.extend (ic)
+					end
+					al_g.set_column_choices (a_column, l_choices.to_array)
+				end
+				changed
+			end
+		end
+
+	table_take_edit (a_table: INTEGER): POINTER
+		do
+			Result := c_text (last_edit_text)
+		end
+
+	table_refuse_edit (a_table, a_row, a_column: INTEGER; a_message: POINTER)
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then a_row >= 1 and then a_row <= al_g.rows.count
+				and then a_column >= 1 and then a_column <= al_g.columns.count
+			then
+				al_g.refuse_edit (a_row, a_column, last_edit_old, from_c (a_message))
+				changed
+			end
+		end
+
+	table_set_filter (a_table: INTEGER; a_text: POINTER; a_columns_mask: INTEGER)
+			-- Held rows matched here: the text, ignoring case, in the mask's columns (0: all).
+		local
+			l_needle: STRING_32
+			l_shown: ARRAYED_LIST [INTEGER]
+			r, c: INTEGER
+			l_hit: BOOLEAN
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached table_rows.item (a_table) as al_rows then
+				l_needle := from_c (a_text).as_lower
+				if l_needle.is_empty then
+					al_g.set_shown_models (Void)
+				else
+					create l_shown.make (al_rows.count)
+					from r := 1 until r > al_rows.count loop
+						l_hit := False
+						from c := 1 until c > al_g.columns.count or l_hit loop
+							if a_columns_mask = 0 or else (c <= 31 and then a_columns_mask & (1 |<< (c - 1)) /= 0) then
+								l_hit := al_g.cell_text (r, c).as_lower.has_substring (l_needle)
+							end
+							c := c + 1
+						end
+						if l_hit then
+							l_shown.extend (r)
+						end
+						r := r + 1
+					end
+					al_g.set_shown_models (l_shown.to_array)
+				end
+				changed
+			end
+		end
+
+	table_set_shown_rows (a_table: INTEGER; a_rows: POINTER)
+		local
+			l_text: STRING_32
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g then
+				l_text := from_c (a_rows)
+				if l_text.is_empty then
+					al_g.set_shown_models (Void)
+				else
+					al_g.set_shown_models (numbers_in (l_text))
+				end
+				changed
+				check_rows_wanted
+			end
+		end
+
+	table_shown_count (a_table: INTEGER): INTEGER
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g then
+				Result := al_g.shown_count
+			end
+		end
+
+	test_edit_cell (a_table, a_row, a_column: INTEGER; a_text: POINTER)
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then a_row >= 1 and then a_row <= al_g.rows.count
+				and then a_column >= 1 and then a_column <= al_g.columns.count
+			then
+				al_g.edit_cell_by_user (a_row, a_column, from_c (a_text))
+				changed
+			end
+		end
+
+	test_cancel_edit (a_table, a_row, a_column: INTEGER)
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then a_row >= 1 and then a_row <= al_g.rows.count
+				and then a_column >= 1 and then a_column <= al_g.columns.count
+			then
+				al_g.cancel_edit_by_user (a_row, a_column)
+				changed
+			end
+		end
+
+	test_cell_text (a_table, a_row, a_column: INTEGER): POINTER
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then a_row >= 1 and then a_row <= al_g.rows.count
+				and then a_column >= 1 and then a_column <= al_g.columns.count
+			then
+				Result := c_text (al_g.cell_text (a_row, a_column))
+			else
+				Result := c_text ({STRING_32} "")
+			end
+		end
+
+	test_cell_note (a_table: INTEGER): POINTER
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g then
+				Result := c_text (al_g.cell_note)
+			else
+				Result := c_text ({STRING_32} "")
+			end
 		end
 
 	table_extend (a_table: INTEGER; a_cells: POINTER)
@@ -3079,6 +3341,8 @@ feature -- Controls
 			row_sources.remove (a_table)
 			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached table_rows.item (a_table) as al_rows then
 				al_rows.wipe_out
+				al_g.set_holds_edits (True)
+				al_g.forget_edits
 				al_g.set_rows (al_rows)
 				changed
 			end
@@ -3112,6 +3376,8 @@ feature -- Controls
 					al_rows.wipe_out
 				end
 				al_g.select_model_row_quietly (0, False)
+				al_g.set_holds_edits (False)
+				al_g.set_shown_models (Void)
 				al_g.set_rows (empty_rows (l_source, a_count, Void))
 				changed
 				check_rows_wanted
@@ -3157,6 +3423,7 @@ feature -- Controls
 		do
 			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (a_table) as al_g and then attached row_sources.item (a_table) as al_s then
 				al_s.set_count (a_count)
+				al_g.set_shown_models (Void)
 				al_g.set_rows (empty_rows (al_s, a_count, al_g.rows))
 				changed
 				check_rows_wanted
