@@ -1476,11 +1476,26 @@ int sga_list_selected(int a_id) { NSTableView *t = s_inner[a_id]; return (int)sg
 	NSInteger source_count;
 	NSMutableDictionary<NSNumber *, NSArray<NSString *> *> *cache;
 	NSMutableIndexSet *pending;
+	/* 1s: editing and filtering */
+	NSMutableDictionary<NSNumber *, NSNumber *> *editor;          /* column (from 1) -> 1 text, 2 check, 3 choice */
+	NSMutableDictionary<NSNumber *, NSArray<NSString *> *> *choices;
+	NSString *filter;      /* a held table's filter text, and the columns it reads (a mask; 0 all) */
+	int filter_columns;
+	NSString *edit_text;   /* the last committed edit, for table_take_edit */
+	NSInteger edit_row, edit_column;   /* model row (from 0), column (from 1) */
+	NSString *edit_old;
+	BOOL editing_allowed;  /* a text cell edits only after a double click, Return or F2 */
+	NSTextField *note;     /* a refused edit's message, until the next edit in this table */
 }
 - (void)wantRowsNear:(NSInteger)a_row;
 @end
+static void sga_table_commit(SGAGridTable *t, NSInteger a_model, NSInteger a_column, NSString *a_text);
 @implementation SGAGridTable
-- (NSInteger)numberOfRowsInTableView:(NSTableView *)a_table { return source_on ? source_count : (NSInteger)[data count]; }
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)a_table
+{
+	NSArray *m = sga_shown_map(a_table);
+	return m ? (NSInteger)[m count] : (source_on ? source_count : (NSInteger)[data count]);
+}
 
 /* Rows wanted (16) for the rows in view plus a viewful either side, those neither held nor
    already asked for; once per range, never for a count of 0. Rows far from the view are
@@ -1491,6 +1506,19 @@ int sga_list_selected(int a_id) { NSTableView *t = s_inner[a_id]; return (int)sg
 	NSRange v = [self rowsInRect:[self visibleRect]];
 	if (v.length == 0) v = NSMakeRange((NSUInteger)a_row, 40);
 	NSInteger l_margin = (NSInteger)MAX(v.length, (NSUInteger)20);
+	if (sga_shown_map(self)) {
+		/* 1s: filtered, the rows near the view are model rows, maybe far apart: ask for each run */
+		NSInteger l_lo = MAX((NSInteger)0, (NSInteger)v.location - l_margin), l_hi = MIN([self numberOfRows] - 1, (NSInteger)NSMaxRange(v) + l_margin - 1);
+		NSInteger lo = -1, hi = -1, l_runs = 0;
+		for (NSInteger s = l_lo; s <= l_hi + 1 && l_runs < 50; s++) {
+			NSInteger m = s <= l_hi ? sga_model_row(self, s) : -1;
+			BOOL l_want = m >= 0 && !cache[@(m)] && ![pending containsIndex:(NSUInteger)m];
+			if (l_want && lo >= 0 && m == hi + 1) { hi = m; continue; }
+			if (lo >= 0) { [pending addIndexesInRange:NSMakeRange((NSUInteger)lo, (NSUInteger)(hi - lo + 1))]; sga_push(16, sga_id_of(self), (int)lo + 1, (int)hi + 1, 0); l_runs++; }
+			lo = l_want ? m : -1; hi = lo;
+		}
+		return;
+	}
 	NSInteger l_first = MAX((NSInteger)0, (NSInteger)v.location - l_margin);
 	NSInteger l_last = MIN(source_count - 1, (NSInteger)NSMaxRange(v) + l_margin - 1);
 	NSInteger lo = -1, hi = -1;
@@ -1509,16 +1537,38 @@ int sga_list_selected(int a_id) { NSTableView *t = s_inner[a_id]; return (int)sg
 }
 - (NSView *)tableView:(NSTableView *)a_table viewForTableColumn:(NSTableColumn *)a_column row:(NSInteger)a_row
 {
-	NSTextField *f = [a_table makeViewWithIdentifier:@"sga_grid_cell" owner:self];
+	NSUInteger k = [[a_table tableColumns] indexOfObject:a_column];
+	NSInteger l_model = sga_model_row(a_table, a_row);
+	NSArray<NSString *> *l_row = l_model < 0 ? nil : source_on ? cache[@(l_model)] : (l_model < (NSInteger)[data count] ? data[(NSUInteger)l_model] : nil);
+	if (source_on && !l_row) [self wantRowsNear:a_row];
+	NSString *l_text = k < [l_row count] ? l_row[k] : @"";
+	int l_kind = [editor[@(k + 1)] intValue];
+	if (l_kind == 2) {   /* 1s: a check cell, toggled by a click: commits at once */
+		NSButton *b = [a_table makeViewWithIdentifier:@"sga_grid_check" owner:self];
+		if (!b) { b = [NSButton checkboxWithTitle:@"" target:self action:@selector(cellChecked:)]; [b setIdentifier:@"sga_grid_check"]; }
+		[b setState:[l_text isEqualToString:@"1"] ? NSControlStateValueOn : NSControlStateValueOff];
+		[b setTag:(NSInteger)k + 1];
+		return b;
+	}
+	if (l_kind == 3) {   /* a choice cell: commits on change */
+		NSPopUpButton *b = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+		[b setBordered:NO];
+		[b addItemsWithTitles:choices[@(k + 1)] ?: @[]];
+		if (![b itemWithTitle:l_text] && [l_text length]) [b addItemWithTitle:l_text];
+		[b selectItemWithTitle:l_text];
+		[b setTarget:self];
+		[b setAction:@selector(cellChosen:)];
+		[b setTag:(NSInteger)k + 1];
+		return b;
+	}
+	NSTextField *f = [a_table makeViewWithIdentifier:l_kind == 1 ? @"sga_grid_edit" : @"sga_grid_cell" owner:self];
 	if (!f) {
 		f = [NSTextField labelWithString:@""];
-		[f setIdentifier:@"sga_grid_cell"];
+		[f setIdentifier:l_kind == 1 ? @"sga_grid_edit" : @"sga_grid_cell"];
 		[f setLineBreakMode:NSLineBreakByTruncatingTail];
+		if (l_kind == 1) { [f setEditable:YES]; [f setDelegate:(id<NSTextFieldDelegate>)self]; [f setTag:(NSInteger)k + 1]; }
 	}
-	NSUInteger k = [[a_table tableColumns] indexOfObject:a_column];
-	NSArray<NSString *> *l_row = source_on ? cache[@(a_row)] : data[(NSUInteger)a_row];
-	if (source_on && !l_row) [self wantRowsNear:a_row];
-	[f setStringValue:k < [l_row count] ? l_row[k] : @""];
+	[f setStringValue:l_text];
 	[f setAlignment:sga_start_alignment(a_table)];
 	return f;
 }
@@ -1526,7 +1576,73 @@ int sga_list_selected(int a_id) { NSTableView *t = s_inner[a_id]; return (int)sg
 {
 	if (s_suppress) return;
 	NSUInteger l_first = [[self selectedRowIndexes] firstIndex];
-	sga_push(4, sga_id_of(self), l_first == NSNotFound ? 0 : (int)l_first + 1, 0, 0);
+	sga_push(4, sga_id_of(self), l_first == NSNotFound ? 0 : (int)sga_model_row(self, (NSInteger)l_first) + 1, 0, 0);
+}
+/* 1s editing: a text cell takes the focus only after a double click, Return or F2. */
+- (BOOL)validateProposedFirstResponder:(NSResponder *)r forEvent:(NSEvent *)e
+{
+	if ([r isKindOfClass:[NSTextField class]] && [[(NSTextField *)r identifier] isEqualToString:@"sga_grid_edit"] && !editing_allowed) return NO;
+	return [super validateProposedFirstResponder:r forEvent:e];
+}
+- (void)editAt:(NSInteger)a_view column:(NSInteger)a_column
+{
+	if (a_view < 0 || a_column < 1) return;
+	int l_kind = [editor[@(a_column)] intValue];
+	[note removeFromSuperview];
+	note = nil;
+	if (l_kind == 1) { editing_allowed = YES; [self editColumn:a_column - 1 row:a_view withEvent:nil select:YES]; }
+	else if (l_kind == 2) { NSButton *b = [self viewAtColumn:a_column - 1 row:a_view makeIfNecessary:YES]; [b performClick:nil]; }
+	else if (l_kind == 3) { NSPopUpButton *b = [self viewAtColumn:a_column - 1 row:a_view makeIfNecessary:YES]; [b performClick:nil]; }
+}
+- (void)doubleClicked:(id)s
+{
+	(void)s;
+	NSInteger c = [self clickedColumn] + 1;
+	if ([editor[@(c)] intValue]) [self editAt:[self clickedRow] column:c];
+}
+- (NSInteger)firstEditableColumn
+{
+	for (NSInteger c = 1; c <= (NSInteger)[[self tableColumns] count]; c++) if ([editor[@(c)] intValue]) return c;
+	return 0;
+}
+/* Return or F2 on the selected row edits its first editable column. */
+- (void)keyDown:(NSEvent *)e
+{
+	BOOL l_edit_key = [e keyCode] == 36 || [e keyCode] == 76 || [e keyCode] == 120;
+	if (l_edit_key && [self selectedRow] >= 0 && [self firstEditableColumn]) { [self editAt:[self selectedRow] column:[self firstEditableColumn]]; return; }
+	[super keyDown:e];
+}
+/* A text cell's editing ended: Escape cancels; Return or leaving commits. */
+- (void)controlTextDidEndEditing:(NSNotification *)n
+{
+	NSTextField *f = [n object];
+	editing_allowed = NO;
+	NSInteger v = [self rowForView:f], c = [f tag];
+	if (v < 0) return;
+	if ([[n userInfo][@"NSTextMovement"] integerValue] == NSTextMovementCancel) { [self reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] columnIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)c - 1]]; return; }
+	sga_table_commit(self, sga_model_row(self, v), c, [f stringValue]);
+}
+- (BOOL)control:(NSControl *)c textView:(NSTextView *)tv doCommandBySelector:(SEL)a_command
+{
+	(void)tv;
+	if (a_command == @selector(cancelOperation:)) {   /* Escape: put the old text back, end editing */
+		NSInteger v = [self rowForView:c];
+		editing_allowed = NO;
+		[[self window] makeFirstResponder:self];
+		if (v >= 0) [self reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] columnIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)[c tag] - 1]];
+		return YES;
+	}
+	return NO;
+}
+- (void)cellChecked:(NSButton *)b
+{
+	NSInteger v = [self rowForView:b];
+	if (v >= 0) sga_table_commit(self, sga_model_row(self, v), [b tag], [b state] == NSControlStateValueOn ? @"1" : @"0");
+}
+- (void)cellChosen:(NSPopUpButton *)b
+{
+	NSInteger v = [self rowForView:b];
+	if (v >= 0) sga_table_commit(self, sga_model_row(self, v), [b tag], [b titleOfSelectedItem] ?: @"");
 }
 - (void)tableView:(NSTableView *)a_table didClickTableColumn:(NSTableColumn *)a_column
 {
@@ -1557,6 +1673,10 @@ int sga_table(const char *a_titles)
 	[t setStyle:NSTableViewStyleFullWidth];
 	[t setDataSource:t];
 	[t setDelegate:t];
+	[t setTarget:t];
+	[t setDoubleAction:@selector(doubleClicked:)];
+	t->editor = [NSMutableDictionary dictionary];
+	t->choices = [NSMutableDictionary dictionary];
 	[l_scroll setDocumentView:t];
 	[l_scroll setHasVerticalScroller:YES];
 	[l_scroll setBorderType:NSBezelBorder];
@@ -1565,19 +1685,21 @@ int sga_table(const char *a_titles)
 	return l_id;
 }
 
+static void sga_table_refilter(SGAGridTable *t);
+
 void sga_table_extend(int a_id, const char *a_cells)
 {
 	SGAGridTable *t = s_inner[a_id];
 	[t->data addObject:sga_fields(a_cells)];
-	s_suppress++;
-	[t reloadData];
-	s_suppress--;
+	if ([t->filter length]) sga_table_refilter(t);
+	else { s_suppress++; [t reloadData]; s_suppress--; }
 }
 
 void sga_table_wipe_out(int a_id)
 {
 	SGAGridTable *t = s_inner[a_id];
 	[t->data removeAllObjects];
+	sga_set_shown_map(t, nil);
 	t->source_on = NO;
 	t->source_count = 0;
 	[t->cache removeAllObjects];
@@ -1594,6 +1716,8 @@ void sga_table_set_source(int a_id, int a_count)
 {
 	SGAGridTable *t = s_inner[a_id];
 	[t->data removeAllObjects];
+	sga_set_shown_map(t, nil);
+	t->filter = nil;
 	t->source_on = YES;
 	t->source_count = MAX(a_count, 0);
 	if (!t->cache) t->cache = [NSMutableDictionary dictionary];
@@ -1613,8 +1737,9 @@ void sga_table_set_row(int a_id, int a_row, const char *a_cells)
 	if (!t->source_on || r < 0 || r >= t->source_count) return;
 	t->cache[@(r)] = sga_fields(a_cells);
 	[t->pending removeIndex:(NSUInteger)r];
+	NSInteger v = sga_view_row(t, r);
 	s_suppress++;
-	[t reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)r] columnIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, [[t tableColumns] count])]];
+	if (v >= 0) [t reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] columnIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, [[t tableColumns] count])]];
 	s_suppress--;
 }
 
@@ -1653,15 +1778,17 @@ void sga_table_forget_row(int a_id, int a_row)
 	if (!t->source_on || r < 0 || r >= t->source_count) return;
 	[t->cache removeObjectForKey:@(r)];
 	[t->pending removeIndex:(NSUInteger)r];
+	NSInteger v = sga_view_row(t, r);
 	s_suppress++;
-	[t reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)r] columnIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, [[t tableColumns] count])]];
+	if (v >= 0) [t reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] columnIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, [[t tableColumns] count])]];
 	s_suppress--;
 }
 
 void sga_table_scroll_to(int a_id, int a_row)
 {
 	NSTableView *t = s_inner[a_id];
-	if (a_row >= 1 && a_row <= [t numberOfRows]) [t scrollRowToVisible:a_row - 1];
+	NSInteger v = a_row >= 1 ? sga_view_row(t, a_row - 1) : -1;
+	if (v >= 0 && v < [t numberOfRows]) [t scrollRowToVisible:v];
 }
 
 void sga_table_set_multiple(int a_id, int a_on) { [(NSTableView *)s_inner[a_id] setAllowsMultipleSelection:a_on != 0]; }
@@ -1669,9 +1796,10 @@ void sga_table_set_multiple(int a_id, int a_on) { [(NSTableView *)s_inner[a_id] 
 void sga_table_select(int a_id, int a_row, int a_extend)
 {
 	NSTableView *t = s_inner[a_id];
+	NSInteger v = a_row >= 1 ? sga_view_row(t, a_row - 1) : -1;
 	s_suppress++;
 	if (a_row <= 0) [t deselectAll:nil];
-	else [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)(a_row - 1)] byExtendingSelection:a_extend != 0];
+	else if (v >= 0) [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] byExtendingSelection:a_extend != 0];
 	s_suppress--;
 }
 
@@ -1680,8 +1808,9 @@ int sga_table_selected_count(int a_id) { return (int)[[(NSTableView *)s_inner[a_
 int sga_table_selected_at(int a_id, int i)
 {
 	__block int l_seen = 0, l_row = 0;
-	[[(NSTableView *)s_inner[a_id] selectedRowIndexes] enumerateIndexesUsingBlock:^(NSUInteger r, BOOL *a_stop) {
-		if (++l_seen == i) { l_row = (int)r + 1; *a_stop = YES; }
+	NSTableView *t = s_inner[a_id];
+	[[t selectedRowIndexes] enumerateIndexesUsingBlock:^(NSUInteger r, BOOL *a_stop) {
+		if (++l_seen == i) { l_row = (int)sga_model_row(t, (NSInteger)r) + 1; *a_stop = YES; }
 	}];
 	return l_row;
 }
@@ -7461,3 +7590,150 @@ int sga_list_shown_count(int a_id) { return (int)[(NSTableView *)s_inner[a_id] n
 /* As the user: row `a_row''s check box, its close button. */
 void sga_test_check_row(int a_id, int a_row) { sga_list_user_check(s_inner[a_id], a_row - 1); }
 void sga_test_close_row(int a_id, int a_row) { sga_list_user_close(s_inner[a_id], a_row - 1); }
+
+/* ---------------------------------------------- 1s: editable cells and filtering (tables) */
+
+/* Column `a_column''s editor: 0 none, 1 text, 2 check ("1" or "0"), 3 choice (the options,
+   separated by 0x1F). */
+void sga_table_set_column_editor(int a_id, int a_column, int a_kind, const char *an_options)
+{
+	SGAGridTable *t = s_inner[a_id];
+	t->editor[@(a_column)] = @(a_kind);
+	t->choices[@(a_column)] = a_kind == 3 ? sga_fields(an_options) : @[];
+	s_suppress++;
+	[t reloadData];
+	s_suppress--;
+}
+
+/* A committed edit: a held table holds it now (and puts the old text back if the program
+   refuses it); a lazy table passes it on. 45 (row, column); the text for table_take_edit. */
+static void sga_table_commit(SGAGridTable *t, NSInteger a_model, NSInteger a_column, NSString *a_text)
+{
+	if (a_model < 0 || a_column < 1) return;
+	[t->note removeFromSuperview];
+	t->note = nil;
+	NSArray<NSString *> *l_row = t->source_on ? t->cache[@(a_model)] : (a_model < (NSInteger)[t->data count] ? t->data[(NSUInteger)a_model] : nil);
+	NSString *l_old = (NSUInteger)a_column - 1 < [l_row count] ? l_row[(NSUInteger)a_column - 1] : @"";
+	if ([l_old isEqualToString:a_text]) return;
+	if (!t->source_on && l_row) {
+		NSMutableArray *l_new = [l_row mutableCopy];
+		while ((NSInteger)[l_new count] < a_column) [l_new addObject:@""];
+		l_new[(NSUInteger)a_column - 1] = a_text;
+		t->data[(NSUInteger)a_model] = l_new;
+	}
+	t->edit_text = a_text;
+	t->edit_old = l_old;
+	t->edit_row = a_model;
+	t->edit_column = a_column;
+	sga_push(45, sga_id_of(t), (int)a_model + 1, (int)a_column, 0);
+	sga_wake();
+}
+
+const char *sga_table_take_edit(int a_id) { SGAGridTable *t = s_inner[a_id]; return sga_return(Kind_field, t->edit_text ?: @""); }
+
+/* The program refused the edit at (row, column): the old text back, and the message under
+   the cell until the next edit in this table. */
+void sga_table_refuse_edit(int a_id, int a_row, int a_column, const char *a_message)
+{
+	SGAGridTable *t = s_inner[a_id];
+	NSInteger m = a_row - 1;
+	if (!t->source_on && m >= 0 && m < (NSInteger)[t->data count] && m == t->edit_row && a_column == t->edit_column && t->edit_old) {
+		NSMutableArray *l_new = [t->data[(NSUInteger)m] mutableCopy];
+		if ((NSInteger)[l_new count] >= a_column) l_new[(NSUInteger)a_column - 1] = t->edit_old;
+		t->data[(NSUInteger)m] = l_new;
+	}
+	NSInteger v = sga_view_row(t, m);
+	s_suppress++;
+	if (v >= 0) [t reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] columnIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)a_column - 1]];
+	s_suppress--;
+	[t->note removeFromSuperview];
+	t->note = nil;
+	if (v < 0 || !a_message || !*a_message) return;
+	NSRect r = [t frameOfCellAtColumn:a_column - 1 row:v];
+	NSTextField *n = [NSTextField labelWithString:sga_string(a_message)];
+	[n setTextColor:[NSColor systemRedColor]];
+	[n setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
+	[n setDrawsBackground:YES];
+	[n setBackgroundColor:[NSColor controlBackgroundColor]];
+	[n sizeToFit];
+	[n setFrameOrigin:NSMakePoint(NSMinX(r) + 2, NSMaxY(r))];
+	[t addSubview:n];
+	t->note = n;
+}
+
+/* Recompute a held table's shown rows from its filter (any of the masked columns, ignoring
+   case); a selected row the filter hides is deselected, with 4. */
+static void sga_table_refilter(SGAGridTable *t)
+{
+	NSMutableIndexSet *l_selected = [NSMutableIndexSet indexSet];
+	[[t selectedRowIndexes] enumerateIndexesUsingBlock:^(NSUInteger v, BOOL *a_stop) { (void)a_stop; NSInteger m = sga_model_row(t, (NSInteger)v); if (m >= 0) [l_selected addIndex:(NSUInteger)m]; }];
+	if ([t->filter length] && !t->source_on) {
+		NSMutableArray<NSNumber *> *m = [NSMutableArray array];
+		for (NSUInteger i = 0; i < [t->data count]; i++) {
+			NSArray<NSString *> *l_row = t->data[i];
+			for (NSUInteger k = 0; k < [l_row count]; k++)
+				if ((t->filter_columns == 0 || (t->filter_columns & (1 << k))) && [l_row[k] rangeOfString:t->filter options:NSCaseInsensitiveSearch].location != NSNotFound) { [m addObject:@(i)]; break; }
+		}
+		sga_set_shown_map(t, m);
+	} else if (!t->source_on) sga_set_shown_map(t, nil);
+	NSMutableIndexSet *l_keep = [NSMutableIndexSet indexSet];
+	__block BOOL l_lost = NO;
+	[l_selected enumerateIndexesUsingBlock:^(NSUInteger m, BOOL *a_stop) { (void)a_stop; NSInteger v = sga_view_row(t, (NSInteger)m); if (v >= 0) [l_keep addIndex:(NSUInteger)v]; else l_lost = YES; }];
+	s_suppress++;
+	[t reloadData];
+	[t selectRowIndexes:l_keep byExtendingSelection:NO];
+	s_suppress--;
+	if (l_lost) {
+		NSUInteger l_first = [l_keep firstIndex];
+		sga_push(4, sga_id_of(t), l_first == NSNotFound ? 0 : (int)sga_model_row(t, (NSInteger)l_first) + 1, 0, 0);
+	}
+}
+
+/* A held table's filter: rows whose masked columns (bit 0 = column 1; 0 all) hold `a_text'. */
+void sga_table_set_filter(int a_id, const char *a_text, int a_columns)
+{
+	SGAGridTable *t = s_inner[a_id];
+	t->filter = sga_string(a_text);
+	t->filter_columns = a_columns;
+	sga_table_refilter(t);
+}
+
+/* A lazy table's shown rows, from the shared class: model rows (from 1) separated by anything
+   that is not a digit; empty shows every row. */
+void sga_table_set_shown_rows(int a_id, const char *a_rows)
+{
+	SGAGridTable *t = s_inner[a_id];
+	NSString *l_text = sga_string(a_rows);
+	if (![l_text length]) sga_set_shown_map(t, nil);
+	else {
+		NSMutableArray<NSNumber *> *m = [NSMutableArray array];
+		NSScanner *k = [NSScanner scannerWithString:l_text];
+		[k setCharactersToBeSkipped:[[NSCharacterSet decimalDigitCharacterSet] invertedSet]];
+		NSInteger n;
+		while ([k scanInteger:&n]) if (n >= 1) [m addObject:@(n - 1)];
+		sga_set_shown_map(t, m);
+	}
+	t->filter = nil;
+	sga_table_refilter(t);
+}
+
+int sga_table_shown_count(int a_id) { return (int)[(NSTableView *)s_inner[a_id] numberOfRows]; }
+
+/* As the user: `a_text' typed into cell (row, column), then Enter (a check cell takes "1" or
+   "0", a choice cell an option); an edit begun there and cancelled with Escape. */
+void sga_test_edit_cell(int a_id, int a_row, int a_column, const char *a_text)
+{
+	SGAGridTable *t = s_inner[a_id];
+	if (![t->editor[@(a_column)] intValue]) return;
+	sga_table_commit(t, a_row - 1, a_column, sga_string(a_text));
+}
+
+void sga_test_cancel_edit(int a_id, int a_row, int a_column)
+{
+	SGAGridTable *t = s_inner[a_id];
+	NSInteger v = sga_view_row(t, a_row - 1);
+	if (v < 0 || [t->editor[@(a_column)] intValue] != 1) return;
+	[t editAt:v column:a_column];
+	NSTextField *f = [t viewAtColumn:a_column - 1 row:v makeIfNecessary:NO];
+	if (f) [t control:f textView:(NSTextView *)[[t window] fieldEditor:NO forObject:f] doCommandBySelector:@selector(cancelOperation:)];
+}
