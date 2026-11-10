@@ -78,7 +78,7 @@ The rest are the [common features](widget.md).
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | a `GtkBox` of frameless `GtkButton`s between "›" labels | `NSPathControl`, standard style, not editable | `GUI_SW_PATH_CONTROL`, an `SW_ROW` of `GUI_SW_LINK_BUTTON`s between "›" labels |
-| Looks or behaves differently | An absolute path's first part is "/". | The parts are the names Finder shows, and the first may name the volume, as "Macintosh HD". | The first part is the root, "/" or a drive such as "C:". |
+| Looks or behaves differently | An absolute path's first part is "/". | The parts are the names Finder shows, and the first may name the volume, as "Macintosh HD". With `set_parts`, one item per part, titled exactly; a narrow control may truncate middle parts, but they stay counted. | The first part is the root, "/" or a drive such as "C:". |
 
 ## Design guidance
 
