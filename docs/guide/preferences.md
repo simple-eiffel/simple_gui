@@ -78,7 +78,7 @@ Every command requires `is_gui_thread`.
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Settings file | `$XDG_CONFIG_HOME/<name>/preferences.json`, or `~/.config/<name>/preferences.json` | `~/Library/Application Support/<name>/preferences.json` | `%APPDATA%\<name>\preferences.json` |
-| Looks or behaves differently | — | Programs usually open it from the application menu's Settings… item, with Command+comma. | — |
+| Looks or behaves differently | The sections list is GTK's navigation sidebar. | Programs usually open it from the application menu's Settings… item, with Command+comma. | The sections list is a drawn SW_SIDEBAR; a number shows as a field with − and + buttons. |
 
 ## Design guidance
 

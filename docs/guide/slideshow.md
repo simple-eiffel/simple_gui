@@ -61,7 +61,7 @@ The slideshow is shared: a tabless [tabs](tabs.md) control and native [buttons](
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | A `GtkNotebook` without tabs, with `GtkButton`s | A tabless `NSTabView` with `NSButton`s | `SW_TABS` without tabs, with simple_widgets buttons |
-| Looks or behaves differently | — | — | — |
+| Looks or behaves differently | The page area is a GtkNotebook without tabs. | The page area is an NSTabView with no tabs. | The page area is an SW_TABS with no strip. |
 
 ## Design guidance
 

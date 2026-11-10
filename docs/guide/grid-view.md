@@ -74,7 +74,7 @@ Every command requires `is_gui_thread`.
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | A `GtkGridView` over a list model, each cell a `GtkPicture` or `GtkImage` over labels; a `GtkFilterListModel` for the filter | An `NSCollectionView` in a flow layout, each cell an image over a title and a subtitle | `SW_GRID_VIEW`, a drawn grid |
-| Looks or behaves differently | — | Icons are SF Symbols; a picture that can't be read shows a warning triangle. | — |
+| Looks or behaves differently | Pictures decode on a GTask thread and appear as each finishes; icons come from the symbolic icon theme. | Icons are SF Symbols; a picture that can't be read shows a warning triangle. | The cells are drawn. Pictures in any format decode on a separate SCOOP processor, two at a time, cells in view first; the selected cell is shaded with the accent. |
 
 ## Design guidance
 

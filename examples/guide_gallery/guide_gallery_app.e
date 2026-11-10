@@ -830,6 +830,8 @@ feature {NONE} -- Collections and preferences (1v)
 			l_dir: STRING_32
 			l_env: EXECUTION_ENVIRONMENT
 			i: INTEGER
+			l_grid_window: GUI_WINDOW
+			l_ready: BOOLEAN
 		do
 			create l_grid.make
 			across <<"button", "calendar", "canvas">> as ic loop
@@ -840,11 +842,19 @@ feature {NONE} -- Collections and preferences (1v)
 			l_grid.extend_icon ("Notes", "document")
 			l_grid.set_item_subtitle (4, "12 files")
 			l_grid.select_item (2)
-			from i := 1 until i > 20 loop
-				app.process_events (30)
+			create l_grid_window.make ("Pictures", 460, 300)
+			l_grid_window.set_content (l_grid)
+			l_grid_window.show
+			settle
+				-- the pictures load off the GUI thread: wait for them before the picture is taken
+			from i := 1 until i > 3 loop
+				l_ready := driver.grid_picture_ready (l_grid, i, 5000)
+				if not l_ready then
+					print ("  grid picture " + i.out + " not ready%N")
+				end
 				i := i + 1
 			end
-			shoot ("grid-view", "Pictures", 460, 300, l_grid)
+			save ("grid-view", l_grid_window)
 			create l_show.make
 			across <<"slider", "rating", "spinner">> as ic loop
 				l_show.extend_item (create {GUI_IMAGE}.make_from_file (folder.extended (ic + ".png")))
