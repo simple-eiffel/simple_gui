@@ -9,6 +9,7 @@
 #import <Cocoa/Cocoa.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <UserNotifications/UserNotifications.h>
+#import <PDFKit/PDFKit.h>
 #include <cairo.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -8749,3 +8750,53 @@ static void sga_grid_user_select(int a_id, int i, BOOL an_extend)
 }
 void sga_test_activate_item(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); NSInteger v = g && i >= 1 ? sga_grid_view_index(g, i - 1) : -1; if (v >= 0) [g openAt:v]; }
 int sga_test_item_picture_ready(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); return g && i >= 1 && i <= (int)[g->items count] && g->items[(NSUInteger)i - 1]->image ? 1 : 0; }
+
+/* ------------------------------------------------------------------ 1v-c: printing */
+
+/* Prints the finished PDF at `a_path' through the system's print panel, as a sheet on
+   `a_parent' when it is a shown window, else app-modal. Blocks only inside AppKit's own
+   print loop (no Eiffel callbacks). 1 printed, 0 cancelled, -1 failed. */
+static int s_print_result;
+@interface SGAPrintEnd : NSObject
+@end
+@implementation SGAPrintEnd
+- (void)printOperationDidRun:(NSPrintOperation *)op success:(BOOL)ok contextInfo:(void *)c
+{
+	(void)op; (void)c;
+	s_print_result = ok ? 1 : 0;
+	[NSApp stopModal];
+}
+@end
+
+int sga_print_pdf(const char *a_path, const char *a_title, int a_parent)
+{
+	PDFDocument *d = [[PDFDocument alloc] initWithURL:[NSURL fileURLWithPath:sga_string(a_path)]];
+	if (!d || [d pageCount] == 0) return -1;
+	NSPrintInfo *i = [[NSPrintInfo sharedPrintInfo] copy];
+	[i setTopMargin:0]; [i setBottomMargin:0]; [i setLeftMargin:0]; [i setRightMargin:0];
+	/* the pages are already laid out: the paper follows the first page's size and shape */
+	NSRect b = [[d pageAtIndex:0] boundsForBox:kPDFDisplayBoxMediaBox];
+	if (NSWidth(b) > 0 && NSHeight(b) > 0) {
+		[i setPaperSize:b.size];
+		[i setOrientation:NSWidth(b) > NSHeight(b) ? NSPaperOrientationLandscape : NSPaperOrientationPortrait];
+	}
+	NSPrintOperation *op = [d printOperationForPrintInfo:i scalingMode:kPDFPrintPageScaleDownToFit autoRotate:YES];
+	if (!op) return -1;
+	NSString *l_title = sga_string(a_title);
+	if ([l_title length]) [op setJobTitle:l_title];
+	[op setShowsPrintPanel:YES];
+	[op setShowsProgressPanel:YES];
+	[[op printPanel] setOptions:NSPrintPanelShowsCopies | NSPrintPanelShowsPageRange | NSPrintPanelShowsPaperSize
+		| NSPrintPanelShowsOrientation | NSPrintPanelShowsScaling | NSPrintPanelShowsPreview];
+	NSWindow *w = a_parent > 0 ? sga_get(a_parent) : nil;
+	if (w && ![w isKindOfClass:[NSWindow class]]) w = nil;
+	s_print_result = -1;
+	if (w && [w isVisible] && ![w attachedSheet]) {
+		static SGAPrintEnd *s_end;
+		if (!s_end) s_end = [[SGAPrintEnd alloc] init];
+		[op runOperationModalForWindow:w delegate:s_end didRunSelector:@selector(printOperationDidRun:success:contextInfo:) contextInfo:NULL];
+		/* wait in AppKit's own modal loop (the parent and its sheet) until the sheet ends */
+		[NSApp runModalForWindow:w];
+	} else s_print_result = [op runOperation] ? 1 : 0;
+	return s_print_result;
+}

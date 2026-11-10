@@ -1550,6 +1550,13 @@ feature -- Common widget state
 		alias "return sga_test_item_picture_ready($an_id, $i) != 0;"
 		end
 
+	print_pdf (a_pdf_path, a_title: POINTER; a_parent_window: INTEGER): INTEGER
+			-- 1v-c: the system's print panel over the finished PDF, as a sheet on `a_parent_window'
+			-- when it is shown. 1 printed, 0 cancelled, -1 failed.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_print_pdf((const char *) $a_pdf_path, (const char *) $a_title, $a_parent_window);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

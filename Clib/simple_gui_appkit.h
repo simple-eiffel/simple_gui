@@ -486,3 +486,6 @@ void sga_grid_view_set_filter(int a_id, const char *a_text);
 int sga_grid_view_shown_count(int a_id);
 void sga_test_activate_item(int a_id, int i);
 int sga_test_item_picture_ready(int a_id, int i);
+
+/* 1v-c: printing */
+int sga_print_pdf(const char *a_path, const char *a_title, int a_parent);
