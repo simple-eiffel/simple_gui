@@ -66,6 +66,34 @@ feature -- Element change
 			set: path = a_path
 		end
 
+	set_parts (a_parts: ARRAY [READABLE_STRING_GENERAL])
+			-- Show any parts, from the first (1t breadcrumbs); `path' becomes Void.
+		require
+			gui_thread: is_gui_thread
+			has_parts: not a_parts.is_empty
+			no_separator: across a_parts as ic all not ic.has ('%/31/') end
+		local
+			l_joined: STRING_32
+			l_c: C_STRING
+			l_first: BOOLEAN
+		do
+			path := Void
+			create l_joined.make (32)
+			l_first := True
+			across a_parts as ic loop
+				if not l_first then
+					l_joined.append_character ('%/31/')
+				end
+				l_joined.append_string_general (ic)
+				l_first := False
+			end
+			l_c := backend.to_c (l_joined)
+			backend.path_control_set_parts (id, l_c.item)
+		ensure
+			no_path: path = Void
+			counted: part_count = a_parts.count
+		end
+
 feature {GUI_APPLICATION} -- Events
 
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)

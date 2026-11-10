@@ -2827,6 +2827,14 @@ static void sg_tabs_select(int tabs, int page) {
     gtk_notebook_set_current_page(GTK_NOTEBOOK(sg_w[tabs]), page - 1);
     sg_quiet--;
 }
+/* 1t: 0 none (no strip), 1 top, 2 bottom, 3 left, 4 right. */
+static void sg_tabs_set_position(int tabs, int position) {
+    GtkNotebook *nb = GTK_NOTEBOOK(sg_w[tabs]);
+    static const GtkPositionType side[] = { GTK_POS_TOP, GTK_POS_TOP, GTK_POS_BOTTOM, GTK_POS_LEFT, GTK_POS_RIGHT };
+    gtk_notebook_set_show_tabs(nb, position != 0);
+    gtk_notebook_set_show_border(nb, position != 0);
+    if (position >= 1 && position <= 4) gtk_notebook_set_tab_pos(nb, side[position]);
+}
 static int sg_tabs_selected(int tabs) {
     int n = gtk_notebook_get_current_page(GTK_NOTEBOOK(sg_w[tabs]));
     return n < 0 ? 0 : n + 1;
@@ -4437,6 +4445,32 @@ static void sg_path_control_set(int id, const char *path) {
     }
     g_object_set_data_full(G_OBJECT(box), "sg-path", g_strdup(path), g_free);
 }
+/* 1t: any parts, joined by U+001F, shown as they are. */
+static void sg_path_control_set_parts(int id, const char *joined) {
+    GtkWidget *box = sg_w[id], *c;
+    GPtrArray *parts = sg_path_parts(id);
+    gchar **pieces = g_strsplit(joined, "\x1f", -1);
+    guint i;
+    while ((c = gtk_widget_get_first_child(box))) gtk_box_remove(GTK_BOX(box), c);
+    g_ptr_array_set_size(parts, 0);
+    for (i = 0; pieces[i]; i++) g_ptr_array_add(parts, g_strdup(pieces[i]));
+    g_strfreev(pieces);
+    for (i = 0; i < parts->len; i++) {
+        GtkWidget *b = g_object_new(GTK_TYPE_BUTTON, "label", (const char *) g_ptr_array_index(parts, i),
+                                    "has-frame", FALSE, "accessible-role", GTK_ACCESSIBLE_ROLE_LINK, NULL);
+        if (i > 0) gtk_box_append(GTK_BOX(box), gtk_label_new("\xe2\x80\xba"));   /* › */
+        g_object_set_data(G_OBJECT(b), "sg-id", GINT_TO_POINTER(id));
+        g_object_set_data(G_OBJECT(b), "sg-index", GINT_TO_POINTER((int) i + 1));
+        g_signal_connect(b, "clicked", G_CALLBACK(sg_on_path_part), NULL);
+        gtk_box_append(GTK_BOX(box), b);
+    }
+    g_object_set_data(G_OBJECT(box), "sg-path", NULL);
+}
+static void sg_test_choose_path_part(int id, int part) {
+    GtkWidget *c;
+    for (c = gtk_widget_get_first_child(sg_w[id]); c; c = gtk_widget_get_next_sibling(c))
+        if (GTK_IS_BUTTON(c) && GPOINTER_TO_INT(g_object_get_data(G_OBJECT(c), "sg-index")) == part) { g_signal_emit_by_name(c, "clicked"); return; }
+}
 static int sg_path_control_count(int id) { return (int) sg_path_parts(id)->len; }
 static const char *sg_path_control_part(int id, int i) {
     return (i >= 1 && (guint) i <= sg_path_parts(id)->len) ? g_ptr_array_index(sg_path_parts(id), i - 1) : "";
@@ -5092,7 +5126,193 @@ static void sg_test_type(int id, const char *t) {   /* emits, like a user */
     if (v) gtk_text_buffer_set_text(gtk_text_view_get_buffer(GTK_TEXT_VIEW(v)), t, -1);
     else gtk_editable_set_text(GTK_EDITABLE(sg_w[id]), t);
 }
+
+/* ---------- 1t: sidebar navigation (kind 56). A box: a column of a GtkListBox in the
+   navigation-sidebar style (pages and unselectable headings) over a collapse button, beside
+   a GtkStack of the pages. A page row keeps its page number ("sg-page"); its icon, title and
+   badge are its children. The user's choice sends 46 (a = page); the collapse button 47 (b).
+   Collapsed, rows show their icon only (or the title's first letter) with the title as tooltip. */
+static GtkListBox *sg_side_list(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-side-list"); }
+static GtkStack *sg_side_stack(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-side-stack"); }
+static GtkListBoxRow *sg_side_row(int id, int page) {
+    GtkListBoxRow *r;
+    int i = 0;
+    while ((r = gtk_list_box_get_row_at_index(sg_side_list(id), i++)))
+        if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(r), "sg-page")) == page) return r;
+    return NULL;
+}
+static void sg_side_show(int id, int page) {
+    char name[16];
+    g_snprintf(name, sizeof name, "p%d", page);
+    if (gtk_stack_get_child_by_name(sg_side_stack(id), name)) gtk_stack_set_visible_child_name(sg_side_stack(id), name);
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-side-page", GINT_TO_POINTER(page));
+}
+static void sg_on_side_row(GtkListBox *l, GtkListBoxRow *r, gpointer d) {
+    int id = GPOINTER_TO_INT(d), page = r ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(r), "sg-page")) : 0;
+    (void) l;
+    if (page <= 0 || page == GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-side-page"))) return;
+    sg_side_show(id, page);
+    if (!sg_quiet) sg_push(46, id, page, 0);
+}
+static int sg_sidebar_is_collapsed(int id) { return GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-side-collapsed")); }
+static void sg_sidebar_set_collapsed(int id, int on) {
+    GtkListBoxRow *r;
+    int i = 0;
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-side-collapsed", GINT_TO_POINTER(on ? 1 : 0));
+    while ((r = gtk_list_box_get_row_at_index(sg_side_list(id), i++))) {
+        GtkWidget *title = g_object_get_data(G_OBJECT(r), "sg-title"), *badge = g_object_get_data(G_OBJECT(r), "sg-badge");
+        GtkWidget *icon = g_object_get_data(G_OBJECT(r), "sg-icon"), *letter = g_object_get_data(G_OBJECT(r), "sg-letter");
+        int page = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(r), "sg-page"));
+        if (page == 0) { gtk_widget_set_visible(GTK_WIDGET(r), !on); continue; }   /* headings hide */
+        if (title) gtk_widget_set_visible(title, !on);
+        if (badge) gtk_widget_set_visible(badge, !on && *gtk_label_get_text(GTK_LABEL(badge)));
+        if (letter) gtk_widget_set_visible(letter, on && !(icon && gtk_widget_get_visible(icon)));
+        gtk_widget_set_tooltip_text(GTK_WIDGET(r), on && title ? gtk_label_get_text(GTK_LABEL(title)) : NULL);
+    }
+    {
+        GtkWidget *b = g_object_get_data(G_OBJECT(sg_w[id]), "sg-side-toggle");
+        if (b) gtk_widget_set_tooltip_text(b, on ? "Show the titles" : "Show icons only");
+    }
+}
+static void sg_on_side_toggle(GtkButton *b, gpointer d) {
+    int id = GPOINTER_TO_INT(d), now;
+    (void) b;
+    sg_sidebar_set_collapsed(id, !sg_sidebar_is_collapsed(id));
+    now = sg_sidebar_is_collapsed(id);
+    sg_push(47, id, 0, now);
+}
+static int sg_sidebar(void) {
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0), *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *l = gtk_list_box_new(), *scroll = gtk_scrolled_window_new(), *stack = gtk_stack_new(), *toggle;
+    int id;
+    gtk_widget_add_css_class(l, "navigation-sidebar");
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(l), GTK_SELECTION_SINGLE);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), l);
+    gtk_scrolled_window_set_propagate_natural_width(GTK_SCROLLED_WINDOW(scroll), TRUE);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_box_append(GTK_BOX(col), scroll);
+    toggle = gtk_button_new_from_icon_name("sidebar-show-symbolic");
+    gtk_button_set_has_frame(GTK_BUTTON(toggle), FALSE);
+    gtk_widget_set_halign(toggle, GTK_ALIGN_START);
+    gtk_widget_set_visible(toggle, FALSE);
+    gtk_box_append(GTK_BOX(col), toggle);
+    gtk_box_append(GTK_BOX(box), col);
+    gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_VERTICAL));
+    gtk_widget_set_hexpand(stack, TRUE);
+    gtk_widget_set_vexpand(stack, TRUE);
+    gtk_box_append(GTK_BOX(box), stack);
+    id = sg_reg(box, 56);
+    g_object_set_data(G_OBJECT(box), "sg-side-list", l);
+    g_object_set_data(G_OBJECT(box), "sg-side-stack", stack);
+    g_object_set_data(G_OBJECT(box), "sg-side-toggle", toggle);
+    g_signal_connect(l, "row-selected", G_CALLBACK(sg_on_side_row), GINT_TO_POINTER(id));
+    g_signal_connect(toggle, "clicked", G_CALLBACK(sg_on_side_toggle), GINT_TO_POINTER(id));
+    gtk_accessible_update_property(GTK_ACCESSIBLE(l), GTK_ACCESSIBLE_PROPERTY_LABEL, "Sections", -1);
+    return id;
+}
+static void sg_sidebar_add_heading(int id, const char *text) {
+    GtkWidget *h = gtk_label_new(text);
+    GtkListBoxRow *r;
+    gtk_label_set_xalign(GTK_LABEL(h), 0.0);
+    gtk_widget_add_css_class(h, "heading");
+    gtk_widget_add_css_class(h, "dim-label");
+    gtk_widget_set_margin_top(h, 6);
+    gtk_list_box_append(sg_side_list(id), h);
+    r = GTK_LIST_BOX_ROW(gtk_widget_get_parent(h));
+    gtk_list_box_row_set_selectable(r, FALSE);
+    gtk_list_box_row_set_activatable(r, FALSE);
+    gtk_widget_set_focusable(GTK_WIDGET(r), FALSE);
+}
+static void sg_sidebar_extend(int id, int page, const char *title) {
+    GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8), *icon = gtk_image_new(), *letter, *label = gtk_label_new(title), *badge = gtk_label_new("");
+    GtkListBoxRow *r;
+    char name[16], first[8] = "";
+    int n = 0;
+    GtkListBoxRow *k;
+    while ((k = gtk_list_box_get_row_at_index(sg_side_list(id), n))) n++;
+    n = 0;
+    { int i = 0; while ((k = gtk_list_box_get_row_at_index(sg_side_list(id), i++))) if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(k), "sg-page")) > 0) n++; }
+    g_utf8_strncpy(first, title, 1);
+    letter = gtk_label_new(first);
+    gtk_widget_set_visible(icon, FALSE);
+    gtk_widget_set_visible(letter, FALSE);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+    gtk_widget_set_hexpand(label, TRUE);
+    gtk_widget_add_css_class(badge, "dim-label");
+    gtk_widget_add_css_class(badge, "numeric");
+    gtk_widget_set_visible(badge, FALSE);
+    gtk_box_append(GTK_BOX(row), icon);
+    gtk_box_append(GTK_BOX(row), letter);
+    gtk_box_append(GTK_BOX(row), label);
+    gtk_box_append(GTK_BOX(row), badge);
+    sg_quiet++;
+    gtk_list_box_append(sg_side_list(id), row);
+    sg_quiet--;
+    r = GTK_LIST_BOX_ROW(gtk_widget_get_parent(row));
+    g_object_set_data(G_OBJECT(r), "sg-page", GINT_TO_POINTER(n + 1));
+    g_object_set_data(G_OBJECT(r), "sg-title", label);
+    g_object_set_data(G_OBJECT(r), "sg-icon", icon);
+    g_object_set_data(G_OBJECT(r), "sg-letter", letter);
+    g_object_set_data(G_OBJECT(r), "sg-badge", badge);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(r), GTK_ACCESSIBLE_PROPERTY_LABEL, title, -1);
+    g_snprintf(name, sizeof name, "p%d", n + 1);
+    gtk_stack_add_named(sg_side_stack(id), sg_w[page], name);
+    if (n == 0) {
+        sg_quiet++;
+        gtk_list_box_select_row(sg_side_list(id), r);
+        sg_quiet--;
+        sg_side_show(id, 1);
+    }
+    if (sg_sidebar_is_collapsed(id)) sg_sidebar_set_collapsed(id, 1);
+}
+static const char *sg_icon_gtk(const char *name);
+static void sg_sidebar_set_icon(int id, int page, const char *name) {
+    GtkListBoxRow *r = sg_side_row(id, page);
+    GtkWidget *icon = r ? g_object_get_data(G_OBJECT(r), "sg-icon") : NULL;
+    if (!icon) return;
+    gtk_image_set_from_icon_name(GTK_IMAGE(icon), sg_icon_gtk(name));
+    gtk_widget_set_visible(icon, *name != 0);
+    sg_sidebar_set_collapsed(id, sg_sidebar_is_collapsed(id));
+}
+static void sg_sidebar_set_badge(int id, int page, const char *text) {
+    GtkListBoxRow *r = sg_side_row(id, page);
+    GtkWidget *badge = r ? g_object_get_data(G_OBJECT(r), "sg-badge") : NULL;
+    if (!badge) return;
+    gtk_label_set_text(GTK_LABEL(badge), text);
+    gtk_widget_set_visible(badge, *text && !sg_sidebar_is_collapsed(id));
+}
+static void sg_sidebar_select(int id, int page) {
+    GtkListBoxRow *r = sg_side_row(id, page);
+    if (!r) return;
+    sg_quiet++;
+    gtk_list_box_select_row(sg_side_list(id), r);
+    sg_quiet--;
+    sg_side_show(id, page);
+}
+static int sg_sidebar_selected(int id) { return GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-side-page")); }
+static void sg_sidebar_set_collapsible(int id, int on) {
+    gtk_widget_set_visible(g_object_get_data(G_OBJECT(sg_w[id]), "sg-side-toggle"), on);
+}
+static void sg_test_toggle_sidebar(int id) { sg_on_side_toggle(NULL, GINT_TO_POINTER(id)); }
+static void sg_test_choose_side(int id, int page) {
+    GtkListBoxRow *r = sg_side_row(id, page);
+    if (r) gtk_list_box_select_row(sg_side_list(id), r);   /* as a click: 46 */
+}
+static int sg_test_page_shown(int id) {
+    if (sg_kind[id] == 11) {
+        int n = gtk_notebook_get_current_page(GTK_NOTEBOOK(sg_w[id]));
+        return n < 0 ? 0 : n + 1;
+    }
+    if (sg_kind[id] == 56) {
+        const char *name = gtk_stack_get_visible_child_name(sg_side_stack(id));
+        return name && name[0] == 'p' ? atoi(name + 1) : 0;
+    }
+    return 0;
+}
 static void sg_test_choose(int id, int row) {
+    if (sg_kind[id] == 56) { sg_test_choose_side(id, row); return; }   /* a click on the page's title */
+    if (sg_kind[id] == 47) { sg_test_choose_path_part(id, row); return; }   /* a click on the part */
     if (sg_kind[id] == 14 || sg_kind[id] == 33) { sg_test_choose_node(id, row); return; }   /* a tree node, by its number */
     if (sg_kind[id] == 20 || sg_kind[id] == 21) { GtkWidget *b = sg_choice_at(id, row); if (b) sg_choice_set(b, TRUE); return; }   /* a click on the choice */
     if (sg_kind[id] == 32) { sg_test_pick_combo(id, row); return; }   /* an option picked */

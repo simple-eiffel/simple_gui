@@ -28,6 +28,7 @@ feature {NONE} -- Initialization
 			create children.make (4)
 			create titles.make (4)
 			create page_changed_actions.make
+			tab_position := Tabs_top
 			register (backend.tabs)
 		ensure
 			empty: count = 0
@@ -128,6 +129,29 @@ feature -- Element change
 			backend.tabs_set_title (id, i, l_c.item)
 		ensure
 			set: page_title (i).same_string_general (a_title)
+		end
+
+feature -- Tab position (1t)
+
+	Tabs_none: INTEGER = 0
+			-- No strip: the pages switch only from code (a page stack).
+	Tabs_top: INTEGER = 1
+	Tabs_bottom: INTEGER = 2
+	Tabs_left: INTEGER = 3
+	Tabs_right: INTEGER = 4
+
+	tab_position: INTEGER
+			-- Where the tabs are; `Tabs_top' until set.
+
+	set_tab_position (a_position: INTEGER)
+		require
+			gui_thread: is_gui_thread
+			valid: a_position >= Tabs_none and a_position <= Tabs_right
+		do
+			tab_position := a_position
+			backend.tabs_set_position (id, a_position)
+		ensure
+			set: tab_position = a_position
 		end
 
 feature {GUI_APPLICATION} -- Events
