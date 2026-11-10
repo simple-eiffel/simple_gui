@@ -2,7 +2,8 @@ note
 	description: "[
 		A path and a "Choose..." button (1p, HTML's file input): the button opens the file or
 		folder dialog, and the chosen path shows in the field, which the user may also type
-		in. `set_path' never fires `change_actions'; a choice or an edit does. Shared Eiffel:
+		in, or drop a file on (1q-b: one the dialog would offer). `set_path' never fires
+		`change_actions'; a choice, a drop or an edit does. Shared Eiffel:
 		a GUI_TEXT_FIELD and a GUI_BUTTON over GUI_DIALOGS, the same on every platform.
 	]"
 
@@ -65,6 +66,8 @@ feature {NONE} -- Initialization
 			extend (choose_button)
 			field.change_actions.extend (agent change_actions.call (Void))
 			choose_button.click_actions.extend (agent choose)
+			field.file_drop_actions.extend (agent take_dropped)
+			choose_button.file_drop_actions.extend (agent take_dropped)
 		end
 
 feature -- Access
@@ -134,6 +137,41 @@ feature -- Basic operations
 		end
 
 feature {NONE} -- Implementation
+
+	take_dropped (a_paths: ARRAYED_LIST [PATH])
+			-- Files dropped on the field or the button: the first the dialog would offer fills
+			-- the field and fires `change_actions'.
+		local
+			l_done: BOOLEAN
+		do
+			across a_paths as ic until l_done loop
+				if is_offered (ic) then
+					field.set_text (ic.name)
+					change_actions.call (Void)
+					l_done := True
+				end
+			end
+		end
+
+	is_offered (a_path: PATH): BOOLEAN
+			-- Would the dialog offer `a_path'? A folder field takes folders; a file field takes
+			-- what is not a folder, of one of `extensions' when there are any.
+		local
+			l_dir: DIRECTORY
+			l_name: STRING_32
+		do
+			create l_dir.make_with_path (a_path)
+			if mode = Mode_folder then
+				Result := l_dir.exists
+			elseif not l_dir.exists then
+				if extensions.is_empty or mode = Mode_save then
+					Result := True
+				else
+					l_name := a_path.name.as_lower
+					Result := across extensions as ic some l_name.ends_with ({STRING_32} "." + ic.as_lower.to_string_32) end
+				end
+			end
+		end
 
 	suggested_name: STRING_32
 			-- The file name now in the field, offered first when saving.
