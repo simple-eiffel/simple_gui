@@ -97,6 +97,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_window_of_1j_controls_snapshot, "window_of_1j_controls_snapshot")
 				run_test (agent t.test_reference_pills_show_their_tips, "reference_pills_show_their_tips")
 				run_test (agent t.test_timers_fire_and_cancel, "timers_fire_and_cancel")
+				run_test (agent t.test_windowless_turn_with_no_wait, "windowless_turn_with_no_wait")
 				run_test (agent t.test_clipboard_round_trip, "clipboard_round_trip")
 				run_test (agent t.test_window_shortcut_fires, "window_shortcut_fires")
 				run_test (agent t.test_fullscreen_toggles, "fullscreen_toggles")
