@@ -1314,7 +1314,7 @@ static int sg_y(int id) { return sg_point(id, 1); }
 /* ---------- common widget state ---------- */
 
 static void sg_set_enabled(int id, int on) { gtk_widget_set_sensitive(sg_w[id], on ? TRUE : FALSE); }
-static int sg_is_enabled(int id) { return gtk_widget_get_sensitive(sg_w[id]) ? 1 : 0; }
+static int sg_is_enabled(int id) { return (sg_w[id] && gtk_widget_get_sensitive(sg_w[id])) ? 1 : 0; }   /* a dead widget (its window closed) is not enabled */
 static void sg_set_visible(int id, int on) { gtk_widget_set_visible(sg_w[id], on ? TRUE : FALSE); }
 static int sg_is_visible(int id) { return gtk_widget_get_visible(sg_w[id]) ? 1 : 0; }
 /* 0 auto, 1 left to right, 2 right to left */
@@ -4569,6 +4569,14 @@ __attribute__((weak)) GtkWidget *sg_pick_menu = NULL;
 __attribute__((weak)) GdkDrag *sg_pick_drag = NULL;
 __attribute__((weak)) int sg_pick_css_done = 0;
 
+/* The window a pick runs in, held weakly: a window closed after its pick (a later test, a
+   closed document) must not leave a dangling pointer for the next pick to read. */
+static void sg_pick_set_window(GtkWidget *w) {
+    if (sg_pick_window == w) return;
+    if (sg_pick_window) g_object_remove_weak_pointer(G_OBJECT(sg_pick_window), (gpointer *) &sg_pick_window);
+    sg_pick_window = w;
+    if (w) g_object_add_weak_pointer(G_OBJECT(w), (gpointer *) &sg_pick_window);
+}
 /* The widget that takes the gestures: a list's GtkListBox, else the registered widget. */
 static GtkWidget *sg_pick_widget(int id) {
     GtkWidget *l = g_object_get_data(G_OBJECT(sg_w[id]), "sg-list");
@@ -4725,7 +4733,7 @@ static void sg_pick_on_secondary(GtkGestureClick *g, int n, double x, double y, 
     gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_CLAIMED);
     win = GTK_WIDGET(gtk_widget_get_root(src));
     sg_pick_start(id, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-row")) ? sg_pick_row_at(id, x, y) : 0, mode);
-    sg_pick_window = win;
+    sg_pick_set_window(win);
     {
         graphene_point_t p = GRAPHENE_POINT_INIT((float) x, (float) y), q;
         if (win && gtk_widget_compute_point(sg_pick_widget(id), win, &p, &q)) {
@@ -4777,7 +4785,7 @@ static GdkContentProvider *sg_pick_on_prepare(GtkDragSource *s, double x, double
     sg_drag_inside = 0; sg_drag_canceled = 0;
     if (pick) {
         sg_pick_start(id, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(src), "sg-pick-row")) ? sg_pick_row_at(id, x, y) : 0, 1);
-        sg_pick_window = GTK_WIDGET(gtk_widget_get_root(src));
+        sg_pick_set_window(GTK_WIDGET(gtk_widget_get_root(src)));
     }
     /* With data to drag out, the drag carries it: our own targets take the pebble while the
        pick is on and ignore the content; another program gets the data. */
@@ -5022,7 +5030,7 @@ static void sg_pick_cancel(void) {
 static void sg_test_pick(int source, int row) {
     int mode = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[source]), "sg-pick-mode"));
     sg_pick_start(source, row, mode > 0 ? mode : 1);
-    sg_pick_window = GTK_WIDGET(gtk_widget_get_root(sg_w[source]));
+    sg_pick_set_window(GTK_WIDGET(gtk_widget_get_root(sg_w[source])));
 }
 static void sg_test_drop(int target, int row) {
     if (!sg_pick_on) return;

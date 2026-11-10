@@ -2293,6 +2293,54 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_tokens_move
+			-- 1q-c: a movable field's token dropped on another token takes its place; dropped
+			-- on another movable field it moves there (the end, or the token's place); a field
+			-- whose tokens do not move neither gives nor takes them.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_a, l_b, l_c: GUI_TOKEN_FIELD
+			l_changes: CELL [INTEGER]
+		do
+			create l_changes.put (0)
+			create l_window.make ("Tokens", 400, 260)
+			create l_stack.make_vertical
+			create l_a.make
+			create l_b.make
+			create l_c.make
+			across <<"grace", "faith", "hope">> as ic loop l_a.extend_token (ic) end
+			l_b.extend_token ("love")
+			l_c.extend_token ("fixed")
+			l_a.set_tokens_movable (True)
+			l_b.set_tokens_movable (True)
+			l_a.change_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_changes))
+			l_b.change_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 10) end (l_changes))
+			l_stack.extend (l_a)
+			l_stack.extend (l_b)
+			l_stack.extend (l_c)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			driver.pick (l_a, 1)
+			assert ("both movable fields light", driver.is_accepting (l_a) and driver.is_accepting (l_b))
+			assert ("the fixed one does not", not driver.is_accepting (l_c))
+			driver.drop (l_a, 3)
+			assert ("grace took hope's place", l_a.i_th (1).same_string ("faith") and l_a.i_th (2).same_string ("hope") and l_a.i_th (3).same_string ("grace"))
+			assert ("one change", l_changes.item = 1)
+			driver.pick (l_a, 1)
+			driver.drop (l_b, 0)
+			assert ("faith moved to the end of the other", l_a.count = 2 and l_b.count = 2 and l_b.i_th (2).same_string ("faith"))
+			assert ("both changed", l_changes.item = 12)
+			driver.pick (l_b, 2)
+			driver.drop (l_a, 1)
+			assert ("back, in the first place", l_a.i_th (1).same_string ("faith") and l_a.count = 3 and l_b.count = 1)
+			driver.pick (l_c, 1)
+			assert ("a fixed token lifts nothing", not driver.is_accepting (l_a))
+			driver.cancel_pick
+			l_window.close
+		end
+
 	test_dragged_out_to_other_programs
 			-- 1q-c: a drag out carries the data the program keeps current; Void carries nothing;
 			-- the end of a drag reaches the source's actions only while it has data.
