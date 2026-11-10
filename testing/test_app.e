@@ -116,6 +116,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_drops_find_rows_by_place, "drops_find_rows_by_place")
 				run_test (agent t.test_list_rich_rows, "list_rich_rows")
 				run_test (agent t.test_tabs_positions, "tabs_positions")
+				run_test (agent t.test_file_field_address_bar, "file_field_address_bar")
 				run_test (agent t.test_dialog_buttons_and_keys, "dialog_buttons_and_keys")
 				run_test (agent t.test_dialog_run_modal, "dialog_run_modal")
 				run_test (agent t.test_context_help, "context_help")

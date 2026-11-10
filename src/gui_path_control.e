@@ -94,12 +94,57 @@ feature -- Element change
 			counted: part_count = a_parts.count
 		end
 
+feature -- Chevrons and the empty space (1p-b)
+
+	has_chevrons: BOOLEAN
+
+	set_chevrons (a_on: BOOLEAN)
+			-- Make each separator a clickable chevron (and add one after the last part).
+		require
+			gui_thread: is_gui_thread
+		do
+			has_chevrons := a_on
+			backend.path_control_set_chevrons (id, a_on)
+		ensure
+			set: has_chevrons = a_on
+		end
+
+	set_root_icon (a_name: READABLE_STRING_GENERAL)
+			-- An icon in front of part 1 (empty: none).
+		require
+			gui_thread: is_gui_thread
+			known: not a_name.is_empty implies (create {GUI_ICON}).is_known (a_name)
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_name)
+			backend.path_control_set_root_icon (id, l_c.item)
+		end
+
+	chevron_actions: GUI_ACTIONS [TUPLE [part: INTEGER]]
+			-- Run when the user clicks the chevron after part `part'.
+		attribute
+			create Result.make
+		end
+
+	space_actions: GUI_ACTIONS [TUPLE]
+			-- Run when the user clicks the empty space after the last part (or presses Ctrl+L,
+			-- Alt+D or F4 with the control focused).
+		attribute
+			create Result.make
+		end
+
 feature {GUI_APPLICATION} -- Events
 
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)
+			-- 4: a part; 53: a chevron; 54: the empty space.
 		do
 			if a_type = 4 then
 				selection_actions.call ([a_a])
+			elseif a_type = 53 then
+				chevron_actions.call ([a_a])
+			elseif a_type = 54 then
+				space_actions.call (Void)
 			end
 		end
 

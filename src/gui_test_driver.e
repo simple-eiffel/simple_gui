@@ -732,6 +732,30 @@ feature -- User actions
 			settle
 		end
 
+	press_chevron (a_crumbs: GUI_PATH_CONTROL; a_part: INTEGER)
+		require
+			has_application: has_application
+		do
+			backend.test_press_chevron (a_crumbs.id, a_part)
+			settle
+		end
+
+	press_path_space (a_crumbs: GUI_PATH_CONTROL)
+		require
+			has_application: has_application
+		do
+			backend.test_press_path_space (a_crumbs.id)
+			settle
+		end
+
+	press_escape (a_field: GUI_TEXT_FIELD)
+		require
+			has_application: has_application
+		do
+			backend.test_field_escape (a_field.id)
+			settle
+		end
+
 	press_dialog_button (a_dialog: GUI_DIALOG; n: INTEGER)
 		require
 			has_application: has_application
