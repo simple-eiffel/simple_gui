@@ -268,6 +268,7 @@ static NSInteger sga_view_row(NSTableView *t, NSInteger a_model)
 static NSString *sga_row_title(id a_row) { return [a_row isKindOfClass:[SGARichRow class]] ? ((SGARichRow *)a_row)->title : (NSString *)a_row; }
 
 static int sga_tab_page(NSTabView *t, NSInteger an_item);
+static void sga_grid_user_select(int a_id, int i, BOOL an_extend);   /* 1v-a */
 static void sga_tabs_titles_follow(NSTabView *t);   /* 1t: a side strip follows its tab view */
 static NSView *sga_rich_cell(NSTableView *t, SGARichRow *a_row, NSInteger a_model);
 static BOOL sga_suggest_key(int a_id, SEL a_command);   /* 1p */
@@ -4789,6 +4790,7 @@ int sga_list_selected_at(int a_id, int i)
 /* As a user: row `a_row' added to the selection (Command-click). */
 void sga_test_extend_list_selection(int a_id, int a_row)
 {
+	if ([s_inner[a_id] isKindOfClass:NSClassFromString(@"SGAGridView")]) { sga_grid_user_select(a_id, a_row, YES); return; }   /* 1v-a */
 	NSTableView *t = s_inner[a_id];
 	NSInteger v = sga_view_row(t, a_row - 1);
 	if (v >= 0) [t selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)v] byExtendingSelection:YES];
@@ -5984,6 +5986,7 @@ static void sga_sidebar_user_choose(int a_id, int a_page);
 void sga_test_choose(int a_id, int a_row)
 {
 	if ([sga_get(a_id) isKindOfClass:NSClassFromString(@"SGASidebar")]) { sga_sidebar_user_choose(a_id, a_row); return; }
+	if ([s_inner[a_id] isKindOfClass:NSClassFromString(@"SGAGridView")]) { sga_grid_user_select(a_id, a_row, NO); return; }
 	if ([sga_get(a_id) isKindOfClass:[SGAPathControl class]]) {   /* a click on that part */
 		if (a_row >= 1 && a_row <= (int)[[(NSPathControl *)sga_get(a_id) pathItems] count]) sga_push(4, a_id, a_row, 0, 0);
 		return;
@@ -6137,20 +6140,66 @@ int sga_test_context_menu(int a_id, int a_item)
 void sga_test_request_close(int a_window) { [(NSWindow *)sga_get(a_window) performClose:nil]; }
 void sga_test_auto_cancel_dialogs(int a_ms) { s_auto_cancel_ms = a_ms; }
 
-int sga_snapshot(int a_window, const char *a_path)
+/* A window's frame view as an image (device pixels), in its own appearance. */
+static NSBitmapImageRep *sga_window_image(NSWindow *w)
 {
-	NSWindow *w = sga_get(a_window);
 	NSView *v = [[w contentView] superview];
-	__block int l_ok = 0;
+	__block NSBitmapImageRep *r = nil;
 	[v layoutSubtreeIfNeeded];
 	[v setNeedsDisplay:YES];
 	[v displayIfNeeded];
 	[[w effectiveAppearance] performAsCurrentDrawingAppearance:^{
-		NSBitmapImageRep *r = [v bitmapImageRepForCachingDisplayInRect:[v bounds]];
+		r = [v bitmapImageRepForCachingDisplayInRect:[v bounds]];
 		[v cacheDisplayInRect:[v bounds] toBitmapImageRep:r];
-		l_ok = [[r representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:sga_string(a_path) atomically:YES] ? 1 : 0;
 	}];
-	return l_ok;
+	return r;
+}
+
+static NSPopover *s_help_popover;
+static NSPopover *sga_shown_help_popover(void) { return [s_help_popover isShown] ? s_help_popover : nil; }
+
+/* The window as the user sees it: a dialog shown as a sheet is rendered in its parent; the
+   parent's attached sheet and a help popover over it are drawn where they show (each is a
+   window of its own, outside the frame view's own drawing). */
+int sga_snapshot(int a_window, const char *a_path)
+{
+	NSWindow *w = sga_get(a_window);
+	if ([w isSheet] && [w sheetParent]) w = [w sheetParent];
+	NSBitmapImageRep *l_base = sga_window_image(w);
+	NSMutableArray<NSWindow *> *l_over = [NSMutableArray array];
+	if ([w attachedSheet] && [[w attachedSheet] isVisible]) [l_over addObject:[w attachedSheet]];
+	NSWindow *l_pop = [[[sga_shown_help_popover() contentViewController] view] window];
+	if (l_pop && [l_pop isVisible]) [l_over addObject:l_pop];
+	if (![l_over count]) return [[l_base representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:sga_string(a_path) atomically:YES] ? 1 : 0;
+	NSRect b = [w frame];
+	double k = (double)[l_base pixelsWide] / NSWidth(b);
+	NSBitmapImageRep *r = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:[l_base pixelsWide] pixelsHigh:[l_base pixelsHigh]
+		bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+	[NSGraphicsContext saveGraphicsState];
+	[NSGraphicsContext setCurrentContext:[NSGraphicsContext graphicsContextWithBitmapImageRep:r]];
+	[l_base drawInRect:NSMakeRect(0, 0, [l_base pixelsWide], [l_base pixelsHigh])];
+	for (NSWindow *o in l_over) {
+		/* Its content view (a popover's vibrant backing and a sheet's are not captured) on a
+		   card of the window background, outlined, where it shows. */
+		NSView *c = o == l_pop ? [[sga_shown_help_popover() contentViewController] view] : [o contentView];
+		NSRect f = [o convertRectToScreen:[c convertRect:[c bounds] toView:nil]];
+		NSRect at = NSMakeRect((NSMinX(f) - NSMinX(b)) * k, (NSMinY(f) - NSMinY(b)) * k, NSWidth(f) * k, NSHeight(f) * k);
+		__block NSBitmapImageRep *l_img = nil;
+		[c layoutSubtreeIfNeeded];
+		[[o effectiveAppearance] performAsCurrentDrawingAppearance:^{
+			l_img = [c bitmapImageRepForCachingDisplayInRect:[c bounds]];
+			[c cacheDisplayInRect:[c bounds] toBitmapImageRep:l_img];
+			NSBezierPath *l_card = [NSBezierPath bezierPathWithRoundedRect:at xRadius:10 * k yRadius:10 * k];
+			[[NSColor windowBackgroundColor] setFill];
+			[l_card fill];
+			[[NSColor separatorColor] setStroke];
+			[l_card setLineWidth:k];
+			[l_card stroke];
+		}];
+		[l_img drawInRect:at fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:NO hints:nil];
+	}
+	[NSGraphicsContext restoreGraphicsState];
+	return [[r representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:sga_string(a_path) atomically:YES] ? 1 : 0;
 }
 
 /* What an assistive client reads, walked from the window: one "role: name" line per
@@ -8347,7 +8396,6 @@ static void sga_help_watch(void)
 	}];
 }
 
-static NSPopover *s_help_popover;
 static NSString *s_help_text;
 /* The default help: the text in a popover at the widget. */
 void sga_help_show_tip(int a_widget, const char *a_text)
@@ -8365,9 +8413,15 @@ void sga_help_show_tip(int a_widget, const char *a_text)
 	[NSLayoutConstraint activateConstraints:@[[l.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:12], [l.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-12],
 		[l.topAnchor constraintEqualToAnchor:box.topAnchor constant:10], [l.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-10]]];
 	[c setView:box];
+	/* The text's own size, wrapped at 280 points: a wrapping label's fitting width collapses. */
+	NSRect l_text = [s_help_text boundingRectWithSize:NSMakeSize(280, CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName: [l font]}];
+	CGFloat l_w = ceil(NSWidth(l_text)) + 4, l_h = ceil(NSHeight(l_text)) + 2;
+	[NSLayoutConstraint activateConstraints:@[[l.widthAnchor constraintEqualToConstant:l_w]]];
 	s_help_popover = [[NSPopover alloc] init];
+	[s_help_popover setContentSize:NSMakeSize(l_w + 24, l_h + 20)];
 	[s_help_popover setContentViewController:c];
 	[s_help_popover setBehavior:NSPopoverBehaviorTransient];
+	[s_help_popover setAnimates:NO];   /* at its size at once: a snapshot right after shows it whole */
 	[s_help_popover showRelativeToRect:[v bounds] ofView:v preferredEdge:NSRectEdgeMaxY];
 }
 
@@ -8378,3 +8432,320 @@ void sga_test_press_help(int a_window)
 }
 
 const char *sga_test_help_tip_shown(void) { return sga_return(Kind_label, [s_help_popover isShown] ? (s_help_text ?: @"") : @""); }
+
+/* ------------------------------------------------------------------ 1v-a: the grid view */
+
+/* A grid view: an NSCollectionView in a flow layout of cells, each a picture or an icon
+   over a title (and a dimmer subtitle). Pictures load off the main thread and appear when
+   ready. A filter shows the items whose title or subtitle holds its text; item numbers are
+   always the model's. The user's selection sends 50 (a = the first selected item, 0 none),
+   a double click (or Return) opens an item, 51 (a = the item). */
+@interface SGAGridItem : NSObject
+{
+@public
+	NSString *title, *subtitle, *picture, *icon;
+	NSImage *image;
+	BOOL loading;
+}
+@end
+@implementation SGAGridItem
+@end
+
+@interface SGAGridCell : NSCollectionViewItem
+{
+@public
+	NSImageView *picture_view;
+	NSTextField *title_field, *subtitle_field;
+}
+@end
+@implementation SGAGridCell
+- (void)loadView
+{
+	NSView *v = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 120, 120)];
+	[v setWantsLayer:YES];
+	[[v layer] setCornerRadius:8];
+	picture_view = [[NSImageView alloc] init];
+	[picture_view setImageScaling:NSImageScaleProportionallyUpOrDown];
+	/* the picture gives way to the title (a large image would push it out of the cell) */
+	for (NSInteger o = 0; o < 2; o++) {
+		[picture_view setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:o];
+		[picture_view setContentHuggingPriority:NSLayoutPriorityDefaultLow - 1 forOrientation:o];
+	}
+	title_field = [NSTextField labelWithString:@""];
+	[title_field setAlignment:NSTextAlignmentCenter];
+	[title_field setLineBreakMode:NSLineBreakByTruncatingTail];
+	subtitle_field = [NSTextField labelWithString:@""];
+	[subtitle_field setAlignment:NSTextAlignmentCenter];
+	[subtitle_field setTextColor:[NSColor secondaryLabelColor]];
+	[subtitle_field setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
+	[subtitle_field setLineBreakMode:NSLineBreakByTruncatingTail];
+	for (NSView *s in @[picture_view, title_field, subtitle_field]) { [s setTranslatesAutoresizingMaskIntoConstraints:NO]; [v addSubview:s]; }
+	[NSLayoutConstraint activateConstraints:@[
+		[picture_view.topAnchor constraintEqualToAnchor:v.topAnchor constant:6], [picture_view.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:6],
+		[picture_view.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-6], [picture_view.bottomAnchor constraintEqualToAnchor:title_field.topAnchor constant:-4],
+		[title_field.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:4], [title_field.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-4],
+		[subtitle_field.topAnchor constraintEqualToAnchor:title_field.bottomAnchor], [subtitle_field.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:4],
+		[subtitle_field.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-4], [subtitle_field.bottomAnchor constraintEqualToAnchor:v.bottomAnchor constant:-4]]];
+	[self setView:v];
+}
+- (void)setSelected:(BOOL)a_on
+{
+	[super setSelected:a_on];
+	[[[self view] layer] setBackgroundColor:a_on ? [[[NSColor controlAccentColor] colorWithAlphaComponent:0.3] CGColor] : [[NSColor clearColor] CGColor]];
+}
+@end
+
+@interface SGAGridView : NSCollectionView
+{
+@public
+	NSMutableArray<SGAGridItem *> *items;
+	NSArray<NSNumber *> *shown;   /* model items (from 0) shown, nil all */
+	NSString *filter;
+}
+@end
+
+static NSInteger sga_grid_model(SGAGridView *g, NSInteger a_view) { return g->shown ? (a_view >= 0 && a_view < (NSInteger)[g->shown count] ? [g->shown[(NSUInteger)a_view] integerValue] : -1) : a_view; }
+static NSInteger sga_grid_view_index(SGAGridView *g, NSInteger a_model) { if (!g->shown) return a_model; NSUInteger i = [g->shown indexOfObject:@(a_model)]; return i == NSNotFound ? -1 : (NSInteger)i; }
+static void sga_grid_load(SGAGridView *g, SGAGridItem *it);
+
+/* The grid's data source and delegate: a separate object, since NSCollectionView forwards
+   some of its own delegate methods to its delegate (itself would recurse forever). */
+@interface SGAGridSource : NSObject <NSCollectionViewDataSource, NSCollectionViewDelegate>
+{
+@public
+	__weak SGAGridView *grid;
+}
+@end
+
+@implementation SGAGridView
+- (void)tellSelection
+{
+	NSIndexPath *p = [[[self selectionIndexPaths] allObjects] sortedArrayUsingSelector:@selector(compare:)].firstObject;
+	sga_push(50, sga_id_of(self), p ? (int)sga_grid_model(self, [p item]) + 1 : 0, 0, 0);
+	sga_wake();
+}
+- (void)openAt:(NSInteger)a_view
+{
+	NSInteger m = sga_grid_model(self, a_view);
+	if (m >= 0) { sga_push(51, sga_id_of(self), (int)m + 1, 0, 0); sga_wake(); }
+}
+- (void)mouseDown:(NSEvent *)e
+{
+	[super mouseDown:e];
+	if ([e clickCount] == 2) {
+		NSIndexPath *p = [self indexPathForItemAtPoint:[self convertPoint:[e locationInWindow] fromView:nil]];
+		if (p) [self openAt:[p item]];
+	}
+}
+- (void)keyDown:(NSEvent *)e
+{
+	if (([e keyCode] == 36 || [e keyCode] == 76) && [[self selectionIndexPaths] count]) { [self openAt:[[[self selectionIndexPaths] anyObject] item]]; return; }
+	[super keyDown:e];
+}
+@end
+
+@implementation SGAGridSource
+- (NSInteger)collectionView:(NSCollectionView *)c numberOfItemsInSection:(NSInteger)s { (void)c; (void)s; SGAGridView *g = grid; return g ? (NSInteger)(g->shown ? [g->shown count] : [g->items count]) : 0; }
+- (NSCollectionViewItem *)collectionView:(NSCollectionView *)c itemForRepresentedObjectAtIndexPath:(NSIndexPath *)p
+{
+	SGAGridView *self_grid = grid;
+	SGAGridCell *cell = [c makeItemWithIdentifier:@"sga_grid_cell" forIndexPath:p];
+	NSInteger m = sga_grid_model(self_grid, [p item]);
+	SGAGridItem *it = m >= 0 ? self_grid->items[(NSUInteger)m] : nil;
+	[cell->title_field setStringValue:it->title ?: @""];
+	[cell->subtitle_field setStringValue:it->subtitle ?: @""];
+	[cell->subtitle_field setHidden:![it->subtitle length]];
+	NSImage *l_image = it->image;
+	if (!l_image && [it->icon length]) l_image = [NSImage imageWithSystemSymbolName:sga_symbol_of(it->icon) accessibilityDescription:it->title]
+		?: [NSImage imageWithSystemSymbolName:@"questionmark.square.dashed" accessibilityDescription:it->title];   /* a name GUI_ICON does not know */
+	if (!l_image && [it->picture length]) { sga_grid_load(self_grid, it); l_image = [NSImage imageWithSystemSymbolName:@"photo" accessibilityDescription:nil]; }
+	[cell->picture_view setImage:l_image];
+	[[cell view] setAccessibilityLabel:it->title];
+	return cell;
+}
+- (void)collectionView:(NSCollectionView *)c didSelectItemsAtIndexPaths:(NSSet<NSIndexPath *> *)p { (void)c; (void)p; if (!s_suppress) [grid tellSelection]; }
+- (void)collectionView:(NSCollectionView *)c didDeselectItemsAtIndexPaths:(NSSet<NSIndexPath *> *)p { (void)c; (void)p; if (!s_suppress) [grid tellSelection]; }
+@end
+
+/* Load the item's picture off the main thread; show it when ready. */
+static void sga_grid_load(SGAGridView *g, SGAGridItem *it)
+{
+	if (it->loading || it->image) return;
+	it->loading = YES;
+	NSString *l_path = it->picture;
+	__weak SGAGridView *w = g;
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+		NSImage *l_image = [[NSImage alloc] initWithContentsOfFile:l_path];
+		dispatch_async(dispatch_get_main_queue(), ^{
+			SGAGridView *l_g = w;
+			it->image = l_image ?: [NSImage imageWithSystemSymbolName:@"exclamationmark.triangle" accessibilityDescription:nil];
+			it->loading = NO;
+			NSUInteger m = l_g ? [l_g->items indexOfObjectIdenticalTo:it] : NSNotFound;
+			NSInteger v = m == NSNotFound ? -1 : sga_grid_view_index(l_g, (NSInteger)m);
+			if (v >= 0) { s_suppress++; [l_g reloadItemsAtIndexPaths:[NSSet setWithObject:[NSIndexPath indexPathForItem:v inSection:0]]]; s_suppress--; }
+		});
+	});
+}
+
+static SGAGridView *sga_grid_of(int a_id) { id g = s_inner[a_id]; return [g isKindOfClass:[SGAGridView class]] ? g : nil; }
+
+static void sga_grid_refresh(SGAGridView *g)
+{
+	NSMutableSet<NSNumber *> *l_selected = [NSMutableSet set];
+	for (NSIndexPath *p in [g selectionIndexPaths]) [l_selected addObject:@(sga_grid_model(g, [p item]))];
+	if ([g->filter length]) {
+		NSMutableArray<NSNumber *> *m = [NSMutableArray array];
+		for (NSUInteger i = 0; i < [g->items count]; i++) {
+			SGAGridItem *it = g->items[i];
+			if ([it->title rangeOfString:g->filter options:NSCaseInsensitiveSearch].location != NSNotFound
+				|| [it->subtitle rangeOfString:g->filter options:NSCaseInsensitiveSearch].location != NSNotFound) [m addObject:@(i)];
+		}
+		g->shown = m;
+	} else g->shown = nil;
+	NSMutableSet<NSIndexPath *> *l_keep = [NSMutableSet set];
+	for (NSNumber *k in l_selected) { NSInteger v = sga_grid_view_index(g, [k integerValue]); if (v >= 0) [l_keep addObject:[NSIndexPath indexPathForItem:v inSection:0]]; }
+	s_suppress++;
+	[g reloadData];
+	[g setSelectionIndexPaths:l_keep];
+	s_suppress--;
+}
+
+int sga_grid_view(void)
+{
+	NSScrollView *l_scroll = [[SGARowsScroll alloc] init];
+	SGAGridView *g = [[SGAGridView alloc] init];
+	NSCollectionViewFlowLayout *l = [[NSCollectionViewFlowLayout alloc] init];
+	[l setItemSize:NSMakeSize(120, 120)];
+	[l setMinimumInteritemSpacing:8];
+	[l setMinimumLineSpacing:8];
+	[l setSectionInset:NSEdgeInsetsMake(8, 8, 8, 8)];
+	[g setCollectionViewLayout:l];
+	[g registerClass:[SGAGridCell class] forItemWithIdentifier:@"sga_grid_cell"];
+	[g setSelectable:YES];
+	static NSMutableArray *s_grid_sources;   /* keeps each grid's source alive */
+	if (!s_grid_sources) s_grid_sources = [NSMutableArray array];
+	SGAGridSource *l_source = [[SGAGridSource alloc] init];
+	l_source->grid = g;
+	[s_grid_sources addObject:l_source];
+	[g setDataSource:l_source];
+	[g setDelegate:l_source];
+	g->items = [NSMutableArray array];
+	[l_scroll setDocumentView:g];
+	[l_scroll setHasVerticalScroller:YES];
+	[l_scroll setBorderType:NSBezelBorder];
+	int l_id = sga_keep(l_scroll);
+	s_inner[l_id] = g;
+	return l_id;
+}
+
+void sga_grid_view_extend(int a_id, const char *a_title, const char *a_picture, const char *an_icon)
+{
+	SGAGridView *g = sga_grid_of(a_id);
+	if (!g) return;
+	SGAGridItem *it = [[SGAGridItem alloc] init];
+	it->title = sga_string(a_title);
+	it->picture = sga_string(a_picture);
+	it->icon = sga_string(an_icon);
+	it->subtitle = @"";
+	[g->items addObject:it];
+	if ([it->picture length]) sga_grid_load(g, it);
+	sga_grid_refresh(g);
+}
+
+void sga_grid_view_set_subtitle(int a_id, int i, const char *a_text)
+{
+	SGAGridView *g = sga_grid_of(a_id);
+	if (g && i >= 1 && i <= (int)[g->items count]) { g->items[(NSUInteger)i - 1]->subtitle = sga_string(a_text); sga_grid_refresh(g); }
+}
+
+void sga_grid_view_remove(int a_id, int i)
+{
+	SGAGridView *g = sga_grid_of(a_id);
+	if (g && i >= 1 && i <= (int)[g->items count]) {
+		/* the selection is kept by model item: shift the later ones down */
+		NSMutableSet<NSNumber *> *l_after = [NSMutableSet set];
+		for (NSIndexPath *p in [g selectionIndexPaths]) {
+			NSInteger m = sga_grid_model(g, [p item]);
+			if (m != i - 1) [l_after addObject:@(m > i - 1 ? m - 1 : m)];
+		}
+		[g->items removeObjectAtIndex:(NSUInteger)i - 1];
+		s_suppress++;
+		[g setSelectionIndexPaths:[NSSet set]];
+		s_suppress--;
+		sga_grid_refresh(g);
+		NSMutableSet<NSIndexPath *> *l_keep = [NSMutableSet set];
+		for (NSNumber *k in l_after) { NSInteger v = sga_grid_view_index(g, [k integerValue]); if (v >= 0) [l_keep addObject:[NSIndexPath indexPathForItem:v inSection:0]]; }
+		s_suppress++;
+		[g setSelectionIndexPaths:l_keep];
+		s_suppress--;
+	}
+}
+
+void sga_grid_view_wipe_out(int a_id) { SGAGridView *g = sga_grid_of(a_id); if (g) { [g->items removeAllObjects]; s_suppress++; [g setSelectionIndexPaths:[NSSet set]]; s_suppress--; sga_grid_refresh(g); } }
+
+void sga_grid_view_set_item_size(int a_id, int w, int h) { SGAGridView *g = sga_grid_of(a_id); if (g) [(NSCollectionViewFlowLayout *)[g collectionViewLayout] setItemSize:NSMakeSize(w, h)]; }
+
+void sga_grid_view_set_spacing(int a_id, int s)
+{
+	SGAGridView *g = sga_grid_of(a_id);
+	if (!g) return;
+	NSCollectionViewFlowLayout *l = (NSCollectionViewFlowLayout *)[g collectionViewLayout];
+	[l setMinimumInteritemSpacing:s];
+	[l setMinimumLineSpacing:s];
+}
+
+void sga_grid_view_set_multiple(int a_id, int a_on) { SGAGridView *g = sga_grid_of(a_id); if (g) [g setAllowsMultipleSelection:a_on != 0]; }
+
+/* Quiet: item `i' selected (added to the selection when `an_extend'); 0 clears. */
+void sga_grid_view_select(int a_id, int i, int an_extend)
+{
+	SGAGridView *g = sga_grid_of(a_id);
+	if (!g) return;
+	NSMutableSet<NSIndexPath *> *s = an_extend ? [[g selectionIndexPaths] mutableCopy] : [NSMutableSet set];
+	NSInteger v = i >= 1 ? sga_grid_view_index(g, i - 1) : -1;
+	if (v >= 0) [s addObject:[NSIndexPath indexPathForItem:v inSection:0]];
+	s_suppress++;
+	[g setSelectionIndexPaths:s];
+	s_suppress--;
+}
+
+static NSArray<NSNumber *> *sga_grid_selected_models(SGAGridView *g)
+{
+	NSMutableArray<NSNumber *> *r = [NSMutableArray array];
+	for (NSIndexPath *p in [g selectionIndexPaths]) [r addObject:@(sga_grid_model(g, [p item]) + 1)];
+	[r sortUsingSelector:@selector(compare:)];
+	return r;
+}
+int sga_grid_view_selected_count(int a_id) { SGAGridView *g = sga_grid_of(a_id); return g ? (int)[[g selectionIndexPaths] count] : 0; }
+int sga_grid_view_selected_at(int a_id, int k) { SGAGridView *g = sga_grid_of(a_id); NSArray *r = g ? sga_grid_selected_models(g) : @[]; return k >= 1 && k <= (int)[r count] ? [r[(NSUInteger)k - 1] intValue] : 0; }
+
+void sga_grid_view_scroll_to(int a_id, int i)
+{
+	SGAGridView *g = sga_grid_of(a_id);
+	NSInteger v = g && i >= 1 ? sga_grid_view_index(g, i - 1) : -1;
+	if (v >= 0) [g scrollToItemsAtIndexPaths:[NSSet setWithObject:[NSIndexPath indexPathForItem:v inSection:0]] scrollPosition:NSCollectionViewScrollPositionNearestHorizontalEdge];
+}
+
+void sga_grid_view_set_filter(int a_id, const char *a_text)
+{
+	SGAGridView *g = sga_grid_of(a_id);
+	if (!g) return;
+	NSArray *l_before = sga_grid_selected_models(g);
+	g->filter = sga_string(a_text);
+	sga_grid_refresh(g);
+	if (![sga_grid_selected_models(g) isEqualToArray:l_before]) [g tellSelection];   /* a hidden selection is deselected, with 50 */
+}
+
+int sga_grid_view_shown_count(int a_id) { SGAGridView *g = sga_grid_of(a_id); return g ? (int)(g->shown ? [g->shown count] : [g->items count]) : 0; }
+
+/* As the user: a click on item `i', a Command-click adding it, a double click opening it;
+   whether its picture has loaded. */
+static void sga_grid_user_select(int a_id, int i, BOOL an_extend)
+{
+	SGAGridView *g = sga_grid_of(a_id);
+	if (!g) return;
+	sga_grid_view_select(a_id, i, an_extend);
+	[g tellSelection];
+}
+void sga_test_activate_item(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); NSInteger v = g && i >= 1 ? sga_grid_view_index(g, i - 1) : -1; if (v >= 0) [g openAt:v]; }
+int sga_test_item_picture_ready(int a_id, int i) { SGAGridView *g = sga_grid_of(a_id); return g && i >= 1 && i <= (int)[g->items count] && g->items[(NSUInteger)i - 1]->image ? 1 : 0; }

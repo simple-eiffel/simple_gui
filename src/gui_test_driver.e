@@ -946,6 +946,24 @@ feature -- Evidence
 			Result := backend.snapshot (a_window.id, l_c.item)
 		end
 
+	snapshot_dialog (a_dialog: GUI_DIALOG; a_parent: GUI_WINDOW; a_path: PATH): BOOLEAN
+			-- Render a shown dialog to a PNG: on Windows it is a sheet drawn in `a_parent', so
+			-- the parent is rendered; elsewhere the dialog's own window.
+		require
+			has_application: has_application
+			shown: a_dialog.is_shown
+		local
+			l_c: C_STRING
+		do
+			settle
+			l_c := backend.to_c (a_path.name)
+			if {PLATFORM}.is_windows then
+				Result := backend.snapshot (a_parent.id, l_c.item)
+			else
+				Result := backend.snapshot (a_dialog.id, l_c.item)
+			end
+		end
+
 	describe_accessibility (a_window: GUI_WINDOW): STRING_32
 			-- The assistive tree of `a_window': one "role: name" line per node.
 		require
