@@ -1353,9 +1353,23 @@ static int sg_dd_is_choice(int id, guint pos);
 static guint sg_dd_pos_of_choice(int id, int choice);
 static int sg_dd_choice_of_pos(int id, guint pos);
 
+static gboolean sg_on_field_escape(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
+    GtkWidget *pop;
+    (void) k; (void) code; (void) m;
+    pop = sg_w[GPOINTER_TO_INT(d)] ? g_object_get_data(G_OBJECT(sg_w[GPOINTER_TO_INT(d)]), "sg-suggest-pop") : NULL;
+    /* 1p-b: with suggestions showing, Escape only closes them; otherwise it is the field's (55) */
+    if (key == GDK_KEY_Escape && !(pop && gtk_widget_get_visible(pop))) sg_push(55, GPOINTER_TO_INT(d), 0, 0);
+    return FALSE;
+}
 static int sg_field(void) {
     GtkWidget *e = gtk_entry_new();
     int id = sg_reg(e, 6);
+    {
+        GtkEventController *k = gtk_event_controller_key_new();
+        gtk_event_controller_set_propagation_phase(k, GTK_PHASE_CAPTURE);
+        g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_field_escape), GINT_TO_POINTER(id));
+        gtk_widget_add_controller(e, k);
+    }
     g_signal_connect(e, "changed", G_CALLBACK(sg_on_changed), NULL);
     g_signal_connect(e, "activate", G_CALLBACK(sg_on_activate), NULL);
     sg_field_hook_leave(e, id);
@@ -4440,6 +4454,14 @@ static void sg_on_path_part(GtkButton *b, gpointer d) {
     (void) d;
     sg_push(4, sg_id_of(b), GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-index")), 0);
 }
+static void sg_path_render(int id);
+static void sg_path_clear(GtkWidget *box) {   /* the parts go; an anchored popover stays */
+    GtkWidget *c, *next;
+    for (c = gtk_widget_get_first_child(box); c; c = next) {
+        next = gtk_widget_get_next_sibling(c);
+        if (!GTK_IS_POPOVER(c)) gtk_box_remove(GTK_BOX(box), c);
+    }
+}
 static int sg_path_control(void) {
     GtkWidget *box = g_object_new(GTK_TYPE_BOX, "orientation", GTK_ORIENTATION_HORIZONTAL, "spacing", 0,
                                   "accessible-role", GTK_ACCESSIBLE_ROLE_NAVIGATION, NULL);
@@ -4454,7 +4476,7 @@ static void sg_path_control_set(int id, const char *path) {
     gchar **pieces;
     guint i;
     int n = 0;
-    while ((c = gtk_widget_get_first_child(box))) gtk_box_remove(GTK_BOX(box), c);
+    sg_path_clear(box);
     g_ptr_array_set_size(parts, 0);
     if (path[0] == '/') g_ptr_array_add(parts, g_strdup("/"));
     pieces = g_strsplit_set(path, "/\\", -1);
@@ -4470,6 +4492,7 @@ static void sg_path_control_set(int id, const char *path) {
         gtk_box_append(GTK_BOX(box), b);
     }
     g_object_set_data_full(G_OBJECT(box), "sg-path", g_strdup(path), g_free);
+    sg_path_render(id);
 }
 /* 1t: any parts, joined by U+001F, shown as they are. */
 static void sg_path_control_set_parts(int id, const char *joined) {
@@ -4477,7 +4500,7 @@ static void sg_path_control_set_parts(int id, const char *joined) {
     GPtrArray *parts = sg_path_parts(id);
     gchar **pieces = g_strsplit(joined, "\x1f", -1);
     guint i;
-    while ((c = gtk_widget_get_first_child(box))) gtk_box_remove(GTK_BOX(box), c);
+    sg_path_clear(box);
     g_ptr_array_set_size(parts, 0);
     for (i = 0; pieces[i]; i++) g_ptr_array_add(parts, g_strdup(pieces[i]));
     g_strfreev(pieces);
@@ -4491,12 +4514,101 @@ static void sg_path_control_set_parts(int id, const char *joined) {
         gtk_box_append(GTK_BOX(box), b);
     }
     g_object_set_data(G_OBJECT(box), "sg-path", NULL);
+    sg_path_render(id);
 }
 static void sg_test_choose_path_part(int id, int part) {
     GtkWidget *c;
     for (c = gtk_widget_get_first_child(sg_w[id]); c; c = gtk_widget_get_next_sibling(c))
         if (GTK_IS_BUTTON(c) && GPOINTER_TO_INT(g_object_get_data(G_OBJECT(c), "sg-index")) == part) { g_signal_emit_by_name(c, "clicked"); return; }
 }
+static const char *sg_icon_gtk(const char *name);
+
+/* ---------- 1p-b: chevrons, a root icon and the empty space. With chevrons on, the control
+   is rebuilt as: [icon] part > part > ... part > [empty space]; each ">" is a flat button
+   sending 53 (the part before it), and a click on the trailing space (or Ctrl+L, Alt+D, F4
+   with the control focused) sends 54. ---------- */
+static void sg_on_path_chevron(GtkButton *b, gpointer d) {
+    (void) d;
+    sg_push(53, sg_id_of(b), GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "sg-chevron-part")), 0);
+}
+static void sg_on_path_space(GtkGestureClick *g, int n, double x, double y, gpointer d) {
+    (void) g; (void) n; (void) x; (void) y;
+    sg_push(54, GPOINTER_TO_INT(d), 0, 0);
+}
+static gboolean sg_on_path_keys(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
+    (void) k; (void) code;
+    if (key == GDK_KEY_F4 || ((m & GDK_CONTROL_MASK) && (key == GDK_KEY_l || key == GDK_KEY_L))
+        || ((m & GDK_ALT_MASK) && (key == GDK_KEY_d || key == GDK_KEY_D))) { sg_push(54, GPOINTER_TO_INT(d), 0, 0); return TRUE; }
+    return FALSE;
+}
+static void sg_path_render(int id) {
+    GtkWidget *box = sg_w[id], *c;
+    GPtrArray *parts = sg_path_parts(id);
+    const char *icon = g_object_get_data(G_OBJECT(box), "sg-root-icon");
+    int chevrons = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(box), "sg-chevrons"));
+    guint i;
+    if (!chevrons && !(icon && *icon)) return;   /* the plain look stays as built */
+    {   /* the parts go; a popover anchored here (the chevron's list) stays attached */
+        GtkWidget *next;
+        for (c = gtk_widget_get_first_child(box); c; c = next) {
+            next = gtk_widget_get_next_sibling(c);
+            if (!GTK_IS_POPOVER(c)) gtk_box_remove(GTK_BOX(box), c);
+        }
+    }
+    if (icon && *icon) gtk_box_append(GTK_BOX(box), gtk_image_new_from_icon_name(sg_icon_gtk(icon)));
+    for (i = 0; i < parts->len; i++) {
+        GtkWidget *b = g_object_new(GTK_TYPE_BUTTON, "label", (const char *) g_ptr_array_index(parts, i),
+                                    "has-frame", FALSE, "accessible-role", GTK_ACCESSIBLE_ROLE_LINK, NULL);
+        g_object_set_data(G_OBJECT(b), "sg-id", GINT_TO_POINTER(id));
+        g_object_set_data(G_OBJECT(b), "sg-index", GINT_TO_POINTER((int) i + 1));
+        g_signal_connect(b, "clicked", G_CALLBACK(sg_on_path_part), NULL);
+        gtk_box_append(GTK_BOX(box), b);
+        if (chevrons) {
+            GtkWidget *ch = gtk_button_new_with_label("\xe2\x80\xba");
+            char name[160];
+            gtk_button_set_has_frame(GTK_BUTTON(ch), FALSE);
+            g_object_set_data(G_OBJECT(ch), "sg-id", GINT_TO_POINTER(id));
+            g_object_set_data(G_OBJECT(ch), "sg-chevron-part", GINT_TO_POINTER((int) i + 1));
+            g_snprintf(name, sizeof name, "Folders in %s", (const char *) g_ptr_array_index(parts, i));
+            gtk_accessible_update_property(GTK_ACCESSIBLE(ch), GTK_ACCESSIBLE_PROPERTY_LABEL, name, -1);
+            g_signal_connect(ch, "clicked", G_CALLBACK(sg_on_path_chevron), NULL);
+            gtk_box_append(GTK_BOX(box), ch);
+        } else if (i + 1 < parts->len) gtk_box_append(GTK_BOX(box), gtk_label_new("\xe2\x80\xba"));
+    }
+    if (chevrons) {
+        GtkWidget *space = gtk_label_new("");
+        GtkGesture *g = gtk_gesture_click_new();
+        gtk_widget_set_hexpand(space, TRUE);
+        g_signal_connect(g, "pressed", G_CALLBACK(sg_on_path_space), GINT_TO_POINTER(id));
+        gtk_widget_add_controller(space, GTK_EVENT_CONTROLLER(g));
+        gtk_box_append(GTK_BOX(box), space);
+    }
+}
+static void sg_path_control_set_chevrons(int id, int on) {
+    GtkWidget *box = sg_w[id];
+    g_object_set_data(G_OBJECT(box), "sg-chevrons", GINT_TO_POINTER(on ? 1 : 0));
+    gtk_widget_set_halign(box, on ? GTK_ALIGN_FILL : GTK_ALIGN_START);
+    gtk_widget_set_hexpand(box, on);
+    if (on && !g_object_get_data(G_OBJECT(box), "sg-path-keys")) {
+        GtkEventController *k = gtk_event_controller_key_new();
+        g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_path_keys), GINT_TO_POINTER(id));
+        gtk_widget_add_controller(box, k);
+        g_object_set_data(G_OBJECT(box), "sg-path-keys", GINT_TO_POINTER(1));
+    }
+    sg_path_render(id);
+}
+static void sg_path_control_set_root_icon(int id, const char *name) {
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-root-icon", g_strdup(name), g_free);
+    sg_path_render(id);
+}
+static void sg_test_press_chevron(int id, int part) {
+    GtkWidget *c;
+    for (c = gtk_widget_get_first_child(sg_w[id]); c; c = gtk_widget_get_next_sibling(c))
+        if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(c), "sg-chevron-part")) == part) { g_signal_emit_by_name(c, "clicked"); return; }
+}
+static void sg_test_press_path_space(int id) { sg_push(54, id, 0, 0); }
+static void sg_test_field_escape(int id) { sg_push(55, id, 0, 0); }
+static void sg_widget_focus(int id) { if (sg_w[id]) gtk_widget_grab_focus(sg_w[id]); }
 static int sg_path_control_count(int id) { return (int) sg_path_parts(id)->len; }
 static const char *sg_path_control_part(int id, int i) {
     return (i >= 1 && (guint) i <= sg_path_parts(id)->len) ? g_ptr_array_index(sg_path_parts(id), i - 1) : "";
@@ -5781,7 +5893,311 @@ static void sg_test_caret_to(int id, int line, int col) {
     gtk_text_buffer_get_iter_at_line_offset(b, &it, line - 1, col - 1);
     gtk_text_buffer_place_cursor(b, &it);
 }
+static int sg_int_compare(const int *a, const int *b);
+
+/* ---------- 1v-a: grid view (kind 58). A GtkGridView in a scrolled window over a selection
+   model, over a GtkFilterListModel, over a GtkStringList whose strings are the items:
+   "title \x1f subtitle \x1f picture path \x1f icon name". Item numbers are positions in the
+   string list; a filtered view finds an item by its object. Pictures are decoded on a GTask
+   thread into a texture cache by path; a load done calls items-changed on its items so they
+   rebind and show it. 50: the user's selection (the first selected item); 51: activated. */
+static GtkStringList *sg_grid_items(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-grid-items"); }
+static GtkFilterListModel *sg_grid_filtered(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-grid-filtered"); }
+static GtkGridView *sg_grid_view(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-grid-view"); }
+static GtkSelectionModel *sg_grid_model(int id) { return gtk_grid_view_get_model(sg_grid_view(id)); }
+static GHashTable *sg_grid_textures(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-grid-textures"); }
+static int sg_grid_item_of(int id, guint pos) {   /* the item number at a shown position */
+    GObject *o = g_list_model_get_item(G_LIST_MODEL(sg_grid_filtered(id)), pos);
+    GListModel *all = G_LIST_MODEL(sg_grid_items(id));
+    guint i, n = g_list_model_get_n_items(all);
+    int r = 0;
+    if (!o) return 0;
+    for (i = 0; i < n && !r; i++) { GObject *k = g_list_model_get_item(all, i); if (k == o) r = (int) i + 1; g_object_unref(k); }
+    g_object_unref(o);
+    return r;
+}
+static int sg_grid_pos_of(int id, int item) {   /* the shown position of an item; -1: hidden */
+    GObject *o;
+    GListModel *f = G_LIST_MODEL(sg_grid_filtered(id));
+    guint i, n = g_list_model_get_n_items(f);
+    int r = -1;
+    if (item < 1) return -1;
+    o = g_list_model_get_item(G_LIST_MODEL(sg_grid_items(id)), (guint) item - 1);
+    if (!o) return -1;
+    for (i = 0; i < n && r < 0; i++) { GObject *k = g_list_model_get_item(f, i); if (k == o) r = (int) i; g_object_unref(k); }
+    g_object_unref(o);
+    return r;
+}
+typedef struct { int id; char *path; } SgGridLoad;
+static void sg_grid_load_thread(GTask *task, gpointer src, gpointer data, GCancellable *c) {
+    SgGridLoad *l = data;
+    GError *e = NULL;
+    GdkTexture *tex = gdk_texture_new_from_filename(l->path, &e);
+    (void) src; (void) c;
+    if (tex) g_task_return_pointer(task, tex, g_object_unref);
+    else g_task_return_error(task, e);
+}
+static void sg_grid_load_done(GObject *src, GAsyncResult *res, gpointer data) {
+    SgGridLoad *l = data;
+    GdkTexture *tex = g_task_propagate_pointer(G_TASK(res), NULL);
+    (void) src;
+    if (sg_w[l->id] && sg_kind[l->id] == 58) {
+        GListModel *all = G_LIST_MODEL(sg_grid_items(l->id));
+        guint i, n = g_list_model_get_n_items(all);
+        if (!tex) {   /* unreadable: a blank texture, so it is not asked for again */
+            GdkPixbuf *pb = gdk_pixbuf_new(GDK_COLORSPACE_RGB, TRUE, 8, 1, 1);
+            gdk_pixbuf_fill(pb, 0);
+            tex = gdk_texture_new_for_pixbuf(pb);
+            g_object_unref(pb);
+        }
+        g_hash_table_insert(sg_grid_textures(l->id), g_strdup(l->path), tex);
+        for (i = 0; i < n; i++) {   /* the items showing this picture rebind */
+            char *p = sg_row_field(gtk_string_list_get_string(GTK_STRING_LIST(all), i), 2);
+            if (strcmp(p, l->path) == 0) g_list_model_items_changed(all, i, 1, 1);
+            g_free(p);
+        }
+    } else if (tex) g_object_unref(tex);
+    g_free(l->path); g_free(l);
+}
+static void sg_grid_want_picture(int id, const char *path) {
+    GHashTable *pending = g_object_get_data(G_OBJECT(sg_w[id]), "sg-grid-pending");
+    SgGridLoad *l;
+    GTask *task;
+    if (g_hash_table_contains(pending, path)) return;
+    g_hash_table_add(pending, g_strdup(path));
+    l = g_new(SgGridLoad, 1);
+    l->id = id; l->path = g_strdup(path);
+    task = g_task_new(NULL, NULL, sg_grid_load_done, l);
+    g_task_set_task_data(task, l, NULL);
+    g_task_run_in_thread(task, sg_grid_load_thread);
+    g_object_unref(task);
+}
+static void sg_grid_setup(GtkSignalListItemFactory *f, GtkListItem *it, gpointer d) {
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4), *pic = gtk_picture_new(), *icon = gtk_image_new(), *title = gtk_label_new(NULL), *sub = gtk_label_new(NULL);
+    (void) f; (void) d;
+    gtk_picture_set_content_fit(GTK_PICTURE(pic), GTK_CONTENT_FIT_CONTAIN);
+    gtk_widget_set_vexpand(pic, TRUE);
+    gtk_image_set_pixel_size(GTK_IMAGE(icon), 48);
+    gtk_widget_set_vexpand(icon, TRUE);
+    gtk_label_set_ellipsize(GTK_LABEL(title), PANGO_ELLIPSIZE_END);
+    gtk_label_set_ellipsize(GTK_LABEL(sub), PANGO_ELLIPSIZE_END);
+    gtk_widget_add_css_class(sub, "dim-label");
+    gtk_widget_add_css_class(sub, "caption");
+    gtk_box_append(GTK_BOX(box), pic);
+    gtk_box_append(GTK_BOX(box), icon);
+    gtk_box_append(GTK_BOX(box), title);
+    gtk_box_append(GTK_BOX(box), sub);
+    g_object_set_data(G_OBJECT(box), "sg-pic", pic);
+    g_object_set_data(G_OBJECT(box), "sg-icon", icon);
+    g_object_set_data(G_OBJECT(box), "sg-title", title);
+    g_object_set_data(G_OBJECT(box), "sg-sub", sub);
+    gtk_list_item_set_child(it, box);
+}
+static const char *sg_icon_gtk(const char *name);
+static void sg_grid_bind(GtkSignalListItemFactory *f, GtkListItem *it, gpointer d) {
+    int id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(f), "sg-grid"));
+    GtkWidget *box = gtk_list_item_get_child(it);
+    const char *joined = gtk_string_object_get_string(GTK_STRING_OBJECT(gtk_list_item_get_item(it)));
+    char *title = sg_row_field(joined, 0), *sub = sg_row_field(joined, 1), *path = sg_row_field(joined, 2), *icon = sg_row_field(joined, 3);
+    int w = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-grid-w")), h = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-grid-h"));
+    GdkTexture *tex = *path ? g_hash_table_lookup(sg_grid_textures(id), path) : NULL;
+    GtkWidget *pic = g_object_get_data(G_OBJECT(box), "sg-pic"), *img = g_object_get_data(G_OBJECT(box), "sg-icon");
+    (void) d;
+    gtk_widget_set_size_request(box, w, h);
+    gtk_label_set_text(GTK_LABEL(g_object_get_data(G_OBJECT(box), "sg-title")), title);
+    gtk_label_set_text(GTK_LABEL(g_object_get_data(G_OBJECT(box), "sg-sub")), sub);
+    gtk_widget_set_visible(g_object_get_data(G_OBJECT(box), "sg-sub"), *sub != 0);
+    gtk_picture_set_paintable(GTK_PICTURE(pic), tex ? GDK_PAINTABLE(tex) : NULL);
+    gtk_widget_set_visible(pic, tex != NULL);
+    if (*path && !tex) sg_grid_want_picture(id, path);
+    gtk_image_set_from_icon_name(GTK_IMAGE(img), *icon ? sg_icon_gtk(icon) : (*path ? "image-x-generic-symbolic" : "text-x-generic-symbolic"));
+    gtk_widget_set_visible(img, tex == NULL);
+    gtk_accessible_update_property(GTK_ACCESSIBLE(box), GTK_ACCESSIBLE_PROPERTY_LABEL, title, -1);
+    g_free(title); g_free(sub); g_free(path); g_free(icon);
+}
+static gboolean sg_grid_filter(gpointer item, gpointer d) {
+    const char *f = g_object_get_data(G_OBJECT(d), "sg-grid-filter");
+    char *lc;
+    gboolean hit;
+    if (!f || !*f) return TRUE;
+    lc = g_utf8_strdown(gtk_string_object_get_string(GTK_STRING_OBJECT(item)), -1);
+    {   /* title and subtitle only */
+        gchar **parts = g_strsplit(lc, "\x1f", -1);
+        hit = (parts[0] && strstr(parts[0], f)) || (parts[0] && parts[1] && strstr(parts[1], f));
+        g_strfreev(parts);
+    }
+    g_free(lc);
+    return hit;
+}
+static void sg_on_grid_selection(GtkSelectionModel *m, guint pos, guint n, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    GtkBitset *b;
+    (void) pos; (void) n;
+    if (sg_quiet) return;
+    b = gtk_selection_model_get_selection(m);
+    sg_push(50, id, gtk_bitset_is_empty(b) ? 0 : sg_grid_item_of(id, gtk_bitset_get_minimum(b)), 0);
+    gtk_bitset_unref(b);
+}
+static void sg_on_grid_activate(GtkGridView *v, guint pos, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    (void) v;
+    sg_push(51, id, sg_grid_item_of(id, pos), 0);
+}
+static void sg_grid_use_selection(int id, int multiple) {
+    GtkSelectionModel *m;
+    GListModel *f = G_LIST_MODEL(sg_grid_filtered(id));
+    if (multiple) m = GTK_SELECTION_MODEL(gtk_multi_selection_new(g_object_ref(f)));
+    else {
+        GtkSingleSelection *s = gtk_single_selection_new(g_object_ref(f));
+        gtk_single_selection_set_autoselect(s, FALSE);
+        gtk_single_selection_set_can_unselect(s, TRUE);
+        m = GTK_SELECTION_MODEL(s);
+    }
+    g_signal_connect(m, "selection-changed", G_CALLBACK(sg_on_grid_selection), GINT_TO_POINTER(id));
+    sg_quiet++;
+    gtk_grid_view_set_model(sg_grid_view(id), m);
+    sg_quiet--;
+    g_object_unref(m);
+}
+static int sg_grid_view_new(void) {
+    GtkStringList *items = gtk_string_list_new(NULL);
+    GtkWidget *scroll = gtk_scrolled_window_new(), *v;
+    GtkListItemFactory *f = gtk_signal_list_item_factory_new();
+    GtkCustomFilter *cf;
+    GtkFilterListModel *fl;
+    int id;
+    id = sg_reg(scroll, 58);
+    cf = gtk_custom_filter_new(sg_grid_filter, scroll, NULL);
+    fl = gtk_filter_list_model_new(G_LIST_MODEL(g_object_ref(items)), GTK_FILTER(cf));
+    g_object_set_data(G_OBJECT(f), "sg-grid", GINT_TO_POINTER(id));
+    g_signal_connect(f, "setup", G_CALLBACK(sg_grid_setup), NULL);
+    g_signal_connect(f, "bind", G_CALLBACK(sg_grid_bind), NULL);
+    v = gtk_grid_view_new(NULL, f);
+    gtk_grid_view_set_max_columns(GTK_GRID_VIEW(v), 64);
+    gtk_grid_view_set_enable_rubberband(GTK_GRID_VIEW(v), TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), v);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_widget_set_hexpand(scroll, TRUE);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 140);
+    g_object_set_data_full(G_OBJECT(scroll), "sg-grid-items", items, g_object_unref);
+    g_object_set_data_full(G_OBJECT(scroll), "sg-grid-filtered", fl, g_object_unref);
+    g_object_set_data(G_OBJECT(scroll), "sg-grid-view", v);
+    g_object_set_data(G_OBJECT(scroll), "sg-grid-w", GINT_TO_POINTER(120));
+    g_object_set_data(G_OBJECT(scroll), "sg-grid-h", GINT_TO_POINTER(120));
+    g_object_set_data_full(G_OBJECT(scroll), "sg-grid-textures", g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_object_unref), (GDestroyNotify) g_hash_table_unref);
+    g_object_set_data_full(G_OBJECT(scroll), "sg-grid-pending", g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL), (GDestroyNotify) g_hash_table_unref);
+    g_signal_connect(v, "activate", G_CALLBACK(sg_on_grid_activate), GINT_TO_POINTER(id));
+    sg_grid_use_selection(id, 0);
+    return id;
+}
+static void sg_grid_view_extend(int id, const char *title, const char *picture, const char *icon) {
+    char *joined = g_strjoin("\x1f", title, "", picture, icon, NULL);
+    sg_quiet++;
+    gtk_string_list_append(sg_grid_items(id), joined);
+    sg_quiet--;
+    g_free(joined);
+}
+static void sg_grid_view_set_subtitle(int id, int i, const char *text) {
+    GtkStringList *items = sg_grid_items(id);
+    char *now;
+    const char *one[2];
+    if (i < 1 || (guint) i > g_list_model_get_n_items(G_LIST_MODEL(items))) return;
+    now = sg_set_field(gtk_string_list_get_string(items, (guint) i - 1), 1, text);
+    one[0] = now; one[1] = NULL;
+    sg_quiet++;
+    gtk_string_list_splice(items, (guint) i - 1, 1, one);
+    sg_quiet--;
+    g_free(now);
+}
+static void sg_grid_view_remove(int id, int i) {
+    GtkStringList *items = sg_grid_items(id);
+    if (i < 1 || (guint) i > g_list_model_get_n_items(G_LIST_MODEL(items))) return;
+    sg_quiet++;
+    gtk_string_list_remove(items, (guint) i - 1);
+    sg_quiet--;
+}
+static void sg_grid_view_wipe_out(int id) {
+    GtkStringList *items = sg_grid_items(id);
+    sg_quiet++;
+    gtk_string_list_splice(items, 0, g_list_model_get_n_items(G_LIST_MODEL(items)), NULL);
+    sg_quiet--;
+}
+static void sg_grid_view_set_item_size(int id, int w, int h) {
+    GListModel *all = G_LIST_MODEL(sg_grid_items(id));
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-grid-w", GINT_TO_POINTER(w));
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-grid-h", GINT_TO_POINTER(h));
+    if (g_list_model_get_n_items(all)) g_list_model_items_changed(all, 0, g_list_model_get_n_items(all), g_list_model_get_n_items(all));
+}
+static void sg_grid_view_set_spacing(int id, int n) {
+    char css[96];
+    GtkCssProvider *p = gtk_css_provider_new();
+    g_snprintf(css, sizeof css, "gridview.sg-grid-%d > child { margin: %dpx; }", id, n / 2);
+    gtk_widget_add_css_class(GTK_WIDGET(sg_grid_view(id)), g_strdup_printf("sg-grid-%d", id));
+    gtk_css_provider_load_from_string(p, css);
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(p), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(p);
+}
+static void sg_grid_view_set_multiple(int id, int on) { sg_grid_use_selection(id, on); }
+static void sg_grid_view_select(int id, int i, int extend) {
+    int at = sg_grid_pos_of(id, i);
+    sg_quiet++;
+    if (i <= 0) gtk_selection_model_unselect_all(sg_grid_model(id));
+    else if (at >= 0) gtk_selection_model_select_item(sg_grid_model(id), (guint) at, extend ? FALSE : TRUE);
+    sg_quiet--;
+}
+static int sg_grid_view_selected_count(int id) {
+    GtkBitset *b = gtk_selection_model_get_selection(sg_grid_model(id));
+    int n = (int) gtk_bitset_get_size(b);
+    gtk_bitset_unref(b);
+    return n;
+}
+static int sg_grid_view_selected_at(int id, int k) {
+    GtkBitset *b = gtk_selection_model_get_selection(sg_grid_model(id));
+    GArray *items = g_array_new(FALSE, FALSE, sizeof(int));
+    GtkBitsetIter it;
+    guint p;
+    int r = 0;
+    if (gtk_bitset_iter_init_first(&it, b, &p)) do { int n = sg_grid_item_of(id, p); g_array_append_val(items, n); } while (gtk_bitset_iter_next(&it, &p));
+    g_array_sort(items, (GCompareFunc) sg_int_compare);
+    if (k >= 1 && (guint) k <= items->len) r = g_array_index(items, int, k - 1);
+    g_array_unref(items);
+    gtk_bitset_unref(b);
+    return r;
+}
+static void sg_grid_view_scroll_to(int id, int i) {
+    int at = sg_grid_pos_of(id, i);
+    if (at >= 0) gtk_grid_view_scroll_to(sg_grid_view(id), (guint) at, GTK_LIST_SCROLL_NONE, NULL);
+}
+static void sg_grid_view_set_filter(int id, const char *text) {
+    GtkSelectionModel *m = sg_grid_model(id);
+    GtkBitset *b = gtk_selection_model_get_selection(m);
+    int first_before = gtk_bitset_is_empty(b) ? 0 : sg_grid_item_of(id, gtk_bitset_get_minimum(b)), first_after;
+    gtk_bitset_unref(b);
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-grid-filter", g_utf8_strdown(text, -1), g_free);
+    sg_quiet++;
+    gtk_filter_changed(gtk_filter_list_model_get_filter(sg_grid_filtered(id)), GTK_FILTER_CHANGE_DIFFERENT);
+    sg_quiet--;
+    b = gtk_selection_model_get_selection(m);
+    first_after = gtk_bitset_is_empty(b) ? 0 : sg_grid_item_of(id, gtk_bitset_get_minimum(b));
+    gtk_bitset_unref(b);
+    if (first_before && first_after != first_before) sg_push(50, id, first_after, 0);   /* a hidden selection went */
+}
+static int sg_grid_view_shown_count(int id) { return (int) g_list_model_get_n_items(G_LIST_MODEL(sg_grid_filtered(id))); }
+static void sg_test_activate_item(int id, int i) { int at = sg_grid_pos_of(id, i); if (at >= 0) g_signal_emit_by_name(sg_grid_view(id), "activate", (guint) at); }
+static int sg_test_item_picture_ready(int id, int i) {
+    GtkStringList *items = sg_grid_items(id);
+    char *path;
+    int r;
+    if (i < 1 || (guint) i > g_list_model_get_n_items(G_LIST_MODEL(items))) return 0;
+    path = sg_row_field(gtk_string_list_get_string(items, (guint) i - 1), 2);
+    r = *path && g_hash_table_lookup(sg_grid_textures(id), path) != NULL;
+    g_free(path);
+    return r;
+}
+static int sg_int_compare(const int *a, const int *b) { return *a - *b; }
 static void sg_test_choose(int id, int row) {
+    if (sg_kind[id] == 58) { int at = sg_grid_pos_of(id, row); if (at >= 0) gtk_selection_model_select_item(sg_grid_model(id), (guint) at, TRUE); return; }   /* a click on the item */
     if (sg_kind[id] == 56) { sg_test_choose_side(id, row); return; }   /* a click on the page's title */
     if (sg_kind[id] == 47) { sg_test_choose_path_part(id, row); return; }   /* a click on the part */
     if (sg_kind[id] == 14 || sg_kind[id] == 33) { sg_test_choose_node(id, row); return; }   /* a tree node, by its number */
@@ -6310,6 +6726,12 @@ static gboolean sg_on_suggest_key(GtkEventControllerKey *k, guint keyval, guint 
         return TRUE;
     }
     if ((keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter) && r) { sg_suggest_choose(id, at + 1); return TRUE; }
+    /* 1p-b: Tab, or Right with the caret at the end, completes to the highlighted row */
+    if (r && (keyval == GDK_KEY_Tab || (keyval == GDK_KEY_Right
+        && gtk_editable_get_position(GTK_EDITABLE(sg_w[id])) == (int) g_utf8_strlen(gtk_editable_get_text(GTK_EDITABLE(sg_w[id])), -1)))) {
+        sg_suggest_choose(id, at + 1);
+        return TRUE;
+    }
     if (keyval == GDK_KEY_Escape) { gtk_popover_popdown(GTK_POPOVER(pop)); return TRUE; }
     return FALSE;
 }
@@ -6317,8 +6739,17 @@ static void sg_field_set_suggestions(int id, const char *joined) {
     GtkWidget *e = sg_w[id], *pop = g_object_get_data(G_OBJECT(e), "sg-suggest-pop"), *list;
     gchar **items;
     int i;
+    if (!joined || !*joined) {
+        /* no suggestions: the popover goes, so a field that hides or dies holds none */
+        if (pop) {
+            gtk_popover_popdown(GTK_POPOVER(pop));
+            gtk_widget_unparent(pop);
+            g_object_set_data(G_OBJECT(e), "sg-suggest-pop", NULL);
+            g_object_set_data(G_OBJECT(e), "sg-suggest-list", NULL);
+        }
+        return;
+    }
     if (!pop) {
-        GtkEventController *k = gtk_event_controller_key_new();
         pop = gtk_popover_new();
         list = gtk_list_box_new();
         gtk_popover_set_autohide(GTK_POPOVER(pop), FALSE);
@@ -6329,9 +6760,13 @@ static void sg_field_set_suggestions(int id, const char *joined) {
         gtk_popover_set_child(GTK_POPOVER(pop), list);
         gtk_widget_set_parent(pop, e);
         g_signal_connect(list, "row-activated", G_CALLBACK(sg_on_suggest_row), GINT_TO_POINTER(id));
-        gtk_event_controller_set_propagation_phase(k, GTK_PHASE_CAPTURE);
-        g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_suggest_key), GINT_TO_POINTER(id));
-        gtk_widget_add_controller(e, k);
+        if (!g_object_get_data(G_OBJECT(e), "sg-suggest-keys")) {   /* the keys once per field */
+            GtkEventController *k = gtk_event_controller_key_new();
+            gtk_event_controller_set_propagation_phase(k, GTK_PHASE_CAPTURE);
+            g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_suggest_key), GINT_TO_POINTER(id));
+            gtk_widget_add_controller(e, k);
+            g_object_set_data(G_OBJECT(e), "sg-suggest-keys", GINT_TO_POINTER(1));
+        }
         g_object_set_data(G_OBJECT(e), "sg-suggest-pop", pop);
         g_object_set_data(G_OBJECT(e), "sg-suggest-list", list);
     }
@@ -6694,6 +7129,11 @@ static int sg_list_selected_at(int id, int i) {
     return v;
 }
 static void sg_test_extend_list_selection(int id, int row) {
+    if (sg_kind[id] == 58) {   /* a grid view: Ctrl and a click add the item */
+        int at = sg_grid_pos_of(id, row);
+        if (at >= 0) gtk_selection_model_select_item(sg_grid_model(id), (guint) at, FALSE);
+        return;
+    }
     GtkListBoxRow *r = gtk_list_box_get_row_at_index(sg_list_box(id), row - 1);
     if (r) gtk_list_box_select_row(sg_list_box(id), r);
 }

@@ -63,6 +63,18 @@ feature -- Access
 	change_actions: GUI_ACTIONS [TUPLE]
 			-- Run after each user edit.
 
+	escape_actions: GUI_ACTIONS [TUPLE]
+			-- Run when the user presses Escape in the field (1p-b).
+		attribute
+			create Result.make
+		end
+
+	leave_actions: GUI_ACTIONS [TUPLE]
+			-- Run when the focus leaves the field, after its validation (1p-b).
+		attribute
+			create Result.make
+		end
+
 	activate_actions: GUI_ACTIONS [TUPLE]
 			-- Run when the user presses Enter.
 
@@ -206,6 +218,20 @@ feature -- Autocomplete (1p)
 			suggester := Void
 		end
 
+	close_suggestions
+			-- Close the suggestion list if it shows (before the field hides, say).
+		require
+			gui_thread: is_gui_thread
+		local
+			l_c: C_STRING
+		do
+			create suggestions.make (0)
+			l_c := backend.to_c ("")
+			backend.field_set_suggestions (id, l_c.item)
+		ensure
+			none: suggestions.is_empty
+		end
+
 	set_suggester (a_suggester: detachable FUNCTION [STRING_32, ITERABLE [READABLE_STRING_GENERAL]])
 			-- Suggest what `a_suggester' answers for the text typed (Void: none).
 		do
@@ -228,6 +254,9 @@ feature {GUI_APPLICATION} -- Events
 				validate
 			elseif a_type = 29 then
 				validate
+				leave_actions.call (Void)
+			elseif a_type = 55 then
+				escape_actions.call (Void)
 			end
 		end
 

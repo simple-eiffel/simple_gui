@@ -481,3 +481,28 @@ void sga_text_go_to_line(int a_id, int n);
 void sga_text_replace_range(int a_id, int a_start, int an_end, const char *a_text);
 void sga_test_type_into_code(int a_id, const char *a_text);
 void sga_test_caret_to(int a_id, int a_line, int a_column);
+/* 1v-a: the grid view */
+int sga_grid_view(void);
+void sga_grid_view_extend(int a_id, const char *a_title, const char *a_picture, const char *an_icon);
+void sga_grid_view_set_subtitle(int a_id, int i, const char *a_text);
+void sga_grid_view_remove(int a_id, int i);
+void sga_grid_view_wipe_out(int a_id);
+void sga_grid_view_set_item_size(int a_id, int w, int h);
+void sga_grid_view_set_spacing(int a_id, int s);
+void sga_grid_view_set_multiple(int a_id, int a_on);
+void sga_grid_view_select(int a_id, int i, int an_extend);
+int sga_grid_view_selected_count(int a_id);
+int sga_grid_view_selected_at(int a_id, int k);
+void sga_grid_view_scroll_to(int a_id, int i);
+void sga_grid_view_set_filter(int a_id, const char *a_text);
+int sga_grid_view_shown_count(int a_id);
+void sga_test_activate_item(int a_id, int i);
+int sga_test_item_picture_ready(int a_id, int i);
+
+/* 1p-b: the address-bar file field */
+void sga_path_control_set_chevrons(int a_id, int a_on);
+void sga_path_control_set_root_icon(int a_id, const char *a_name);
+void sga_test_press_chevron(int a_id, int a_part);
+void sga_test_press_path_space(int a_id);
+void sga_widget_focus(int a_id);
+void sga_test_field_escape(int a_id);

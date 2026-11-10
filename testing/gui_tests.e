@@ -2131,6 +2131,271 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_preferences_values_and_file
+			-- 1v-d: typed values with defaults; integers clamp; a file round-trips, keeps keys it
+			-- doesn't know, and a bad value falls back to its default; changes are told.
+		local
+			l_prefs, l_again: GUI_PREFERENCES
+			l_file: PATH
+			l_told: ARRAYED_LIST [STRING_32]
+			l_out: PLAIN_TEXT_FILE
+		do
+			create l_told.make (4)
+			l_file := temporary_file ("prefs_test.json")
+			create l_out.make_with_path (l_file)
+			l_out.open_write
+			l_out.put_string ("{%"stranger%": 42, %"size%": %"not a number%"}")
+			l_out.close
+			create l_prefs.make_in_file (l_file)
+			l_prefs.set_section ("Editor")
+			l_prefs.add_boolean ("wrap", "Wrap long lines", True)
+			l_prefs.add_integer ("size", "Font size", 12, 6, 72)
+			l_prefs.add_choice ("theme", "Theme", <<"Light", "Dark", "System">>, "System")
+			l_prefs.set_section ("Files")
+			l_prefs.add_text ("author", "Author", "")
+			l_prefs.add_color ("accent", "Accent", 0x3366CC)
+			l_prefs.add_path ("folder", "Folder", Void)
+			l_prefs.changed_actions.extend (agent (k: STRING_32; t: ARRAYED_LIST [STRING_32]) do t.extend (k) end (?, l_told))
+			assert ("defaults", l_prefs.boolean_item ("wrap") and l_prefs.integer_item ("size") = 12
+				and l_prefs.text_item ("theme").same_string ("System") and l_prefs.color_item ("accent") = 0x3366CC)
+			assert ("sections", l_prefs.sections.count = 2 and l_prefs.sections [2].same_string ("Files"))
+			l_prefs.set_integer ("size", 200)
+			assert ("clamped: " + l_prefs.integer_item ("size").out, l_prefs.integer_item ("size") = 72)
+			l_prefs.set_boolean ("wrap", False)
+			l_prefs.set_text ("theme", "Dark")
+			l_prefs.set_text ("author", "Larry")
+			l_prefs.set_color ("accent", 0x112233)
+			assert ("told", l_told.count = 5 and l_told [1].same_string ("size"))
+			create l_again.make_in_file (l_file)
+			l_again.add_boolean ("wrap", "Wrap long lines", True)
+			l_again.add_integer ("size", "Font size", 12, 6, 72)
+			l_again.add_choice ("theme", "Theme", <<"Light", "Dark", "System">>, "System")
+			l_again.add_text ("author", "Author", "")
+			l_again.add_color ("accent", "Accent", 0x3366CC)
+			assert ("read back", not l_again.boolean_item ("wrap") and l_again.integer_item ("size") = 72
+				and l_again.text_item ("theme").same_string ("Dark") and l_again.text_item ("author").same_string ("Larry")
+				and l_again.color_item ("accent") = 0x112233)
+			assert ("the stranger kept", file_text (l_file).has_substring ("stranger"))
+			l_again.reset ("size")
+			assert ("reset", l_again.integer_item ("size") = 12)
+			l_again.reset_all
+			assert ("all reset", l_again.boolean_item ("wrap") and l_again.text_item ("theme").same_string ("System"))
+		end
+
+	test_preferences_window
+			-- 1v-d: the window's controls show the values, a user's change sets them at once,
+			-- and Restore defaults puts the section back.
+		local
+			l_prefs: GUI_PREFERENCES
+		do
+			create l_prefs.make_in_file (temporary_file ("prefs_window.json"))
+			l_prefs.reset_all
+			l_prefs.add_boolean ("wrap", "Wrap long lines", True)
+			l_prefs.add_integer ("size", "Font size", 12, 6, 72)
+			l_prefs.add_text ("author", "Author", "")
+			l_prefs.reset_all
+			l_prefs.show_window (Void)
+			settle_window
+			assert ("a switch, on", attached {GUI_SWITCH} l_prefs.control_for ("wrap") as al_s and then al_s.is_on)
+			if attached {GUI_SWITCH} l_prefs.control_for ("wrap") as al_s then
+				driver.flip_switch (al_s)
+			end
+			assert ("the user's flip set it", not l_prefs.boolean_item ("wrap"))
+			if attached {GUI_SPIN_BOX} l_prefs.control_for ("size") as al_spin then
+				driver.enter_number (al_spin, 20)
+			end
+			assert ("the user's number", l_prefs.integer_item ("size") = 20)
+			if attached {GUI_TEXT_FIELD} l_prefs.control_for ("author") as al_f then
+				driver.type_text (al_f, "Larry")
+			end
+			assert ("the user's text", l_prefs.text_item ("author").same_string ("Larry"))
+			l_prefs.reset_section ("General")
+			assert ("restored", l_prefs.boolean_item ("wrap") and l_prefs.integer_item ("size") = 12)
+			if attached l_prefs.window as al_w then
+				al_w.close
+			end
+		end
+
+	temporary_file (a_name: STRING): PATH
+			-- `a_name' in the system's temporary folder, removed first.
+		local
+			l_env: EXECUTION_ENVIRONMENT
+			l_dir: STRING_32
+			l_f: RAW_FILE
+		do
+			create l_env
+			if attached l_env.item ("TEMP") as al_t then l_dir := al_t
+			elseif attached l_env.item ("TMPDIR") as al_t then l_dir := al_t
+			else l_dir := {STRING_32} "/tmp" end
+			create Result.make_from_string (l_dir)
+			Result := Result.extended (a_name)
+			create l_f.make_with_path (Result)
+			if l_f.exists then l_f.delete end
+		end
+
+	file_text (a_path: PATH): STRING
+		local
+			l_f: PLAIN_TEXT_FILE
+		do
+			create l_f.make_with_path (a_path)
+			l_f.open_read
+			l_f.read_stream (l_f.count)
+			Result := l_f.last_string
+			l_f.close
+		end
+
+	test_grid_view_items
+			-- 1v-a: pictures load off the GUI thread and show; the user's click and double click
+			-- fire, code is quiet; several items select; a filter keeps item numbers.
+		local
+			l_window: GUI_WINDOW
+			l_grid: GUI_GRID_VIEW
+			l_chosen, l_opened: ARRAYED_LIST [INTEGER]
+			l_png: PATH
+		do
+			create l_chosen.make (2)
+			create l_opened.make (2)
+			create l_png.make_from_string ("docs/guide/images/linux/button.png")
+			create l_window.make ("Grid", 560, 400)
+			create l_grid.make
+			l_grid.extend_picture ("Button", l_png)
+			l_grid.extend_icon ("Folder", "folder")
+			l_grid.extend ("Genesis")
+			l_grid.extend ("Exodus")
+			l_grid.set_item_subtitle (3, "The beginning")
+			l_grid.set_item_size (140, 120)
+			l_grid.selection_actions.extend (agent (i: INTEGER; t: ARRAYED_LIST [INTEGER]) do t.extend (i) end (?, l_chosen))
+			l_grid.activate_actions.extend (agent (i: INTEGER; t: ARRAYED_LIST [INTEGER]) do t.extend (i) end (?, l_opened))
+			l_window.set_content (l_grid)
+			l_window.show
+			settle_window
+			assert ("four items", l_grid.count = 4 and l_grid.item_title (2).same_string ("Folder"))
+			assert ("the picture loaded", driver.grid_picture_ready (l_grid, 1, 3000))
+			l_grid.select_item (2)
+			assert ("selected quietly", l_grid.selected_index = 2 and l_chosen.is_empty)
+			driver.choose_grid_item (l_grid, 3)
+			assert ("the user chose Genesis", l_grid.selected_index = 3 and l_chosen.count = 1 and l_chosen [1] = 3)
+			driver.activate_grid_item (l_grid, 4)
+			assert ("opened Exodus", l_opened.count = 1 and l_opened [1] = 4)
+			l_grid.set_multiple_selection (True)
+			l_grid.select_item (1)
+			driver.extend_grid_selection (l_grid, 4)
+			assert ("two selected: " + l_grid.selected_items.count.out, l_grid.selected_items.count = 2 and l_grid.selected_items [2] = 4)
+			l_grid.set_filter ("BEGIN")
+			settle_window
+			assert ("the subtitle matched: " + l_grid.shown_count.out, l_grid.shown_count = 1)
+			l_grid.set_filter ("")
+			l_grid.remove_item (1)
+			assert ("removed", l_grid.count = 3 and l_grid.item_title (1).same_string ("Folder"))
+			l_window.close
+		end
+
+	test_slideshow_moves
+			-- 1v-a: next and previous stop at the ends unless it wraps; the user's moves fire,
+			-- show_item is quiet; autoplay moves, and pauses.
+		local
+			l_window: GUI_WINDOW
+			l_show: GUI_SLIDESHOW
+			l_told: ARRAYED_LIST [INTEGER]
+		do
+			create l_told.make (4)
+			create l_window.make ("Slides", 420, 260)
+			create l_show.make
+			l_show.extend_item (create {GUI_LABEL}.make ("In the beginning"))
+			l_show.extend_item (create {GUI_LABEL}.make ("Let there be light"))
+			l_show.extend_item (create {GUI_LABEL}.make ("And it was good"))
+			l_show.item_changed_actions.extend (agent (i: INTEGER; t: ARRAYED_LIST [INTEGER]) do t.extend (i) end (?, l_told))
+			l_window.set_content (l_show)
+			l_window.show
+			settle_window
+			assert ("first shown, Previous off", l_show.item_index = 1 and not l_show.previous_button.is_enabled)
+			driver.perform_click (l_show.next_button)
+			assert ("the user's next", l_show.item_index = 2 and l_told.count = 1 and l_told [1] = 2)
+			l_show.show_item (3)
+			assert ("quietly to the last, Next off", l_show.item_index = 3 and l_told.count = 1 and not l_show.next_button.is_enabled)
+			l_show.set_wraps (True)
+			driver.perform_click (l_show.next_button)
+			assert ("wraps to the first", l_show.item_index = 1 and l_told.count = 2)
+			l_show.set_interval (100)
+			driver.wait (450)
+			assert ("autoplay moved: " + l_told.count.out, l_told.count >= 4)
+			l_show.set_paused (True)
+			l_told.wipe_out
+			driver.wait (350)
+			assert ("paused", l_told.is_empty)
+			l_show.set_interval (0)
+			l_window.close
+		end
+
+	test_file_field_address_bar
+			-- 1p-b: breadcrumbs at rest; a chevron lists the subfolders and choosing one goes
+			-- there; the empty space turns them into the typed path with suggestions; Escape puts
+			-- the old path back; a bad path stays typed, marked invalid.
+		local
+			l_window: GUI_WINDOW
+			l_field: GUI_FILE_FIELD
+			l_root, l_sep: STRING_32
+			l_dir: DIRECTORY
+			l_changes: CELL [INTEGER]
+			l_has_b: BOOLEAN
+		do
+			create l_changes.put (0)
+			if {PLATFORM}.is_windows then l_sep := {STRING_32} "\" else l_sep := {STRING_32} "/" end
+			l_root := temporary_folder ("address_bar_test")
+			across <<"alpha", "beta", "gamma">> as ic loop
+				create l_dir.make (l_root + l_sep + ic)
+				if not l_dir.exists then l_dir.create_dir end
+			end
+			create l_window.make ("Address bar", 640, 160)
+			create l_field.make_folder ("Folder")
+			l_field.set_breadcrumbs (True)
+			l_field.change_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_changes))
+			l_window.set_content (l_field)
+			l_window.show
+			settle_window
+			l_field.set_path (create {PATH}.make_from_string (l_root + l_sep + "alpha"))
+			settle_window
+			assert ("breadcrumbs at rest", l_field.breadcrumbs.is_shown and not l_field.field.is_shown)
+			assert ("the last part: " + l_field.breadcrumbs.part (l_field.breadcrumbs.part_count).out,
+				l_field.breadcrumbs.part (l_field.breadcrumbs.part_count).same_string ("alpha"))
+			driver.press_chevron (l_field.breadcrumbs, l_field.breadcrumbs.part_count - 1)
+			assert ("the folder buttons", attached l_field.folder_choices as al_c and then al_c.count = 3 and then al_c [2].text.same_string ("beta"))
+			assert ("nothing chosen yet", l_changes.item = 0)
+			if attached l_field.folder_choices as al_c then
+				driver.perform_click (al_c [2])
+			end
+			assert ("went to beta: " + l_field.field.text.out, l_field.field.text.ends_with ("beta") and l_changes.item = 1)
+			driver.press_path_space (l_field.breadcrumbs)
+			assert ("typing", l_field.field.is_shown and not l_field.breadcrumbs.is_shown)
+			driver.type_text (l_field.field, l_root + l_sep + "g")
+			across l_field.field.suggestions as ic loop
+				if ic.has_substring ("gamma") then l_has_b := True end
+			end
+			assert ("suggests gamma: " + l_field.field.suggestions.count.out, l_has_b)
+			driver.press_escape (l_field.field)
+			assert ("Escape: beta again, as breadcrumbs", l_field.breadcrumbs.is_shown and l_field.field.text.ends_with ("beta"))
+			driver.press_path_space (l_field.breadcrumbs)
+			driver.type_text (l_field.field, l_root + l_sep + "nowhere")
+			driver.leave_field (l_field.field)
+			assert ("a bad path stays typed and invalid", l_field.field.is_shown and not l_field.field.is_valid)
+			l_window.close
+		end
+
+	temporary_folder (a_name: STRING): STRING_32
+			-- A folder `a_name' in the system's temporary folder.
+		local
+			l_env: EXECUTION_ENVIRONMENT
+			l_dir: DIRECTORY
+		do
+			create l_env
+			if attached l_env.item ("TEMP") as al_t then Result := al_t
+			elseif attached l_env.item ("TMPDIR") as al_t then Result := al_t
+			else Result := {STRING_32} "/tmp" end
+			if {PLATFORM}.is_windows then Result := Result + "\" + a_name else Result := Result + "/" + a_name end
+			create l_dir.make (Result)
+			if not l_dir.exists then l_dir.recursive_create_dir end
+		end
+
 	test_rating_set_silently_and_user_emits
 		local
 			l_window: GUI_WINDOW
