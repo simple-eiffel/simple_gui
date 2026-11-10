@@ -6176,13 +6176,23 @@ int sga_snapshot(int a_window, const char *a_path)
 	[NSGraphicsContext setCurrentContext:[NSGraphicsContext graphicsContextWithBitmapImageRep:r]];
 	[l_base drawInRect:NSMakeRect(0, 0, [l_base pixelsWide], [l_base pixelsHigh])];
 	for (NSWindow *o in l_over) {
-		NSBitmapImageRep *l_img = sga_window_image(o);
-		NSRect f = [o frame];
+		/* Its content view (a popover's vibrant backing and a sheet's are not captured) on a
+		   card of the window background, outlined, where it shows. */
+		NSView *c = o == l_pop ? [[sga_shown_help_popover() contentViewController] view] : [o contentView];
+		NSRect f = [o convertRectToScreen:[c convertRect:[c bounds] toView:nil]];
 		NSRect at = NSMakeRect((NSMinX(f) - NSMinX(b)) * k, (NSMinY(f) - NSMinY(b)) * k, NSWidth(f) * k, NSHeight(f) * k);
-		if (o == [w attachedSheet]) {   /* a sheet's own backing: the window background behind it */
+		__block NSBitmapImageRep *l_img = nil;
+		[c layoutSubtreeIfNeeded];
+		[[o effectiveAppearance] performAsCurrentDrawingAppearance:^{
+			l_img = [c bitmapImageRepForCachingDisplayInRect:[c bounds]];
+			[c cacheDisplayInRect:[c bounds] toBitmapImageRep:l_img];
+			NSBezierPath *l_card = [NSBezierPath bezierPathWithRoundedRect:at xRadius:10 * k yRadius:10 * k];
 			[[NSColor windowBackgroundColor] setFill];
-			[[NSBezierPath bezierPathWithRoundedRect:at xRadius:10 * k yRadius:10 * k] fill];
-		}
+			[l_card fill];
+			[[NSColor separatorColor] setStroke];
+			[l_card setLineWidth:k];
+			[l_card stroke];
+		}];
 		[l_img drawInRect:at fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:NO hints:nil];
 	}
 	[NSGraphicsContext restoreGraphicsState];
@@ -8400,9 +8410,15 @@ void sga_help_show_tip(int a_widget, const char *a_text)
 	[NSLayoutConstraint activateConstraints:@[[l.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:12], [l.trailingAnchor constraintEqualToAnchor:box.trailingAnchor constant:-12],
 		[l.topAnchor constraintEqualToAnchor:box.topAnchor constant:10], [l.bottomAnchor constraintEqualToAnchor:box.bottomAnchor constant:-10]]];
 	[c setView:box];
+	/* The text's own size, wrapped at 280 points: a wrapping label's fitting width collapses. */
+	NSRect l_text = [s_help_text boundingRectWithSize:NSMakeSize(280, CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName: [l font]}];
+	CGFloat l_w = ceil(NSWidth(l_text)) + 4, l_h = ceil(NSHeight(l_text)) + 2;
+	[NSLayoutConstraint activateConstraints:@[[l.widthAnchor constraintEqualToConstant:l_w]]];
 	s_help_popover = [[NSPopover alloc] init];
+	[s_help_popover setContentSize:NSMakeSize(l_w + 24, l_h + 20)];
 	[s_help_popover setContentViewController:c];
 	[s_help_popover setBehavior:NSPopoverBehaviorTransient];
+	[s_help_popover setAnimates:NO];   /* at its size at once: a snapshot right after shows it whole */
 	[s_help_popover showRelativeToRect:[v bounds] ofView:v preferredEdge:NSRectEdgeMaxY];
 }
 
