@@ -316,6 +316,178 @@ feature -- Windows and containers
 			end
 		end
 
+	dock (a_center: INTEGER): INTEGER
+			-- 1r-a: SW_DOCK_HOST around the center (its zones: west, east, south, north).
+		local
+			l_host: SW_DOCK_HOST
+		do
+			if attached widget (a_center) as al_c then
+				create l_host.make (al_c)
+				Result := register (l_host)
+				l_host.set_on_layout_change (agent dock_layout_changed (Result))
+				dock_seen.force (dock_state (l_host), Result)
+			else
+				Result := register (Void)
+			end
+		end
+
+	dock_add (a_dock, a_content, a_side: INTEGER; a_key, a_title: POINTER)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then attached widget (a_content) as al_c then
+				dock_quiet := dock_quiet + 1
+				al_h.add_keyed_panel (from_c (a_key), from_c (a_title), al_c, dock_zone (a_side)).do_nothing
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+			end
+		end
+
+	dock_move (a_dock, an_index, a_side, a_position: INTEGER)
+			-- simple_widgets keeps a zone's panels in the order they were added, so the position
+			-- is not honored yet on Windows.
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count then
+				dock_quiet := dock_quiet + 1
+				al_h.move_panel (an_index, dock_zone (a_side))
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+			end
+		end
+
+	dock_remove (a_dock, an_index: INTEGER)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count then
+				dock_quiet := dock_quiet + 1
+				al_h.remove_panel (an_index)
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+			end
+		end
+
+	dock_set_title (a_dock, an_index: INTEGER; a_title: POINTER)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count then
+				al_h.panels.i_th (an_index).title := from_c (a_title)
+				changed
+			end
+		end
+
+	dock_set_tabbed (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h then
+				dock_quiet := dock_quiet + 1
+				al_h.set_tabbed (dock_zone (a_side), a_on)
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+			end
+		end
+
+	dock_activate (a_dock, an_index: INTEGER)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count
+				and then al_h.is_panel_visible (an_index)
+			then
+				dock_quiet := dock_quiet + 1
+				al_h.activate_panel (an_index)
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+			end
+		end
+
+	dock_set_size (a_dock, a_side, a_size: INTEGER)
+			-- As a share of the host (simple_widgets sizes zones by fraction); asked before the
+			-- host is laid out, it waits until it is.
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h then
+				dock_wanted.force (a_size, a_dock * 8 + a_side)
+				dock_apply_sizes (a_dock, al_h)
+			end
+		end
+
+	dock_size (a_dock, a_side: INTEGER): INTEGER
+		local
+			l_zone: INTEGER
+			l_extent: REAL_64
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h then
+				dock_apply_sizes (a_dock, al_h)
+				if dock_wanted.has (a_dock * 8 + a_side) then
+					Result := dock_wanted.item (a_dock * 8 + a_side)
+				else
+					l_zone := dock_zone (a_side)
+					if l_zone = al_h.Zone_west or l_zone = al_h.Zone_east then
+						l_extent := al_h.width
+					else
+						l_extent := al_h.height
+					end
+					Result := logical (al_h, al_h.fraction (l_zone) * l_extent).max (0)
+				end
+			end
+		end
+
+	dock_collapse (a_dock, a_side: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h then
+				dock_quiet := dock_quiet + 1
+				if a_on then
+					al_h.collapse_zone (dock_zone (a_side))
+				else
+					al_h.expand_zone (dock_zone (a_side))
+				end
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+			end
+		end
+
+	dock_show_panel (a_dock, an_index: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count then
+				dock_quiet := dock_quiet + 1
+				if a_on then
+					al_h.show_panel (an_index)
+				else
+					al_h.hide_panel (an_index)
+				end
+				dock_quiet := dock_quiet - 1
+				dock_settled (a_dock, al_h)
+			end
+		end
+
+	test_drag_dock_edge (a_dock, a_side, a_size: INTEGER)
+			-- As the user's drag: the size taken, and the change reported as the host reports a
+			-- drag (35).
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h then
+				dock_wanted.force (a_size, a_dock * 8 + a_side)
+				dock_quiet := dock_quiet + 1
+				dock_apply_sizes (a_dock, al_h)
+				dock_quiet := dock_quiet - 1
+				push (35, a_dock, a_side, dock_size (a_dock, a_side), 0)
+				dock_settled (a_dock, al_h)
+			end
+		end
+
+	test_press_dock_strip (a_dock, an_index: INTEGER)
+			-- As a press on a name in a folded zone's strip: the zone opens showing that panel.
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count
+				and then al_h.is_collapsed (al_h.panels.i_th (an_index).zone)
+			then
+				al_h.zone_widget (al_h.panels.i_th (an_index).zone).open_at_panel (an_index)
+				changed
+			end
+		end
+
+	test_click_dock_tab (a_dock, an_index: INTEGER)
+			-- As a click on the panel's tab.
+		do
+			if attached {SW_DOCK_HOST} widget (a_dock) as al_h and then an_index >= 1 and then an_index <= al_h.panels.count
+				and then al_h.is_panel_visible (an_index)
+			then
+				al_h.activate_panel (an_index)
+				changed
+			end
+		end
+
 	splitter (a_vertical: BOOLEAN): INTEGER
 			-- A holder column; the SW_SPLITTER goes into it once both panes are set (simple_widgets
 			-- takes both at creation).
@@ -4330,6 +4502,116 @@ feature {NONE} -- Pick and drop (1q)
 			if pick_source > 0 and then attached pick_menu_window as al_w and then al_w.open_popup = Void then
 				push (32, pick_source, 0, 0, 0)
 				pick_clear
+			end
+		end
+
+	dock_zone (a_side: INTEGER): INTEGER
+			-- simple_gui's side (1 left, 2 right, 3 top, 4 bottom) as SW_DOCK_HOST's zone.
+		do
+			inspect a_side
+			when 1 then Result := {SW_DOCK_HOST}.Zone_west
+			when 2 then Result := {SW_DOCK_HOST}.Zone_east
+			when 3 then Result := {SW_DOCK_HOST}.Zone_north
+			else Result := {SW_DOCK_HOST}.Zone_south
+			end
+		end
+
+	dock_side (a_zone: INTEGER): INTEGER
+		do
+			if a_zone = {SW_DOCK_HOST}.Zone_west then Result := 1
+			elseif a_zone = {SW_DOCK_HOST}.Zone_east then Result := 2
+			elseif a_zone = {SW_DOCK_HOST}.Zone_north then Result := 3
+			else Result := 4
+			end
+		end
+
+	dock_quiet: INTEGER
+			-- Above 0 while the program changes a dock: its layout notice is not the user's.
+
+	dock_wanted: HASH_TABLE [INTEGER, INTEGER]
+			-- Sides' sizes the program asked for and the host has not taken yet (dock * 8 + side).
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	dock_seen: HASH_TABLE [TUPLE [fractions: ARRAY [REAL_64]; folded: ARRAY [BOOLEAN]; actives: ARRAY [INTEGER]], INTEGER]
+			-- Each dock's state as last reported, to tell what the user changed.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	dock_state (a_host: SW_DOCK_HOST): TUPLE [fractions: ARRAY [REAL_64]; folded: ARRAY [BOOLEAN]; actives: ARRAY [INTEGER]]
+		local
+			z: INTEGER
+		do
+			Result := [create {ARRAY [REAL_64]}.make_filled (0.0, 1, 4), create {ARRAY [BOOLEAN]}.make_filled (False, 1, 4),
+				create {ARRAY [INTEGER]}.make_filled (0, 1, 4)]
+			from z := 1 until z > 4 loop
+				Result.fractions [z] := a_host.fraction (z)
+				Result.folded [z] := a_host.is_collapsed (z)
+				Result.actives [z] := a_host.active_panel (z)
+				z := z + 1
+			end
+		end
+
+	dock_settled (a_dock: INTEGER; a_host: SW_DOCK_HOST)
+			-- The program's change is done: it is the state to compare the user's against.
+		do
+			dock_seen.force (dock_state (a_host), a_dock)
+			changed
+		end
+
+	dock_apply_sizes (a_dock: INTEGER; a_host: SW_DOCK_HOST)
+			-- Give the host the sizes asked for, once it is laid out.
+		local
+			s, l_zone: INTEGER
+			l_extent, l_fraction: REAL_64
+		do
+			from s := 1 until s > 4 loop
+				if dock_wanted.has (a_dock * 8 + s) then
+					l_zone := dock_zone (s)
+					if l_zone = a_host.Zone_west or l_zone = a_host.Zone_east then
+						l_extent := a_host.width
+					else
+						l_extent := a_host.height
+					end
+					if l_extent > 0 then
+						l_fraction := (device (dock_wanted.item (a_dock * 8 + s)) / l_extent).max (a_host.Min_fraction).min (a_host.Max_fraction)
+						dock_quiet := dock_quiet + 1
+						a_host.set_fraction (l_zone, l_fraction)
+						dock_quiet := dock_quiet - 1
+						dock_wanted.remove (a_dock * 8 + s)
+					end
+				end
+				s := s + 1
+			end
+			dock_seen.force (dock_state (a_host), a_dock)
+		end
+
+	dock_layout_changed (a_dock: INTEGER)
+			-- SW_DOCK_HOST's notice: when the user (not the program) changed it, report what
+			-- changed: 35 a zone's size, 36 a fold, 37 the panel a tabbed zone shows.
+		local
+			l_now: like dock_state
+			z: INTEGER
+		do
+			if dock_quiet = 0 and then attached {SW_DOCK_HOST} widget (a_dock) as al_h then
+				l_now := dock_state (al_h)
+				if attached dock_seen.item (a_dock) as al_was then
+					from z := 1 until z > 4 loop
+						if l_now.fractions [z] /= al_was.fractions [z] then
+							push (35, a_dock, dock_side (z), dock_size (a_dock, dock_side (z)), 0)
+						end
+						if l_now.folded [z] /= al_was.folded [z] then
+							push (36, a_dock, dock_side (z), l_now.folded [z].to_integer, 0)
+						end
+						if l_now.actives [z] /= al_was.actives [z] and then l_now.actives [z] > 0 and then al_h.is_tabbed (z) then
+							push (37, a_dock, dock_side (z), l_now.actives [z], 0)
+						end
+						z := z + 1
+					end
+				end
+				dock_seen.force (l_now, a_dock)
 			end
 		end
 

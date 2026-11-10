@@ -588,6 +588,33 @@ feature -- User actions
 			settle
 		end
 
+	drag_dock_edge (a_dock: GUI_DOCK; a_side, a_size: INTEGER)
+			-- Drag `a_side''s edge to `a_size', as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_drag_dock_edge (a_dock.id, a_side, a_size)
+			settle
+		end
+
+	press_dock_strip (a_dock: GUI_DOCK; a_panel: GUI_DOCK_PANEL)
+			-- Press `a_panel''s name in its collapsed side's strip, as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_press_dock_strip (a_dock.id, a_dock.index_of (a_panel))
+			settle
+		end
+
+	click_dock_tab (a_dock: GUI_DOCK; a_panel: GUI_DOCK_PANEL)
+			-- Click `a_panel''s tab, as the user would.
+		require
+			has_application: has_application
+		do
+			backend.test_click_dock_tab (a_dock.id, a_dock.index_of (a_panel))
+			settle
+		end
+
 	drag_out_carries (a_source: GUI_WIDGET): STRING_32
 			-- What a drag out of `a_source' would give another program now: the text, a line
 			-- feed, then the paths one per line; empty for nothing.

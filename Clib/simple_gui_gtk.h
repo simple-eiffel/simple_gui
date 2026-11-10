@@ -450,6 +450,441 @@ static void sg_splitter_set_pane(int s, int pane, int child) {
 static int sg_splitter_position(int s) { return gtk_paned_get_position(GTK_PANED(sg_w[s])); }
 static void sg_splitter_set_position(int s, int position) { gtk_paned_set_position(GTK_PANED(sg_w[s]), position); }
 
+/* ---------- 1r-a: the dock. Nested GtkPaned around the center (top and bottom span the width;
+   left, center and right between them). Each side's holder is a bar (with a collapse button)
+   over the side's panels: a GtkNotebook when tabbed, else an even box along the side's long
+   axis. A collapsed side hides its holder and shows a strip of its panels' names outside the
+   panes. A side with no shown panel hides altogether. Indices are the panels' order of adding,
+   from 1; removing one moves the later ones down. The user's acts push 35 (an edge dragged:
+   side, size), 36 (side folded or opened: side, 1 or 0) and 37 (a tab chosen: side, index);
+   code changes push nothing. ---------- */
+
+/* Replace the last queued event when it is `t' for the same id and a (coalescing); 1 when done. */
+static int sg_coalesce5(int t, int id, int a, int b) {
+    int last = (sg_qt + SG_QCAP - 1) % SG_QCAP;
+    if (sg_qt == sg_qh || sg_q[last][0] != t || sg_q[last][1] != id || sg_q[last][2] != a) return 0;
+    sg_q[last][3] = b;
+    return 1;
+}
+typedef struct { GtkWidget *frame, *header, *content; char *key, *title; int side, visible; } SgDockPanel;
+typedef struct {
+    int id;
+    GtkWidget *root, *strip[5], *pane[5], *holder[5], *box[5], *bar_label[5];
+    int tabbed[5], collapsed[5], wanted[5], applied[5], remembered[5], reported[5], dragging[5];
+    GPtrArray *panels;   /* SgDockPanel*, in the order added */
+    GPtrArray *order[5]; /* each side's panels in their order on it */
+    guint idle;
+} SgDock;
+enum { Sg_side_left = 1, Sg_side_right = 2, Sg_side_top = 3, Sg_side_bottom = 4 };
+static const char *sg_dock_side_name[5] = {"", "Left", "Right", "Top", "Bottom"};
+
+static SgDock *sg_dock_of(int id) { return sg_w[id] ? g_object_get_data(G_OBJECT(sg_w[id]), "sg-dock") : NULL; }
+static SgDockPanel *sg_dock_panel(SgDock *d, int index) {
+    return (index >= 1 && (guint) index <= d->panels->len) ? g_ptr_array_index(d->panels, index - 1) : NULL;
+}
+static int sg_dock_index(SgDock *d, SgDockPanel *p) {
+    guint i;
+    for (i = 0; i < d->panels->len; i++) if (g_ptr_array_index(d->panels, i) == p) return (int) i + 1;
+    return 0;
+}
+static int sg_dock_shown_on(SgDock *d, int side) {
+    guint i;
+    for (i = 0; i < d->order[side]->len; i++) if (((SgDockPanel *) g_ptr_array_index(d->order[side], i))->visible) return 1;
+    return 0;
+}
+static int sg_dock_across(int side) { return side == Sg_side_top || side == Sg_side_bottom; }
+/* The side's depth now, in logical units: its holder's allocation, or what it had before it folded. */
+static int sg_dock_actual(SgDock *d, int side) {
+    if (!gtk_widget_get_visible(d->holder[side])) return d->remembered[side];
+    return sg_dock_across(side) ? gtk_widget_get_height(d->holder[side]) : gtk_widget_get_width(d->holder[side]);
+}
+/* Put the paned's handle where the side gets `size'. */
+static int sg_dock_place(SgDock *d, int side, int size) {
+    GtkWidget *p = d->pane[side];
+    int whole = sg_dock_across(side) ? gtk_widget_get_height(p) : gtk_widget_get_width(p), handle, pos;
+    if (whole <= 0 || !gtk_widget_get_visible(d->holder[side])) return 0;
+    if (side == Sg_side_left || side == Sg_side_top) pos = size;
+    else {
+        GtkWidget *a = gtk_paned_get_start_child(GTK_PANED(p)), *b = gtk_paned_get_end_child(GTK_PANED(p));
+        int sa = sg_dock_across(side) ? gtk_widget_get_height(a) : gtk_widget_get_width(a);
+        int sb = sg_dock_across(side) ? gtk_widget_get_height(b) : gtk_widget_get_width(b);
+        handle = whole - sa - sb;
+        if (handle < 0 || handle > 20) handle = 1;
+        pos = whole - size - handle;
+    }
+    if (pos < 0) pos = 0;
+    sg_quiet++;
+    gtk_paned_set_position(GTK_PANED(p), pos);
+    sg_quiet--;
+    return 1;
+}
+/* Sizes asked for before the dock was laid out are given once it is. */
+static gboolean sg_dock_tick(GtkWidget *w, GdkFrameClock *c, gpointer data) {
+    SgDock *d = data;
+    int s, l_left = 0;
+    (void) w; (void) c;
+    for (s = 1; s <= 4; s++) {
+        if (d->wanted[s] > 0 && !d->applied[s]) {
+            if (sg_dock_place(d, s, d->wanted[s])) d->applied[s] = 1; else l_left = 1;
+        } else if (d->wanted[s] > 0 && d->applied[s]) {
+            /* taken once the holder shows it */
+            if (abs(sg_dock_actual(d, s) - d->wanted[s]) <= 2) { d->reported[s] = d->wanted[s]; d->wanted[s] = 0; d->applied[s] = 0; }
+            else l_left = 1;
+        }
+    }
+    return l_left ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+}
+static void sg_dock_want(SgDock *d, int side, int size) {
+    d->wanted[side] = size > 0 ? size : 1;
+    d->applied[side] = 0;
+    gtk_widget_add_tick_callback(d->root, sg_dock_tick, d, NULL);
+}
+
+/* The user dragging a handle: told once the holders are laid out at the new size (idle). */
+static gboolean sg_dock_drag_idle(gpointer data) {
+    SgDock *d = data;
+    int s, n;
+    d->idle = 0;
+    for (s = 1; s <= 4; s++) {
+        if (!d->dragging[s]) continue;
+        d->dragging[s] = 0;
+        n = sg_dock_actual(d, s);
+        if (abs(n - d->reported[s]) > 1) {
+            d->reported[s] = n;
+            if (!sg_coalesce5(35, d->id, s, n)) sg_push(35, d->id, s, n);
+        }
+    }
+    return G_SOURCE_REMOVE;
+}
+static void sg_dock_on_position(GObject *o, GParamSpec *ps, gpointer data) {
+    SgDock *d = g_object_get_data(o, "sg-dock-owner");
+    int side = GPOINTER_TO_INT(data);
+    GdkSeat *seat;
+    GdkDevice *ptr;
+    (void) ps;
+    if (sg_quiet || !d) return;
+    seat = gdk_display_get_default_seat(gdk_display_get_default());
+    ptr = seat ? gdk_seat_get_pointer(seat) : NULL;
+    if (!ptr || !(gdk_device_get_modifier_state(ptr) & GDK_BUTTON1_MASK)) return;   /* not a drag: a window resize */
+    d->dragging[side] = 1;
+    if (!d->idle) d->idle = g_idle_add(sg_dock_drag_idle, d);
+}
+
+/* Is the panel's frame in the side's box now? A GtkNotebook parents its pages to an inner stack,
+   so ask it for the page instead of comparing parents. */
+static int sg_dock_in_box(SgDock *d, int side, SgDockPanel *p) {
+    GtkWidget *b = d->box[side];
+    if (!b) return 0;
+    if (GTK_IS_NOTEBOOK(b)) return gtk_notebook_page_num(GTK_NOTEBOOK(b), p->frame) >= 0;
+    return gtk_widget_get_parent(p->frame) == b;
+}
+static void sg_dock_rebuild(SgDock *d, int side);
+static void sg_dock_refresh(SgDock *d, int side) {
+    int shown = sg_dock_shown_on(d, side);
+    gtk_widget_set_visible(d->holder[side], shown && !d->collapsed[side]);
+    gtk_widget_set_visible(d->strip[side], shown && d->collapsed[side]);
+}
+static void sg_dock_on_tab(GtkNotebook *nb, GtkWidget *page, guint n, gpointer data) {
+    SgDock *d = g_object_get_data(G_OBJECT(nb), "sg-dock-owner");
+    guint i;
+    (void) n; (void) data;
+    if (sg_quiet || !d) return;
+    for (i = 0; i < d->panels->len; i++) {
+        SgDockPanel *p = g_ptr_array_index(d->panels, i);
+        if (p->frame == page) sg_push(37, d->id, p->side, (int) i + 1);
+    }
+}
+static void sg_dock_activate_quietly(SgDock *d, SgDockPanel *p) {
+    if (d->tabbed[p->side] && GTK_IS_NOTEBOOK(d->box[p->side]) && sg_dock_in_box(d, p->side, p)) {
+        sg_quiet++;
+        gtk_notebook_set_current_page(GTK_NOTEBOOK(d->box[p->side]), gtk_notebook_page_num(GTK_NOTEBOOK(d->box[p->side]), p->frame));
+        sg_quiet--;
+    }
+}
+static void sg_dock_collapse_now(SgDock *d, int side, int on) {
+    if (on && !d->collapsed[side]) {
+        if (gtk_widget_get_visible(d->holder[side])) d->remembered[side] = sg_dock_actual(d, side);
+        d->collapsed[side] = 1;
+        sg_dock_refresh(d, side);
+    } else if (!on && d->collapsed[side]) {
+        d->collapsed[side] = 0;
+        sg_dock_refresh(d, side);
+        if (d->remembered[side] > 0) sg_dock_want(d, side, d->remembered[side]);
+    }
+}
+static void sg_dock_on_fold(GtkButton *b, gpointer data) {
+    SgDock *d = g_object_get_data(G_OBJECT(b), "sg-dock-owner");
+    int side = GPOINTER_TO_INT(data);
+    if (!d) return;
+    sg_dock_collapse_now(d, side, 1);
+    sg_push(36, d->id, side, 1);
+}
+/* A press on a name in a folded side's strip opens the side showing that panel. */
+static void sg_dock_strip_press(SgDock *d, SgDockPanel *p) {
+    int side = p->side;
+    if (!d->collapsed[side]) return;
+    sg_dock_collapse_now(d, side, 0);
+    sg_push(36, d->id, side, 0);
+    if (d->tabbed[side] && p->visible) {
+        sg_dock_activate_quietly(d, p);
+        sg_push(37, d->id, side, sg_dock_index(d, p));
+    }
+}
+static void sg_dock_on_strip(GtkButton *b, gpointer data) {
+    SgDock *d = g_object_get_data(G_OBJECT(b), "sg-dock-owner");
+    if (d) sg_dock_strip_press(d, data);
+}
+static void sg_dock_rebuild_strip(SgDock *d, int side) {
+    GtkWidget *c;
+    guint i;
+    while ((c = gtk_widget_get_first_child(d->strip[side]))) gtk_box_remove(GTK_BOX(d->strip[side]), c);
+    for (i = 0; i < d->order[side]->len; i++) {
+        SgDockPanel *p = g_ptr_array_index(d->order[side], i);
+        GtkWidget *b;
+        if (!p->visible) continue;
+        b = gtk_button_new_with_label(p->title);
+        gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
+        g_object_set_data(G_OBJECT(b), "sg-dock-owner", d);
+        g_signal_connect(b, "clicked", G_CALLBACK(sg_dock_on_strip), p);
+        gtk_box_append(GTK_BOX(d->strip[side]), b);
+    }
+}
+/* Lay the side's shown panels out again, in order, stacked or as tabs. */
+static void sg_dock_rebuild(SgDock *d, int side) {
+    guint i;
+    int l_active = 0;
+    GtkWidget *nb;
+    if (d->box[side]) {
+        if (GTK_IS_NOTEBOOK(d->box[side])) l_active = gtk_notebook_get_current_page(GTK_NOTEBOOK(d->box[side]));
+        sg_quiet++;
+        for (i = 0; i < d->panels->len; i++) {
+            SgDockPanel *p = g_ptr_array_index(d->panels, i);
+            if (sg_dock_in_box(d, side, p)) {
+                if (GTK_IS_NOTEBOOK(d->box[side])) gtk_notebook_remove_page(GTK_NOTEBOOK(d->box[side]), gtk_notebook_page_num(GTK_NOTEBOOK(d->box[side]), p->frame));
+                else gtk_box_remove(GTK_BOX(d->box[side]), p->frame);
+            }
+        }
+        gtk_box_remove(GTK_BOX(d->holder[side]), d->box[side]);
+        sg_quiet--;
+    }
+    if (d->tabbed[side]) {
+        nb = gtk_notebook_new();
+        gtk_notebook_set_scrollable(GTK_NOTEBOOK(nb), TRUE);
+        g_object_set_data(G_OBJECT(nb), "sg-dock-owner", d);
+        g_signal_connect(nb, "switch-page", G_CALLBACK(sg_dock_on_tab), NULL);
+        d->box[side] = nb;
+    } else {
+        d->box[side] = gtk_box_new(sg_dock_across(side) ? GTK_ORIENTATION_HORIZONTAL : GTK_ORIENTATION_VERTICAL, 4);
+        gtk_box_set_homogeneous(GTK_BOX(d->box[side]), TRUE);
+    }
+    gtk_widget_set_vexpand(d->box[side], TRUE);
+    gtk_widget_set_hexpand(d->box[side], TRUE);
+    gtk_box_append(GTK_BOX(d->holder[side]), d->box[side]);
+    sg_quiet++;
+    for (i = 0; i < d->order[side]->len; i++) {
+        SgDockPanel *p = g_ptr_array_index(d->order[side], i);
+        if (!p->visible) continue;
+        gtk_widget_set_visible(p->header, !d->tabbed[side]);
+        if (d->tabbed[side]) gtk_notebook_append_page(GTK_NOTEBOOK(d->box[side]), p->frame, gtk_label_new(p->title));
+        else gtk_box_append(GTK_BOX(d->box[side]), p->frame);
+    }
+    if (d->tabbed[side] && l_active > 0 && l_active < gtk_notebook_get_n_pages(GTK_NOTEBOOK(d->box[side])))
+        gtk_notebook_set_current_page(GTK_NOTEBOOK(d->box[side]), l_active);
+    sg_quiet--;
+    sg_dock_rebuild_strip(d, side);
+    sg_dock_refresh(d, side);
+}
+static void sg_dock_free(gpointer data) {
+    SgDock *d = data;
+    guint i;
+    int s;
+    if (d->idle) g_source_remove(d->idle);
+    for (i = 0; i < d->panels->len; i++) {
+        SgDockPanel *p = g_ptr_array_index(d->panels, i);
+        g_object_unref(p->frame);
+        g_free(p->key); g_free(p->title); g_free(p);
+    }
+    g_ptr_array_free(d->panels, TRUE);
+    for (s = 1; s <= 4; s++) g_ptr_array_free(d->order[s], TRUE);
+    g_free(d);
+}
+static GtkWidget *sg_dock_paned(SgDock *d, GtkOrientation o, int side, int side_first) {
+    GtkWidget *p = gtk_paned_new(o);
+    gtk_paned_set_resize_start_child(GTK_PANED(p), side_first ? FALSE : TRUE);
+    gtk_paned_set_resize_end_child(GTK_PANED(p), side_first ? TRUE : FALSE);
+    gtk_paned_set_shrink_start_child(GTK_PANED(p), FALSE);
+    gtk_paned_set_shrink_end_child(GTK_PANED(p), FALSE);
+    g_object_set_data(G_OBJECT(p), "sg-dock-owner", d);
+    g_signal_connect(p, "notify::position", G_CALLBACK(sg_dock_on_position), GINT_TO_POINTER(side));
+    d->pane[side] = p;
+    return p;
+}
+static GtkWidget *sg_dock_holder(SgDock *d, int side) {
+    GtkWidget *h = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0), *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4), *b;
+    d->bar_label[side] = gtk_label_new(sg_dock_side_name[side]);
+    gtk_widget_set_hexpand(d->bar_label[side], TRUE);
+    gtk_label_set_xalign(GTK_LABEL(d->bar_label[side]), 0.0);
+    gtk_widget_add_css_class(d->bar_label[side], "dim-label");
+    b = gtk_button_new_from_icon_name("pan-down-symbolic");
+    gtk_button_set_has_frame(GTK_BUTTON(b), FALSE);
+    gtk_widget_set_tooltip_text(b, "Collapse");
+    g_object_set_data(G_OBJECT(b), "sg-dock-owner", d);
+    g_signal_connect(b, "clicked", G_CALLBACK(sg_dock_on_fold), GINT_TO_POINTER(side));
+    gtk_box_append(GTK_BOX(bar), d->bar_label[side]);
+    gtk_box_append(GTK_BOX(bar), b);
+    gtk_box_append(GTK_BOX(h), bar);
+    gtk_widget_set_visible(h, FALSE);
+    d->holder[side] = h;
+    return h;
+}
+static int sg_dock(int center) {
+    SgDock *d = g_new0(SgDock, 1);
+    GtkWidget *middle, *wrap;
+    int s;
+    d->panels = g_ptr_array_new();
+    for (s = 1; s <= 4; s++) { d->order[s] = g_ptr_array_new(); d->remembered[s] = s <= 2 ? 240 : 180; }
+    d->root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    for (s = 1; s <= 4; s++) {
+        d->strip[s] = gtk_box_new(sg_dock_across(s) ? GTK_ORIENTATION_HORIZONTAL : GTK_ORIENTATION_VERTICAL, 2);
+        gtk_widget_set_visible(d->strip[s], FALSE);
+    }
+    wrap = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_size_request(wrap, 120, 120);   /* Min_center */
+    gtk_widget_set_hexpand(wrap, TRUE); gtk_widget_set_vexpand(wrap, TRUE);
+    if (sg_w[center]) { gtk_widget_set_hexpand(sg_w[center], TRUE); gtk_widget_set_vexpand(sg_w[center], TRUE); gtk_box_append(GTK_BOX(wrap), sg_w[center]); }
+    sg_dock_paned(d, GTK_ORIENTATION_HORIZONTAL, Sg_side_right, 0);
+    gtk_paned_set_start_child(GTK_PANED(d->pane[Sg_side_right]), wrap);
+    gtk_paned_set_end_child(GTK_PANED(d->pane[Sg_side_right]), sg_dock_holder(d, Sg_side_right));
+    sg_dock_paned(d, GTK_ORIENTATION_HORIZONTAL, Sg_side_left, 1);
+    gtk_paned_set_start_child(GTK_PANED(d->pane[Sg_side_left]), sg_dock_holder(d, Sg_side_left));
+    gtk_paned_set_end_child(GTK_PANED(d->pane[Sg_side_left]), d->pane[Sg_side_right]);
+    sg_dock_paned(d, GTK_ORIENTATION_VERTICAL, Sg_side_bottom, 0);
+    gtk_paned_set_start_child(GTK_PANED(d->pane[Sg_side_bottom]), d->pane[Sg_side_left]);
+    gtk_paned_set_end_child(GTK_PANED(d->pane[Sg_side_bottom]), sg_dock_holder(d, Sg_side_bottom));
+    sg_dock_paned(d, GTK_ORIENTATION_VERTICAL, Sg_side_top, 1);
+    gtk_paned_set_start_child(GTK_PANED(d->pane[Sg_side_top]), sg_dock_holder(d, Sg_side_top));
+    gtk_paned_set_end_child(GTK_PANED(d->pane[Sg_side_top]), d->pane[Sg_side_bottom]);
+    middle = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_vexpand(middle, TRUE);
+    gtk_box_append(GTK_BOX(middle), d->strip[Sg_side_left]);
+    gtk_widget_set_hexpand(d->pane[Sg_side_top], TRUE);
+    gtk_box_append(GTK_BOX(middle), d->pane[Sg_side_top]);
+    gtk_box_append(GTK_BOX(middle), d->strip[Sg_side_right]);
+    gtk_box_append(GTK_BOX(d->root), d->strip[Sg_side_top]);
+    gtk_box_append(GTK_BOX(d->root), middle);
+    gtk_box_append(GTK_BOX(d->root), d->strip[Sg_side_bottom]);
+    for (s = 1; s <= 4; s++) sg_dock_rebuild(d, s);
+    g_object_set_data_full(G_OBJECT(d->root), "sg-dock", d, sg_dock_free);
+    d->id = sg_reg(d->root, 56);
+    return d->id;
+}
+static void sg_dock_add(int dock, int content, int side, const char *key, const char *title) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p;
+    if (!d || side < 1 || side > 4) return;
+    p = g_new0(SgDockPanel, 1);
+    p->key = g_strdup(key); p->title = g_strdup(title); p->side = side; p->visible = 1;
+    p->frame = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    g_object_ref_sink(p->frame);   /* ours: it moves between sides and tabs */
+    p->header = gtk_label_new(title);
+    gtk_label_set_xalign(GTK_LABEL(p->header), 0.0);
+    gtk_widget_add_css_class(p->header, "heading");
+    gtk_box_append(GTK_BOX(p->frame), p->header);
+    if (sg_w[content]) {
+        p->content = sg_w[content];
+        gtk_widget_set_vexpand(p->content, TRUE);
+        gtk_box_append(GTK_BOX(p->frame), p->content);
+    }
+    g_ptr_array_add(d->panels, p);
+    g_ptr_array_add(d->order[side], p);
+    sg_dock_rebuild(d, side);
+}
+static void sg_dock_move(int dock, int index, int side, int position) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
+    int old;
+    if (!p || side < 1 || side > 4) return;
+    old = p->side;
+    g_ptr_array_remove(d->order[old], p);
+    if (position < 1 || (guint) position > d->order[side]->len) g_ptr_array_add(d->order[side], p);
+    else g_ptr_array_insert(d->order[side], position - 1, p);
+    p->side = side;
+    sg_dock_rebuild(d, old);
+    if (side != old) sg_dock_rebuild(d, side);
+}
+static void sg_dock_remove(int dock, int index) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
+    if (!p) return;
+    g_ptr_array_remove(d->order[p->side], p);
+    p->visible = 0;
+    sg_dock_rebuild(d, p->side);
+    g_ptr_array_remove_index(d->panels, (guint) index - 1);
+    if (p->content && gtk_widget_get_parent(p->content) == p->frame) gtk_box_remove(GTK_BOX(p->frame), p->content);
+    g_object_unref(p->frame);
+    g_free(p->key); g_free(p->title); g_free(p);
+}
+static void sg_dock_set_title(int dock, int index, const char *title) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
+    if (!p) return;
+    g_free(p->title); p->title = g_strdup(title);
+    gtk_label_set_text(GTK_LABEL(p->header), title);
+    sg_dock_rebuild(d, p->side);
+}
+static void sg_dock_set_tabbed(int dock, int side, int on) {
+    SgDock *d = sg_dock_of(dock);
+    if (!d || side < 1 || side > 4 || d->tabbed[side] == (on ? 1 : 0)) return;
+    d->tabbed[side] = on ? 1 : 0;
+    sg_dock_rebuild(d, side);
+}
+static void sg_dock_activate(int dock, int index) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
+    if (p) sg_dock_activate_quietly(d, p);
+}
+static void sg_dock_set_size(int dock, int side, int size) {
+    SgDock *d = sg_dock_of(dock);
+    if (!d || side < 1 || side > 4) return;
+    if (d->collapsed[side]) d->remembered[side] = size;
+    else sg_dock_want(d, side, size);
+}
+static int sg_dock_size(int dock, int side) {
+    SgDock *d = sg_dock_of(dock);
+    if (!d || side < 1 || side > 4) return 0;
+    if (d->wanted[side] > 0) return d->wanted[side];
+    return sg_dock_actual(d, side);
+}
+static void sg_dock_collapse(int dock, int side, int on) {
+    SgDock *d = sg_dock_of(dock);
+    if (d && side >= 1 && side <= 4) sg_dock_collapse_now(d, side, on);
+}
+static void sg_dock_show_panel(int dock, int index, int on) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
+    if (!p || p->visible == (on ? 1 : 0)) return;
+    p->visible = on ? 1 : 0;
+    sg_dock_rebuild(d, p->side);
+}
+static void sg_test_drag_dock_edge(int dock, int side, int size) {
+    SgDock *d = sg_dock_of(dock);
+    if (!d || side < 1 || side > 4) return;
+    sg_dock_want(d, side, size);
+    d->reported[side] = size;
+    sg_push(35, dock, side, size);
+}
+static void sg_test_press_dock_strip(int dock, int index) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
+    if (p) sg_dock_strip_press(d, p);
+}
+static void sg_test_click_dock_tab(int dock, int index) {
+    SgDock *d = sg_dock_of(dock);
+    SgDockPanel *p = d ? sg_dock_panel(d, index) : NULL;
+    if (p && d->tabbed[p->side] && GTK_IS_NOTEBOOK(d->box[p->side]) && sg_dock_in_box(d, p->side, p))
+        gtk_notebook_set_current_page(GTK_NOTEBOOK(d->box[p->side]), gtk_notebook_page_num(GTK_NOTEBOOK(d->box[p->side]), p->frame));
+}
+
 /* ---------- controls ---------- */
 
 static void sg_set_description_a11y(int id, const char *text) {

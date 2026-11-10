@@ -375,3 +375,19 @@ int sga_snapshot(int a_window, const char *a_path);
 const char *sga_describe_accessibility(int a_window);
 
 #endif
+
+/* 1r-a: the dock (sides 1 left, 2 right, 3 top, 4 bottom; indices from 1 in the shared order) */
+int sga_dock(int a_center);
+void sga_dock_add(int a_dock, int a_widget, int a_side, const char *a_key, const char *a_title);
+void sga_dock_move(int a_dock, int an_index, int a_side, int a_position);
+void sga_dock_remove(int a_dock, int an_index);
+void sga_dock_set_title(int a_dock, int an_index, const char *a_title);
+void sga_dock_set_tabbed(int a_dock, int a_side, int a_on);
+void sga_dock_activate(int a_dock, int an_index);
+void sga_dock_set_size(int a_dock, int a_side, int a_px);
+int sga_dock_size(int a_dock, int a_side);
+void sga_dock_collapse(int a_dock, int a_side, int a_on);
+void sga_dock_show_panel(int a_dock, int an_index, int a_on);
+void sga_test_drag_dock_edge(int a_dock, int a_side, int a_px);
+void sga_test_press_dock_strip(int a_dock, int an_index);
+void sga_test_click_dock_tab(int a_dock, int an_index);
