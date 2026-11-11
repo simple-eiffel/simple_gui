@@ -262,15 +262,167 @@ feature -- Theme colors
 
 	system_color (a_role: INTEGER): NATURAL_32
 			-- The theme's color for `a_role' as 0xRRGGBB; it follows light and dark, so a canvas
-			-- can draw to match the window around it.
+			-- can draw to match the window around it. The program's own value when
+			-- `set_theme_color' gave one (1w), unless the system's contrast setting is on.
 		require
 			available: is_available
-			known: a_role >= Color_window_background and a_role <= Color_separator
+			known: is_theme_role (a_role)
 		do
-			Result := backend.system_color (a_role).to_natural_32
+			if has_theme_color (a_role) and then not backend.is_high_contrast then
+				if is_dark then
+					Result := theme_darks [a_role].to_natural_32
+				else
+					Result := theme_lights [a_role].to_natural_32
+				end
+			else
+				Result := backend.system_color (a_role).to_natural_32
+			end
 		ensure
 			rgb: Result <= 0xFFFFFF
 		end
+
+	is_theme_role (a_role: INTEGER): BOOLEAN
+		do
+			Result := a_role >= Color_window_background and a_role <= Color_separator
+		ensure
+			definition: Result = (a_role >= Color_window_background and a_role <= Color_separator)
+		end
+
+	has_theme_color (a_role: INTEGER): BOOLEAN
+			-- Did the program give its own color for `a_role' (`set_theme_color')?
+		require
+			known: is_theme_role (a_role)
+		do
+			Result := theme_lights [a_role] >= 0
+		end
+
+	set_theme_color (a_role: INTEGER; a_rgb, a_dark_rgb: NATURAL_32)
+			-- Use `a_rgb' (and `a_dark_rgb' in the dark appearance) for `a_role' in place of the
+			-- system's color: `system_color' answers it, styles that name the role follow it,
+			-- and the toolkit shows it where it lets a program change the theme. The system's
+			-- contrast setting wins: while it is on, the system's colors are used.
+		require
+			gui_thread: is_gui_thread
+			available: is_available
+			known: is_theme_role (a_role)
+			rgb: a_rgb <= 0xFFFFFF and a_dark_rgb <= 0xFFFFFF
+		do
+			theme_lights [a_role] := a_rgb.to_integer_32
+			theme_darks [a_role] := a_dark_rgb.to_integer_32
+			send_theme_color (a_role)
+			restyle_all
+		ensure
+			set: has_theme_color (a_role)
+			answered: not is_high_contrast implies system_color (a_role) = (if is_dark then a_dark_rgb else a_rgb end)
+		end
+
+	reset_theme_color (a_role: INTEGER)
+			-- Go back to the system's color for `a_role'.
+		require
+			gui_thread: is_gui_thread
+			available: is_available
+			known: is_theme_role (a_role)
+		do
+			theme_lights [a_role] := -1
+			theme_darks [a_role] := -1
+			send_theme_color (a_role)
+			restyle_all
+		ensure
+			reset: not has_theme_color (a_role)
+		end
+
+	set_accent_color (a_rgb, a_dark_rgb: NATURAL_32)
+			-- The program's accent (role `Color_accent'), on the controls that show one: default
+			-- buttons, checks, radios, switches, sliders, progress bars, selections and the focus
+			-- ring, where the toolkit allows.
+		require
+			gui_thread: is_gui_thread
+			available: is_available
+			rgb: a_rgb <= 0xFFFFFF and a_dark_rgb <= 0xFFFFFF
+		do
+			set_theme_color (Color_accent, a_rgb, a_dark_rgb)
+		ensure
+			set: has_theme_color (Color_accent)
+		end
+
+feature -- Style classes (1w)
+
+	define_style_class (a_name: READABLE_STRING_GENERAL; a_style: GUI_STYLE)
+			-- Make `a_name' mean `a_style' (as it is now; later changes to `a_style' need another
+			-- call). Every widget that has the class shows it at once.
+		require
+			gui_thread: is_gui_thread
+			named: not a_name.is_empty
+		do
+			style_classes.force (a_style.twin, a_name.to_string_32)
+			across widgets as ic loop
+				if ic.has_style_class (a_name) then
+					ic.restyle
+				end
+			end
+		ensure
+			defined: attached style_class (a_name) as al_style and then al_style.is_equal (a_style)
+		end
+
+	style_class (a_name: READABLE_STRING_GENERAL): detachable GUI_STYLE
+			-- The style that class `a_name' means; Void when it is not defined.
+		do
+			Result := style_classes.item (a_name.to_string_32)
+		end
+
+feature -- Fonts (1w)
+
+	load_font (a_path: PATH): ARRAYED_LIST [STRING_32]
+			-- Load the font file at `a_path' (TTF, OTF or a collection) for this program only.
+			-- The family names it adds, which GUI_STYLE.set_font_family takes from now on; empty
+			-- when the file cannot be loaded.
+		require
+			gui_thread: is_gui_thread
+			available: is_available
+		local
+			l_c: C_STRING
+			l_names: STRING_32
+		do
+			l_c := backend.to_c (a_path.name)
+			l_names := backend.from_c (backend.font_load (l_c.item))
+			create Result.make (2)
+			if not l_names.is_empty then
+				across l_names.split ('%/31/') as ic loop
+					if not ic.is_empty then
+						Result.extend (ic)
+					end
+				end
+			end
+		ensure
+			usable: across Result as ic all has_font_family (ic) end
+		end
+
+	has_font_family (a_name: READABLE_STRING_GENERAL): BOOLEAN
+			-- Can text be shown in family `a_name' (installed, or loaded by `load_font')?
+		require
+			available: is_available
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_name)
+			Result := backend.font_family_available (l_c.item)
+		end
+
+feature -- Contrast (1w)
+
+	is_high_contrast: BOOLEAN
+			-- Is the system's contrast setting on (Windows High Contrast, GTK's HighContrast
+			-- theme, macOS Increase Contrast)? Style colors, backgrounds and shadows are then
+			-- left out; fonts, sizes, padding and borders still show.
+		require
+			available: is_available
+		do
+			Result := backend.is_high_contrast
+		end
+
+	low_contrast_warned: BOOLEAN
+			-- Did a styled widget's text and background measure below 4.5:1 (WCAG 2's minimum
+			-- for body text)? A workbench build says so once on standard error.
 
 feature -- Basic operations
 
@@ -346,6 +498,8 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 				when 5 then
 					menu.invoke (l_a)
 				when 10 then
+					resend_theme_colors
+					restyle_all
 					appearance_changed_actions.call ([l_a = 1])
 				when 11 then
 					fire_waiting_messages
@@ -384,10 +538,101 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 			end
 		end
 
+feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Style (1w)
+
+	check_contrast (a_style: GUI_STYLE)
+			-- Note it when `a_style' puts text on a background with too little contrast.
+		local
+			l_fg, l_bg: NATURAL_32
+			l_dark: BOOLEAN
+		do
+			if
+				not low_contrast_warned and then a_style.is_set (a_style.Property_foreground)
+				and then a_style.is_set (a_style.Property_background)
+			then
+				l_dark := is_dark
+				l_fg := a_style.color (a_style.Property_foreground, l_dark, agent system_color)
+				l_bg := a_style.color (a_style.Property_background, l_dark, agent system_color)
+				if a_style.contrast_ratio (l_fg, l_bg) < 4.5 then
+					low_contrast_warned := True
+					if is_workbench_build then
+						io.error.put_string ("simple_gui: a styled widget's text and background measure below 4.5:1 (GUI_STYLE.contrast_ratio).%N")
+					end
+				end
+			end
+		end
+
+	restyle_all
+			-- Show every styled widget's style anew (the appearance, the theme or the system's
+			-- contrast setting changed).
+		do
+			across widgets as ic loop
+				if ic.is_styled or ic.has_native_style then
+					ic.restyle
+				end
+			end
+		end
+
 feature {GUI_TEST_DRIVER} -- Registry
 
 	widgets: HASH_TABLE [GUI_WIDGET, INTEGER]
 			-- Every widget, by id.
+
+feature {NONE} -- Style (1w)
+
+	style_classes: HASH_TABLE [GUI_STYLE, STRING_32]
+			-- Each defined class, by name.
+		attribute
+			create Result.make (4)
+		end
+
+	theme_lights: ARRAY [INTEGER]
+			-- The program's own color for each theme role in the light appearance; -1: the system's.
+		attribute
+			create Result.make_filled (-1, Color_window_background, Color_separator)
+		end
+
+	theme_darks: ARRAY [INTEGER]
+			-- The same in the dark appearance.
+		attribute
+			create Result.make_filled (-1, Color_window_background, Color_separator)
+		end
+
+	send_theme_color (a_role: INTEGER)
+			-- Give the backend the program's color for `a_role' in the appearance of now.
+		do
+			if not has_theme_color (a_role) or else backend.is_high_contrast then
+					-- The system's contrast setting wins: the toolkit shows its own colors.
+				backend.set_theme_color (a_role, -1)
+			elseif is_dark then
+				backend.set_theme_color (a_role, theme_darks [a_role])
+			else
+				backend.set_theme_color (a_role, theme_lights [a_role])
+			end
+		end
+
+	resend_theme_colors
+			-- The appearance or the system's contrast setting changed: give the backend each
+			-- override's variant for now (none under the contrast setting).
+		do
+			across Color_window_background |..| Color_separator as ic loop
+				send_theme_color (ic)
+			end
+		end
+
+	is_workbench_build: BOOLEAN
+			-- Is this a workbench (development) build, not a finalized one?
+		external
+			"C inline"
+		alias
+			"[
+				#ifdef WORKBENCH
+				return EIF_TRUE;
+				#else
+				return EIF_FALSE;
+				#endif
+			]"
+		end
 
 feature {NONE} -- Implementation
 

@@ -43,7 +43,8 @@ inherit
 		undefine
 			accepts_focus, preferred_width, context_menu, accepts_pebble, receive_pebble,
 			cursor_kind, accessible_role, accessible_value, set_focused, takes_typing,
-			can_edit, perform_edit
+			can_edit, perform_edit,
+			set_style, shows_style
 		redefine
 			handle_click, handle_double_click, handle_triple_click, handle_drag,
 			handle_char, handle_key, handle_wheel, handle_release, wants_tab
@@ -275,6 +276,31 @@ feature -- Completion (1v-e-4)
 			if not a_focused then
 				completion_hides_itself
 			end
+		end
+
+feature -- View
+
+	first_visible_line: INTEGER
+			-- The first line, from 1, any part of which is in view; 0 before the first layout.
+		do
+			if is_laid_out then
+				build_bands
+				Result := line_at_shown_y ((scroll_y - Pad_y).max (0.0)) + 1
+			end
+		ensure
+			not_negative: Result >= 0
+		end
+
+	last_visible_line: INTEGER
+			-- The last line, from 1, any part of which is in view (closed folds' hidden lines
+			-- passed over); 0 before the first layout.
+		do
+			if is_laid_out then
+				build_bands
+				Result := line_at_shown_y ((scroll_y - Pad_y + (height - bottom_room)).max (0.0)) + 1
+			end
+		ensure
+			not_negative: Result >= 0
 		end
 
 feature -- Multiple carets (1v-e-5)

@@ -149,8 +149,8 @@ feature -- Windows and containers
 			l_w.set_on_tick (agent on_window_tick)
 			l_w.set_on_shell_event (agent on_window_shell_event)
 			l_w.set_on_pick_cancelled (agent pick_cancelled)
-			if forced_dark_set then
-				l_w.set_theme (themed (forced_dark))
+			if forced_dark_set or is_high_contrast then
+				wear (l_w)
 			end
 			windows.put (l_w, Result)
 		end
@@ -1605,7 +1605,7 @@ feature -- Controls
 			l_was := is_dark
 			forced_dark_set := False
 			across windows as ic loop
-				ic.follow_system_theme (themed (False), themed (True))
+				wear (ic)
 			end
 			if is_dark /= l_was then
 				push (10, 0, is_dark.to_integer, 0, 0)
@@ -4811,7 +4811,9 @@ feature -- Appearance
 			t: SW_THEME
 			l_rgb: NATURAL_32
 		do
-			if is_dark then
+			if is_high_contrast then
+				t := contrast_theme
+			elseif is_dark then
 				create t.make_dark
 			else
 				create t.make_light
@@ -4833,10 +4835,209 @@ feature -- Appearance
 			forced_dark_set := True
 			forced_dark := a_on
 			across windows as ic loop
-				ic.set_theme (themed (a_on))
+				wear (ic)
 			end
 			push (10, 0, a_on.to_integer, 0, 0)
 			changed
+		end
+
+	set_theme_color (a_role, a_rgb: INTEGER)
+			-- 1w: the program's own color for the theme role `a_role' (1 background, 2 text,
+			-- 3 secondary text, 4 accent, 5 selection, 6 separator); -1 gives the theme's
+			-- back. Every window wears it at once. See `wear_theme_colors' for the one limit.
+		do
+			if a_role >= 1 and a_role <= 6 and then theme_overrides [a_role] /= a_rgb.max (-1) then
+				theme_overrides [a_role] := a_rgb.max (-1)
+				across windows as ic loop
+					wear (ic)
+				end
+				changed
+			end
+		end
+
+	is_high_contrast: BOOLEAN
+			-- 1w: is the system's contrast setting on (or held on or off by the test door)?
+		do
+			if forced_contrast_set then
+				Result := forced_contrast
+			else
+				Result := (create {SHELL_APPEARANCE}).system_high_contrast
+			end
+		end
+
+	test_set_high_contrast (a_on: BOOLEAN)
+			-- Tests: behave as if the contrast setting were `a_on', and report the change.
+		local
+			l_was: BOOLEAN
+		do
+			l_was := is_high_contrast
+			forced_contrast_set := True
+			forced_contrast := a_on
+			if a_on /= l_was then
+				across windows as ic loop
+					wear (ic)
+				end
+				push (10, 0, is_dark.to_integer, 0, 0)
+				changed
+			end
+		ensure then
+			held: is_high_contrast = a_on
+		end
+
+feature -- Own appearance (1w)
+
+	widget_set_style (an_id: INTEGER; a_spec: POINTER)
+			-- 1w: the widget wears the style in `a_spec' (see GUI_STYLE.flat); an empty spec
+			-- gives its own look back. UNITS: the spec's lengths are logical pixels and its
+			-- type size is points; simple_widgets takes device pixels and a type size in theme
+			-- units before the text scale (a point is 4/3 of one).
+		local
+			l_style: SW_WIDGET_STYLE
+			i: INTEGER
+		do
+			if attached widget (an_id) as al_w then
+				style_fonts.remove (an_id)
+				if a_spec = default_pointer or else from_c (a_spec).is_empty then
+					al_w.set_style (Void)
+				else
+					create l_style.make
+					across from_c (a_spec).split ('%/31/') as ic loop
+						i := ic.index_of ('=', 1)
+						if i > 1 then
+							put_style_part (l_style, an_id, ic.substring (1, i - 1), ic.substring (i + 1, ic.count))
+						end
+					end
+					al_w.set_style (l_style)
+				end
+				changed
+			end
+		end
+
+	widget_style_supported (an_id: INTEGER; a_property: POINTER): BOOLEAN
+			-- 1w: does the widget show the part of a style the key `a_property' sets?
+		local
+			l_part: INTEGER
+		do
+			if a_property /= default_pointer and then attached widget (an_id) as al_w then
+				l_part := style_part (from_c (a_property))
+				Result := l_part > 0 and then al_w.shows_style (l_part)
+			end
+		end
+
+	font_load (a_path: POINTER): POINTER
+			-- 1w: add the faces in the font file at `a_path' for this process only, and answer
+			-- the family names it carries (parted by unit separators); empty when the file
+			-- cannot be loaded. Loading a file again only names its families again.
+			-- HOW: simple_shaping's private font load (GDI, which every drawn text goes
+			-- through here); each window's shaping kit then forgets its font answers, so a
+			-- widget already styled with the family is set in it at the next draw.
+		local
+			l_path, l_names: STRING_32
+			l_loaded: BOOLEAN
+		do
+			create l_names.make_empty
+			if a_path /= default_pointer and then not from_c (a_path).is_empty then
+				l_path := from_c (a_path)
+				if loaded_fonts.has (l_path) then
+					l_loaded := True
+				elseif font_kit.facade.load_font_file (l_path) > 0 then
+					loaded_fonts.extend (l_path)
+					l_loaded := True
+					across windows as ic loop
+						if attached ic.shaping as al_kit then
+							al_kit.facade.forget_font_answers
+						end
+					end
+					changed
+				end
+				if l_loaded then
+					across font_kit.facade.font_file_families (l_path) as ic loop
+						if not l_names.is_empty then
+							l_names.append_character ('%/31/')
+						end
+						l_names.append (ic)
+					end
+				end
+			end
+			Result := c_text (l_names)
+		end
+
+	font_family_available (a_name: POINTER): BOOLEAN
+			-- 1w: can text be set in a font called `a_name' as itself: a generic name (system,
+			-- sans-serif, serif, monospace), a family installed on the machine, or one
+			-- `font_load' added?
+		local
+			l_name: STRING_32
+		do
+			if a_name /= default_pointer then
+				l_name := from_c (a_name)
+				if l_name.is_case_insensitive_equal_general ("system") or l_name.is_case_insensitive_equal_general ("sans-serif")
+					or l_name.is_case_insensitive_equal_general ("serif") or l_name.is_case_insensitive_equal_general ("monospace") then
+					Result := True
+				elseif not l_name.is_empty then
+					Result := font_kit.facade.has_font_family (l_name)
+				end
+			end
+		end
+
+feature -- Test doors (act on the widget as a user would)
+
+	test_style_value (an_id: INTEGER; a_key: POINTER): POINTER
+			-- Tests: what the widget shows now for the style key `a_key', written as the spec
+			-- writes it; empty when the widget has no style, the style does not set the key
+			-- or the widget does not show it. It is read from the style the widget's own
+			-- drawing takes (`SW_WIDGET.shown_style'), in the spec's units again.
+		local
+			l_key, l_answer: STRING_32
+			l_part: INTEGER
+		do
+			create l_answer.make_empty
+			if a_key /= default_pointer and then attached widget (an_id) as al_w then
+				l_key := from_c (a_key)
+				l_part := style_part (l_key)
+				if l_part > 0 and then attached al_w.shown_style (l_part) as al_s then
+					if l_key.same_string_general ("fg") then
+						l_answer := style_hex (al_s.foreground)
+					elseif l_key.same_string_general ("bg") then
+						l_answer := style_hex (al_s.background)
+					elseif l_key.same_string_general ("placeholder") then
+						l_answer := style_hex (al_s.placeholder)
+					elseif l_key.same_string_general ("selection") then
+						l_answer := style_hex (al_s.selection)
+					elseif l_key.same_string_general ("border_color") then
+						if al_s.has_border_color then
+							l_answer := style_hex (al_s.border_color)
+						end
+					elseif l_key.same_string_general ("shadow_color") then
+						if al_s.has_shadow_color then
+							l_answer := style_hex (al_s.shadow_color)
+						end
+					elseif l_key.same_string_general ("font") then
+						if attached style_fonts.item (an_id) as al_word then
+							l_answer := al_word.twin
+						end
+					elseif l_key.same_string_general ("size") then
+						l_answer := style_number (al_s.size * 0.75)
+					elseif l_key.same_string_general ("weight") then
+						l_answer.append_integer (al_s.weight)
+					elseif l_key.same_string_general ("italic") then
+						l_answer.append_integer (al_s.is_italic.to_integer)
+					elseif l_key.same_string_general ("pad") then
+						l_answer := style_number (al_s.padding_top / dpi) + "," + style_number (al_s.padding_end / dpi)
+							+ "," + style_number (al_s.padding_bottom / dpi) + "," + style_number (al_s.padding_start / dpi)
+					elseif l_key.same_string_general ("border") then
+						l_answer := style_number (al_s.border_width / dpi)
+					elseif l_key.same_string_general ("radius") then
+						l_answer := style_number (al_s.radius / dpi)
+					elseif l_key.same_string_general ("shadow") then
+						l_answer := style_number (al_s.shadow_x / dpi) + "," + style_number (al_s.shadow_y / dpi)
+							+ "," + style_number (al_s.shadow_blur / dpi) + "," + style_number (al_s.shadow_alpha * 100.0)
+					elseif l_key.same_string_general ("scroll") then
+						l_answer.append_integer (al_s.scroll_bars)
+					end
+				end
+			end
+			Result := c_text (l_answer)
 		end
 
 feature -- Test doors (act on the widget as a user would)
@@ -4922,6 +5123,26 @@ feature -- Test doors (act on the widget as a user would)
 		do
 			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
 				al_c.press_code_key (an_action, a_shift, from_c (a_text))
+			end
+		end
+
+	clock_ms: REAL_64
+			-- 1v-e-6: the performance counter, through simple_shell.
+		do
+			Result := desktop.now_ms
+		end
+
+	code_first_visible_line (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.first_visible_line
+			end
+		end
+
+	code_last_visible_line (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.last_visible_line
 			end
 		end
 
@@ -6241,6 +6462,235 @@ feature {NONE} -- Reference pills (1l)
 			end
 		end
 
+feature {NONE} -- Own appearance (1w)
+
+	style_fonts: HASH_TABLE [STRING_32, INTEGER]
+			-- The `font' word each styled widget was given, by widget number: what
+			-- `test_style_value' answers ("system", not the face that stands for it here).
+		once ("OBJECT")
+			create Result.make (8)
+		end
+
+	font_kit: SW_SHAPING
+			-- The backend's own door to the fonts: it loads font files and answers which
+			-- families exist, with or without a window open.
+		once ("OBJECT")
+			create Result.make
+		end
+
+	loaded_fonts: ARRAYED_LIST [STRING_32]
+			-- The font files `font_load' has added, as their paths were given.
+		once ("OBJECT")
+			create Result.make (2)
+			Result.compare_objects
+		end
+
+	style_hex (a_rgb: NATURAL_32): STRING_32
+			-- `a_rgb' (0xRRGGBB) as a spec writes a color: six lowercase hex digits.
+		do
+			Result := (a_rgb & 0xFFFFFF).to_hex_string.substring (3, 8).as_lower
+		ensure
+			six_digits: Result.count = 6
+		end
+
+	style_part (a_key: READABLE_STRING_GENERAL): INTEGER
+			-- The SW_WIDGET_STYLE part the spec key `a_key' sets; 0 for a key nobody knows.
+		do
+			if a_key.same_string ("fg") then
+				Result := {SW_WIDGET_STYLE}.Part_foreground
+			elseif a_key.same_string ("bg") then
+				Result := {SW_WIDGET_STYLE}.Part_background
+			elseif a_key.same_string ("placeholder") then
+				Result := {SW_WIDGET_STYLE}.Part_placeholder
+			elseif a_key.same_string ("selection") then
+				Result := {SW_WIDGET_STYLE}.Part_selection
+			elseif a_key.same_string ("font") then
+				Result := {SW_WIDGET_STYLE}.Part_family
+			elseif a_key.same_string ("size") then
+				Result := {SW_WIDGET_STYLE}.Part_size
+			elseif a_key.same_string ("weight") then
+				Result := {SW_WIDGET_STYLE}.Part_weight
+			elseif a_key.same_string ("italic") then
+				Result := {SW_WIDGET_STYLE}.Part_italic
+			elseif a_key.same_string ("pad") then
+				Result := {SW_WIDGET_STYLE}.Part_padding
+			elseif a_key.same_string ("border") or a_key.same_string ("border_color") then
+				Result := {SW_WIDGET_STYLE}.Part_border
+			elseif a_key.same_string ("radius") then
+				Result := {SW_WIDGET_STYLE}.Part_radius
+			elseif a_key.same_string ("shadow") or a_key.same_string ("shadow_color") then
+				Result := {SW_WIDGET_STYLE}.Part_shadow
+			elseif a_key.same_string ("scroll") then
+				Result := {SW_WIDGET_STYLE}.Part_scroll_bars
+			end
+		ensure
+			a_part_or_none: Result >= 0 and Result <= {SW_WIDGET_STYLE}.Part_scroll_bars
+		end
+
+	put_style_part (a_style: SW_WIDGET_STYLE; an_id: INTEGER; a_key, a_value: STRING_32)
+			-- Set on `a_style' what the spec pair `a_key'=`a_value' says. A value that is
+			-- not what the key takes is left out, as the specification asks.
+		local
+			l_rgb, l_whole: INTEGER
+			l_n: ARRAYED_LIST [REAL_64]
+		do
+			l_rgb := style_color (a_value)
+			l_n := style_numbers (a_value)
+			if l_n.count = 1 then
+				l_whole := l_n.first.rounded
+			end
+			if a_key.same_string_general ("fg") then
+				if l_rgb >= 0 then
+					a_style.set_foreground (l_rgb.to_natural_32)
+				end
+			elseif a_key.same_string_general ("bg") then
+				if l_rgb >= 0 then
+					a_style.set_background (l_rgb.to_natural_32)
+				end
+			elseif a_key.same_string_general ("placeholder") then
+				if l_rgb >= 0 then
+					a_style.set_placeholder (l_rgb.to_natural_32)
+				end
+			elseif a_key.same_string_general ("selection") then
+				if l_rgb >= 0 then
+					a_style.set_selection (l_rgb.to_natural_32)
+				end
+			elseif a_key.same_string_general ("border_color") then
+				if l_rgb >= 0 then
+					a_style.set_border_color (l_rgb.to_natural_32)
+				end
+			elseif a_key.same_string_general ("shadow_color") then
+				if l_rgb >= 0 then
+					a_style.set_shadow_color (l_rgb.to_natural_32)
+				end
+			elseif a_key.same_string_general ("font") then
+				if not a_value.is_empty then
+					style_fonts.force (a_value, an_id)
+					if a_value.is_case_insensitive_equal_general ("system") or a_value.is_case_insensitive_equal_general ("sans-serif") then
+						a_style.set_face ({SW_PAINTER}.Role_ui, "")
+					elseif a_value.is_case_insensitive_equal_general ("serif") then
+						a_style.set_face ({SW_PAINTER}.Role_body, "")
+					elseif a_value.is_case_insensitive_equal_general ("monospace") then
+						a_style.set_face ({SW_PAINTER}.Role_mono, "")
+					else
+						a_style.set_face (0, a_value)
+					end
+				end
+			elseif a_key.same_string_general ("size") then
+				if l_n.count = 1 and then l_n.first > 0.0 then
+					a_style.set_size (l_n.first * 4.0 / 3.0)
+				end
+			elseif a_key.same_string_general ("weight") then
+				if l_n.count = 1 and then l_whole >= 1 and then l_whole <= 1000 then
+					a_style.set_weight (l_whole)
+				end
+			elseif a_key.same_string_general ("italic") then
+				a_style.set_italic (a_value.same_string_general ("1"))
+			elseif a_key.same_string_general ("pad") then
+				if l_n.count = 4 then
+					a_style.set_padding (l_n [1].max (0.0) * dpi, l_n [2].max (0.0) * dpi, l_n [3].max (0.0) * dpi, l_n [4].max (0.0) * dpi)
+				end
+			elseif a_key.same_string_general ("border") then
+				if l_n.count = 1 then
+					a_style.set_border (l_n.first.max (0.0) * dpi)
+				end
+			elseif a_key.same_string_general ("radius") then
+				if l_n.count = 1 then
+					a_style.set_radius (l_n.first.max (0.0) * dpi)
+				end
+			elseif a_key.same_string_general ("shadow") then
+				if l_n.count = 4 then
+					a_style.set_shadow (l_n [1] * dpi, l_n [2] * dpi, l_n [3].max (0.0) * dpi, (l_n [4] / 100.0).max (0.0).min (1.0))
+				end
+			elseif a_key.same_string_general ("scroll") then
+				if l_n.count = 1 and then a_style.is_scroll_bar_kind (l_whole) then
+					a_style.set_scroll_bars (l_whole)
+				end
+			end
+		end
+
+	style_color (a_value: READABLE_STRING_32): INTEGER
+			-- `a_value' (six hex digits) as 0xRRGGBB; -1 when it is anything else.
+		local
+			i, l_digit: INTEGER
+			c: CHARACTER_32
+		do
+			if a_value.count = 6 then
+				from
+					i := 1
+				until
+					i > 6 or Result < 0
+				loop
+					c := a_value [i]
+					if c >= '0' and c <= '9' then
+						l_digit := c.code - ('0').code
+					elseif c >= 'a' and c <= 'f' then
+						l_digit := c.code - ('a').code + 10
+					elseif c >= 'A' and c <= 'F' then
+						l_digit := c.code - ('A').code + 10
+					else
+						l_digit := -1
+					end
+					if l_digit < 0 then
+						Result := -1
+					else
+						Result := Result * 16 + l_digit
+					end
+					i := i + 1
+				end
+			else
+				Result := -1
+			end
+		ensure
+			a_color_or_none: Result >= -1 and Result <= 0xFFFFFF
+		end
+
+	style_numbers (a_value: READABLE_STRING_32): ARRAYED_LIST [REAL_64]
+			-- The numbers in `a_value', parted by commas; empty when any part is not one.
+		local
+			l_bad: BOOLEAN
+		do
+			create Result.make (4)
+			across a_value.split (',') as ic loop
+				if ic.is_real_64 then
+					Result.extend (ic.to_real_64)
+				else
+					l_bad := True
+				end
+			end
+			if l_bad then
+				Result.wipe_out
+			end
+		end
+
+	style_number (a_value: REAL_64): STRING_32
+			-- `a_value' as a spec writes it: at most two decimals, no trailing zeros
+			-- ("15.5", "14", "-2").
+		local
+			l_hundredths, l_fraction: INTEGER_64
+		do
+			l_hundredths := (a_value.abs * 100.0).rounded_real_64.truncated_to_integer_64
+			create Result.make (8)
+			if a_value < 0.0 and l_hundredths > 0 then
+				Result.append_character ('-')
+			end
+			Result.append_integer_64 (l_hundredths // 100)
+			l_fraction := l_hundredths \\ 100
+			if l_fraction > 0 then
+				Result.append_character ('.')
+				if l_fraction \\ 10 = 0 then
+					Result.append_integer_64 (l_fraction // 10)
+				else
+					if l_fraction < 10 then
+						Result.append_character ('0')
+					end
+					Result.append_integer_64 (l_fraction)
+				end
+			end
+		ensure
+			never_empty: not Result.is_empty
+		end
+
 feature {NONE} -- State
 
 	items: ARRAYED_LIST [detachable SW_WIDGET]
@@ -6394,6 +6844,16 @@ feature {NONE} -- State
 
 	forced_dark, forced_dark_set: BOOLEAN
 
+	forced_contrast, forced_contrast_set: BOOLEAN
+			-- Tests: the contrast setting as `test_set_high_contrast' gave it.
+
+	theme_overrides: ARRAY [INTEGER]
+			-- 1w: the program's own color for each theme role (1 to 6) as 0xRRGGBB; -1: the
+			-- theme's own.
+		once ("OBJECT")
+			create Result.make_filled (-1, 1, 6)
+		end
+
 	last_c: detachable C_STRING
 			-- The text handed out last (alive until the next).
 
@@ -6409,8 +6869,78 @@ feature {GUI_SW_WINDOW} -- Themes
 				create Result.make_light
 			end
 			Result.set_text_scale (dpi)
+			wear_theme_colors (Result)
 		ensure
 			scaled: Result.text_scale = dpi
+		end
+
+	contrast_theme: SW_THEME
+			-- A theme painted with the system's colors as the contrast setting has them now,
+			-- at the desktop's scale. The program's own colors stay out of it.
+		local
+			sa: SHELL_APPEARANCE
+		do
+			create sa
+			create Result.make_high_contrast (sa.system_color (sa.Color_window), sa.system_color (sa.Color_window_text),
+				sa.system_color (sa.Color_highlight), sa.system_color (sa.Color_highlight_text),
+				sa.system_color (sa.Color_button_face), sa.system_color (sa.Color_hotlight))
+			Result.set_text_scale (dpi)
+		ensure
+			contrast: Result.is_high_contrast
+			scaled: Result.text_scale = dpi
+		end
+
+	wear (a_window: GUI_SW_WINDOW)
+			-- `a_window' wears the theme of now: the contrast one while the test door holds
+			-- the setting on, the light or dark one a test forced, else the system's (which
+			-- follows light, dark and the real contrast setting by itself).
+		do
+			if forced_contrast_set and then forced_contrast then
+				a_window.set_theme (contrast_theme)
+			elseif forced_dark_set then
+				a_window.set_theme (themed (forced_dark))
+			else
+				a_window.follow_system_theme (themed (False), themed (True))
+			end
+		end
+
+	wear_theme_colors (a_theme: SW_THEME)
+			-- Put the program's own colors (`theme_overrides') over `a_theme''s.
+			-- THE ONE LIMIT: SW_THEME holds its text readable on its surface (4.5 to 1, and
+			-- 3 to 1 for secondary text), so a text color that would break that is not worn
+			-- and the theme's own stays. The text on an accent fill becomes black or white,
+			-- whichever reads better on the new accent.
+		local
+			l_background, l_outline, l_ink, l_muted, l_accent, l_on_accent: NATURAL_32
+		do
+			l_background := a_theme.background
+			l_outline := a_theme.outline
+			l_ink := a_theme.ink
+			l_muted := a_theme.ink_muted
+			if theme_overrides [1] >= 0 then
+				l_background := theme_overrides [1].to_natural_32
+			end
+			if theme_overrides [2] >= 0 and then a_theme.contrast_ratio (theme_overrides [2].to_natural_32, a_theme.surface) >= a_theme.Body_contrast then
+				l_ink := theme_overrides [2].to_natural_32
+			end
+			if theme_overrides [3] >= 0 and then a_theme.contrast_ratio (theme_overrides [3].to_natural_32, a_theme.surface) >= a_theme.Label_contrast then
+				l_muted := theme_overrides [3].to_natural_32
+			end
+			if theme_overrides [6] >= 0 then
+				l_outline := theme_overrides [6].to_natural_32
+			end
+			a_theme.set_surfaces (l_background, a_theme.surface, a_theme.surface_variant, l_outline, l_ink, l_muted)
+			if theme_overrides [4] >= 0 then
+				l_accent := theme_overrides [4].to_natural_32
+				a_theme.set_semantics (l_accent, a_theme.success, a_theme.warning, a_theme.danger, a_theme.neutral)
+				if a_theme.contrast_ratio (0xFFFFFF, l_accent) >= a_theme.contrast_ratio (0x000000, l_accent) then
+					l_on_accent := 0xFFFFFF
+				end
+				a_theme.set_inks_on_fills (l_on_accent, a_theme.ink_on_success, a_theme.ink_on_warning, a_theme.ink_on_danger)
+			end
+			if theme_overrides [5] >= 0 then
+				a_theme.set_washes (theme_overrides [5].to_natural_32, a_theme.wash_success, a_theme.wash_warning, a_theme.wash_danger)
+			end
 		end
 
 feature {NONE} -- Implementation

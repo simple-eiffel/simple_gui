@@ -83,6 +83,33 @@ feature -- Changes
 			end
 		end
 
+feature -- Coloring by the view
+
+	wanted: ARRAYED_LIST [TUPLE [first, last: INTEGER]]
+			-- Each range `spans_wanted' was asked for, in order.
+		attribute
+			create Result.make (8)
+		end
+
+	span_maker: detachable FUNCTION [INTEGER, INTEGER, GUI_SYNTAX_SPANS]
+			-- Answers `spans_wanted' at once with the spans it makes for the lines; Void: no
+			-- answer (a test then answers itself, as a parser on another processor would).
+
+	set_span_maker (a_maker: like span_maker)
+		do
+			span_maker := a_maker
+		ensure
+			set: span_maker = a_maker
+		end
+
+	spans_wanted (a_first_line, a_last_line: INTEGER)
+		do
+			wanted.extend ([a_first_line, a_last_line])
+			if attached editor as al_editor and then attached span_maker as al_maker then
+				al_editor.apply_spans (a_first_line, a_last_line, al_maker.item ([a_first_line, a_last_line]))
+			end
+		end
+
 feature -- Brackets
 
 	bracket_position: INTEGER

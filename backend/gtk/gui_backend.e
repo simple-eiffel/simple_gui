@@ -831,6 +831,24 @@ feature -- Windows and containers
 		alias "sg_test_caret_gesture($an_id, $a_gesture, $a_position);"
 		end
 
+	clock_ms: REAL_64
+			-- 1v-e-6: GLib's monotonic clock.
+		external "C inline use <glib.h>"
+		alias "return (EIF_REAL_64) g_get_monotonic_time () / 1000.0;"
+		end
+
+	code_first_visible_line (an_id: INTEGER): INTEGER
+			-- View-first: the line at the top of the visible rectangle.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_code_visible_line($an_id, 0);"
+		end
+
+	code_last_visible_line (an_id: INTEGER): INTEGER
+			-- View-first: the line at the bottom of the visible rectangle.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_code_visible_line($an_id, 1);"
+		end
+
 	grid_view: INTEGER
 			-- 1v-a.
 		external "C inline use %"simple_gui_gtk.h%""
@@ -2493,6 +2511,46 @@ feature -- Test driver
 	describe_accessibility (a_window: INTEGER): POINTER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return (EIF_POINTER) sg_describe($a_window);"
+		end
+
+	widget_set_style (an_id: INTEGER; a_spec: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_widget_set_style($an_id, (const char *) $a_spec);"
+		end
+
+	widget_style_supported (an_id: INTEGER; a_property: POINTER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_widget_style_supported($an_id, (const char *) $a_property) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	set_theme_color (a_role, a_rgb: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_set_theme_color($a_role, $a_rgb);"
+		end
+
+	font_load (a_path: POINTER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_font_load((const char *) $a_path);"
+		end
+
+	font_family_available (a_name: POINTER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_font_family_available((const char *) $a_name) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	is_high_contrast: BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_is_high_contrast() ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	test_style_value (an_id: INTEGER; a_key: POINTER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_test_style_value($an_id, (const char *) $a_key);"
+		end
+
+	test_set_high_contrast (a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_set_high_contrast($a_on ? 1 : 0);"
 		end
 
 feature {NONE} -- C

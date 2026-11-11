@@ -9,6 +9,7 @@
 #import <Cocoa/Cocoa.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <UserNotifications/UserNotifications.h>
+#import <CoreText/CoreText.h>
 #include <cairo.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -66,13 +67,59 @@ static int sga_id_of(id a_object)
 static NSString *sga_string(const char *a_text) { return [NSString stringWithUTF8String:a_text ? a_text : ""] ?: @""; }
 
 /* Returned strings stay valid until the next call of the same kind. */
-enum { Kind_label, Kind_button, Kind_field, Kind_role, Kind_path, Kind_tree, Kind_check, Kind_menu, Kind_area, Kind_count };
+enum { Kind_label, Kind_button, Kind_field, Kind_role, Kind_path, Kind_tree, Kind_check, Kind_menu, Kind_area, Kind_style, Kind_count };
 static NSString *s_returned[Kind_count];
 static const char *sga_return(int a_kind, NSString *a_text)
 {
 	s_returned[a_kind] = [a_text copy] ?: @"";
 	return [s_returned[a_kind] UTF8String];
 }
+
+/* 1w: styles and the theme (the code is at the end of the file). */
+static void sga_style_suspend(int a_id);   /* before native code changes what a style changed too */
+static void sga_style_resume(int a_id);    /* and after it */
+static void sga_style_cell(NSTableView *a_table, NSView *a_cell);
+static void sga_style_rows_height(NSTableView *a_table);
+static NSColor *sga_style_selection(NSView *a_table);   /* nil: the native selection */
+static NSTextView *sga_style_field_editor(NSView *a_field);
+static void sga_style_untint(NSTextView *a_editor);   /* an edit ended: the shared editor's own selection color again */
+static NSColor *sga_theme_color(int a_role);   /* nil: the system's */
+static void sga_theme_apply(int a_id);
+static unsigned char s_style_hint[SGA_MAX];   /* 1: a check box (an NSButton like any other) */
+static unsigned char s_button_style[SGA_MAX];   /* a button's style: 1 suggested (it shows the accent), 3 flat, 4 pill */
+static int s_contrast_seen;
+int sga_is_high_contrast(void);
+int sga_is_dark(void);
+void sga_wake(void);
+
+/* A row of a list, table or tree: with a selection color in its widget's style (1w) it paints
+   the selection in that color, and tells its cells whether that color is dark. */
+@interface SGARowView : NSTableRowView
+@end
+@implementation SGARowView
+- (NSColor *)styled
+{
+	NSView *v = [self superview];
+	while (v && ![v isKindOfClass:[NSTableView class]]) v = [v superview];
+	return v ? sga_style_selection(v) : nil;
+}
+- (void)drawSelectionInRect:(NSRect)a_rect
+{
+	NSColor *c = [self styled];
+	if (!c) { [super drawSelectionInRect:a_rect]; return; }
+	NSTableView *t = (NSTableView *)[self superview];
+	[c setFill];
+	if ([t isKindOfClass:[NSTableView class]] && [t effectiveStyle] == NSTableViewStyleInset)
+		[[NSBezierPath bezierPathWithRoundedRect:NSInsetRect([self bounds], 10, 0) xRadius:5 yRadius:5] fill];
+	else NSRectFill([self bounds]);
+}
+- (NSBackgroundStyle)interiorBackgroundStyle
+{
+	NSColor *c = [self isSelected] ? [[self styled] colorUsingColorSpace:[NSColorSpace sRGBColorSpace]] : nil;
+	if (!c) return [super interiorBackgroundStyle];
+	return 0.2126 * [c redComponent] + 0.7152 * [c greenComponent] + 0.0722 * [c blueComponent] < 0.5 ? NSBackgroundStyleEmphasized : NSBackgroundStyleNormal;
+}
+@end
 
 static int sga_modifiers(NSEventModifierFlags a_flags)
 {
@@ -128,7 +175,7 @@ static int sga_gdk_key(NSEvent *e)
 {
 	NSRect l_painted = [self bounds];
 	l_painted.size.height -= bottom_bar;
-	[[NSColor windowBackgroundColor] setFill];
+	[(sga_theme_color(1) ?: [NSColor windowBackgroundColor]) setFill];   /* 1w: the theme's own window background */
 	NSRectFill(NSIntersectionRect(a_rect, l_painted));
 }
 @end
@@ -329,8 +376,10 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 	if (!l_cell) { l_cell = [NSTextField labelWithString:@""]; l_cell.identifier = @"sga_cell"; }
 	l_cell.stringValue = l_row;
 	l_cell.alignment = sga_start_alignment(t);
+	sga_style_cell(t, l_cell);
 	return l_cell;
 }
+- (NSTableRowView *)tableView:(NSTableView *)t rowViewForRow:(NSInteger)r { (void)t; (void)r; return [[SGARowView alloc] init]; }
 - (void)tableViewSelectionDidChange:(NSNotification *)n
 {
 	NSTableView *t = [n object];
@@ -344,6 +393,16 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 {
 	(void)p; (void)o; (void)ch; (void)ctx;
 	if (!s_setting_dark) sga_push(10, 0, sga_is_dark(), 0, 0);
+}
+/* 1w: the system's Increase Contrast setting changed: shared code restyles on appearance changed (10). */
+- (void)contrastChanged:(NSNotification *)n
+{
+	(void)n;
+	int l_now = sga_is_high_contrast();
+	if (l_now == s_contrast_seen) return;
+	s_contrast_seen = l_now;
+	sga_push(10, 0, sga_is_dark(), 0, 0);
+	sga_wake();
 }
 - (void)heartbeat:(NSTimer *)t { (void)t; }
 @end
@@ -420,6 +479,9 @@ int sga_init(const char *a_name, const char *a_id)
 	[NSApp setMainMenu:l_bar];
 	[NSApp setWindowsMenu:[s_window_item submenu]];
 	[NSApp addObserver:s_target forKeyPath:@"effectiveAppearance" options:0 context:NULL];
+	s_contrast_seen = sga_is_high_contrast();
+	[[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:s_target selector:@selector(contrastChanged:)
+		name:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification object:nil];
 	[NSApp finishLaunching];
 	return NSApp != nil;
 }
@@ -887,11 +949,24 @@ void sga_stack_extend(int a_stack, int a_child, int a_stretch)
 				[l_share setActive:YES];
 				break;
 			}
-	/* The slot fills the stack across. */
-	if (l_vertical) [[l_slot.widthAnchor constraintEqualToAnchor:s.widthAnchor] setActive:YES];
-	else [[l_slot.heightAnchor constraintEqualToAnchor:s.heightAnchor] setActive:YES];
+	/* The slot fills the stack across, inside its edge insets (1w: a style's padding). */
+	NSEdgeInsets l_insets = [s edgeInsets];
+	if (l_vertical) [[l_slot.widthAnchor constraintEqualToAnchor:s.widthAnchor constant:-(l_insets.left + l_insets.right)] setActive:YES];
+	else [[l_slot.heightAnchor constraintEqualToAnchor:s.heightAnchor constant:-(l_insets.top + l_insets.bottom)] setActive:YES];
 	sga_place(l_slot, s_stack_alignment[a_stack] > 0 ? s_stack_alignment[a_stack] - 1 : sga_default_alignment(v));
 	if (a_stretch) [sga_end_margin(a_stack) setPriority:NSLayoutPriorityRequired - 1];
+}
+
+/* 1w: a stack's edge insets changed (a style's padding): its slots fill it across inside them. */
+static void sga_stack_insets_changed(NSStackView *s)
+{
+	BOOL l_vertical = [s orientation] == NSUserInterfaceLayoutOrientationVertical;
+	NSLayoutAttribute l_across = l_vertical ? NSLayoutAttributeWidth : NSLayoutAttributeHeight;
+	NSEdgeInsets i = [s edgeInsets];
+	CGFloat l_less = l_vertical ? i.left + i.right : i.top + i.bottom;
+	for (NSLayoutConstraint *k in [s constraints])
+		if ([k firstItem] != s && [[k firstItem] isKindOfClass:[SGASlot class]] && [k secondItem] == s
+			&& [k firstAttribute] == l_across && [k secondAttribute] == l_across && [k relation] == NSLayoutRelationEqual) [k setConstant:-l_less];
 }
 
 /* Applies to the existing children and to later ones (stored as alignment + 1; 0 = defaults). */
@@ -1218,9 +1293,40 @@ void sga_splitter_set_position(int a_splitter, int a_position)
 /* A label is one line in 0.1 (wrapping comes in 0.2) and gives way before anything
    else, a canvas included: a long label ends in "\u2026" instead of widening its
    container. */
+/* 1w: a label's padding is its cell's: the text is drawn inside it, and the label's natural
+   size grows by it. Top, end, bottom, start; the start and end follow the text direction. */
+@interface SGALabelCell : NSTextFieldCell
+{
+@public
+	CGFloat pad[4];
+}
+@end
+@implementation SGALabelCell
+- (NSRect)drawingRectForBounds:(NSRect)r
+{
+	BOOL l_rtl = [self userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft;
+	CGFloat l_left = l_rtl ? pad[1] : pad[3], l_right = l_rtl ? pad[3] : pad[1];
+	BOOL l_flipped = [[self controlView] isFlipped];
+	r.origin.x += l_left;
+	r.size.width -= l_left + l_right;
+	r.origin.y += l_flipped ? pad[0] : pad[2];
+	r.size.height -= pad[0] + pad[2];
+	return [super drawingRectForBounds:r];
+}
+@end
 @interface SGALabel : NSTextField
 @end
 @implementation SGALabel
++ (Class)cellClass { return [SGALabelCell class]; }
+- (NSSize)intrinsicContentSize
+{
+	NSSize s = [super intrinsicContentSize];
+	SGALabelCell *c = [self cell];
+	if (![c isKindOfClass:[SGALabelCell class]]) return s;
+	if (s.width != NSViewNoIntrinsicMetric) s.width += c->pad[1] + c->pad[3];
+	if (s.height != NSViewNoIntrinsicMetric) s.height += c->pad[0] + c->pad[2];
+	return s;
+}
 @end
 
 int sga_label(const char *a_text)
@@ -1263,14 +1369,33 @@ const char *sga_label_get(int a_id) { return sga_return(Kind_label, [(NSTextFiel
 /* A toolbar button's item, by button: its label (the overflow menu's text) and enabled state follow the button. */
 static NSMapTable<NSButton *, NSToolbarItem *> *s_toolbar_item;
 
+/* 1w: a flat or pill button takes padding from its style: its natural size grows by it. */
+@interface SGAButton : NSButton
+{
+@public
+	CGFloat pad[4];   /* top, end, bottom, start */
+}
+@end
+@implementation SGAButton
+- (NSSize)intrinsicContentSize
+{
+	NSSize s = [super intrinsicContentSize];
+	if (s.width != NSViewNoIntrinsicMetric) s.width += pad[1] + pad[3];
+	if (s.height != NSViewNoIntrinsicMetric) s.height += pad[0] + pad[2];
+	return s;
+}
+@end
+
 int sga_button(const char *a_text)
 {
-	return sga_keep([NSButton buttonWithTitle:sga_string(a_text) target:s_target action:@selector(clicked:)]);
+	return sga_keep([SGAButton buttonWithTitle:sga_string(a_text) target:s_target action:@selector(clicked:)]);
 }
 void sga_button_set(int a_id, const char *a_text)
 {
 	NSButton *b = sga_get(a_id);
+	sga_style_suspend(a_id);   /* 1w: a styled title's color is in the title */
 	[b setTitle:sga_string(a_text)];
+	sga_style_resume(a_id);
 	[[s_toolbar_item objectForKey:b] setLabel:[b title]];
 }
 const char *sga_button_get(int a_id) { return sga_return(Kind_button, [(NSButton *)sga_get(a_id) title]); }
@@ -1279,7 +1404,10 @@ const char *sga_button_get(int a_id) { return sga_return(Kind_button, [(NSButton
    click, by a user or the test driver, toggles it and sends toggled (12). */
 int sga_check_box(const char *a_text)
 {
-	return sga_keep([NSButton checkboxWithTitle:sga_string(a_text) target:s_target action:@selector(toggled:)]);
+	int l_id = sga_keep([NSButton checkboxWithTitle:sga_string(a_text) target:s_target action:@selector(toggled:)]);
+	s_style_hint[l_id] = 1;
+	sga_theme_apply(l_id);
+	return l_id;
 }
 void sga_check_box_set(int a_id, int a_on) { [(NSButton *)sga_get(a_id) setState:a_on ? NSControlStateValueOn : NSControlStateValueOff]; }
 int sga_check_box_is_checked(int a_id) { return [(NSButton *)sga_get(a_id) state] == NSControlStateValueOn; }
@@ -1398,9 +1526,27 @@ void sga_tabs_set_title(int a_tabs, int a_page, const char *a_title)
 	{ NSTabView *t = sga_get(a_tabs); [[t tabViewItemAtIndex:sga_tab_item(t, a_page)] setLabel:sga_string(a_title)]; sga_tabs_titles_follow(t); }
 }
 
+/* 1w: a field whose style names a selection color edits through its own field editor, which
+   shows that color; any other field uses the window's, as before. */
+@interface SGAFieldCell : NSTextFieldCell
+@end
+@implementation SGAFieldCell
+- (NSTextView *)fieldEditorForView:(NSView *)v { return sga_style_field_editor(v); }
+@end
+@interface SGAField : NSTextField
+@end
+@implementation SGAField
++ (Class)cellClass { return [SGAFieldCell class]; }
+- (void)textDidEndEditing:(NSNotification *)a_note
+{
+	sga_style_untint([a_note object]);
+	[super textDidEndEditing:a_note];
+}
+@end
+
 int sga_field(void)
 {
-	NSTextField *f = [NSTextField textFieldWithString:@""];
+	NSTextField *f = [SGAField textFieldWithString:@""];
 	[f setDelegate:s_target];
 	[f setTarget:s_target];
 	[f setAction:@selector(activated:)];
@@ -1455,8 +1601,10 @@ const char *sga_field_get(int a_id) { return sga_return(Kind_field, [sga_text_fi
 void sga_field_set_placeholder(int a_id, const char *a_text)
 {
 	id o = sga_get(a_id);
+	sga_style_suspend(a_id);   /* 1w: a styled placeholder's color is in the placeholder */
 	if ([o isKindOfClass:NSClassFromString(@"SGAPassword")]) for (NSView *v in [o subviews]) { if ([v isKindOfClass:[NSTextField class]]) [(NSTextField *)v setPlaceholderString:sga_string(a_text)]; }
 	else [(NSTextField *)o setPlaceholderString:sga_string(a_text)];
+	sga_style_resume(a_id);
 }
 
 /* A list's, table's or tree's scroll view: its natural height is its rows' (as a GTK list's
@@ -1667,8 +1815,10 @@ static void sga_table_commit(SGAGridTable *t, NSInteger a_model, NSInteger a_col
 	}
 	[f setStringValue:l_text];
 	[f setAlignment:sga_start_alignment(a_table)];
+	sga_style_cell(a_table, f);
 	return f;
 }
+- (NSTableRowView *)tableView:(NSTableView *)t rowViewForRow:(NSInteger)r { (void)t; (void)r; return [[SGARowView alloc] init]; }
 - (void)tableViewSelectionDidChange:(NSNotification *)n
 {
 	if (s_suppress) return;
@@ -1978,8 +2128,10 @@ void sga_test_click_header(int a_id, int a_column)
 	SGANode *n = an_item;
 	NSUInteger k = [[o tableColumns] indexOfObject:c];
 	[f setStringValue:k == 0 || k == NSNotFound ? n->text : (k <= [n->cells count] ? n->cells[k - 1] : @"")];
+	sga_style_cell(o, f);
 	return f;
 }
+- (NSTableRowView *)outlineView:(NSOutlineView *)o rowViewForItem:(id)an_item { (void)o; (void)an_item; return [[SGARowView alloc] init]; }
 - (void)outlineViewSelectionDidChange:(NSNotification *)n
 {
 	if (s_suppress) return;
@@ -2548,6 +2700,9 @@ void sga_radio_group_extend(int a_id, const char *a_text)
 		[b setState:NSControlStateValueOn];
 		g->chosen = 1;
 	}
+	sga_theme_apply(a_id);   /* 1w: the new radio takes the accent and the group's font */
+	sga_style_suspend(a_id);
+	sga_style_resume(a_id);
 }
 
 void sga_radio_group_select(int a_id, int i)
@@ -2591,7 +2746,9 @@ int sga_slider(int a_min, int a_max, int a_vertical)
 	[s setTranslatesAutoresizingMaskIntoConstraints:NO];
 	if (a_vertical) [[s.heightAnchor constraintGreaterThanOrEqualToConstant:100] setActive:YES];
 	else [[s.widthAnchor constraintGreaterThanOrEqualToConstant:100] setActive:YES];
-	return sga_keep(s);
+	int l_id = sga_keep(s);
+	sga_theme_apply(l_id);
+	return l_id;
 }
 
 void sga_slider_set_value(int a_id, int a_value) { SGASlider *s = sga_get(a_id); [s setIntegerValue:a_value]; s->last = a_value; }
@@ -5485,10 +5642,13 @@ void sga_button_set_icon(int a_id, const char *a_name)
 void sga_button_set_style(int a_id, int a_style)
 {
 	NSButton *b = sga_core(a_id);
+	sga_style_suspend(a_id);   /* 1w: a flat or pill button's style reaches its border too */
 	[b setBordered:a_style != 3];
 	[b setBezelStyle:a_style == 4 ? NSBezelStyleInline : NSBezelStylePush];
-	[b setBezelColor:a_style == 1 ? [NSColor controlAccentColor] : a_style == 2 ? [NSColor systemRedColor] : nil];
+	s_button_style[a_id] = (unsigned char)a_style;
+	[b setBezelColor:a_style == 1 ? (sga_theme_color(4) ?: [NSColor controlAccentColor]) : a_style == 2 ? [NSColor systemRedColor] : nil];
 	[b setHasDestructiveAction:a_style == 2];
+	sga_style_resume(a_id);
 	[b invalidateIntrinsicContentSize];
 }
 
@@ -7930,6 +8090,7 @@ static void sga_list_refilter(NSTableView *t)
 	BOOL l_two = NO;
 	for (id r in l_rows) if ([r isKindOfClass:[SGARichRow class]] && [((SGARichRow *)r)->subtitle length]) l_two = YES;
 	[t setRowHeight:l_two ? 40 : 24];
+	sga_style_rows_height(t);   /* 1w: a styled font may need more */
 	NSMutableIndexSet *l_keep = [NSMutableIndexSet indexSet];
 	__block BOOL l_lost = NO;
 	[l_selected enumerateIndexesUsingBlock:^(NSUInteger m, BOOL *a_stop) {
@@ -8014,6 +8175,7 @@ static NSView *sga_rich_cell(NSTableView *t, SGARichRow *a_row, NSInteger a_mode
 	[c->badge_field setHidden:a_row->badge <= 0];
 	[c->close setHidden:!a_row->closable];
 	[c setAccessibilityLabel:a_row->title];
+	sga_style_cell(t, c);
 	return c;
 }
 
@@ -10506,4 +10668,935 @@ void sga_test_caret_gesture(int a_id, int a_gesture, int a_position)
 	if (!t || a_gesture < 1 || a_gesture > 4) return;
 	sga_push(61, a_id, a_gesture, a_position, 0);
 	sga_wake();
+}
+
+/* ------------------------------------------------------------------ 1v-e-6: view-first coloring */
+
+/* A monotonic clock in milliseconds (as simple_shell's shell_now_ms). */
+double sga_clock_ms(void) { return (double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1.0e6; }
+
+/* The first (or, when `a_last', the last) line, from 1, any part of which is in view; 0
+   before the control has a window and a size to show. The visible rectangle's glyphs, as
+   the gutter finds them; lines a closed fold hides take no room, and when the range starts
+   or ends in them it steps to the nearest shown line. */
+int sga_code_visible_line(int a_id, int a_last)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || ![t window]) return 0;
+	NSRect v = [t visibleRect];
+	if (NSIsEmptyRect(v)) return 0;
+	NSString *s = [t string];
+	NSUInteger n = [s length];
+	if (n == 0) return 1;
+	NSLayoutManager *m = [t layoutManager];
+	NSRect r = NSOffsetRect(v, -[t textContainerOrigin].x, -[t textContainerOrigin].y);
+	NSRange g = [m glyphRangeForBoundingRect:r inTextContainer:[t textContainer]];
+	NSRange c = [m characterRangeForGlyphRange:g actualGlyphRange:NULL];
+	NSUInteger k;
+	if (!a_last) {
+		k = MIN(c.location, n);
+		int i = t->hidden_count ? sga_code_hidden_at(t, k) : -1;
+		if (i >= 0) k = NSMaxRange(t->hidden[i]);
+	}
+	else {
+		/* the empty last line after a final line break, when it is in view */
+		if (NSMaxRange(c) >= n && [s hasSuffix:@"\n"] && NSIntersectsRect([m extraLineFragmentRect], r))
+			return (int)sga_line_breaks(s, 0, n, NULL) + 1;
+		k = NSMaxRange(c) > 0 ? MIN(NSMaxRange(c) - 1, n - 1) : 0;
+		int i = t->hidden_count ? sga_code_hidden_at(t, k) : -1;
+		if (i >= 0 && t->hidden[i].location > 0) k = t->hidden[i].location - 1;
+	}
+	return (int)sga_line_breaks(s, 0, MIN(k, n), NULL) + 1;
+}
+
+/* ------------------------------------------------------------------ 1w: styles and the theme */
+
+/* A style reaches a widget as the flat text shared code resolved (GUI_STYLE.flat): `key=value'
+   pairs separated by 0x1F. What a kind of widget cannot show is left out before anything is
+   applied. Every native value a style replaces is kept, so an empty style, or a new one, starts
+   again from the native look. */
+
+enum { Style_none, Style_label, Style_box, Style_grid, Style_field, Style_search, Style_password, Style_button,
+	Style_check, Style_radio, Style_area, Style_rich_area, Style_rows, Style_grid_view, Style_scroll_area };
+
+@interface SGAStyle : NSObject
+{
+@public
+	NSDictionary<NSString *, NSString *> *raw;    /* as sent */
+	NSDictionary<NSString *, NSString *> *spec;   /* what this widget can show of it */
+	BOOL saved;                                   /* is it on the control now? */
+	/* What it changed, and the native state it replaced. */
+	BOOL did_font, did_color, did_back, did_box, did_pad, did_bordered, did_title, did_placeholder, did_selection, did_scroll, did_height;
+	NSFont *font;
+	NSColor *color, *back;
+	NSArray<NSColor *> *backs;
+	BOOL draws, layered, autohides, vertical, horizontal;
+	NSEdgeInsets insets;
+	CGFloat row_height;
+	NSScrollerStyle scroller;
+	NSDictionary *selected;
+	NSString *placeholder;
+	NSTextView *editor;        /* a field with a selection color edits through this */
+	NSFont *cell_font;         /* rows: what each cell shows */
+	NSColor *cell_color;
+}
+@end
+@implementation SGAStyle
+@end
+
+static NSMutableDictionary<NSNumber *, SGAStyle *> *s_styles;
+static NSMapTable<NSView *, NSNumber *> *s_style_tables;   /* every table ever styled, to its id */
+static int s_theme[7] = { -1, -1, -1, -1, -1, -1, -1 };    /* the program's own color for each role; -1: the system's */
+static int s_force_contrast = -1;                          /* tests: 0 off, 1 on; -1: the system's setting */
+
+static SGAStyle *sga_style_of(int a_id) { return [s_styles objectForKey:@(a_id)]; }
+
+static int sga_style_kind(int a_id)
+{
+	id o = sga_get(a_id), c = sga_core(a_id);
+	if (!o) return Style_none;
+	if ([o isKindOfClass:[SGALabel class]]) return Style_label;
+	if ([o isKindOfClass:[SGAWrapper class]])
+		return [c isKindOfClass:[NSStackView class]] ? Style_box : [c isKindOfClass:[NSGridView class]] ? Style_grid : Style_none;
+	if ([o isKindOfClass:[SGASearchField class]]) return Style_search;
+	if ([o isKindOfClass:[SGAField class]]) return Style_field;
+	if ([o isKindOfClass:[SGAPassword class]]) return Style_password;
+	if ([o isKindOfClass:[SGAButton class]]) return Style_button;
+	if (s_style_hint[a_id] == 1) return Style_check;
+	if ([o isKindOfClass:[SGARadioGroup class]]) return Style_radio;
+	if ([o isKindOfClass:[NSScrollView class]]) {
+		if ([c isKindOfClass:[SGAGridView class]]) return Style_grid_view;
+		if ([c isKindOfClass:[SGANavList class]]) return Style_none;
+		if ([c isKindOfClass:[NSTableView class]]) return Style_rows;
+		if ([c isKindOfClass:[NSTextView class]]) return [(NSTextView *)c isRichText] ? Style_rich_area : Style_area;
+		if ([c isKindOfClass:[SGAWrapper class]]) return Style_scroll_area;
+	}
+	return Style_none;
+}
+
+static BOOL sga_style_in(NSString *a_key, NSString *a_keys) { return [[a_keys componentsSeparatedByString:@" "] containsObject:a_key]; }
+
+/* Can a widget of this kind show the key? A border's color goes with its border, a shadow's with its shadow. */
+static BOOL sga_style_supports(int a_id, int a_kind, NSString *a_key)
+{
+	NSString *k = [a_key isEqualToString:@"border_color"] ? @"border" : [a_key isEqualToString:@"shadow_color"] ? @"shadow" : a_key;
+	switch (a_kind) {
+		case Style_label: return sga_style_in(k, @"font size weight italic fg bg border radius shadow pad");
+		case Style_box: return sga_style_in(k, @"bg border radius shadow pad");
+		case Style_grid: return sga_style_in(k, @"bg border radius shadow");
+		case Style_field: return sga_style_in(k, @"font size weight italic fg placeholder selection bg");
+		case Style_password: return sga_style_in(k, @"font size weight italic fg placeholder bg");
+		case Style_search: return sga_style_in(k, @"font size weight italic fg placeholder");
+		case Style_area: return sga_style_in(k, @"font size weight italic fg selection bg scroll");
+		case Style_rich_area: return sga_style_in(k, @"selection bg scroll");
+		case Style_button:
+			return sga_style_in(k, @"font size weight italic fg")
+				|| ((s_button_style[a_id] == 3 || s_button_style[a_id] == 4) && sga_style_in(k, @"bg border radius pad"));
+		case Style_check: case Style_radio: return sga_style_in(k, @"font size weight italic");
+		case Style_rows: return sga_style_in(k, @"font size weight italic fg selection bg scroll");
+		case Style_grid_view: case Style_scroll_area: return sga_style_in(k, @"bg scroll");
+		default: return NO;
+	}
+}
+
+static NSDictionary<NSString *, NSString *> *sga_style_parse(NSString *a_spec)
+{
+	NSMutableDictionary *d = [NSMutableDictionary dictionary];
+	for (NSString *p in [a_spec componentsSeparatedByString:@"\x1f"]) {
+		NSRange r = [p rangeOfString:@"="];
+		if (r.location != NSNotFound && r.location > 0) d[[p substringToIndex:r.location]] = [p substringFromIndex:r.location + 1];
+	}
+	return d;
+}
+
+static NSColor *sga_style_color(SGAStyle *st, NSString *a_key)
+{
+	NSString *v = st->spec[a_key];
+	return [v length] == 6 ? sga_rgb_color((int)strtol([v UTF8String], NULL, 16)) : nil;
+}
+
+static BOOL sga_style_four(NSString *a_value, CGFloat a_four[4])
+{
+	NSArray<NSString *> *p = [a_value componentsSeparatedByString:@","];
+	if ([p count] != 4) return NO;
+	for (NSUInteger i = 0; i < 4; i++) a_four[i] = [p[i] doubleValue];
+	return YES;
+}
+
+/* A number as GUI_STYLE writes one: at most two decimals, none it does not need. */
+static NSString *sga_style_number(double a_value)
+{
+	NSString *s = [NSString stringWithFormat:@"%.2f", a_value];
+	while ([s hasSuffix:@"0"] && [s containsString:@"."]) s = [s substringToIndex:[s length] - 1];
+	if ([s hasSuffix:@"."]) s = [s substringToIndex:[s length] - 1];
+	return [s isEqualToString:@"-0"] ? @"0" : s;
+}
+
+static NSString *sga_style_hex(NSColor *a_color) { return a_color ? [NSString stringWithFormat:@"%06x", sga_color_rgb(a_color)] : @""; }
+
+/* A system color as it is in the application's appearance of now (a layer keeps what it is given). */
+static NSColor *sga_style_resolved(NSColor *a_color)
+{
+	__block NSColor *r = nil;
+	[[NSApp effectiveAppearance] performAsCurrentDrawingAppearance:^{ r = [a_color colorUsingColorSpace:[NSColorSpace sRGBColorSpace]]; }];
+	return r ?: a_color;
+}
+
+/* ---- fonts */
+
+static const double s_font_weights[9] = { -0.8, -0.6, -0.4, 0, 0.23, 0.3, 0.4, 0.56, 0.62 };   /* NSFontWeight for 100..900 */
+
+/* A font's weight, 100 to 900. */
+static int sga_font_weight(NSFont *a_font)
+{
+	NSDictionary *t = [[a_font fontDescriptor] objectForKey:NSFontTraitsAttribute];
+	double w = [t[NSFontWeightTrait] doubleValue], l_best = 10;
+	int r = 400;
+	for (int i = 0; i < 9; i++) if (fabs(s_font_weights[i] - w) < l_best) { l_best = fabs(s_font_weights[i] - w); r = (i + 1) * 100; }
+	return r;
+}
+static BOOL sga_font_italic(NSFont *a_font) { return ([[a_font fontDescriptor] symbolicTraits] & NSFontDescriptorTraitItalic) != 0; }
+
+/* "system", "monospace" or "serif" for the system's own families; nil for any other font. */
+static NSString *sga_font_generic(NSFont *a_font)
+{
+	NSString *l_family = [a_font familyName] ?: @"", *l_name = [a_font fontName] ?: @"";
+	if (![l_family hasPrefix:@"."] && ![l_name hasPrefix:@"."]) return nil;
+	NSString *l_both = [l_family stringByAppendingString:l_name];
+	if ([l_both containsString:@"Mono"]) return @"monospace";
+	if ([l_both containsString:@"Serif"] || [l_both containsString:@"NewYork"] || [l_both containsString:@"New York"]) return @"serif";
+	return @"system";
+}
+static BOOL sga_font_is_generic(NSString *a_name) { return sga_style_in(a_name, @"system sans-serif serif monospace"); }
+
+/* The font a style asks for, starting from `a_base' for what it leaves unset; nil when it
+   sets nothing of the font. A family that has no such weight or slant gives its nearest
+   face; an unknown family gives the base's. */
+static NSFont *sga_style_font(SGAStyle *st, NSFont *a_base)
+{
+	NSString *l_family = st->spec[@"font"], *l_size = st->spec[@"size"], *l_weight = st->spec[@"weight"], *l_italic = st->spec[@"italic"];
+	if (!l_family && !l_size && !l_weight && !l_italic) return nil;
+	NSFont *l_base = a_base ?: [NSFont systemFontOfSize:[NSFont systemFontSize]];
+	CGFloat l_points = l_size ? [l_size doubleValue] : [l_base pointSize];
+	if (l_points <= 0) l_points = [l_base pointSize];
+	int w = l_weight ? [l_weight intValue] : sga_font_weight(l_base);
+	if (w < 100) w = 100;
+	if (w > 900) w = 900;
+	int l_step = (w + 50) / 100 - 1;   /* 0..8 */
+	BOOL l_slanted = l_italic ? [l_italic intValue] != 0 : sga_font_italic(l_base);
+	NSString *l_name = [l_family length] ? l_family : (sga_font_generic(l_base) ?: [l_base familyName]);
+	NSFont *f = nil;
+	if (sga_font_is_generic(l_name)) {
+		f = [l_name isEqualToString:@"monospace"] ? [NSFont monospacedSystemFontOfSize:l_points weight:s_font_weights[l_step]]
+			: [NSFont systemFontOfSize:l_points weight:s_font_weights[l_step]];
+		if ([l_name isEqualToString:@"serif"]) {
+			NSFontDescriptor *d = [[f fontDescriptor] fontDescriptorWithDesign:NSFontDescriptorSystemDesignSerif];
+			NSFont *l_serif = d ? [NSFont fontWithDescriptor:d size:l_points] : nil;
+			if (l_serif) f = l_serif;
+		}
+		if (l_slanted) {
+			NSFontDescriptor *d = [[f fontDescriptor] fontDescriptorWithSymbolicTraits:[[f fontDescriptor] symbolicTraits] | NSFontDescriptorTraitItalic];
+			NSFont *l_italic_font = d ? [NSFont fontWithDescriptor:d size:l_points] : nil;
+			if (l_italic_font) f = l_italic_font;
+		}
+	} else {
+		static const NSInteger l_manager[9] = { 2, 3, 4, 5, 6, 8, 9, 10, 11 };   /* NSFontManager's 0..15 scale */
+		NSFontManager *m = [NSFontManager sharedFontManager];
+		f = [m fontWithFamily:l_name traits:l_slanted ? NSItalicFontMask : 0 weight:l_manager[l_step] size:l_points];
+		if (!f && l_slanted) f = [m fontWithFamily:l_name traits:0 weight:l_manager[l_step] size:l_points];
+		if (!f) f = [NSFont fontWithName:l_name size:l_points];
+		if (!f) f = [m convertFont:l_base toSize:l_points];
+	}
+	return f ?: l_base;
+}
+
+/* ---- the box: background, border, corner radius and shadow, on a view's layer */
+
+static void sga_style_box(SGAStyle *st, NSView *v)
+{
+	NSColor *l_back = sga_style_color(st, @"bg");
+	double l_border = [st->spec[@"border"] doubleValue], l_radius = [st->spec[@"radius"] doubleValue];
+	CGFloat l_shadow[4];
+	BOOL l_shadowed = st->spec[@"shadow"] && sga_style_four(st->spec[@"shadow"], l_shadow);
+	if (!l_back && l_border <= 0 && l_radius <= 0 && !l_shadowed) return;
+	st->layered = [v wantsLayer];
+	st->did_box = YES;
+	[v setWantsLayer:YES];
+	if (l_back) [[v layer] setBackgroundColor:[l_back CGColor]];
+	if (l_border > 0) {
+		/* No color came with it (the system's contrast setting is on): the text color. */
+		[[v layer] setBorderWidth:l_border];
+		[[v layer] setBorderColor:[(sga_style_color(st, @"border_color") ?: sga_style_resolved([NSColor labelColor])) CGColor]];
+	}
+	if (l_radius > 0) [[v layer] setCornerRadius:l_radius];
+	if (l_shadowed) {
+		NSShadow *s = [[NSShadow alloc] init];
+		[s setShadowOffset:NSMakeSize(l_shadow[0], -l_shadow[1])];   /* the style's y grows downward */
+		[s setShadowBlurRadius:l_shadow[2]];
+		[s setShadowColor:[(sga_style_color(st, @"shadow_color") ?: [NSColor blackColor]) colorWithAlphaComponent:l_shadow[3] / 100.0]];
+		[v setShadow:s];
+	}
+}
+static void sga_style_unbox(SGAStyle *st, NSView *v)
+{
+	if (!st->did_box) return;
+	[[v layer] setBackgroundColor:NULL];
+	[[v layer] setBorderWidth:0];
+	[[v layer] setBorderColor:NULL];
+	[[v layer] setCornerRadius:0];
+	[v setShadow:nil];
+	[v setWantsLayer:st->layered];
+}
+
+/* ---- scroll bars */
+
+static void sga_style_scroll(SGAStyle *st, NSScrollView *a_scroll)
+{
+	int k = st->spec[@"scroll"] ? [st->spec[@"scroll"] intValue] : 0;
+	if (k < 1 || k > 3) return;   /* 0: the system's choice, which is what is there */
+	st->did_scroll = YES;
+	st->scroller = [a_scroll scrollerStyle];
+	st->autohides = [a_scroll autohidesScrollers];
+	st->vertical = [a_scroll hasVerticalScroller];
+	st->horizontal = [a_scroll hasHorizontalScroller];
+	if (k == 1) [a_scroll setScrollerStyle:NSScrollerStyleOverlay];
+	else if (k == 2) { [a_scroll setScrollerStyle:NSScrollerStyleLegacy]; [a_scroll setAutohidesScrollers:NO]; }
+	else { [a_scroll setHasVerticalScroller:NO]; [a_scroll setHasHorizontalScroller:NO]; }
+}
+static void sga_style_unscroll(SGAStyle *st, NSScrollView *a_scroll)
+{
+	if (!st->did_scroll) return;
+	[a_scroll setHasVerticalScroller:st->vertical];
+	[a_scroll setHasHorizontalScroller:st->horizontal];
+	[a_scroll setAutohidesScrollers:st->autohides];
+	[a_scroll setScrollerStyle:st->scroller];
+}
+
+/* ---- rows: lists, tables and trees */
+
+static NSFont *sga_style_cell_default(void) { return [NSFont systemFontOfSize:[NSFont systemFontSize]]; }
+static CGFloat sga_style_line(NSFont *a_font) { return ceil([a_font ascender] - [a_font descender] + [a_font leading]); }
+
+static SGAStyle *sga_style_of_table(NSView *a_table)
+{
+	NSNumber *n = s_style_tables ? [s_style_tables objectForKey:a_table] : nil;
+	SGAStyle *st = n ? [s_styles objectForKey:n] : nil;
+	return st && st->saved ? st : nil;
+}
+
+/* The text of a cell: the cell itself, or a rich row's title. */
+static NSTextField *sga_style_cell_text(NSView *a_cell)
+{
+	if ([a_cell isKindOfClass:[NSTextField class]]) return (NSTextField *)a_cell;
+	if ([a_cell isKindOfClass:[SGARichCell class]]) return ((SGARichCell *)a_cell)->title_field;
+	return nil;
+}
+
+/* A cell about to be shown (cells are reused): its table's style, or the native font and
+   color again. Nothing is done for a table that was never styled. */
+static void sga_style_cell(NSTableView *a_table, NSView *a_cell)
+{
+	if (!s_style_tables || ![s_style_tables objectForKey:a_table]) return;
+	NSTextField *f = sga_style_cell_text(a_cell);
+	if (!f) return;
+	SGAStyle *st = sga_style_of_table(a_table);
+	[f setFont:(st ? st->cell_font : nil) ?: sga_style_cell_default()];
+	[f setTextColor:(st ? st->cell_color : nil) ?: [NSColor labelColor]];
+}
+
+static NSColor *sga_style_selection(NSView *a_table)
+{
+	SGAStyle *st = sga_style_of_table(a_table);
+	return st ? sga_style_color(st, @"selection") : nil;
+}
+
+static void sga_style_rows_refresh(NSTableView *t)
+{
+	[t enumerateAvailableRowViewsUsingBlock:^(NSTableRowView *a_row_view, NSInteger a_row) {
+		(void)a_row;
+		for (NSInteger k = 0; k < [a_row_view numberOfColumns]; k++) {
+			NSView *v = [a_row_view viewAtColumn:k];
+			if (v) sga_style_cell(t, v);
+		}
+		[a_row_view setNeedsDisplay:YES];
+	}];
+}
+
+/* Rows grow by what the styled font's line is taller than the native one. */
+static void sga_style_rows_bump(SGAStyle *st, NSTableView *t)
+{
+	if (!st->cell_font) return;
+	st->row_height = [t rowHeight];
+	st->did_height = YES;
+	CGFloat l_more = sga_style_line(st->cell_font) - sga_style_line(sga_style_cell_default());
+	if (l_more > 0) [t setRowHeight:st->row_height + l_more];
+}
+
+/* Native code just set the table's row height. */
+static void sga_style_rows_height(NSTableView *a_table)
+{
+	SGAStyle *st = sga_style_of_table(a_table);
+	if (st) sga_style_rows_bump(st, a_table);
+}
+
+/* ---- fields */
+
+static NSArray<NSTextField *> *sga_style_fields(int a_id, int a_kind)
+{
+	id o = sga_get(a_id);
+	if (a_kind == Style_password) return @[((SGAPassword *)o)->secure, ((SGAPassword *)o)->plain];
+	return @[o];
+}
+
+/* The field editor that is editing `a_field' now, if it is one of a style's own (not the
+   window's shared one). */
+static NSTextView *sga_style_editing(NSView *a_field, BOOL *a_shared)
+{
+	NSWindow *w = [a_field window];
+	id r = [w firstResponder];
+	if (a_shared) *a_shared = NO;
+	if (![r isKindOfClass:[NSTextView class]] || ![(NSTextView *)r isFieldEditor] || [(NSTextView *)r delegate] != (id)a_field) return nil;
+	if (r == [w fieldEditor:NO forObject:nil]) { if (a_shared) *a_shared = YES; return nil; }
+	return r;
+}
+
+/* A style that names a selection color, given to a field while the window's shared editor
+   is editing it, shows the color on that editor until the edit ends. */
+static __weak NSTextView *s_style_tinted;
+static NSDictionary *s_style_tinted_saved;
+static void sga_style_untint(NSTextView *a_editor)
+{
+	NSTextView *e = s_style_tinted;
+	if (!e || (a_editor && a_editor != e)) return;
+	[e setSelectedTextAttributes:s_style_tinted_saved ?: @{}];
+	s_style_tinted = nil;
+	s_style_tinted_saved = nil;
+}
+
+static NSTextView *sga_style_field_editor(NSView *a_field)
+{
+	/* An edit in progress keeps the editor it began with, whatever the field's style has
+	   become since: the field finds its text in the editor it is asked for here. */
+	BOOL l_shared;
+	NSTextView *e = sga_style_editing(a_field, &l_shared);
+	if (e || l_shared) return e;
+	if (![s_styles count]) return nil;
+	SGAStyle *st = sga_style_of(sga_id_of(a_field));
+	return st && st->saved ? st->editor : nil;
+}
+
+/* ---- buttons */
+
+/* A button's text color is in its title. */
+static void sga_style_button_title(NSButton *b, NSColor *a_color)
+{
+	NSMutableParagraphStyle *p = [[NSMutableParagraphStyle alloc] init];
+	[p setAlignment:[b alignment]];
+	[p setLineBreakMode:NSLineBreakByTruncatingTail];
+	NSMutableDictionary *a = [NSMutableDictionary dictionaryWithObjectsAndKeys:a_color, NSForegroundColorAttributeName, p, NSParagraphStyleAttributeName, nil];
+	if ([b font]) a[NSFontAttributeName] = [b font];
+	[b setAttributedTitle:[[NSAttributedString alloc] initWithString:[b title] ?: @"" attributes:a]];
+}
+
+/* ---- apply and restore */
+
+static void sga_style_apply(int a_id, SGAStyle *st)
+{
+	int l_kind = sga_style_kind(a_id);
+	id o = sga_get(a_id), c = sga_core(a_id);
+	NSMutableDictionary *l_spec = [NSMutableDictionary dictionary];
+	for (NSString *k in st->raw) if (sga_style_supports(a_id, l_kind, k)) l_spec[k] = st->raw[k];
+	st->spec = l_spec;
+	st->did_font = st->did_color = st->did_back = st->did_box = st->did_pad = st->did_bordered = st->did_title = NO;
+	st->did_placeholder = st->did_selection = st->did_scroll = st->did_height = NO;
+	st->editor = nil;
+	st->cell_font = nil;
+	st->cell_color = nil;
+	st->saved = YES;
+	NSColor *l_fore = sga_style_color(st, @"fg"), *l_back = sga_style_color(st, @"bg"), *l_selection = sga_style_color(st, @"selection");
+	CGFloat l_pad[4];
+	BOOL l_padded = st->spec[@"pad"] && sga_style_four(st->spec[@"pad"], l_pad);
+	switch (l_kind) {
+		case Style_label: case Style_field: case Style_search: case Style_password: {
+			NSArray<NSTextField *> *l_fields = sga_style_fields(a_id, l_kind);
+			NSTextField *l_first = l_fields[0];
+			NSFont *f = sga_style_font(st, [l_first font]);
+			if (f) {
+				st->font = [l_first font];
+				st->did_font = YES;
+				for (NSTextField *x in l_fields) [x setFont:f];
+			}
+			if (l_fore) {
+				st->color = [l_first textColor];
+				st->did_color = YES;
+				for (NSTextField *x in l_fields) [x setTextColor:l_fore];
+			}
+			if (l_kind == Style_label) {
+				sga_style_box(st, l_first);
+				SGALabelCell *l_cell = [l_first cell];
+				if (l_padded && [l_cell isKindOfClass:[SGALabelCell class]]) {
+					memcpy(l_cell->pad, l_pad, sizeof l_pad);
+					st->did_pad = YES;
+				}
+				[l_first invalidateIntrinsicContentSize];
+				[l_first setNeedsDisplay:YES];
+				break;
+			}
+			if (l_back) {
+				st->back = [l_first backgroundColor];
+				st->draws = [l_first drawsBackground];
+				st->did_back = YES;
+				for (NSTextField *x in l_fields) { [x setBackgroundColor:l_back]; [x setDrawsBackground:YES]; }
+			}
+			NSColor *l_faint = sga_style_color(st, @"placeholder");
+			if (l_faint) {
+				st->placeholder = [[l_first placeholderString] copy] ?: [[[l_first placeholderAttributedString] string] copy] ?: @"";
+				st->did_placeholder = YES;
+				if ([st->placeholder length]) for (NSTextField *x in l_fields) {
+					NSMutableDictionary *a = [NSMutableDictionary dictionaryWithObject:l_faint forKey:NSForegroundColorAttributeName];
+					if ([x font]) a[NSFontAttributeName] = [x font];
+					[x setPlaceholderAttributedString:[[NSAttributedString alloc] initWithString:st->placeholder attributes:a]];
+				}
+			}
+			if (l_selection && l_kind == Style_field) {
+				/* The editor that is editing it now shows the color at once: its own from an
+				   earlier style, or the window's shared one, for this edit only. */
+				BOOL l_shared;
+				NSTextView *e = sga_style_editing(l_first, &l_shared);
+				if (l_shared) {
+					NSTextView *w = (NSTextView *)[[l_first window] firstResponder];
+					sga_style_untint(nil);
+					s_style_tinted = w;
+					s_style_tinted_saved = [w selectedTextAttributes];
+					[w setSelectedTextAttributes:@{NSBackgroundColorAttributeName: l_selection}];
+				}
+				if (!e) e = [[NSTextView alloc] initWithFrame:NSZeroRect];
+				[e setFieldEditor:YES];
+				st->selected = [e selectedTextAttributes];
+				[e setSelectedTextAttributes:@{NSBackgroundColorAttributeName: l_selection}];
+				st->editor = e;
+				st->did_selection = YES;
+			}
+			break;
+		}
+		case Style_box: case Style_grid: {
+			sga_style_box(st, c);
+			if (l_padded && l_kind == Style_box) {
+				NSStackView *s = c;
+				BOOL l_rtl = [s userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft;
+				st->insets = [s edgeInsets];
+				st->did_pad = YES;
+				[s setEdgeInsets:NSEdgeInsetsMake(l_pad[0], l_rtl ? l_pad[1] : l_pad[3], l_pad[2], l_rtl ? l_pad[3] : l_pad[1])];
+				sga_stack_insets_changed(s);
+			}
+			break;
+		}
+		case Style_button: {
+			SGAButton *b = o;
+			NSFont *f = sga_style_font(st, [b font]);
+			if (f) { st->font = [b font]; st->did_font = YES; [b setFont:f]; }
+			if (l_fore) { st->did_title = YES; sga_style_button_title(b, l_fore); }
+			if (l_back || [st->spec[@"border"] doubleValue] > 0 || [st->spec[@"radius"] doubleValue] > 0) {
+				/* A pill gives up its own bezel for the style's box. */
+				if ([b isBordered]) { st->did_bordered = YES; [b setBordered:NO]; }
+				sga_style_box(st, b);
+			}
+			if (l_padded) { memcpy(b->pad, l_pad, sizeof l_pad); st->did_pad = YES; }
+			[b invalidateIntrinsicContentSize];
+			[b setNeedsDisplay:YES];
+			break;
+		}
+		case Style_check: case Style_radio: {
+			NSArray *l_buttons = l_kind == Style_check ? @[o] : [(NSStackView *)o arrangedSubviews];
+			NSFont *l_native = [l_buttons count] ? [(NSButton *)l_buttons[0] font] : nil;
+			NSFont *f = sga_style_font(st, l_native ?: sga_style_cell_default());
+			if (f) {
+				st->font = l_native ?: sga_style_cell_default();
+				st->did_font = YES;
+				for (NSButton *b in l_buttons) { [b setFont:f]; [b invalidateIntrinsicContentSize]; }
+			}
+			break;
+		}
+		case Style_area: case Style_rich_area: {
+			NSTextView *t = c;
+			s_suppress++;
+			NSFont *f = sga_style_font(st, [t font]);
+			if (f) { st->font = [t font]; st->did_font = YES; [t setFont:f]; }
+			if (l_fore) { st->color = [t textColor]; st->did_color = YES; [t setTextColor:l_fore]; }
+			if (l_back) {
+				st->back = [t backgroundColor];
+				st->draws = [t drawsBackground];
+				st->did_back = YES;
+				[t setBackgroundColor:l_back];
+				[t setDrawsBackground:YES];
+			}
+			if (l_selection) {
+				st->selected = [t selectedTextAttributes];
+				st->did_selection = YES;
+				NSMutableDictionary *a = [NSMutableDictionary dictionaryWithDictionary:st->selected ?: @{}];
+				a[NSBackgroundColorAttributeName] = l_selection;
+				[t setSelectedTextAttributes:a];
+			}
+			s_suppress--;
+			sga_style_scroll(st, o);
+			break;
+		}
+		case Style_rows: {
+			NSTableView *t = c;
+			if (!s_style_tables) s_style_tables = [NSMapTable weakToStrongObjectsMapTable];
+			[s_style_tables setObject:@(a_id) forKey:t];
+			if (l_back) {
+				/* A table's alternate rows are painted over its background: one color it is. */
+				st->back = [t backgroundColor];
+				st->draws = [t usesAlternatingRowBackgroundColors];
+				st->did_back = YES;
+				[t setUsesAlternatingRowBackgroundColors:NO];
+				[t setBackgroundColor:l_back];
+			}
+			st->cell_font = sga_style_font(st, sga_style_cell_default());
+			st->cell_color = l_fore;
+			sga_style_rows_bump(st, t);
+			sga_style_rows_refresh(t);
+			sga_style_scroll(st, o);
+			break;
+		}
+		case Style_grid_view: {
+			SGAGridView *g = c;
+			if (l_back) { st->backs = [g backgroundColors]; st->did_back = YES; [g setBackgroundColors:@[l_back]]; }
+			sga_style_scroll(st, o);
+			break;
+		}
+		case Style_scroll_area: {
+			NSScrollView *s = o;
+			if (l_back) {
+				st->back = [s backgroundColor];
+				st->draws = [s drawsBackground];
+				st->did_back = YES;
+				[s setBackgroundColor:l_back];
+				[s setDrawsBackground:YES];
+			}
+			sga_style_scroll(st, s);
+			break;
+		}
+		default: break;
+	}
+}
+
+static void sga_style_restore(int a_id, SGAStyle *st)
+{
+	int l_kind = sga_style_kind(a_id);
+	id o = sga_get(a_id), c = sga_core(a_id);
+	st->saved = NO;
+	switch (l_kind) {
+		case Style_label: case Style_field: case Style_search: case Style_password: {
+			NSArray<NSTextField *> *l_fields = sga_style_fields(a_id, l_kind);
+			for (NSTextField *x in l_fields) {
+				if (st->did_font) [x setFont:st->font];
+				if (st->did_color) [x setTextColor:st->color];
+				if (st->did_back) { [x setBackgroundColor:st->back]; [x setDrawsBackground:st->draws]; }
+				if (st->did_placeholder) {
+					[x setPlaceholderAttributedString:nil];
+					[x setPlaceholderString:[st->placeholder length] ? st->placeholder : nil];
+				}
+			}
+			if (l_kind == Style_field && st->did_selection) {
+				BOOL l_shared;
+				if (st->editor) [st->editor setSelectedTextAttributes:st->selected ?: @{}];
+				sga_style_editing(l_fields[0], &l_shared);
+				if (l_shared) sga_style_untint((NSTextView *)[[l_fields[0] window] firstResponder]);
+			}
+			if (l_kind == Style_label) {
+				NSTextField *l = l_fields[0];
+				sga_style_unbox(st, l);
+				SGALabelCell *l_cell = [l cell];
+				if (st->did_pad && [l_cell isKindOfClass:[SGALabelCell class]]) memset(l_cell->pad, 0, sizeof l_cell->pad);
+				[l invalidateIntrinsicContentSize];
+				[l setNeedsDisplay:YES];
+			}
+			break;
+		}
+		case Style_box: case Style_grid:
+			sga_style_unbox(st, c);
+			if (st->did_pad) { [(NSStackView *)c setEdgeInsets:st->insets]; sga_stack_insets_changed(c); }
+			break;
+		case Style_button: {
+			SGAButton *b = o;
+			sga_style_unbox(st, b);
+			if (st->did_bordered) [b setBordered:YES];
+			if (st->did_pad) memset(b->pad, 0, sizeof b->pad);
+			if (st->did_font) [b setFont:st->font];
+			if (st->did_title) {
+				NSString *l_title = [[b title] copy] ?: @"";
+				[b setTitle:@""];   /* the title's attributes go with it */
+				[b setTitle:l_title];
+			}
+			[b invalidateIntrinsicContentSize];
+			[b setNeedsDisplay:YES];
+			break;
+		}
+		case Style_check: case Style_radio:
+			if (st->did_font) for (NSButton *b in (l_kind == Style_check ? @[o] : [(NSStackView *)o arrangedSubviews])) {
+				[b setFont:st->font];
+				[b invalidateIntrinsicContentSize];
+			}
+			break;
+		case Style_area: case Style_rich_area: {
+			NSTextView *t = c;
+			s_suppress++;
+			if (st->did_font && st->font) [t setFont:st->font];
+			if (st->did_color) [t setTextColor:st->color];
+			if (st->did_back) { [t setBackgroundColor:st->back]; [t setDrawsBackground:st->draws]; }
+			if (st->did_selection) [t setSelectedTextAttributes:st->selected ?: @{}];
+			s_suppress--;
+			sga_style_unscroll(st, o);
+			break;
+		}
+		case Style_rows: {
+			NSTableView *t = c;
+			if (st->did_back) { [t setBackgroundColor:st->back]; [t setUsesAlternatingRowBackgroundColors:st->draws]; }
+			if (st->did_height) [t setRowHeight:st->row_height];
+			sga_style_rows_refresh(t);
+			sga_style_unscroll(st, o);
+			break;
+		}
+		case Style_grid_view:
+			if (st->did_back) [(SGAGridView *)c setBackgroundColors:st->backs];
+			sga_style_unscroll(st, o);
+			break;
+		case Style_scroll_area:
+			if (st->did_back) { [(NSScrollView *)o setBackgroundColor:st->back]; [(NSScrollView *)o setDrawsBackground:st->draws]; }
+			sga_style_unscroll(st, o);
+			break;
+		default: break;
+	}
+	st->editor = nil;
+	st->cell_font = nil;
+	st->cell_color = nil;
+}
+
+static void sga_style_suspend(int a_id)
+{
+	SGAStyle *st = sga_style_of(a_id);
+	if (st && st->saved) sga_style_restore(a_id, st);
+}
+static void sga_style_resume(int a_id)
+{
+	SGAStyle *st = sga_style_of(a_id);
+	if (st && !st->saved) sga_style_apply(a_id, st);
+}
+
+/* Show a resolved style on a widget; an empty one takes it back to its native look. */
+void sga_widget_set_style(int a_id, const char *a_spec)
+{
+	if (!sga_get(a_id)) return;
+	sga_style_suspend(a_id);
+	NSDictionary *l_raw = sga_style_parse(sga_string(a_spec));
+	if (![l_raw count]) { [s_styles removeObjectForKey:@(a_id)]; return; }
+	if (!s_styles) s_styles = [NSMutableDictionary dictionary];
+	SGAStyle *st = sga_style_of(a_id);
+	if (!st) { st = [[SGAStyle alloc] init]; s_styles[@(a_id)] = st; }
+	st->raw = l_raw;
+	sga_style_apply(a_id, st);
+}
+
+int sga_widget_style_supported(int a_id, const char *a_key)
+{
+	return sga_style_supports(a_id, sga_style_kind(a_id), sga_string(a_key)) ? 1 : 0;
+}
+
+/* ---- the theme */
+
+static NSColor *sga_theme_color(int a_role) { return a_role >= 1 && a_role <= 6 && s_theme[a_role] >= 0 ? sga_rgb_color(s_theme[a_role]) : nil; }
+
+/* The accent on a control that shows one: a suggested button's bezel, a check's and a radio's
+   tint, a slider's filled track. */
+static void sga_theme_apply(int a_id)
+{
+	id o = sga_get(a_id);
+	NSColor *l_accent = sga_theme_color(4);
+	if (s_button_style[a_id] == 1 && [sga_core(a_id) isKindOfClass:[NSButton class]])
+		[(NSButton *)sga_core(a_id) setBezelColor:l_accent ?: [NSColor controlAccentColor]];
+	else if (s_style_hint[a_id] == 1) [(NSButton *)o setContentTintColor:l_accent];
+	else if ([o isKindOfClass:[SGARadioGroup class]]) {
+		for (NSView *b in [(NSStackView *)o arrangedSubviews]) if ([b isKindOfClass:[NSButton class]]) [(NSButton *)b setContentTintColor:l_accent];
+	}
+	else if ([o isKindOfClass:[SGASlider class]]) [(NSSlider *)o setTrackFillColor:l_accent];
+}
+
+static void sga_theme_redraw(NSView *v)
+{
+	if ([v isKindOfClass:[SGAContent class]]) [v setNeedsDisplay:YES];
+	for (NSView *s in [v subviews]) sga_theme_redraw(s);
+}
+
+/* The program's own color for a theme role; -1 goes back to the system's. AppKit lets a
+   program change two of them: the window background (1), which window content is filled
+   with, and the accent (4), on the controls above. The others are answered by shared code. */
+void sga_set_theme_color(int a_role, int a_rgb)
+{
+	if (a_role < 1 || a_role > 6) return;
+	if (a_rgb < 0 || a_rgb > 0xffffff) a_rgb = -1;
+	if (s_theme[a_role] == a_rgb) return;
+	s_theme[a_role] = a_rgb;
+	if (a_role == 1) for (NSWindow *w in [NSApp windows]) { if ([w contentView]) sga_theme_redraw([w contentView]); }
+	if (a_role == 4) for (int i = 1; i <= s_count; i++) sga_theme_apply(i);
+}
+
+/* ---- the system's contrast setting */
+
+int sga_is_high_contrast(void)
+{
+	if (s_force_contrast >= 0) return s_force_contrast;
+	return [[NSWorkspace sharedWorkspace] accessibilityDisplayShouldIncreaseContrast] ? 1 : 0;
+}
+
+/* Tests: act as if Increase Contrast were on (or off). Shared code restyles on appearance changed (10). */
+void sga_test_set_high_contrast(int a_on)
+{
+	s_force_contrast = a_on ? 1 : 0;
+	if (s_contrast_seen == s_force_contrast) return;
+	s_contrast_seen = s_force_contrast;
+	sga_push(10, 0, sga_is_dark(), 0, 0);
+	sga_wake();
+}
+
+/* ---- fonts loaded while the program runs */
+
+/* Load a font file for this process only. The families it adds, separated by 0x1F; empty
+   when it cannot be loaded. Loading the same file again answers the same families. */
+const char *sga_font_load(const char *a_path)
+{
+	NSURL *l_url = [NSURL fileURLWithPath:sga_string(a_path)];
+	NSArray *l_descriptors = CFBridgingRelease(CTFontManagerCreateFontDescriptorsFromURL((__bridge CFURLRef)l_url));
+	NSMutableArray<NSString *> *l_names = [NSMutableArray array];
+	for (id d in l_descriptors) {
+		NSString *l_family = CFBridgingRelease(CTFontDescriptorCopyAttribute((__bridge CTFontDescriptorRef)d, kCTFontFamilyNameAttribute));
+		if ([l_family length] && ![l_names containsObject:l_family]) [l_names addObject:l_family];
+	}
+	if (![l_names count]) return sga_return(Kind_style, @"");
+	CFErrorRef l_error = NULL;
+	if (!CTFontManagerRegisterFontsForURL((__bridge CFURLRef)l_url, kCTFontManagerScopeProcess, &l_error)) {
+		BOOL l_already = l_error && CFErrorGetCode(l_error) == kCTFontManagerErrorAlreadyRegistered;
+		if (l_error) CFRelease(l_error);
+		if (!l_already) return sga_return(Kind_style, @"");
+	}
+	return sga_return(Kind_style, [l_names componentsJoinedByString:@"\x1f"]);
+}
+
+int sga_font_family_available(const char *a_name)
+{
+	NSString *n = sga_string(a_name);
+	if (![n length]) return 0;
+	if (sga_font_is_generic(n)) return 1;
+	NSFontDescriptor *d = [NSFontDescriptor fontDescriptorWithFontAttributes:@{NSFontFamilyAttribute: n}];
+	return [[d matchingFontDescriptorsWithMandatoryKeys:[NSSet setWithObject:NSFontFamilyAttribute]] count] > 0 ? 1 : 0;
+}
+
+/* ---- tests: what the control shows */
+
+static NSString *sga_style_read_font(SGAStyle *st, NSFont *a_font, NSString *a_key)
+{
+	if (!a_font) return @"";
+	if ([a_key isEqualToString:@"size"]) return sga_style_number([a_font pointSize]);
+	if ([a_key isEqualToString:@"weight"]) return [NSString stringWithFormat:@"%d", sga_font_weight(a_font)];
+	if ([a_key isEqualToString:@"italic"]) return sga_font_italic(a_font) ? @"1" : @"0";
+	NSString *l_name = sga_font_generic(a_font) ?: [a_font familyName] ?: @"";
+	if ([l_name isEqualToString:@"system"] && [st->spec[@"font"] isEqualToString:@"sans-serif"]) return @"sans-serif";   /* the same font */
+	return l_name;
+}
+
+static NSString *sga_style_read_color(NSAttributedString *a_text, NSString *an_attribute)
+{
+	return [a_text length] ? sga_style_hex([a_text attribute:an_attribute atIndex:0 effectiveRange:NULL]) : @"";
+}
+
+/* What the native control shows now for a key of its style, read from the control and written
+   as the style writes it. Empty when the control does not show the key. */
+const char *sga_test_style_value(int a_id, const char *a_key)
+{
+	NSString *k = sga_string(a_key), *r = @"";
+	SGAStyle *st = sga_style_of(a_id);
+	int l_kind = sga_style_kind(a_id);
+	if (!st || !st->saved || !st->spec[k]) return sga_return(Kind_style, @"");
+	id o = sga_get(a_id), c = sga_core(a_id);
+	BOOL l_rows = l_kind == Style_rows, l_text_area = l_kind == Style_area || l_kind == Style_rich_area;
+	NSScrollView *l_scroll = [o isKindOfClass:[NSScrollView class]] ? o : nil;
+	/* The view that has the box, the text control, and (rows) the first cell. */
+	NSView *l_box = l_kind == Style_box || l_kind == Style_grid ? c : o;
+	NSTextField *l_field = l_kind == Style_password ? ((SGAPassword *)o)->secure
+		: (l_kind == Style_label || l_kind == Style_field || l_kind == Style_search) ? o : nil;
+	if (l_rows) {
+		NSTableView *t = c;
+		NSView *l_cell = [t numberOfRows] > 0 && [t numberOfColumns] > 0 ? [t viewAtColumn:0 row:0 makeIfNecessary:YES] : nil;
+		l_field = l_cell ? sga_style_cell_text(l_cell) : nil;
+	}
+	if (sga_style_in(k, @"font size weight italic")) {
+		NSFont *f = l_field ? [l_field font] : l_text_area ? [(NSTextView *)c font]
+			: (l_kind == Style_button || l_kind == Style_check) ? [(NSButton *)o font]
+			: l_kind == Style_radio ? [(NSButton *)[[(NSStackView *)o arrangedSubviews] firstObject] font] : nil;
+		r = sga_style_read_font(st, f, k);
+	} else if ([k isEqualToString:@"fg"]) {
+		if (l_field) r = sga_style_hex([l_field textColor]);
+		else if (l_text_area) r = sga_style_hex([(NSTextView *)c textColor]);
+		else if (l_kind == Style_button) r = sga_style_read_color([(NSButton *)o attributedTitle], NSForegroundColorAttributeName);
+	} else if ([k isEqualToString:@"bg"]) {
+		if (l_kind == Style_label || l_kind == Style_box || l_kind == Style_grid || l_kind == Style_button)
+			r = [[l_box layer] backgroundColor] ? sga_style_hex([NSColor colorWithCGColor:[[l_box layer] backgroundColor]]) : @"";
+		else if (l_rows) r = [(NSTableView *)c usesAlternatingRowBackgroundColors] ? @"" : sga_style_hex([(NSTableView *)c backgroundColor]);   /* alternate rows would paint over it */
+		else if (l_field) r = [l_field drawsBackground] ? sga_style_hex([l_field backgroundColor]) : @"";
+		else if (l_text_area) r = sga_style_hex([(NSTextView *)c backgroundColor]);
+		else if (l_kind == Style_grid_view) r = sga_style_hex([[(SGAGridView *)c backgroundColors] firstObject]);
+		else if (l_kind == Style_scroll_area) r = [l_scroll drawsBackground] ? sga_style_hex([l_scroll backgroundColor]) : @"";
+	} else if ([k isEqualToString:@"placeholder"]) {
+		if (l_field && !l_rows) r = sga_style_read_color([l_field placeholderAttributedString], NSForegroundColorAttributeName);
+	} else if ([k isEqualToString:@"selection"]) {
+		if (l_rows) r = sga_style_hex(sga_style_selection(c));
+		else if (l_text_area) r = sga_style_hex([(NSTextView *)c selectedTextAttributes][NSBackgroundColorAttributeName]);
+		else if (l_kind == Style_field) {
+			/* The editor that is editing it now, or the one its cell hands out when an edit starts. */
+			id l_now = [[(NSView *)o window] firstResponder];
+			NSTextView *e = [l_now isKindOfClass:[NSTextView class]] && [(NSTextView *)l_now delegate] == o ? l_now : [[(NSTextField *)o cell] fieldEditorForView:o];
+			r = e ? sga_style_hex([e selectedTextAttributes][NSBackgroundColorAttributeName]) : @"";
+		}
+	} else if ([k isEqualToString:@"pad"]) {
+		CGFloat *p = NULL, l_insets[4];
+		if (l_kind == Style_label && [[(NSTextField *)o cell] isKindOfClass:[SGALabelCell class]]) p = ((SGALabelCell *)[(NSTextField *)o cell])->pad;
+		else if (l_kind == Style_button) p = ((SGAButton *)o)->pad;
+		else if (l_kind == Style_box) {
+			/* Measured where it can be: where the children really are, across the box and at
+			   its start. */
+			NSStackView *s = c;
+			NSEdgeInsets i = [s edgeInsets];
+			BOOL l_rtl = [s userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft;
+			BOOL l_vertical = [s orientation] == NSUserInterfaceLayoutOrientationVertical, l_any = NO;
+			NSRect u = NSZeroRect, b = [s bounds];
+			[s layoutSubtreeIfNeeded];
+			for (NSView *v in [s arrangedSubviews]) if (![v isHidden]) { u = l_any ? NSUnionRect(u, [v frame]) : [v frame]; l_any = YES; }
+			if (l_any) {
+				CGFloat l_low = NSMinY(u) - NSMinY(b), l_high = NSMaxY(b) - NSMaxY(u);
+				CGFloat l_top = [s isFlipped] ? l_low : l_high, l_bottom = [s isFlipped] ? l_high : l_low;
+				if (l_vertical) { i.left = NSMinX(u) - NSMinX(b); i.right = NSMaxX(b) - NSMaxX(u); i.top = l_top; }
+				else { i.top = l_top; i.bottom = l_bottom; if (l_rtl) i.right = NSMaxX(b) - NSMaxX(u); else i.left = NSMinX(u) - NSMinX(b); }
+			}
+			l_insets[0] = i.top; l_insets[1] = l_rtl ? i.left : i.right; l_insets[2] = i.bottom; l_insets[3] = l_rtl ? i.right : i.left;
+			p = l_insets;
+		}
+		if (p) r = [NSString stringWithFormat:@"%@,%@,%@,%@", sga_style_number(p[0]), sga_style_number(p[1]), sga_style_number(p[2]), sga_style_number(p[3])];
+	} else if ([k isEqualToString:@"border"]) {
+		r = sga_style_number([[l_box layer] borderWidth]);
+	} else if ([k isEqualToString:@"border_color"]) {
+		r = [[l_box layer] borderColor] ? sga_style_hex([NSColor colorWithCGColor:[[l_box layer] borderColor]]) : @"";
+	} else if ([k isEqualToString:@"radius"]) {
+		r = sga_style_number([[l_box layer] cornerRadius]);
+	} else if ([k isEqualToString:@"shadow"] || [k isEqualToString:@"shadow_color"]) {
+		NSShadow *s = [l_box shadow];
+		if (s && [k isEqualToString:@"shadow_color"]) r = sga_style_hex([[s shadowColor] colorWithAlphaComponent:1]);
+		else if (s) r = [NSString stringWithFormat:@"%@,%@,%@,%@", sga_style_number([s shadowOffset].width), sga_style_number(-[s shadowOffset].height),
+			sga_style_number([s shadowBlurRadius]), sga_style_number(round([[s shadowColor] alphaComponent] * 100))];
+	} else if ([k isEqualToString:@"scroll"] && l_scroll) {
+		r = ![l_scroll hasVerticalScroller] && ![l_scroll hasHorizontalScroller] ? @"3"
+			: [l_scroll scrollerStyle] == NSScrollerStyleLegacy && ![l_scroll autohidesScrollers] ? @"2"
+			: [l_scroll scrollerStyle] == NSScrollerStyleOverlay ? @"1" : @"0";
+	}
+	return sga_return(Kind_style, r ?: @"");
 }

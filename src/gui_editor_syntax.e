@@ -74,6 +74,19 @@ feature -- Changes (called by the editor)
 		deferred
 		end
 
+feature -- Coloring by the view (called by the editor, from 1v-e-6 on)
+
+	spans_wanted (a_first_line, a_last_line: INTEGER)
+			-- The editor wants lines `a_first_line' to `a_last_line' colored: answer, now or
+			-- later, with the editor's `apply_spans' for a range that covers them. The editor
+			-- asks for the lines in view first and the rest a slice at a time, and asks again
+			-- for nothing it has not had an answer to.
+		require
+			working: editor /= Void
+			lines_ordered: 1 <= a_first_line and a_first_line <= a_last_line
+		deferred
+		end
+
 feature -- Brackets (called by the editor, from 1v-e-2 on)
 
 	bracket_wanted (a_position: INTEGER)
