@@ -29,6 +29,9 @@ note
 deferred class
 	GUI_BACKEND_API
 
+inherit
+	STRING_HANDLER
+
 feature -- Lifecycle and loop
 
 	init (a_name, a_id: POINTER): BOOLEAN
@@ -2246,15 +2249,92 @@ feature -- Strings across the boundary
 
 	from_c (a_pointer: POINTER): STRING_32
 			-- The UTF-8 C string at `a_pointer', or empty for a null pointer.
+			-- Well-formed UTF-8 is decoded in C in one pass, straight into the storage of
+			-- the result. Anything else takes the two steps this always took (a byte string,
+			-- then UTF_CONVERTER), so bytes that are not UTF-8 read as they always did.
 		local
 			l_c: C_STRING
+			l_bytes, l_count: INTEGER
 		do
 			if a_pointer = default_pointer then
 				create Result.make_empty
 			else
-				create l_c.make_by_pointer (a_pointer)
-				Result := {UTF_CONVERTER}.utf_8_string_8_to_string_32 (l_c.string)
+				l_bytes := c_byte_count (a_pointer)
+					-- room for the most there can be: one character for each byte
+				create Result.make (l_bytes)
+				l_count := c_decode_utf_8 (a_pointer, l_bytes, Result.area.base_address)
+				if l_count >= 0 then
+					Result.set_count (l_count)
+				else
+					create l_c.make_by_pointer (a_pointer)
+					Result := {UTF_CONVERTER}.utf_8_string_8_to_string_32 (l_c.string)
+				end
 			end
+		ensure
+			empty_for_null: a_pointer = default_pointer implies Result.is_empty
+		end
+
+feature {NONE} -- Strings across the boundary: the C side
+
+	c_byte_count (a_pointer: POINTER): INTEGER
+			-- The bytes of the C string at `a_pointer', before its closing zero.
+		require
+			not_null: a_pointer /= default_pointer
+		external
+			"C inline use <string.h>"
+		alias
+			"return (EIF_INTEGER) strlen ((const char *) $a_pointer);"
+		ensure
+			non_negative: Result >= 0
+		end
+
+	c_decode_utf_8 (a_source: POINTER; a_bytes: INTEGER; a_target: POINTER): INTEGER
+			-- Decode the `a_bytes' bytes of UTF-8 at `a_source' into the 32-bit characters
+			-- at `a_target', which has room for `a_bytes' of them. The count of characters
+			-- written, or -1 when the bytes are not well-formed UTF-8 (a stray or missing
+			-- continuation byte, a longer form than the character needs, a surrogate, a
+			-- value past 0x10FFFF): what was written then means nothing.
+		require
+			source: a_source /= default_pointer
+			target: a_target /= default_pointer
+			non_negative: a_bytes >= 0
+		external
+			"C inline"
+		alias
+			"[
+				{
+					const unsigned char *s = (const unsigned char *) $a_source;
+					const unsigned char *e = s + $a_bytes;
+					EIF_CHARACTER_32 *d0 = (EIF_CHARACTER_32 *) $a_target;
+					EIF_CHARACTER_32 *d = d0;
+					unsigned int c, v;
+					while (s < e) {
+						c = *s;
+						if (c < 0x80) {
+							*d++ = (EIF_CHARACTER_32) c;
+							s += 1;
+						} else if (c >= 0xC2 && c <= 0xDF && e - s >= 2 && (s[1] & 0xC0) == 0x80) {
+							*d++ = (EIF_CHARACTER_32) (((c & 0x1F) << 6) | (s[1] & 0x3F));
+							s += 2;
+						} else if ((c & 0xF0) == 0xE0 && e - s >= 3 && (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80) {
+							v = ((c & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
+							if (v < 0x800 || (v >= 0xD800 && v <= 0xDFFF)) return -1;
+							*d++ = (EIF_CHARACTER_32) v;
+							s += 3;
+						} else if ((c & 0xF8) == 0xF0 && e - s >= 4 && (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80 && (s[3] & 0xC0) == 0x80) {
+							v = ((c & 0x07) << 18) | ((s[1] & 0x3F) << 12) | ((s[2] & 0x3F) << 6) | (s[3] & 0x3F);
+							if (v < 0x10000 || v > 0x10FFFF) return -1;
+							*d++ = (EIF_CHARACTER_32) v;
+							s += 4;
+						} else {
+							return -1;
+						}
+					}
+					return (EIF_INTEGER) (d - d0);
+				}
+			]"
+		ensure
+			in_range: Result >= -1 and Result <= a_bytes
 		end
 
 end

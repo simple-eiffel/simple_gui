@@ -4703,12 +4703,20 @@ static void sg_rich_iters(int id, int s, int e, GtkTextIter *a, GtkTextIter *z) 
     gtk_text_buffer_get_iter_at_offset(sg_rich_buffer(id), a, s - 1);
     gtk_text_buffer_get_iter_at_offset(sg_rich_buffer(id), z, e);
 }
-/* Remove every tag of a family (color or size) from a range, before applying another. */
+/* Remove every tag of a family (color or size) from a range, before applying another.
+   The tags on a character change only at a toggle, so the tags are asked for at the start
+   and at each toggle, not at every character (389,000 times for a text of that many
+   characters going plain). The walk itself stays character by character, so it never looks
+   past the range: gtk_text_iter_forward_to_tag_toggle for any tag steps line by line to
+   the end of the text when no toggle follows, and made a 10,000-line load 3.5 times
+   slower (measured 2026-11-11). */
 static void sg_rich_clear_family(int id, int s, int e, const char *prefix) {
     GtkTextIter a, z, i;
     GSList *tags, *l;
+    int first = 1;
     sg_rich_iters(id, s, e, &a, &z);
-    for (i = a; gtk_text_iter_compare(&i, &z) < 0; gtk_text_iter_forward_char(&i)) {
+    for (i = a; gtk_text_iter_compare(&i, &z) < 0; gtk_text_iter_forward_char(&i), first = 0) {
+        if (!first && !gtk_text_iter_toggles_tag(&i, NULL)) continue;
         tags = gtk_text_iter_get_tags(&i);
         for (l = tags; l; l = l->next) {
             char *name = NULL;
