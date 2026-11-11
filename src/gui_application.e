@@ -73,6 +73,22 @@ feature -- Access
 	message_actions: GUI_ACTIONS [TUPLE [tag: INTEGER; payload: STRING_32]]
 			-- Run for each worker message, on the GUI processor.
 
+	new_message_tag: INTEGER
+			-- A mailbox tag no one else has (1v-e-1): always negative, and different on
+			-- every call. A tag a class fixes for itself as a constant (the picture
+			-- loader's) is positive, so the two kinds never meet. Ask on the GUI processor
+			-- and hand the number to the worker that will post with it.
+		do
+			last_message_tag := last_message_tag - 1
+			Result := last_message_tag
+		ensure
+			negative: Result < 0
+			new: Result < old last_message_tag
+		end
+
+	last_message_tag: INTEGER
+			-- The tag `new_message_tag' gave last; 0 before the first.
+
 	appearance_changed_actions: GUI_ACTIONS [TUPLE [dark: BOOLEAN]]
 
 	help_actions: GUI_ACTIONS [TUPLE [topic: STRING_32; widget: detachable GUI_WIDGET]]

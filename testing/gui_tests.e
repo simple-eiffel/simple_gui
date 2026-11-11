@@ -2272,6 +2272,342 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_code_syntax_hears_true_edits
+			-- 1v-e-1: a syntax object hears each change as an edit that, applied to its own
+			-- copy of the text, gives the editor's text: typing, a selection typed over, a
+			-- cut, a paste, `replace_selection', `replace_all', undo and redo, and a line
+			-- that repeats. `set_text' is told as a replaced text.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_menu: GUI_MENU
+			l_undo, l_redo, l_cut, l_paste, l_edits, l_replaced, l_round: INTEGER
+			l_before, l_theirs: STRING_32
+		do
+				-- the cut and the paste below use the clipboard: the person's own text is
+				-- put back at the end
+			l_theirs := app.clipboard.text
+			l_menu := app.menu.add_menu ("Edit")
+			l_menu.add_edit_item (l_menu.Role_undo, "Undo")
+			l_undo := l_menu.last_item_id
+			l_menu.add_edit_item (l_menu.Role_redo, "Redo")
+			l_redo := l_menu.last_item_id
+			l_menu.add_edit_item (l_menu.Role_cut, "Cut")
+			l_cut := l_menu.last_item_id
+			l_menu.add_edit_item (l_menu.Role_paste, "Paste")
+			l_paste := l_menu.last_item_id
+			create l_window.make ("Syntax edits", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_syntax.make
+			l_code.set_syntax (l_syntax)
+			assert ("attached: " + l_syntax.log, l_syntax.editor = l_code and l_syntax.log.same_string ("A"))
+			l_code.set_text ("class A%Nfeature%N    x: INTEGER = 42%Nend")
+			assert ("set_text is told as a replaced text", l_syntax.replaced_count = 1 and l_syntax.edit_count = 0)
+			assert_copy_holds ("as set", l_code, l_syntax)
+			driver.focus (l_code)
+			l_code.go_to_line (2)
+			driver.type_code (l_code, "do")
+			assert ("typing is told as edits", l_syntax.edit_count >= 1 and l_syntax.replaced_count = 1)
+			assert_copy_holds ("typed", l_code, l_syntax)
+			driver.type_code (l_code, "%N    y")
+			assert_copy_holds ("a line typed", l_code, l_syntax)
+				-- a selection typed over
+			l_code.select_range (1, 5)
+			driver.type_code (l_code, "deferred class")
+			assert ("typed over: " + l_code.line_text (1).out, l_code.line_text (1).same_string ({STRING_32} "deferred class A"))
+			assert_copy_holds ("a selection typed over", l_code, l_syntax)
+				-- a cut
+			l_before := l_code.text
+			l_code.select_range (1, 9)
+			driver.invoke_menu (l_cut)
+			assert ("the cut took the selection: " + l_code.line_text (1).out, l_code.text.count = l_before.count - 9)
+			assert_copy_holds ("cut", l_code, l_syntax)
+				-- a paste, of two lines. (GTK reads the clipboard on a later turn of the loop,
+				-- which may come after the loop first goes quiet: the paste is waited for.)
+			app.clipboard.set_text ("one%Ntwo ")
+			driver.invoke_menu (l_paste)
+			from l_round := 0 until l_round = 40 or l_code.text.has_substring ({STRING_32} "one%Ntwo ") loop
+				driver.wait (50)
+				l_round := l_round + 1
+			end
+			assert ("the paste added the lines: " + l_code.line_text (1).out, l_code.text.has_substring ({STRING_32} "one%Ntwo "))
+			assert_copy_holds ("pasted", l_code, l_syntax)
+				-- the editor's own edits
+			l_code.select_range (1, 3)
+			l_code.replace_selection ("ONE")
+			assert_copy_holds ("replace_selection", l_code, l_syntax)
+			l_edits := l_syntax.edit_count
+			assert ("some replaced", l_code.replace_all ("e", "EE", True, False) > 0)
+			assert ("replace_all is told as an edit", l_syntax.edit_count > l_edits)
+			assert_copy_holds ("replace_all", l_code, l_syntax)
+				-- undo and redo
+			l_code.go_to_line (2)
+			driver.type_code (l_code, "zz")
+			assert_copy_holds ("typed before the undo", l_code, l_syntax)
+			l_before := l_code.text
+			driver.invoke_menu (l_undo)
+			assert ("undo changed the text", not l_code.text.same_string (l_before))
+			assert_copy_holds ("undone", l_code, l_syntax)
+			driver.invoke_menu (l_redo)
+			assert ("redo brought it back", l_code.text.same_string (l_before))
+			assert_copy_holds ("redone", l_code, l_syntax)
+			assert ("only set_text was told as a replaced text", l_syntax.replaced_count = 1)
+				-- a line that repeats: the shared start and the shared end overlap
+			app.clipboard.set_text (l_theirs)
+			l_code.set_text ("do%Ndo")
+			l_replaced := l_syntax.replaced_count
+			assert ("told as replaced again", l_replaced = 2)
+			driver.move_caret (l_code, 2, 3)
+			driver.type_code (l_code, "%Ndo")
+			assert ("three lines: " + l_code.line_count.out, l_code.line_count = 3)
+			assert_copy_holds ("a repeated line added", l_code, l_syntax)
+			assert ("an edit is never told as a replaced text", l_syntax.replaced_count = l_replaced)
+			l_window.close
+		end
+
+	test_code_syntax_takes_the_place_of_the_rules
+			-- 1v-e-1: with a syntax object set the rules color nothing; a second one detaches
+			-- the first; Void detaches and the rules color again; a change of theme asks the
+			-- object to color again; the folds it gives are kept while it is set.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_first, l_second: GUI_TEST_SYNTAX
+			l_folds: GUI_TEST_RANGES
+			l_was_dark: BOOLEAN
+			l_replaced, l_keyword: INTEGER
+		do
+			create l_window.make ("Syntax or rules", 560, 320)
+			l_code := new_ruled_editor
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("class A%Nfeature -- note%Nend")
+			l_keyword := l_code.style_color (l_code.Style_keyword).to_integer_32
+			assert ("the rules color a keyword", color_at (l_code, 1) = l_keyword)
+			create l_first.make
+			l_code.set_syntax (l_first)
+			assert ("attached", l_code.syntax = l_first and l_first.editor = l_code and l_first.attach_count = 1)
+			assert ("with the text", l_first.copy_text.same_string (l_code.text))
+			assert ("every line went plain: " + first_colored (l_code).out, first_colored (l_code) = 0)
+			driver.focus (l_code)
+			l_code.go_to_line (3)
+			driver.type_code (l_code, "do ")
+			assert ("the edit was told", l_first.edit_count >= 1)
+			assert_copy_holds ("typed", l_code, l_first)
+			assert ("and the rules colored nothing: " + first_colored (l_code).out, first_colored (l_code) = 0)
+			l_replaced := l_first.replaced_count
+			l_code.add_keywords (<<"A">>, l_code.Style_type)
+			assert ("a new rule colors nothing", first_colored (l_code) = 0)
+			assert ("and asks nothing of the syntax", l_first.replaced_count = l_replaced)
+				-- folds
+			assert ("no folds yet", l_code.fold_count = 0)
+			create l_folds.make
+			l_folds.put (1, 3)
+			l_folds.put (2, 2)
+			l_code.set_folds (l_folds)
+			assert ("the folds are kept", l_code.fold_count = 2 and l_code.fold_first_line (1) = 1
+				and l_code.fold_last_line (1) = 3 and l_code.fold_first_line (2) = 2 and l_code.fold_last_line (2) = 2)
+				-- theme
+			l_was_dark := app.is_dark
+			driver.set_dark (not l_was_dark)
+			assert ("a change of theme asks the syntax to color again", l_first.replaced_count = l_replaced + 1)
+			driver.set_dark (l_was_dark)
+				-- a second syntax, then none
+			create l_second.make
+			l_code.set_syntax (l_second)
+			assert ("the first was detached", l_first.detach_count = 1 and l_first.editor = Void)
+			assert ("the second attached", l_second.attach_count = 1 and l_second.editor = l_code)
+			assert ("the folds went with the first", l_code.fold_count = 0)
+			l_code.set_syntax (l_second)
+			assert ("the same one again changes nothing", l_second.attach_count = 1 and l_second.detach_count = 0)
+			l_code.set_syntax (Void)
+			assert ("Void detaches", l_second.detach_count = 1 and l_second.editor = Void and l_code.syntax = Void)
+			l_keyword := l_code.style_color (l_code.Style_keyword).to_integer_32
+			assert ("and the rules color again", color_at (l_code, 1) = l_keyword)
+			assert ("the typed keyword too", color_at (l_code, l_code.text.substring_index ("do end", 1)) = l_keyword)
+			assert ("and the rule added meanwhile", color_at (l_code, 7) = l_code.style_color (l_code.Style_type).to_integer_32)
+			l_window.close
+		end
+
+	test_code_apply_spans
+			-- 1v-e-1: `apply_spans' colors what it names and makes the rest of its lines
+			-- plain, leaves the other lines alone, and passes over or cuts what lies past the
+			-- text.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_spans: GUI_TEST_SPANS
+			l_text: STRING_32
+			l_keyword, l_string, l_comment, l_function, l_2, l_3, l_4: INTEGER
+		do
+			create l_window.make ("Spans", 560, 320)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("one two%Nthree four%Nfive%Nsix seven")
+			l_text := l_code.text
+			l_2 := l_text.index_of ('%N', 1) + 1
+			l_3 := l_text.index_of ('%N', l_2) + 1
+			l_4 := l_text.index_of ('%N', l_3) + 1
+			l_keyword := l_code.style_color (l_code.Style_keyword).to_integer_32
+			l_string := l_code.style_color (l_code.Style_string).to_integer_32
+			l_comment := l_code.style_color (l_code.Style_comment).to_integer_32
+			l_function := l_code.style_color (l_code.Style_function).to_integer_32
+				-- every line a comment, end to end
+			create l_spans.make (4)
+			l_spans.put (1, 1, 7, l_code.Style_comment)
+			l_spans.put (2, 1, 10, l_code.Style_comment)
+			l_spans.put (3, 1, 4, l_code.Style_comment)
+			l_spans.put (4, 1, 9, l_code.Style_comment)
+			l_code.apply_spans (1, 4, l_spans)
+			assert ("all four lines colored", color_at (l_code, 1) = l_comment and color_at (l_code, l_2) = l_comment
+				and color_at (l_code, l_3) = l_comment and color_at (l_code, l_text.count) = l_comment)
+				-- lines 2 and 3 again
+			create l_spans.make (8)
+			l_spans.put (2, 1, 5, l_code.Style_keyword)		-- "three"
+			l_spans.put (2, 7, 100, l_code.Style_string)	-- "four", and far past the line's end
+			l_spans.put (1, 1, 3, l_code.Style_function)	-- a line before the range
+			l_spans.put (4, 1, 3, l_code.Style_function)	-- a line after the range
+			l_spans.put (9, 1, 2, l_code.Style_keyword)		-- a line the text does not have
+			l_spans.put (3, 1, 2, 99)						-- a style the editor does not know
+			l_spans.put (3, 9, 2, l_code.Style_keyword)		-- starts past its line's end
+			l_spans.put (3, 3, 1, l_code.Style_function)	-- the "v" of "five", in a new style
+			l_code.apply_spans (2, 3, l_spans)
+			assert ("the keyword", color_at (l_code, l_2) = l_keyword and color_at (l_code, l_2 + 4) = l_keyword)
+			assert ("between the spans is plain", is_plain_at (l_code, l_2 + 5))
+			assert ("the long span is cut at its line's end", color_at (l_code, l_2 + 6) = l_string and color_at (l_code, l_3 - 2) = l_string)
+			assert ("and does not reach the next line", is_plain_at (l_code, l_3))
+			assert ("an unknown style shows as plain", is_plain_at (l_code, l_3 + 1))
+			assert ("a new style colors", color_at (l_code, l_3 + 2) = l_function)
+			assert ("the rest of the line went plain", is_plain_at (l_code, l_3 + 3))
+			assert ("line 1 was left alone", color_at (l_code, 1) = l_comment and color_at (l_code, 7) = l_comment)
+			assert ("line 4 was left alone", color_at (l_code, l_4) = l_comment and color_at (l_code, l_text.count) = l_comment)
+				-- past the text
+			l_code.apply_spans (7, 9, l_spans)
+			assert ("lines the text does not have change nothing", color_at (l_code, l_2) = l_keyword and color_at (l_code, 1) = l_comment)
+			create l_spans.make (0)
+			l_code.apply_spans (4, {INTEGER}.max_value, l_spans)
+			assert ("to the end with no spans: line 4 plain", is_plain_at (l_code, l_4) and is_plain_at (l_code, l_text.count))
+			assert ("and line 3 as it was", color_at (l_code, l_3 + 2) = l_function)
+			l_code.set_text ("")
+			l_code.apply_spans (1, 1, l_spans)
+			assert ("an empty text takes it", l_code.text.is_empty)
+			l_window.close
+		end
+
+	test_code_apply_spans_cost
+			-- 1v-e-1: what `apply_spans' costs for a whole 10,000-line text of 60,000 spans
+			-- (the first answer after a load) and for one line (a keystroke's answer), each
+			-- alone and with its frame drawn. Printed, as a shipped program would spend it:
+			-- the measured steps run inside `timed'.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_all, l_one: GUI_TEST_SPANS
+			l_text: STRING_32
+			i, l_lines, l_middle, l_string_length, l_offset: INTEGER
+			l_t0, l_whole, l_whole_frame, l_hundred, l_key, l_sum, l_worst: REAL_64
+		do
+			l_lines := 10_000
+			if attached (create {EXECUTION_ENVIRONMENT}).item ("GUI_LARGE_LINES") as al_n and then al_n.is_integer then
+				l_lines := al_n.to_integer
+			end
+			l_middle := l_lines // 2
+			create l_window.make ("Spans cost", 720, 480)
+			create l_code.make
+			l_code.set_syntax (create {GUI_TEST_SYNTAX}.make)
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+				-- each line:     do print ("line N") end -- note
+			create l_text.make (400_000)
+			create l_all.make (l_lines * 6)
+			create l_one.make (6)
+			from i := 1 until i > l_lines loop
+				l_text.append ({STRING_32} "    do print (%"line ")
+				l_text.append_integer (i)
+				l_text.append ({STRING_32} "%") end -- note%N")
+				l_string_length := 7 + i.out.count
+				across << l_all, l_one >> as ic loop
+					if ic = l_all or i = l_middle then
+						ic.put (i, 5, 2, l_code.Style_keyword)
+						ic.put (i, 8, 5, l_code.Style_function)
+						ic.put (i, 14, 1, l_code.Style_operator)
+						ic.put (i, 15, l_string_length, l_code.Style_string)
+						ic.put (i, 17 + l_string_length, 3, l_code.Style_keyword)
+						ic.put (i, 21 + l_string_length, 7, l_code.Style_comment)
+					end
+				end
+				i := i + 1
+			end
+			l_text.remove_tail (1)
+			timed (agent l_code.set_text (l_text))
+			timed (agent driver.pump_until_idle (0))
+			assert ("all the lines: " + l_code.line_count.out, l_code.line_count = l_lines)
+			l_t0 := now_seconds
+			timed (agent l_code.apply_spans (1, l_lines, l_all))
+			l_whole := now_seconds - l_t0
+			timed (agent driver.pump_until_idle (0))
+			l_whole_frame := now_seconds - l_t0
+			print ("    apply_spans: " + l_lines.out + " lines, " + l_all.count.out + " spans colored in "
+				+ (l_whole * 1000.0).rounded.out + " ms; with the frame drawn " + (l_whole_frame * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+			timed (agent l_code.go_to_line (l_middle))
+			timed (agent driver.pump_until_idle (0))
+			l_t0 := now_seconds
+			from i := 1 until i > 100 loop
+				timed (agent l_code.apply_spans (l_middle, l_middle, l_one))
+				i := i + 1
+			end
+			l_hundred := now_seconds - l_t0
+			from i := 1 until i > 5 loop
+				l_t0 := now_seconds
+				timed (agent l_code.apply_spans (l_middle, l_middle, l_one))
+				timed (agent driver.pump_until_idle (0))
+				l_key := now_seconds - l_t0
+				l_sum := l_sum + l_key
+				l_worst := l_worst.max (l_key)
+				i := i + 1
+			end
+			print ("    apply_spans: one line in the middle, " + l_one.count.out + " spans, mean of 100: "
+				+ (l_hundred * 10_000.0).rounded.out + " microseconds; with the frame drawn, mean of 5: "
+				+ (l_sum * 200.0).rounded.out + " ms, worst " + (l_worst * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+			assert ("six spans a line", l_all.count = l_lines * 6 and l_one.count = 6)
+			l_offset := l_code.text.substring_index ("(%"line " + l_middle.out + "%")", 1)
+			assert ("the middle line is in the text", l_offset > 0)
+			assert ("its keyword colored", color_at (l_code, l_offset - 9) = l_code.style_color (l_code.Style_keyword).to_integer_32)
+			assert ("its function colored", color_at (l_code, l_offset - 6) = l_code.style_color (l_code.Style_function).to_integer_32)
+			assert ("its string colored", color_at (l_code, l_offset + 1) = l_code.style_color (l_code.Style_string).to_integer_32)
+			assert ("its comment colored", color_at (l_code, l_offset + 14 + l_middle.out.count) = l_code.style_color (l_code.Style_comment).to_integer_32)
+			assert ("the last line's comment colored", color_at (l_code, l_code.text.count) = l_code.style_color (l_code.Style_comment).to_integer_32)
+			l_window.close
+		end
+
+	test_new_message_tag
+			-- 1v-e-1: a tag from `new_message_tag' is negative and never comes twice.
+		local
+			l_seen: HASH_TABLE [BOOLEAN, INTEGER]
+			i, l_tag, l_bad: INTEGER
+		do
+			create l_seen.make (1000)
+			from i := 1 until i > 1000 loop
+				l_tag := app.new_message_tag
+				if l_tag >= 0 or l_seen.has (l_tag) then
+					l_bad := l_bad + 1
+				end
+				l_seen.force (True, l_tag)
+				i := i + 1
+			end
+			assert ("1000 tags, each negative and new; bad ones: " + l_bad.out, l_bad = 0)
+		end
+
 	test_preferences_values_and_file
 			-- 1v-d: typed values with defaults; integers clamp; a file round-trips, keeps keys it
 			-- doesn't know, and a bad value falls back to its default; changes are told.
@@ -4300,6 +4636,54 @@ feature {NONE} -- Fixtures
 			end
 			assert (a_tag + ": colored as a fresh text (first difference at character " + l_differing.out
 				+ " of [" + l_text.out + "])", l_differing = 0)
+		end
+
+	assert_copy_holds (a_tag: STRING; a_code: GUI_CODE_EDITOR; a_syntax: GUI_TEST_SYNTAX)
+			-- The edits `a_syntax' was told, applied in order to its own copy of the text,
+			-- give the text of `a_code'.
+		do
+			assert (a_tag + ": every edit fit the copy", a_syntax.false_edits = 0)
+			assert (a_tag + ": the copy [" + a_syntax.copy_text.out + "] is the text [" + a_code.text.out + "]",
+				a_syntax.copy_text.same_string (a_code.text))
+		end
+
+	color_at (a_code: GUI_CODE_EDITOR; i: INTEGER): INTEGER
+			-- The color of character `i', 0xRRGGBB; -1 when it has none of its own.
+		do
+			if a_code.has_text_color_at (i) then
+				Result := a_code.text_color_at (i).to_integer_32
+			else
+				Result := -1
+			end
+		end
+
+	is_plain_at (a_code: GUI_CODE_EDITOR; i: INTEGER): BOOLEAN
+			-- Is character `i' plain: no color of its own, or the plain style's?
+		local
+			l_color: INTEGER
+		do
+			l_color := color_at (a_code, i)
+			Result := l_color = -1 or l_color = a_code.style_color (a_code.Style_plain).to_integer_32
+		end
+
+	first_colored (a_code: GUI_CODE_EDITOR): INTEGER
+			-- The first character of `a_code' that is not plain (line breaks show no color
+			-- and are passed over); 0 when every one is.
+		local
+			l_text: STRING_32
+			i, l_plain, l_color: INTEGER
+		do
+			l_text := a_code.text
+			l_plain := a_code.style_color (a_code.Style_plain).to_integer_32
+			from i := 1 until i > l_text.count or Result > 0 loop
+				if l_text [i] /= '%N' then
+					l_color := color_at (a_code, i)
+					if l_color /= -1 and l_color /= l_plain then
+						Result := i
+					end
+				end
+				i := i + 1
+			end
 		end
 
 	timed (a_work: PROCEDURE)

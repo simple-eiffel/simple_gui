@@ -3291,15 +3291,14 @@ static void sg_window_install_shortcuts(int win, const char *spec_list) {
 }
 /* Edit roles act on the focused widget of the active window (a menu bar's own action scope
    does not reach a text field's "clipboard.*" actions). */
+static GtkWidget *sg_active_focus(void);
+/* An Edit item acts on the widget whose enabled state it showed: `sg_active_focus', which
+   also answers when no window is active (a test run's window may never be activated; an item
+   that was enabled then did nothing). */
 static void sg_on_edit(GSimpleAction *a, GVariant *p, gpointer d) {
-    int i; (void) a; (void) p;
-    for (i = 1; i < sg_n; i++) {
-        if (sg_kind[i] == 1 && sg_w[i] && gtk_window_is_active(GTK_WINDOW(sg_w[i]))) {
-            GtkWidget *f = gtk_root_get_focus(GTK_ROOT(sg_w[i]));
-            if (f) gtk_widget_activate_action(f, (const char *) d, NULL);
-            return;
-        }
-    }
+    GtkWidget *f = sg_active_focus();
+    (void) a; (void) p;
+    if (f) gtk_widget_activate_action(f, (const char *) d, NULL);
 }
 /* role: 10 undo 11 redo 12 cut 13 copy 14 paste 15 select all */
 static const char *sg_edit_names[] = {"undo", "redo", "cut", "copy", "paste", "select_all"};
@@ -3386,7 +3385,16 @@ static void sg_update_edit_enabled(void) {
     }
 }
 /* Test doors: focus a widget as a click would; is Edit role `role' enabled now? */
-static void sg_test_focus(int id) { if (sg_w[id]) gtk_widget_grab_focus(sg_w[id]); }
+/* The widget that takes the keyboard for `id': a text area, list, table or tree is
+   registered as its scrolled window, and the focus belongs on the view inside it (on
+   the scrolled window Cut, Copy and the other Edit items read as disabled). */
+static GtkWidget *sg_focus_target(int id) {
+    GtkWidget *v;
+    if (!sg_w[id]) return NULL;
+    v = g_object_get_data(G_OBJECT(sg_w[id]), "sg-view");
+    return (v && GTK_IS_WIDGET(v)) ? v : sg_w[id];
+}
+static void sg_test_focus(int id) { GtkWidget *t = sg_focus_target(id); if (t) gtk_widget_grab_focus(t); }
 static int sg_test_edit_enabled(int role) {
     char name[32];
     GAction *a;
@@ -4608,7 +4616,7 @@ static void sg_test_press_chevron(int id, int part) {
 }
 static void sg_test_press_path_space(int id) { sg_push(54, id, 0, 0); }
 static void sg_test_field_escape(int id) { sg_push(55, id, 0, 0); }
-static void sg_widget_focus(int id) { if (sg_w[id]) gtk_widget_grab_focus(sg_w[id]); }
+static void sg_widget_focus(int id) { GtkWidget *t = sg_focus_target(id); if (t) gtk_widget_grab_focus(t); }
 static int sg_path_control_count(int id) { return (int) sg_path_parts(id)->len; }
 static const char *sg_path_control_part(int id, int i) {
     return (i >= 1 && (guint) i <= sg_path_parts(id)->len) ? g_ptr_array_index(sg_path_parts(id), i - 1) : "";
