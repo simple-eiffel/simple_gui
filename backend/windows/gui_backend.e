@@ -4850,6 +4850,17 @@ feature -- Test doors (act on the widget as a user would)
 			end
 		end
 
+	test_fill_event_queue (a_count: INTEGER)
+			-- The queue is a list here, unbounded: every one is kept.
+		local
+			i: INTEGER
+		do
+			from i := 1 until i > a_count loop
+				push (0, 0, 0, 0, 0)
+				i := i + 1
+			end
+		end
+
 	test_bracket_key (an_id: INTEGER)
 			-- The key that goes to the matching bracket, as the user would press it (event 56).
 		do
