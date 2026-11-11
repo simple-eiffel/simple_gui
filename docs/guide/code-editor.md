@@ -82,6 +82,14 @@ The window shows a short class with line numbers in the gutter. `class`, `featur
 | `replace_selection (a_text)` | Replace the selected text. |
 | `replace_all (a_text, a_with, a_case_sensitive, a_whole_word)` | Replace every match; answers how many. One undo step. |
 | `caret_actions` | Agents run with the line and column when the user moves the caret, for a status bar. |
+| `set_folding_shown (a_on)`, `is_folding_shown` | Fold markers in the gutter, and the fold keys Control+Shift+[ and ] (Command+Option+[ and ] on macOS). Off until set. Folds come from the indentation, or from a syntax object. |
+| `fold (a_line)`, `unfold (a_line)`, `toggle_fold (a_line)`, `fold_all`, `unfold_all` | Close or open the fold that starts on `a_line` (`is_foldable`), or every fold. The text stays whole: queries, find and the syntax object see the hidden lines. |
+| `is_foldable (a_line)`, `is_folded (a_line)`, `is_line_hidden (a_line)`, `fold_actions` | Does a fold start there, is it closed, is a line hidden; agents run (line, folded) when the user folds or unfolds. |
+| `set_completion_words (a_words)`, `set_completer (a_function)` | Offers for completion: a fixed list, and an agent that gets the word, the line and the column. Each offer is a `GUI_COMPLETION` (text, label, detail, kind). |
+| `completion_opened_actions`, `add_completions (a_start, an_offers)` | For a slow source: told where the word starts when a list is wanted, it adds its offers later. |
+| `complete`, `set_completion_auto_count (a_count)`, `completion_accepted_actions` | Open the list as Control+Space does; open it by itself after `a_count` word characters (2; 0 for only on request); agents run with the text accepted. |
+| `add_caret (a_line, a_column)`, `add_selection (a_start, an_end)`, `add_next_occurrence`, `clear_extra_carets` | More carets: from code, or by Alt+click (Option+click), Control+Alt+Down and Up, and Control+D (Command on macOS). Typing, deleting, moving and pasting then act at every caret, as one undo step; Escape goes back to one. |
+| `caret_count`, `caret_start (i)`, `caret_end (i)` | The carets, the control's own first. |
 
 Everything a [rich text area](rich-text-area.md) has works here too (`change_actions`, `select_range`, `selection_start`, `set_read_only`), and the rest are the [common features](widget.md).
 
