@@ -704,6 +704,11 @@ feature -- Windows and containers
 		alias "return sg_test_bracket_tint_at($an_id, $a_position) ? EIF_TRUE : EIF_FALSE;"
 		end
 
+	test_fill_event_queue (a_count: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_fill_event_queue($a_count);"
+		end
+
 	test_bracket_key (an_id: INTEGER)
 			-- 1v-e-2.
 		external "C inline use %"simple_gui_gtk.h%""

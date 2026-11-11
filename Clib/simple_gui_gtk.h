@@ -5863,6 +5863,8 @@ static int sg_test_bracket_tint_at(int id, int pos) {
     return gtk_text_iter_has_tag(&it, sg_code_pair_tag(id)) ? 1 : 0;
 }
 static void sg_test_bracket_key(int id) { sg_push(56, id, 0, 0); }
+/* For the tests of a full queue: `n' events no widget answers (type 0, id 0). */
+static void sg_test_fill_event_queue(int n) { int i; for (i = 0; i < n; i++) sg_push(0, 0, 0, 0); }
 static gboolean sg_on_code_key(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
     int id = GPOINTER_TO_INT(d);
     (void) k; (void) code;

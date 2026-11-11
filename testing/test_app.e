@@ -41,6 +41,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_dark_mode_switch_fires_and_reads, "dark_mode_switch_fires_and_reads")
 				run_test (agent t.test_snapshots_light_and_dark, "snapshots_light_and_dark")
 				run_test (agent t.test_worker_message_arrives_through_mailbox_and_wake, "worker_message_arrives_through_mailbox_and_wake")
+				run_test (agent t.test_wake_arrives_after_a_full_event_queue, "wake_arrives_after_a_full_event_queue")
 				run_test (agent t.test_close_request_without_agents_closes, "close_request_without_agents_closes")
 				run_test (agent t.test_splitter, "splitter")
 				run_test (agent t.test_wrapping_label_grows_taller, "wrapping_label_grows_taller")

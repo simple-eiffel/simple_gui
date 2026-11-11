@@ -1659,6 +1659,11 @@ feature -- Common widget state
 		alias "return sga_test_bracket_tint_at($an_id, $a_position) ? EIF_TRUE : EIF_FALSE;"
 		end
 
+	test_fill_event_queue (a_count: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_fill_event_queue($a_count);"
+		end
+
 	test_bracket_key (an_id: INTEGER)
 			-- 1v-e-2.
 		external "C inline use %"simple_gui_appkit.h%""
