@@ -534,6 +534,57 @@ feature -- Windows and containers
 		deferred
 		end
 
+	code_show_completions (an_id: INTEGER; a_joined: POINTER; a_selected: INTEGER)
+			-- 1v-e-4: show the completion list at the caret, or replace its rows. `a_joined' is
+			-- UTF-8, ending in NUL: rows joined by 0x1F, and in a row the label, the detail and
+			-- the kind (one digit, 0 to 5) joined by 0x1E. Row `a_selected', from 1, is
+			-- highlighted. Read during the call.
+			-- A native popup under the caret's line (above it when there is no room below), at
+			-- most 8 rows tall, scrolling; it never takes the focus.
+			-- While it shows, Up, Down, Page Up, Page Down, Return or Tab, and Escape send 58
+			-- with a = 1 to 6 in place of their usual work, and a click on a row sends 59 with
+			-- a = the row. Control+Space sends 58 with a = 0 at any time (on macOS the
+			-- `complete:' action does too). The control hides the list itself when the editor
+			-- loses the focus or scrolls, and sends 58 with a = 6.
+		require
+			has_rows: a_joined /= default_pointer
+			selected_from_one: a_selected >= 1
+		deferred
+		end
+
+	code_select_completion (an_id, a_row: INTEGER)
+			-- Highlight row `a_row', from 1, and scroll it into view.
+		require
+			row_from_one: a_row >= 1
+		deferred
+		end
+
+	code_hide_completions (an_id: INTEGER)
+			-- No completion list; nothing when none shows. Sends no event.
+		deferred
+		end
+
+	test_completion_key (an_id, a_key: INTEGER)
+			-- As the user pressing completion key `a_key': 0 Control+Space, 1 Up, 2 Down,
+			-- 3 Page Up, 4 Page Down, 5 Return, 6 Escape. 58 with a = `a_key' for 0 always,
+			-- and for 1 to 6 while the list shows; otherwise the key does its usual work.
+		require
+			a_key: 0 <= a_key and a_key <= 6
+		deferred
+		end
+
+	test_press_completion (an_id, a_row: INTEGER)
+			-- As the user clicking row `a_row' of the list: 59. Nothing when no list shows.
+		require
+			row_from_one: a_row >= 1
+		deferred
+		end
+
+	test_completions_shown (an_id: INTEGER): BOOLEAN
+			-- Does the completion list show?
+		deferred
+		end
+
 	grid_view: INTEGER
 			-- 1v-a: items in a flowing grid of cells (120 by 120 until set).
 		deferred
