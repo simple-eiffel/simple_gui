@@ -10,6 +10,10 @@ note
 		changes; never on the whole text per keystroke. The styles' colors come from the
 		theme and follow dark mode.
 
+		A syntax object (`set_syntax', 1v-e-1) takes the place of both: the editor tells it
+		each edit (the start, the count removed, the text inserted) and colors what it
+		answers through `apply_spans'. A parser lives behind it; the editor names none.
+
 		Cost: the control says only that the text changed, so each edit reads the whole text
 		and finds the changed lines from what it shares with the text as last highlighted
 		(GUI_TEXT_COMPARISON): one comparison of memory and one count of line breaks, no
@@ -44,7 +48,7 @@ feature {NONE} -- Initialization
 			is_case_sensitive := True
 			tab_width := 4
 			register (backend.code_editor)
-			change_actions.extend (agent rehighlight)
+			change_actions.extend (agent text_changed)
 			application.appearance_changed_actions.extend (agent (d: BOOLEAN) do highlight_all end)
 		end
 
@@ -57,10 +61,16 @@ feature -- Styles
 	Style_comment: INTEGER = 4
 	Style_number: INTEGER = 5
 	Style_operator: INTEGER = 6
+	Style_function: INTEGER = 7
+	Style_constant: INTEGER = 8
+	Style_variable: INTEGER = 9
+	Style_tag: INTEGER = 10
+			-- 7 to 10 came with 1v-e-1. The numbers are those of simple_tree_sitter's
+			-- TS_STYLES, so a parser's spans need no translation.
 
 	is_valid_style (a_style: INTEGER): BOOLEAN
 		do
-			Result := a_style >= Style_plain and a_style <= Style_operator
+			Result := a_style >= Style_plain and a_style <= Style_tag
 		end
 
 	style_color (a_style: INTEGER): NATURAL_32
@@ -76,6 +86,10 @@ feature -- Styles
 				when Style_comment then Result := 0x6A9955
 				when Style_number then Result := 0xB5CEA8
 				when Style_operator then Result := 0xD4D4D4
+				when Style_function then Result := 0xDCDCAA
+				when Style_constant then Result := 0x4FC1FF
+				when Style_variable then Result := 0x9CDCFE
+				when Style_tag then Result := 0x569CD6
 				else Result := 0xD4D4D4
 				end
 			else
@@ -86,6 +100,10 @@ feature -- Styles
 				when Style_comment then Result := 0x008000
 				when Style_number then Result := 0x098658
 				when Style_operator then Result := 0x333333
+				when Style_function then Result := 0x795E26
+				when Style_constant then Result := 0x0070C1
+				when Style_variable then Result := 0x001080
+				when Style_tag then Result := 0x800000
 				else Result := 0x1E1E1E
 				end
 			end
@@ -181,7 +199,7 @@ feature -- Highlighting by rules
 	set_case_sensitive (a_on: BOOLEAN)
 		do
 			is_case_sensitive := a_on
-			highlight_all
+			rules_changed
 		end
 
 	add_keywords (a_words: ARRAY [READABLE_STRING_GENERAL]; a_style: INTEGER)
@@ -191,7 +209,7 @@ feature -- Highlighting by rules
 			across a_words as ic loop
 				keywords.force (a_style, word_key (ic.to_string_32))
 			end
-			highlight_all
+			rules_changed
 		end
 
 	add_line_comment (a_prefix: READABLE_STRING_GENERAL; a_style: INTEGER)
@@ -201,7 +219,7 @@ feature -- Highlighting by rules
 			valid_style: is_valid_style (a_style)
 		do
 			line_comments.extend ([a_prefix.to_string_32, a_style])
-			highlight_all
+			rules_changed
 		end
 
 	add_delimited (an_open, a_close: READABLE_STRING_GENERAL; a_style: INTEGER)
@@ -212,7 +230,7 @@ feature -- Highlighting by rules
 			valid_style: is_valid_style (a_style)
 		do
 			delimiters.extend ([an_open.to_string_32, a_close.to_string_32, a_style])
-			highlight_all
+			rules_changed
 		end
 
 feature -- Highlighting by an agent
@@ -223,7 +241,174 @@ feature -- Highlighting by an agent
 			-- starts in. Void: the rules.
 		do
 			highlighter := a_function
-			highlight_all
+			rules_changed
+		end
+
+feature -- Highlighting by a syntax object
+
+	syntax: detachable GUI_EDITOR_SYNTAX
+			-- What colors the text in place of the rules and the agent, if anything.
+
+	set_syntax (a_syntax: detachable GUI_EDITOR_SYNTAX)
+			-- Let `a_syntax' color the text: every line goes plain, then it is attached and
+			-- hears of each edit from now on. The one before it, if any, is detached first.
+			-- Void: the rules and the agent color again.
+		require
+			gui_thread: is_gui_thread
+			free: attached a_syntax as al_s implies (al_s = syntax or al_s.editor = Void)
+		do
+			if a_syntax /= syntax then
+				if attached syntax as al_old then
+					al_old.detach
+				end
+				syntax := a_syntax
+				folds := Void
+				if attached a_syntax as al_new then
+					make_plain
+					al_new.attach (Current)
+				else
+					highlight_all
+				end
+			end
+		ensure
+			set: syntax = a_syntax
+		end
+
+	apply_spans (a_first_line, a_last_line: INTEGER; a_spans: GUI_SYNTAX_SPANS)
+			-- Lines `a_first_line' to `a_last_line' go plain, then each of `a_spans' on one
+			-- of them takes its style's color. For the syntax object, on the GUI processor.
+			-- The control's text can be one event ahead of the last edit reported, so this
+			-- clamps where another feature would require: a line the text does not have is
+			-- passed over, a span that runs past its line's end is cut there, and a span on
+			-- a line outside the range, or of a style the editor does not know, colors
+			-- nothing.
+			-- Cost: one read of the text, one walk over the line breaks down to the range's
+			-- end, and one call to the control per span.
+		require
+			gui_thread: is_gui_thread
+			lines_ordered: 1 <= a_first_line and a_first_line <= a_last_line
+		local
+			l_text: STRING_32
+			l_starts: ARRAYED_LIST [INTEGER]
+			l_colors: ARRAY [NATURAL_32]
+			i, n, l_count, l_line, l_offset, l_break, l_from, l_to, l_style: INTEGER
+		do
+			l_text := text
+			l_colors := style_colors
+				-- where line `a_first_line' starts; 0 when the text has no such line
+			from
+				l_line := 1
+				l_offset := 1
+			until
+				l_line = a_first_line or l_offset = 0
+			loop
+				l_break := l_text.index_of ('%N', l_offset)
+				if l_break = 0 then
+					l_offset := 0
+				else
+					l_offset := l_break + 1
+					l_line := l_line + 1
+				end
+			end
+			if l_offset > 0 then
+					-- Where each line of the range starts, then where the line after the last
+					-- would: line k is characters `l_starts [k]' to `l_starts [k + 1] - 2'.
+				create l_starts.make ((a_last_line - a_first_line).min (l_text.count) + 2)
+				from
+					l_starts.extend (l_offset)
+				until
+					l_offset = 0 or l_starts.count - 1 > a_last_line - a_first_line
+				loop
+					l_break := l_text.index_of ('%N', l_offset)
+					if l_break = 0 then
+						l_offset := 0
+						l_starts.extend (l_text.count + 2)
+					else
+						l_offset := l_break + 1
+						l_starts.extend (l_offset)
+					end
+				end
+				n := l_starts.count - 1
+				l_to := l_starts [n + 1] - 2
+				if l_starts [1] <= l_to then
+					color_run (l_starts [1], l_to, l_colors [Style_plain])
+				end
+				from
+					i := 1
+					l_count := a_spans.count
+				until
+					i > l_count
+				loop
+					l_line := a_spans.line (i) - a_first_line + 1
+					l_style := a_spans.style (i)
+					if 1 <= l_line and l_line <= n and l_style /= Style_plain and is_valid_style (l_style) then
+						l_from := l_starts [l_line] + a_spans.column (i) - 1
+						l_to := l_starts [l_line + 1] - 2
+						if a_spans.length (i) <= l_to - l_from then
+							l_to := l_from + a_spans.length (i) - 1
+						end
+						if l_from <= l_to then
+							color_run (l_from, l_to, l_colors [l_style])
+						end
+					end
+					i := i + 1
+				end
+			end
+		end
+
+	set_folds (a_folds: GUI_SYNTAX_RANGES)
+			-- The folds of the whole text are `a_folds'. For the syntax object, on the GUI
+			-- processor. The object is kept and read in place. (1v-e-3 shows the folds;
+			-- until then `fold_count' and its fellows answer them.)
+		require
+			gui_thread: is_gui_thread
+			has_syntax: syntax /= Void
+		do
+			folds := a_folds
+		ensure
+			kept: fold_count = a_folds.count
+		end
+
+	fold_count: INTEGER
+			-- How many folds the syntax object has given; 0 without one.
+		do
+			if attached folds as al_folds then
+				Result := al_folds.count
+			end
+		ensure
+			not_negative: Result >= 0
+		end
+
+	is_valid_fold (i: INTEGER): BOOLEAN
+			-- Is `i' the number of a fold?
+		do
+			Result := 1 <= i and i <= fold_count
+		ensure
+			definition: Result = (1 <= i and i <= fold_count)
+		end
+
+	fold_first_line (i: INTEGER): INTEGER
+			-- The line fold `i' starts on.
+		require
+			valid_fold: is_valid_fold (i)
+		do
+			if attached folds as al_folds then
+				Result := al_folds.first_line (i)
+			end
+		ensure
+			positive: Result >= 1
+		end
+
+	fold_last_line (i: INTEGER): INTEGER
+			-- The last line of fold `i'.
+		require
+			valid_fold: is_valid_fold (i)
+		do
+			if attached folds as al_folds then
+				Result := al_folds.last_line (i)
+			end
+		ensure
+			not_before_the_first: Result >= fold_first_line (i)
 		end
 
 feature -- Find and replace
@@ -254,7 +439,7 @@ feature -- Find and replace
 		do
 			l_c := backend.to_c (a_text)
 			backend.text_replace_range (id, selection_start, selection_end, l_c.item)
-			highlight_all
+			program_edited
 		end
 
 	replace_all (a_text, a_with: READABLE_STRING_GENERAL; a_case_sensitive, a_whole_word: BOOLEAN): INTEGER
@@ -284,7 +469,7 @@ feature -- Find and replace
 			if Result > 0 then
 				l_c := backend.to_c (l_out)
 				backend.text_replace_range (id, 1, count, l_c.item)
-				highlight_all
+				program_edited
 			end
 		end
 
@@ -309,10 +494,17 @@ feature -- Element change
 		end
 
 	highlight_all
-			-- Highlight every line again (after a rule change or a new text).
+			-- Highlight every line again (after a rule change, a new text or a change of
+			-- theme). With a syntax object every line goes plain and the object is told the
+			-- text was replaced, so that it colors all of it again.
 		do
-			starts.wipe_out
-			rehighlight
+			if attached syntax as al_syntax then
+				make_plain
+				al_syntax.text_replaced (highlighted)
+			else
+				starts.wipe_out
+				rehighlight
+			end
 		end
 
 feature {NONE} -- Highlighting
@@ -329,6 +521,77 @@ feature {NONE} -- Highlighting
 	starts: ARRAYED_LIST [INTEGER]
 			-- The state each line of `highlighted' started in; empty when every line is
 			-- to be highlighted again.
+
+	folds: detachable GUI_SYNTAX_RANGES
+			-- The folds the syntax object gave last.
+
+	text_changed
+			-- The user edited the text: the syntax object hears what changed, or the rules
+			-- color the changed lines.
+		do
+			if attached syntax as al_syntax then
+				report_edit (al_syntax)
+			else
+				rehighlight
+			end
+		end
+
+	rules_changed
+			-- The rules or the agent changed: color again, when they are what colors.
+		do
+			if syntax = Void then
+				highlight_all
+			end
+		end
+
+	program_edited
+			-- A feature of this class changed a part of the text (no change event follows):
+			-- the syntax object hears what changed, or the rules color every line.
+		do
+			if attached syntax as al_syntax then
+				report_edit (al_syntax)
+			else
+				highlight_all
+			end
+		end
+
+	make_plain
+			-- Every line plain, and no line states: the rules have colored nothing.
+		do
+			highlighted := text
+			starts.wipe_out
+			if not highlighted.is_empty then
+				color_run (1, highlighted.count, style_color (Style_plain))
+			end
+		ensure
+			no_states: starts.is_empty
+		end
+
+	report_edit (a_syntax: GUI_EDITOR_SYNTAX)
+			-- Tell `a_syntax' the edit that makes the text now from `highlighted', the text
+			-- as last reported: what lies between the start and the end the two share. Where
+			-- the shared start and the shared end overlap (a stretch that repeats), the end
+			-- gives way, so the edit is always a true one. Nothing is told when the texts are
+			-- equal (one edit that reached here twice).
+			-- Cost: one read of the text and one comparison of memory.
+		require
+			working_for_this: a_syntax.editor = Current
+		local
+			l_text, l_old: STRING_32
+			l_head, l_tail, l_limit: INTEGER
+		do
+			l_text := text
+			l_old := highlighted
+			l_limit := l_text.count.min (l_old.count)
+			l_head := shared_head (l_text, l_old, l_limit)
+			if l_head < l_limit or l_text.count /= l_old.count then
+				l_tail := shared_tail (l_text, l_old, l_limit).min (l_limit - l_head)
+					-- before the call: the object may answer with `apply_spans' at once
+				highlighted := l_text
+				a_syntax.text_edited (l_head + 1, l_old.count - l_head - l_tail,
+					l_text.substring (l_head + 1, l_text.count - l_tail))
+			end
+		end
 
 	rehighlight
 			-- Highlight the lines that changed since `highlighted', then the following ones
@@ -455,6 +718,21 @@ feature {NONE} -- Highlighting
 					end
 				end
 			end
+		end
+
+	style_colors: ARRAY [NATURAL_32]
+			-- The color of each style now, by style number: the theme is asked once for
+			-- many spans. (`style_color' asks the system whether it is dark on every call.)
+		local
+			i: INTEGER
+		do
+			create Result.make_filled (0, Style_plain, Style_tag)
+			from i := Style_plain until i > Style_tag loop
+				Result [i] := style_color (i)
+				i := i + 1
+			end
+		ensure
+			every_style: Result.lower = Style_plain and Result.upper = Style_tag
 		end
 
 	color_run (a_start, an_end: INTEGER; a_color: NATURAL_32)
@@ -636,5 +914,6 @@ feature {NONE} -- Finding
 
 invariant
 	starts_fit_the_text: starts.count <= highlighted.count + 1
+	folds_come_from_a_syntax: syntax = Void implies folds = Void
 
 end
