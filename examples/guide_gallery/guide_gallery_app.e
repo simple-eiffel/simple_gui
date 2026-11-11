@@ -897,6 +897,7 @@ feature {NONE} -- Code editor (1v-b)
 			-- with line numbers shown and the caret on line 6.
 		local
 			l_editor: GUI_CODE_EDITOR
+			l_window: GUI_WINDOW
 		do
 			create l_editor.make
 			l_editor.add_keywords (<<"class", "create", "feature", "do", "end", "local", "if", "then", "else", "require", "ensure">>, {GUI_CODE_EDITOR}.Style_keyword)
@@ -905,7 +906,11 @@ feature {NONE} -- Code editor (1v-b)
 			l_editor.add_delimited ("%"", "%"", {GUI_CODE_EDITOR}.Style_string)
 			l_editor.set_text (Greeter_text)
 			l_editor.go_to_line (6)
-			shoot ("code-editor", "greeter.e", 520, 320, l_editor)
+				-- the editor is the window's content, as a program would make it: it fills the
+				-- window, and every line of the class shows
+			create l_window.make ("greeter.e", 560, 400)
+			l_window.set_content (l_editor)
+			save ("code-editor", l_window)
 		end
 
 	Greeter_text: STRING = "[
