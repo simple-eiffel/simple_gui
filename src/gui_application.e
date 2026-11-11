@@ -33,6 +33,7 @@ feature {NONE} -- Initialization
 			create windows.make (2)
 			create message_actions.make
 			create appearance_changed_actions.make
+			create window_closed_actions.make
 			create menu.make
 			create pills.make
 			create timers.make (4)
@@ -90,6 +91,10 @@ feature -- Access
 			-- The tag `new_message_tag' gave last; 0 before the first.
 
 	appearance_changed_actions: GUI_ACTIONS [TUPLE [dark: BOOLEAN]]
+
+	window_closed_actions: GUI_ACTIONS [TUPLE [window: GUI_WINDOW]]
+			-- Run after a window closed, with that window: the controls of what it held
+			-- are gone. A widget that asked the application to call it lets go here.
 
 	help_actions: GUI_ACTIONS [TUPLE [topic: STRING_32; widget: detachable GUI_WIDGET]]
 			-- 1u: run when the user asks for help (F1; Command+? on macOS), with the nearest
@@ -320,6 +325,7 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 			-- `a_window' closed; quit after the last.
 		do
 			windows.prune_all (a_window)
+			window_closed_actions.call ([a_window])
 			if windows.is_empty then
 				quit
 			end

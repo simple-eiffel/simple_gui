@@ -58,10 +58,11 @@ feature -- Element change
 feature -- Basic operations
 
 	call (a_arguments: G)
-			-- Run every agent with `a_arguments'.
+			-- Run every agent with `a_arguments': the agents as they are when the call
+			-- starts, so one that prunes itself while it runs costs no other its turn.
 		do
 			fire_count := fire_count + 1
-			across agents as ic loop
+			across agents.twin as ic loop
 				ic.call (a_arguments)
 			end
 		ensure
