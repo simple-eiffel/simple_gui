@@ -4449,11 +4449,13 @@ feature -- Styles and the theme (1w)
 			l_radios: GUI_RADIO_GROUP
 			l_check: GUI_CHECK_BOX
 			l_slider: GUI_SLIDER
+			l_switch: GUI_SWITCH
+			l_bar: GUI_PROGRESS_BAR
 			l_style: GUI_STYLE
 		do
 			driver.set_high_contrast (False)
 			driver.set_dark (False)
-			create l_window.make ("Theme", 300, 240)
+			create l_window.make ("Theme", 300, 320)
 			create l_stack.make_vertical
 			create l_label.make ("In the text role")
 			create l_save.make ("Save")
@@ -4469,6 +4471,13 @@ feature -- Styles and the theme (1w)
 			l_stack.extend (l_check)
 			l_stack.extend (l_radios)
 			l_stack.extend (l_slider)
+				-- A switch that is on and a part-filled bar: both wear the accent.
+			create l_switch.make
+			l_switch.set_on (True)
+			create l_bar.make
+			l_bar.set_value (60)
+			l_stack.extend (l_switch)
+			l_stack.extend (l_bar)
 			l_window.set_content (l_stack)
 			l_window.show
 			settle_window

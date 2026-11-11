@@ -8010,7 +8010,9 @@ static void sg_set_theme_color(int role, int rgb) {
     if (t[4] >= 0)
         g_string_append_printf(c, "button.suggested-action, checkbutton > check:checked, checkbutton > radio:checked, "
             "scale > trough > highlight, progressbar > trough > progress, switch:checked "
-            "{ background-color: #%06x; background-image: none; border-color: #%06x; } ", (unsigned) t[4], (unsigned) t[4]);
+            "{ background-color: #%06x; background-image: none; border-color: #%06x; } "
+            /* The knob of a switch that is on carries the system's accent on its border. */
+            "switch:checked > slider { border-color: #%06x; } ", (unsigned) t[4], (unsigned) t[4], (unsigned) t[4]);
     if (sel >= 0) g_string_append_printf(c, "selection, row:selected { background-color: #%06x; } ", (unsigned) sel);
     if (t[6] >= 0) g_string_append_printf(c, "entry, frame > border { border-color: #%06x; } ", (unsigned) t[6]);
     if (!sg_theme_css) {
