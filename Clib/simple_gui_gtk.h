@@ -5863,6 +5863,8 @@ static int sg_test_bracket_tint_at(int id, int pos) {
     return gtk_text_iter_has_tag(&it, sg_code_pair_tag(id)) ? 1 : 0;
 }
 static void sg_test_bracket_key(int id) { sg_push(56, id, 0, 0); }
+/* For the tests of a full queue: `n' events no widget answers (type 0, id 0). */
+static void sg_test_fill_event_queue(int n) { int i; for (i = 0; i < n; i++) sg_push(0, 0, 0, 0); }
 static gboolean sg_on_code_key(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
     int id = GPOINTER_TO_INT(d);
     (void) k; (void) code;
@@ -5876,6 +5878,7 @@ static gboolean sg_on_code_key(GtkEventControllerKey *k, guint key, guint code, 
     if (key == GDK_KEY_Tab) { sg_code_tab(id); return TRUE; }
     return FALSE;
 }
+static void sg_code_set_indent(int id, int width, int spaces);
 static int sg_code_editor(void) {
     int id = sg_rich_text_area();
     GtkTextView *v = sg_view_of(id);
@@ -5889,7 +5892,9 @@ static int sg_code_editor(void) {
     gtk_widget_add_css_class(g, "dim-label");
     gtk_text_view_set_gutter(v, GTK_TEXT_WINDOW_LEFT, g);
     g_object_set_data(G_OBJECT(sg_w[id]), "sg-gutter", g);
-    g_object_set_data(G_OBJECT(sg_w[id]), "sg-tab-width", GINT_TO_POINTER(4));
+    /* real tab stops four columns apart from the start: recording the width alone left
+       GTK's default of eight until a program called set_tab_width */
+    sg_code_set_indent(id, 4, 0);
     g_signal_connect(gtk_text_view_get_buffer(v), "changed", G_CALLBACK(sg_code_redraw_gutter), GINT_TO_POINTER(id));
     g_signal_connect_swapped(gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(v)), "value-changed", G_CALLBACK(gtk_widget_queue_draw), g);
     g_signal_connect(gtk_text_view_get_buffer(v), "mark-set", G_CALLBACK(sg_on_code_mark), GINT_TO_POINTER(id));
