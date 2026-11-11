@@ -18,12 +18,12 @@
 		</capability>
 		<external_include location="$(SIMPLE_EIFFEL)/simple_gui/Clib"/>
 		<!-- GTK 4 (Linux) -->
-		<external_cflag value="`pkg-config --cflags gtk4`">
+		<external_cflag value="`pkg-config --cflags gtk4 pangoft2 fontconfig`">
 			<condition>
 				<platform value="unix"/>
 			</condition>
 		</external_cflag>
-		<external_linker_flag value="`pkg-config --libs gtk4`">
+		<external_linker_flag value="`pkg-config --libs gtk4 pangoft2 fontconfig`">
 			<condition>
 				<platform value="unix"/>
 			</condition>
