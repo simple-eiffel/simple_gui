@@ -9,6 +9,11 @@ note
 		the lines after them while the state they start in (inside a block comment, say)
 		changes; never on the whole text per keystroke. The styles' colors come from the
 		theme and follow dark mode.
+
+		Cost: the control says only that the text changed, so each edit reads the whole text
+		and finds the changed lines from what it shares with the text as last highlighted
+		(GUI_TEXT_COMPARISON): one comparison of memory and one count of line breaks, no
+		list of lines. The highlighter itself is called for the changed lines alone.
 	]"
 
 class
@@ -19,6 +24,8 @@ inherit
 		redefine
 			make, set_text, dispatch
 		end
+
+	GUI_TEXT_COMPARISON
 
 create
 	make
@@ -32,7 +39,7 @@ feature {NONE} -- Initialization
 			create keywords.make (32)
 			create line_comments.make (2)
 			create delimiters.make (2)
-			create lines.make (64)
+			create highlighted.make_empty
 			create starts.make (64)
 			is_case_sensitive := True
 			tab_width := 4
@@ -304,7 +311,6 @@ feature -- Element change
 	highlight_all
 			-- Highlight every line again (after a rule change or a new text).
 		do
-			lines.wipe_out
 			starts.wipe_out
 			rehighlight
 		end
@@ -317,92 +323,151 @@ feature {NONE} -- Highlighting
 	highlighter: detachable FUNCTION [STRING_32, INTEGER, TUPLE [spans: LIST [TUPLE [start, length, style: INTEGER]]; state: INTEGER]]
 	line_numbers_hidden: BOOLEAN
 
-	lines: ARRAYED_LIST [STRING_32]
-			-- The lines as last highlighted.
+	highlighted: STRING_32
+			-- The text as last highlighted.
 
 	starts: ARRAYED_LIST [INTEGER]
-			-- The state each of `lines' started in.
+			-- The state each line of `highlighted' started in; empty when every line is
+			-- to be highlighted again.
 
 	rehighlight
-			-- Highlight the lines that changed since `lines', then the following ones while the
-			-- state they start in differs from before.
+			-- Highlight the lines that changed since `highlighted', then the following ones
+			-- while the state they start in differs from before.
+			-- The changed lines are found from the characters the two texts share at their
+			-- start and at their end (as whole lines, the first that differs from the top and
+			-- the last from the bottom), and each is cut from the text as it is painted: no
+			-- list of the lines is made. With 10,000 lines the split into lines cost 15 ms
+			-- of every keystroke, more than the highlighting it saved.
 		local
-			l_new: LIST [STRING_32]
-			l_first, l_last_new, l_last_old, i, l_offset, l_state: INTEGER
+			l_text, l_line: STRING_32
+			l_head, l_tail, l_limit, l_count, l_old_count, l_kept: INTEGER
+			l_first, l_last_new, l_last_old, i, j, l_offset, l_end, l_state: INTEGER
 			l_starts: ARRAYED_LIST [INTEGER]
 			l_done: BOOLEAN
 		do
-			l_new := text.split ('%N')
-				-- the first line that differs, from the top
-			from l_first := 1 until l_first > l_new.count or l_first > lines.count or else not l_new [l_first].same_string (lines [l_first]) loop
-				l_first := l_first + 1
+			l_text := text
+			l_count := l_text.occurrences ('%N') + 1
+			l_old_count := starts.count
+			if l_old_count = 0 then
+				l_first := 1
+				l_offset := 1
+				l_last_new := l_count
+			else
+				l_limit := l_text.count.min (highlighted.count)
+				l_head := shared_head (l_text, highlighted, l_limit)
+				l_tail := shared_tail (l_text, highlighted, l_limit)
+				if l_head = l_limit and l_text.count = highlighted.count then
+						-- the same text again (one edit reported twice): every line stands
+				elseif l_head + l_tail > l_limit then
+						-- The shared start and the shared end overlap: a stretch that repeats
+						-- ("do%Ndo" given one more "do" line). The texts alone do not say where
+						-- in the overlap the edit was, and the control's colors followed the
+						-- real edit, so every line of the overlap is highlighted.
+					i := l_head
+					l_head := l_limit - l_tail
+					l_tail := l_limit - i
+				end
+					-- the first line that differs, from the top
+				l_first := line_breaks_in (l_text, 1, l_head) + 1
+				if l_head > 0 then l_offset := l_text.last_index_of ('%N', l_head) + 1 else l_offset := 1 end
+				if is_line_end (l_text, l_head) and is_line_end (highlighted, l_head) then
+						-- the line the texts part in is the same in both: one text ends there
+					l_first := l_first + 1
+					l_offset := l_head + 2
+				end
+					-- and the last, matching whole lines from the bottom, never past the first
+				l_kept := line_breaks_in (l_text, l_text.count - l_tail + 1, l_text.count)
+				if is_line_start (l_text, l_tail) and is_line_start (highlighted, l_tail) then
+					l_kept := l_kept + 1
+				end
+				l_kept := l_kept.min (l_count - l_first + 1).min (l_old_count - l_first + 1)
+				l_last_new := l_count - l_kept
+				l_last_old := l_old_count - l_kept
 			end
-				-- and the last, matching from the bottom
-			from
-				l_last_new := l_new.count
-				l_last_old := lines.count
-			until
-				l_last_new < l_first or l_last_old < l_first or else not l_new [l_last_new].same_string (lines [l_last_old])
-			loop
-				l_last_new := l_last_new - 1
-				l_last_old := l_last_old - 1
-			end
-			create l_starts.make (l_new.count)
-			from i := 1 until i > l_first - 1 or i > starts.count loop
+			create l_starts.make (l_count)
+			from i := 1 until i >= l_first loop
 				l_starts.extend (starts [i])
 				i := i + 1
 			end
-			if l_first = 1 or l_starts.count < l_first - 1 then
-				l_first := 1
-				l_starts.wipe_out
+			if l_first > 1 and l_first <= l_count then
+					-- the state the first changed line starts in, from the line before it
+				j := l_offset - 2
+				if j >= 1 then l_end := l_text.last_index_of ('%N', j) + 1 else l_end := 1 end
+				l_state := next_state (l_text.substring (l_end, j), l_starts [l_first - 1])
 			end
-			l_offset := 1
-			from i := 1 until i >= l_first loop
-				l_offset := l_offset + l_new [i].count + 1
-				i := i + 1
-			end
-			if l_first = 1 then l_state := 0 else l_state := next_state (l_new [l_first - 1], l_starts [l_first - 1]) end
 			from
 				i := l_first
 			until
-				i > l_new.count or l_done
+				i > l_count or l_done
 			loop
-				if i > l_last_new and then (i - l_last_new + l_last_old) >= 1 and then (i - l_last_new + l_last_old) <= starts.count
-					and then starts [i - l_last_new + l_last_old] = l_state
-				then
+				j := i - l_last_new + l_last_old
+				if i > l_last_new and then j >= 1 and then j <= l_old_count and then starts [j] = l_state then
 						-- past the edit, and this line starts as it did: the rest stands
 					l_done := True
 				else
+					l_end := l_text.index_of ('%N', l_offset)
+					if l_end = 0 then l_end := l_text.count + 1 end
+					l_line := l_text.substring (l_offset, l_end - 1)
 					l_starts.extend (l_state)
-					paint_line (l_new [i], l_offset, l_state)
-					l_state := next_state (l_new [i], l_state)
-					l_offset := l_offset + l_new [i].count + 1
+					paint_line (l_line, l_offset, l_state)
+					l_state := next_state (l_line, l_state)
+					l_offset := l_end + 1
 					i := i + 1
 				end
 			end
 			if l_done then
 					-- the unchanged tail keeps its states, shifted to the new lines
-				from until i > l_new.count loop
+				from until i > l_count loop
 					l_starts.extend (starts [i - l_last_new + l_last_old])
 					i := i + 1
 				end
 			end
-			lines.wipe_out
-			across l_new as ic loop lines.extend (ic) end
+			highlighted := l_text
 			starts := l_starts
+		ensure
+			one_start_each: starts.count = highlighted.occurrences ('%N') + 1
+		end
+
+	is_line_end (a_text: READABLE_STRING_32; a_before: INTEGER): BOOLEAN
+			-- Does a line of `a_text' end after its first `a_before' characters?
+		require
+			in_text: 0 <= a_before and a_before <= a_text.count
+		do
+			Result := a_before = a_text.count or else a_text.item (a_before + 1) = '%N'
+		end
+
+	is_line_start (a_text: READABLE_STRING_32; a_after: INTEGER): BOOLEAN
+			-- Does a line of `a_text' start at its last `a_after' characters?
+		require
+			in_text: 0 <= a_after and a_after <= a_text.count
+		do
+			Result := a_after = a_text.count or else a_text.item (a_text.count - a_after) = '%N'
 		end
 
 	paint_line (a_line: STRING_32; an_offset, a_state: INTEGER)
 			-- Color line `a_line', which starts at `an_offset' in the text.
 		do
 			if not a_line.is_empty then
-				set_text_color (an_offset, an_offset + a_line.count - 1, style_color (Style_plain))
+				color_run (an_offset, an_offset + a_line.count - 1, style_color (Style_plain))
 				across spans_of (a_line, a_state) as ic loop
 					if ic.length > 0 and then ic.start >= 1 and then ic.start + ic.length - 1 <= a_line.count and then is_valid_style (ic.style) then
-						set_text_color (an_offset + ic.start - 1, an_offset + ic.start + ic.length - 2, style_color (ic.style))
+						color_run (an_offset + ic.start - 1, an_offset + ic.start + ic.length - 2, style_color (ic.style))
 					end
 				end
 			end
+		end
+
+	color_run (a_start, an_end: INTEGER; a_color: NATURAL_32)
+			-- Color characters `a_start' to `an_end': `set_text_color' without its check of
+			-- the range against `count', which fetches the whole text from the backend. The
+			-- highlighter cuts its runs from the text it has just read, so each one lies in
+			-- the text, and a 10,000-line text has some 60,000 of them: checked the general
+			-- way, coloring it would fetch the text 60,000 times.
+		require
+			ordered: 1 <= a_start and a_start <= an_end
+			rgb: a_color <= 0xFFFFFF
+		do
+			backend.rich_text_set_color (id, a_start, an_end, a_color.to_integer_32)
 		end
 
 	spans_of (a_line: STRING_32; a_state: INTEGER): LIST [TUPLE [start, length, style: INTEGER]]
@@ -570,6 +635,6 @@ feature {NONE} -- Finding
 		end
 
 invariant
-	one_start_each: starts.count = lines.count
+	starts_fit_the_text: starts.count <= highlighted.count + 1
 
 end

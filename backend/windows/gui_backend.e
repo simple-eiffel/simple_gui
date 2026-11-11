@@ -18,7 +18,7 @@ class
 inherit
 	GUI_BACKEND_API
 		redefine
-			scale
+			scale, text_area_string
 		end
 
 feature -- Lifecycle and loop
@@ -47,6 +47,9 @@ feature -- Lifecycle and loop
 		local
 			l_wait: INTEGER
 		do
+			if is_render_due then
+				changed
+			end
 			if events.is_empty then
 				l_wait := a_ms.max (0).min (ms_to_next_timer)
 				if attached open_window as al_w and then al_w.is_window_open then
@@ -64,6 +67,7 @@ feature -- Lifecycle and loop
 			-- Dispatch what is waiting, then lay out and draw, so positions and sizes are current
 			-- (the shared tests' rule 2).
 		do
+			is_render_due := False
 			if attached open_window as al_w and then al_w.is_window_open then
 				al_w.shell_turn_pending
 				al_w.request_render
@@ -2860,7 +2864,7 @@ feature -- Path controls, continued
 		do
 			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
 				al_r.set_trait (a_start, an_end, a_trait, a_on)
-				changed
+				style_changed
 			end
 		end
 
@@ -2868,7 +2872,7 @@ feature -- Path controls, continued
 		do
 			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
 				al_r.set_color (a_start, an_end, a_rgb)
-				changed
+				style_changed
 			end
 		end
 
@@ -2876,6 +2880,7 @@ feature -- Path controls, continued
 		do
 			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
 				al_r.set_size (a_start, an_end, a_points)
+				style_changed
 			end
 		end
 
@@ -2927,6 +2932,84 @@ feature -- Path controls, continued
 		do
 			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
 				al_r.select_characters (a_start, an_end)
+				changed
+			end
+		end
+
+	code_editor: INTEGER
+			-- GUI_SW_CODE_AREA: event 2 on an edit, event 52 (line, column) when the user
+			-- moves the caret.
+		local
+			l_c: GUI_SW_CODE_AREA
+		do
+			create l_c.make_rich (themed (is_dark).size_body)
+			Result := register (l_c)
+			l_c.set_on_change (agent push (2, Result, 0, 0, 0))
+			l_c.set_on_caret_move (agent push (52, Result, ?, ?, 0))
+		end
+
+	code_set_line_numbers (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.set_line_numbers_shown (a_on)
+				changed
+			end
+		end
+
+	code_set_indent (an_id, a_tab_width: INTEGER; a_spaces: BOOLEAN)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then a_tab_width >= 1 then
+				al_c.set_indent (a_tab_width, a_spaces)
+				changed
+			end
+		end
+
+	text_line_count (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.code_line_count
+			end
+		end
+
+	text_caret_line (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.code_caret_line
+			end
+		end
+
+	text_caret_column (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.code_caret_column
+			end
+		end
+
+	text_line_text (an_id, n: INTEGER): POINTER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then 1 <= n and then n <= al_c.code_line_count then
+				Result := c_text (al_c.code_line_text (n))
+			else
+				Result := c_text ("")
+			end
+		end
+
+	text_go_to_line (an_id, n: INTEGER)
+			-- The program's own move: no event.
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then 1 <= n and then n <= al_c.code_line_count then
+				al_c.go_to_line (n)
+				changed
+			end
+		end
+
+	text_replace_range (an_id, a_start, an_end: INTEGER; a_text: POINTER)
+			-- The program's own change, one undo step: no event.
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c
+				and then 1 <= a_start and then a_start <= an_end + 1 and then an_end <= al_c.text.count
+			then
+				al_c.replace_characters (a_start, an_end, from_c (a_text))
 				changed
 			end
 		end
@@ -3052,6 +3135,16 @@ feature -- Path controls, continued
 		do
 			if attached {SW_TEXT_BOX} widget (an_id) as al_t then
 				Result := c_text (al_t.text)
+			end
+		end
+
+	text_area_string (an_id: INTEGER): STRING_32
+			-- A copy of the box's own string: no pass through UTF-8 and back.
+		do
+			if attached {SW_TEXT_BOX} widget (an_id) as al_t then
+				Result := al_t.text.twin
+			else
+				create Result.make_empty
 			end
 		end
 
@@ -4609,6 +4702,27 @@ feature -- Test doors (act on the widget as a user would)
 		do
 			if attached {SW_TEXT_BOX} widget (an_id) as al_t and then not al_t.is_read_only then
 				al_t.type_text (from_c (a_text))
+				changed
+			end
+		end
+
+	test_type_into_code (an_id: INTEGER; a_text: POINTER)
+			-- Type at the caret as the user would: Return and Tab through the editor's own
+			-- handling.
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then not al_c.is_read_only then
+				al_c.type_code (from_c (a_text))
+				changed
+			end
+		end
+
+	test_caret_to (an_id, a_line, a_column: INTEGER)
+			-- Move the caret as the user would (event 52).
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c
+				and then 1 <= a_line and then a_line <= al_c.code_line_count and then a_column >= 1
+			then
+				al_c.move_caret_to (a_line, a_column)
 				changed
 			end
 		end
@@ -6666,10 +6780,25 @@ feature {NONE} -- Implementation
 			end
 		end
 
+	is_render_due: BOOLEAN
+			-- Has a styling call changed what a frame would show since the last one drawn?
+
+	style_changed
+			-- A style was set over a range of a text: draw at the next turn of the loop, not
+			-- now. A highlighter sets thousands of ranges in a row, and a frame for each lays
+			-- the text out and draws it thousands of times (measured: 30 lines of code took
+			-- 30 seconds to color).
+		do
+			is_render_due := True
+		ensure
+			due: is_render_due
+		end
+
 	changed
 			-- A programmatic change: lay out and draw again (and place a splitter whose position
 			-- was set before it had a size).
 		do
+			is_render_due := False
 			if attached open_window as al_w and then al_w.is_window_open then
 				al_w.request_render
 				apply_pending_positions

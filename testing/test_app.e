@@ -18,6 +18,9 @@ feature {NONE} -- Initialization
 			l_app: GUI_APPLICATION
 		do
 			print ("simple_gui tests%N%N")
+			if (create {ARGUMENTS_32}).argument_count >= 1 then
+				only := (create {ARGUMENTS_32}).argument (1).to_string_32
+			end
 			create l_app.make ("simple_gui tests", "org.simple-eiffel.simple-gui-tests")
 			if not l_app.is_available then
 				print ("  SKIP: no display (the toolkit did not start)%N")
@@ -120,6 +123,8 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_code_editor_highlighting, "code_editor_highlighting")
 				run_test (agent t.test_code_editor_lines_and_indent, "code_editor_lines_and_indent")
 				run_test (agent t.test_code_editor_find_replace, "code_editor_find_replace")
+				run_test (agent t.test_code_editor_large_text, "code_editor_large_text")
+				run_test (agent t.test_code_editor_edits_color_as_a_fresh_text, "code_editor_edits_color_as_a_fresh_text")
 				run_test (agent t.test_preferences_values_and_file, "preferences_values_and_file")
 				run_test (agent t.test_preferences_window, "preferences_window")
 				run_test (agent t.test_grid_view_items, "grid_view_items")
@@ -163,7 +168,9 @@ feature {NONE} -- Initialization
 		local
 			l_retried: BOOLEAN
 		do
-			if not l_retried then
+			if attached only as al_only and then not a_name.has_substring (al_only.to_string_8) then
+					-- not asked for
+			elseif not l_retried then
 				a_test.call (Void)
 				print ("  PASS: " + a_name + "%N")
 				passed := passed + 1
@@ -186,6 +193,9 @@ feature {NONE} -- Initialization
 			l_retried := True
 			retry
 		end
+
+	only: detachable STRING_32
+			-- Run just the tests whose name contains this (the first command-line argument).
 
 	passed: INTEGER
 

@@ -35,7 +35,7 @@ feature -- Access
 
 	text: STRING_32
 		do
-			Result := backend.from_c (backend.text_area_get (id))
+			Result := backend.text_area_string (id)
 		end
 
 	is_read_only: BOOLEAN
