@@ -1323,21 +1323,12 @@ feature -- Controls
 	release_picture_loaders (a_window: SW_WINDOW)
 			-- Let go the workers of the grids in `a_window' (they restart on the next request).
 		do
-			across picture_loaders as ic loop
-				if ic.is_started and then is_in_window (ic.grid, a_window) then
-					ic.release
+			if attached a_window.root as al_root then
+				across picture_loaders as ic loop
+					if ic.is_started and then is_inside (ic.grid, al_root) then
+						ic.release
+					end
 				end
-			end
-		end
-
-	is_in_window (a_widget: SW_WIDGET; a_window: SW_WINDOW): BOOLEAN
-			-- Is `a_widget' under `a_window''s root?
-		local
-			l_w: detachable SW_WIDGET
-		do
-			from l_w := a_widget until l_w = Void or Result loop
-				Result := l_w = a_window.root
-				l_w := l_w.parent
 			end
 		end
 
@@ -6771,6 +6762,7 @@ feature {NONE} -- Implementation
 		end
 
 	is_inside (a_w, a_ancestor: SW_WIDGET): BOOLEAN
+			-- Is `a_w' `a_ancestor' itself or under it?
 		local
 			l_w: detachable SW_WIDGET
 		do
