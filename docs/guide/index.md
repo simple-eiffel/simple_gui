@@ -86,6 +86,7 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - [Custom dialog](custom-dialog.md): a modal dialog with any content and the platform's buttons
 - [Context help](context-help.md): F1 help about the focused control
 - [Preferences](preferences.md): typed, saved settings and a ready preferences window
+- [Printing](printing.md): pages drawn with Cairo, printed through the system's dialog or saved as PDF
 
 ## Drawing
 - [Canvas](canvas.md): your own drawing with Cairo, at the screen's scale

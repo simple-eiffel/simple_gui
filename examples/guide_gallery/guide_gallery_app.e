@@ -47,6 +47,7 @@ feature {NONE} -- Initialization
 				shoot_dialog_and_help
 				shoot_collections_and_preferences
 				shoot_code_editor
+				shoot_printing
 				print ("guide gallery: " + saved.out + " pictures in " + folder.name.to_string_8 + "%N")
 			else
 				print ("guide gallery: no display%N")
@@ -911,6 +912,24 @@ feature {NONE} -- Code editor (1v-b)
 			create l_window.make ("greeter.e", 560, 400)
 			l_window.set_content (l_editor)
 			save ("code-editor", l_window)
+		end
+
+	shoot_printing
+			-- 1v-c: a short document with Print and Save as PDF, as a program that prints shows
+			-- them. (The print dialog is the system's own window, so it is not pictured.)
+		local
+			l_stack, l_buttons: GUI_STACK
+			l_window: GUI_WINDOW
+		do
+			create l_stack.make_vertical
+			l_stack.extend (create {GUI_LABEL}.make ("Psalm 23%NThe Lord is my shepherd; I shall not want.%NHe maketh me to lie down in green pastures:%Nhe leadeth me beside the still waters."))
+			create l_buttons.make_horizontal
+			l_buttons.extend (create {GUI_BUTTON}.make ({STRING_32} "Print%/8230/"))
+			l_buttons.extend (create {GUI_BUTTON}.make ("Save as PDF"))
+			l_stack.extend (l_buttons)
+			create l_window.make ("Psalm 23", 440, 200)
+			l_window.set_content (l_stack)
+			save ("printing", l_window)
 		end
 
 	Greeter_text: STRING = "[
