@@ -795,6 +795,42 @@ feature -- Windows and containers
 		alias "return sg_compl_shown($an_id) ? EIF_TRUE : EIF_FALSE;"
 		end
 
+	code_set_extra_carets (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- 1v-e-5: a tag under each extra selection, an overlay bar at each extra caret.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_set_extra_carets($an_id, (const int *) $a_pairs, $a_count);"
+		end
+
+	code_typed_text (an_id: INTEGER): POINTER
+			-- 1v-e-5.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_code_typed_text($an_id);"
+		end
+
+	text_begin_edit_group (an_id: INTEGER)
+			-- 1v-e-5: one user action, so one undo step.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_text_begin_edit_group($an_id);"
+		end
+
+	text_end_edit_group (an_id: INTEGER)
+			-- 1v-e-5: and one change event at its end.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_text_end_edit_group($an_id);"
+		end
+
+	test_code_key (an_id, an_action: INTEGER; a_shift: BOOLEAN; a_text: POINTER)
+			-- 1v-e-5.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_code_key($an_id, $an_action, $a_shift ? 1 : 0, (const char *) $a_text);"
+		end
+
+	test_caret_gesture (an_id, a_gesture, a_position: INTEGER)
+			-- 1v-e-5.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_caret_gesture($an_id, $a_gesture, $a_position);"
+		end
+
 	grid_view: INTEGER
 			-- 1v-a.
 		external "C inline use %"simple_gui_gtk.h%""
