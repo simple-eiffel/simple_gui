@@ -475,6 +475,15 @@ feature -- Windows and containers
 		deferred
 		end
 
+	test_fill_event_queue (a_count: INTEGER)
+			-- Queue `a_count' events that no widget answers (type 0, id 0), as a flood would:
+			-- for the tests of a full event queue. They are queued by the time the loop next
+			-- turns, ahead of a wake sent after this call. A bounded queue keeps what fits.
+		require
+			count_not_negative: a_count >= 0
+		deferred
+		end
+
 	grid_view: INTEGER
 			-- 1v-a: items in a flowing grid of cells (120 by 120 until set).
 		deferred

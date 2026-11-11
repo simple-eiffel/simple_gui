@@ -752,6 +752,15 @@ feature -- User actions
 			settle
 		end
 
+	fill_event_queue (a_count: INTEGER)
+			-- Queue `a_count' events no widget answers, at once, as a flood would.
+		require
+			has_application: has_application
+			count_not_negative: a_count >= 0
+		do
+			backend.test_fill_event_queue (a_count)
+		end
+
 	press_bracket_key (an_editor: GUI_CODE_EDITOR)
 			-- Press the key that goes to the matching bracket, as the user would: 56.
 		require
