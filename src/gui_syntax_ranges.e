@@ -8,8 +8,8 @@ note
 		in place, so nothing is copied into Eiffel objects. The names are those of
 		TS_LINE_RANGES, so a class that inherits both joins the features without a rename.
 
-		The editor keeps the object it is given and reads it later, so an implementer does
-		not change one it has handed over; a new answer is a new object.
+		The editor reads the object during the call (GUI_CODE_EDITOR.set_folds) and does
+		not keep it, so an implementer may change it, or hand it over again, afterwards.
 	]"
 	author: "Larry Rix"
 

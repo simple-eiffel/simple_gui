@@ -710,6 +710,50 @@ feature -- Windows and containers
 		alias "sg_test_bracket_key($an_id);"
 		end
 
+	code_set_folding_shown (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1v-e-3. The markers are drawn in the gutter, after the line numbers.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_set_folding_shown($an_id, $a_on);"
+		end
+
+	code_set_fold_marks (an_id: INTEGER; a_lines: POINTER; a_count: INTEGER)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_set_fold_marks($an_id, (const int *) $a_lines, $a_count);"
+		end
+
+	code_set_folded_lines (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- 1v-e-3. The hidden lines carry an invisible text tag, so GTK itself keeps the
+			-- caret out of them and moves them with the text; the mark that lines are
+			-- hidden is a faint tint of the fold's first line.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_set_folded_lines($an_id, (const int *) $a_pairs, $a_count);"
+		end
+
+	test_press_fold_marker (an_id, a_line: INTEGER)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_press_fold_marker($an_id, $a_line);"
+		end
+
+	test_fold_key (an_id: INTEGER; a_unfold: BOOLEAN)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_fold_key($an_id, $a_unfold);"
+		end
+
+	test_line_is_shown (an_id, a_line: INTEGER): BOOLEAN
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_line_is_shown($an_id, $a_line) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	test_code_arrow_key (an_id, a_direction: INTEGER)
+			-- 1v-e-3. The move GTK binds to the arrow key.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_code_arrow_key($an_id, $a_direction);"
+		end
+
 	grid_view: INTEGER
 			-- 1v-a.
 		external "C inline use %"simple_gui_gtk.h%""
