@@ -42,7 +42,8 @@ inherit
 		undefine
 			accepts_focus, preferred_width, context_menu, accepts_pebble, receive_pebble,
 			cursor_kind, accessible_role, accessible_value, set_focused, takes_typing,
-			can_edit, perform_edit
+			can_edit, perform_edit,
+			set_style, shows_style
 		redefine
 			handle_click, handle_double_click, handle_triple_click, handle_drag,
 			handle_char, handle_key, handle_wheel, handle_release, wants_tab
