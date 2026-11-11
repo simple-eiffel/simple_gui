@@ -4209,6 +4209,7 @@ feature -- Styles and the theme (1w)
 			l_list: GUI_LIST
 			l_table: GUI_TABLE
 			l_tree: GUI_TREE
+			l_tree_table: GUI_TREE_TABLE
 			l_grid_view: GUI_GRID_VIEW
 			l_scroll: GUI_SCROLL_AREA
 			l_grid: GUI_GRID
@@ -4273,6 +4274,11 @@ feature -- Styles and the theme (1w)
 			l_tree.add_root ("Law")
 			l_tree.add_child (l_tree.last_node, "Genesis")
 			l_widgets.extend (l_tree); l_names.extend ("tree")
+			create l_tree_table.make (<<"Name", "Size">>)
+			l_tree_table.add_root ("Documents")
+			l_tree_table.add_child (l_tree_table.last_node, "notes.txt")
+			l_tree_table.set_cell (l_tree_table.last_node, 2, "4 KB")
+			l_widgets.extend (l_tree_table); l_names.extend ("tree table")
 			create l_grid_view.make
 			l_grid_view.extend ("Genesis")
 			l_grid_view.extend ("Exodus")

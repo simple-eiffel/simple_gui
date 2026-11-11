@@ -7558,7 +7558,7 @@ static unsigned sg_style_can(int id) {
         return SGM(SGK_FG) | SGM_TEXT | SGM(SGK_PLACEHOLDER) | SGM(SGK_SELECTION) | SGM(SGK_BG);
     case 10: return SGM(SGK_FG) | SGM_TEXT | SGM(SGK_SELECTION) | SGM(SGK_BG) | SGM(SGK_SCROLL);   /* text area */
     case 49: return SGM(SGK_SELECTION) | SGM(SGK_BG) | SGM(SGK_SCROLL); /* rich text area: its text has its own fonts and colors */
-    case 7: case 13: case 14: return SGM_ROWS;                          /* list, table, tree */
+    case 7: case 13: case 14: case 33: return SGM_ROWS;                 /* list, table, tree, tree table */
     case 58: case 27: return SGM(SGK_BG) | SGM(SGK_SCROLL);             /* grid view, scroll area */
     default: return 0;
     }
@@ -7641,7 +7641,7 @@ static void sg_style_css(GString *c, int id, const char *cls, const SgStyle *s, 
     case 7:
         g_string_append_printf(c, ".%s list { ", cls);
         break;
-    case 13: case 14:
+    case 13: case 14: case 33:
         g_string_append_printf(c, ".%s columnview, .%s listview { ", cls, cls);
         break;
     case 58:
@@ -7774,7 +7774,7 @@ static GtkWidget *sg_style_text_widget(int id) {
         return l ? l : w;
     case 10: case 49:
         return sg_style_inner(id);
-    case 7: case 13: case 14:
+    case 7: case 13: case 14: case 33:
         l = sg_style_first_label(sg_style_inner(id), 0);
         return l ? l : sg_style_inner(id);
     case 5: case 9: case 20:
