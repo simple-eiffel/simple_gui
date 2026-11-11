@@ -450,6 +450,31 @@ feature -- Windows and containers
 		deferred
 		end
 
+	code_show_bracket_pair (an_id, a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
+			-- 1v-e-2: a background tint from the theme under the `a_first_count' characters
+			-- from position `a_first_start' and the `a_second_count' from `a_second_start',
+			-- in place of any pair shown before. A decoration: not a text color, not an undo
+			-- step, no change event. A range that does not lie in the text shows no pair.
+			-- The control drops the tint by itself at the next change of its text.
+			-- Control+Shift+\ (Command+Shift+\ on macOS) in the control sends event 56.
+		deferred
+		end
+
+	code_hide_bracket_pair (an_id: INTEGER)
+			-- No pair is tinted.
+		deferred
+		end
+
+	test_bracket_tint_at (an_id, a_position: INTEGER): BOOLEAN
+			-- Is the character at `a_position' under the bracket tint?
+		deferred
+		end
+
+	test_bracket_key (an_id: INTEGER)
+			-- As the user pressing the key that goes to the matching bracket: 56.
+		deferred
+		end
+
 	grid_view: INTEGER
 			-- 1v-a: items in a flowing grid of cells (120 by 120 until set).
 		deferred

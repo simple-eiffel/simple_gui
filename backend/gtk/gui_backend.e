@@ -686,6 +686,30 @@ feature -- Windows and containers
 		alias "sg_test_caret_to($an_id, $a_line, $a_column);"
 		end
 
+	code_show_bracket_pair (an_id, a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_show_bracket_pair($an_id, $a_first_start, $a_first_count, $a_second_start, $a_second_count);"
+		end
+
+	code_hide_bracket_pair (an_id: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_hide_bracket_pair($an_id);"
+		end
+
+	test_bracket_tint_at (an_id, a_position: INTEGER): BOOLEAN
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_bracket_tint_at($an_id, $a_position) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	test_bracket_key (an_id: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_bracket_key($an_id);"
+		end
+
 	grid_view: INTEGER
 			-- 1v-a.
 		external "C inline use %"simple_gui_gtk.h%""

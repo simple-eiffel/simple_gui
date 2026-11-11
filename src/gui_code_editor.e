@@ -26,7 +26,7 @@ class
 inherit
 	GUI_RICH_TEXT_AREA
 		redefine
-			make, set_text, dispatch
+			make, set_text, dispatch, select_range
 		end
 
 	GUI_TEXT_COMPARISON
@@ -49,6 +49,7 @@ feature {NONE} -- Initialization
 			create highlighted.make_empty
 			create starts.make (64)
 			is_case_sensitive := True
+			is_bracket_matching := True
 			tab_width := 4
 			register (backend.code_editor)
 			change_actions.extend (agent text_changed)
@@ -193,6 +194,7 @@ feature -- Lines and the caret
 			valid: 1 <= n and n <= line_count
 		do
 			backend.text_go_to_line (id, n)
+			look_for_bracket
 		ensure
 			there: caret_line = n and caret_column = 1
 		end
@@ -274,6 +276,7 @@ feature -- Highlighting by a syntax object
 				if attached a_syntax as al_new then
 					make_plain
 					al_new.attach (Current)
+					look_for_bracket
 				else
 					highlight_all
 				end
@@ -419,6 +422,108 @@ feature -- Highlighting by a syntax object
 			not_before_the_first: Result >= fold_first_line (i)
 		end
 
+feature -- Bracket matching (1v-e-2)
+
+	is_bracket_matching: BOOLEAN
+			-- Is a bracket at the caret shown with its partner? (On until set.)
+
+	set_bracket_matching (a_on: BOOLEAN)
+		require
+			gui_thread: is_gui_thread
+		do
+			is_bracket_matching := a_on
+			look_for_bracket
+		ensure
+			set: is_bracket_matching = a_on
+			none_when_off: not a_on implies not has_bracket_pair
+		end
+
+	has_bracket_pair: BOOLEAN
+			-- Are a bracket at the caret and its partner tinted?
+			-- Each time the caret moves or the text changes, the character after the caret
+			-- is looked at, then the one before it. One of ( ) [ ] { } there wants its
+			-- partner: from the syntax object (`bracket_wanted'), which answers now or later
+			-- with `show_bracket_pair' or `hide_bracket_pair'; without one, by counting
+			-- brackets of that kind (see `find_partner').
+
+	bracket_first, bracket_second: INTEGER
+			-- Where the two brackets of the pair start, the first before the second;
+			-- meaningful with `has_bracket_pair'.
+
+	go_to_matching_bracket
+			-- The caret just before the partner of the bracket it is at, brought into view;
+			-- nothing without a pair. No event. From there the first bracket is the partner,
+			-- so a second call comes back to it. The key: Control+Shift+\ (Command+Shift+\
+			-- on macOS), which also runs `caret_actions'.
+		require
+			gui_thread: is_gui_thread
+		local
+			l_target: INTEGER
+		do
+			if has_bracket_pair then
+				if bracket_first <= bracket_asked and bracket_asked < bracket_first + bracket_first_count then
+					l_target := bracket_second
+				else
+					l_target := bracket_first
+				end
+				backend.rich_text_select (id, l_target, l_target - 1)
+				look_for_bracket
+			end
+		end
+
+	show_bracket_pair (a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
+			-- The answer to `bracket_wanted', now or later: tint the `a_first_count'
+			-- characters from `a_first_start' and the `a_second_count' from `a_second_start'.
+			-- A decoration: no text color, no undo step, nothing `change_actions' hears of.
+			-- No pair is shown when a range does not lie in the text or the first does not
+			-- end before the second starts. A pair that does not hold the bracket last
+			-- asked about is the answer to an older question: what is shown stands.
+		require
+			gui_thread: is_gui_thread
+		do
+			if not is_bracket_matching
+				or else not is_pair_in_text (a_first_start, a_first_count, a_second_start, a_second_count)
+			then
+				hide_bracket_pair
+			elseif (a_first_start <= bracket_asked and bracket_asked < a_first_start + a_first_count)
+				or (a_second_start <= bracket_asked and bracket_asked < a_second_start + a_second_count)
+			then
+				has_bracket_pair := True
+				bracket_first := a_first_start
+				bracket_first_count := a_first_count
+				bracket_second := a_second_start
+				bracket_second_count := a_second_count
+				backend.code_show_bracket_pair (id, a_first_start, a_first_count, a_second_start, a_second_count)
+			end
+		ensure
+			none_out_of_text: not is_pair_in_text (a_first_start, a_first_count, a_second_start, a_second_count)
+				implies not has_bracket_pair
+		end
+
+	hide_bracket_pair
+			-- No pair is shown: the answer to `bracket_wanted' for a bracket without a partner.
+		require
+			gui_thread: is_gui_thread
+		do
+			if has_bracket_pair then
+				has_bracket_pair := False
+				backend.code_hide_bracket_pair (id)
+			end
+		ensure
+			hidden: not has_bracket_pair
+		end
+
+	is_pair_in_text (a_first_start, a_first_count, a_second_start, a_second_count: INTEGER): BOOLEAN
+			-- Do the two ranges lie in the text as last reported, one character each at
+			-- least, the first ending before the second starts?
+		do
+			Result := a_first_start >= 1 and a_first_count >= 1 and a_second_count >= 1
+				and then a_first_start < a_second_start
+				and then a_first_count <= a_second_start - a_first_start
+				and then a_second_start <= highlighted.count
+				and then a_second_count <= highlighted.count - a_second_start + 1
+		end
+
 feature -- Find and replace
 
 	find_next (a_text: READABLE_STRING_GENERAL; a_case_sensitive, a_whole_word: BOOLEAN): BOOLEAN
@@ -484,10 +589,17 @@ feature -- Find and replace
 feature {GUI_APPLICATION} -- Events
 
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)
-			-- 52: the user moved the caret (line, column); else as a text area.
+			-- 52: the user moved the caret (line, column); 56: the user pressed the key that
+			-- goes to the matching bracket; else as a text area.
 		do
 			if a_type = 52 then
+				look_for_bracket
 				caret_actions.call ([a_a, a_b])
+			elseif a_type = 56 then
+				if has_bracket_pair then
+					go_to_matching_bracket
+					caret_actions.call ([caret_line, caret_column])
+				end
 			else
 				Precursor (a_type, a_a, a_b, a_c)
 			end
@@ -499,6 +611,13 @@ feature -- Element change
 		do
 			Precursor (a_text)
 			highlight_all
+		end
+
+	select_range (a_start, an_end: INTEGER)
+			-- Also: a bracket at the caret's new place gets its pair.
+		do
+			Precursor (a_start, an_end)
+			look_for_bracket
 		end
 
 	highlight_all
@@ -513,6 +632,7 @@ feature -- Element change
 				starts.wipe_out
 				rehighlight
 			end
+			look_for_bracket
 		end
 
 feature {NONE} -- The application's calls
@@ -538,6 +658,8 @@ feature {NONE} -- The application's calls
 			-- change of theme, its window open or not.
 		do
 			if enclosing_window = a_window then
+				has_bracket_pair := False
+				bracket_asked := 0
 				if attached syntax as al_syntax then
 					al_syntax.detach
 					syntax := Void
@@ -581,6 +703,7 @@ feature {NONE} -- Highlighting
 			else
 				rehighlight
 			end
+			look_for_bracket
 		end
 
 	rules_changed
@@ -597,6 +720,7 @@ feature {NONE} -- Highlighting
 		do
 			if attached syntax as al_syntax then
 				report_edit (al_syntax)
+				look_for_bracket
 			else
 				highlight_all
 			end
@@ -898,6 +1022,228 @@ feature {NONE} -- Highlighting
 			if is_case_sensitive then Result := a_word else Result := a_word.as_lower end
 		end
 
+feature {NONE} -- Bracket matching
+
+	bracket_asked: INTEGER
+			-- Where the bracket is whose partner was last looked for; 0 when the caret was
+			-- at none.
+
+	bracket_first_count, bracket_second_count: INTEGER
+			-- How many characters each range of the pair has.
+
+	Brackets: STRING_32 = "()[]{}"
+			-- The brackets that are matched, each opening one before its closing one.
+
+	Bracket_reach: INTEGER = 2000
+			-- How many lines, the bracket's own among them, the rules' search looks at.
+
+	look_for_bracket
+			-- No pair; then, when matching is on, the character after the caret and the one
+			-- before it are looked at, and the first that is a bracket wants its partner.
+			-- Cost: away from any bracket, what `is_bracket_near_caret' costs, which walks
+			-- no text. Next to one: three calls to the control (the caret's line, its
+			-- column, that line's text; the Windows control walks its text for each: 4 ms
+			-- in all at the middle of 388,893 characters), one walk over `highlighted' down
+			-- to the caret's line, then the syntax object's answer or `find_partner'.
+			-- The control's text can be one event ahead of `highlighted'; then the caret's
+			-- line differs there, no pair is shown, and the change event that follows
+			-- looks again.
+		local
+			l_line: STRING_32
+			l_number, l_column, l_at, l_start, l_end: INTEGER
+		do
+			hide_bracket_pair
+			bracket_asked := 0
+			if is_bracket_matching and then is_bracket_near_caret then
+				l_number := caret_line
+				l_column := caret_column
+				if l_number >= 1 then
+					l_line := line_text (l_number)
+					if l_column >= 1 and then l_column <= l_line.count and then Brackets.has (l_line [l_column]) then
+						l_at := l_column
+					elseif l_column >= 2 and then l_column - 1 <= l_line.count and then Brackets.has (l_line [l_column - 1]) then
+						l_at := l_column - 1
+					end
+					if l_at > 0 then
+						l_start := highlighted_line_start (l_number)
+						if l_start > 0 and l_start <= highlighted.count then
+							l_end := highlighted.index_of ('%N', l_start)
+							if l_end = 0 then l_end := highlighted.count + 1 end
+							if l_end - l_start = l_line.count and then highlighted.same_characters (l_line, 1, l_line.count, l_start) then
+								bracket_asked := l_start + l_at - 1
+								if attached syntax as al_syntax then
+									al_syntax.bracket_wanted (bracket_asked)
+								elseif starts.valid_index (l_number) then
+									find_partner (l_number, l_start, l_at, l_line)
+								end
+							end
+						end
+					end
+				end
+			end
+		ensure
+			none_when_off: not is_bracket_matching implies not has_bracket_pair
+		end
+
+	is_bracket_near_caret: BOOLEAN
+			-- Can the caret be next to a bracket? With nothing selected, the caret's place
+			-- is read from the control (two calls that walk no text) and `highlighted'
+			-- answers. With a selection the caret is at one of its ends, and only its line
+			-- and column say which: True.
+			-- When the control's text is one event ahead of `highlighted' the answer can
+			-- be wrong either way: a False shows no pair until the change event that
+			-- follows looks again, and a True is settled by `look_for_bracket', which
+			-- reads the control's own line.
+		local
+			l_first, l_last: INTEGER
+		do
+			l_first := backend.rich_text_selection_start (id)
+			l_last := backend.rich_text_selection_end (id)
+			if l_last >= l_first then
+				Result := True
+			else
+				Result := (highlighted.valid_index (l_first) and then Brackets.has (highlighted [l_first]))
+					or else (highlighted.valid_index (l_first - 1) and then Brackets.has (highlighted [l_first - 1]))
+			end
+		end
+
+	highlighted_line_start (a_number: INTEGER): INTEGER
+			-- Where line `a_number' of `highlighted' starts (one past the text's end for an
+			-- empty last line); 0 when it has no such line.
+		require
+			positive: a_number >= 1
+		local
+			i: INTEGER
+		do
+			from
+				Result := 1
+				i := 1
+			until
+				i = a_number or Result = 0
+			loop
+				Result := highlighted.index_of ('%N', Result)
+				if Result > 0 then
+					Result := Result + 1
+				end
+				i := i + 1
+			end
+		ensure
+			in_reach: 0 <= Result and Result <= highlighted.count + 1
+		end
+
+	find_partner (a_number, a_start, a_column: INTEGER; a_line: STRING_32)
+			-- Without a syntax object: the partner of the bracket at column `a_column' of
+			-- line `a_number' (`a_line', which starts at position `a_start' of `highlighted')
+			-- is found by counting brackets of its kind, forward from an opening one and
+			-- backward from a closing one, passing over what the rules (or the agent) color
+			-- as a string or a comment. Found: the pair is shown. Not found within
+			-- `Bracket_reach' lines, or the bracket is itself in a string or a comment: no
+			-- pair.
+			-- Cost: one pass over the lines searched; the rules are asked only for a line
+			-- that has a bracket of the kind.
+		require
+			no_syntax: syntax = Void
+			line_has_a_state: starts.valid_index (a_number)
+			a_bracket: a_line.valid_index (a_column) and then Brackets.has (a_line [a_column])
+			asked: bracket_asked = a_start + a_column - 1
+		local
+			l_own, l_other, c: CHARACTER_32
+			l_kind, l_step, l_depth, l_number, l_offset, l_end, l_lines, l_found, i: INTEGER
+			l_line: STRING_32
+			l_spans: detachable LIST [TUPLE [start, length, style: INTEGER]]
+			l_stop: BOOLEAN
+		do
+			l_own := a_line [a_column]
+			l_kind := Brackets.index_of (l_own, 1)
+			if l_kind \\ 2 = 1 then
+				l_other := Brackets [l_kind + 1]
+				l_step := 1
+			else
+				l_other := Brackets [l_kind - 1]
+				l_step := -1
+			end
+			from
+				l_number := a_number
+				l_offset := a_start
+				l_line := a_line
+				l_lines := 1
+				i := a_column + l_step
+				l_spans := spans_of (l_line, starts [l_number])
+				l_stop := is_passed_over (l_spans, a_column)
+			until
+				l_found > 0 or l_stop
+			loop
+				from until i < 1 or i > l_line.count or l_found > 0 loop
+					c := l_line [i]
+					if c = l_own or c = l_other then
+						if l_spans = Void then
+							l_spans := spans_of (l_line, starts [l_number])
+						end
+						if attached l_spans as al_spans and then not is_passed_over (al_spans, i) then
+							if c = l_own then
+								l_depth := l_depth + 1
+							elseif l_depth = 0 then
+								l_found := l_offset + i - 1
+							else
+								l_depth := l_depth - 1
+							end
+						end
+					end
+					i := i + l_step
+				end
+				if l_found = 0 then
+					l_number := l_number + l_step
+					if l_lines >= Bracket_reach or not starts.valid_index (l_number) then
+						l_stop := True
+					elseif l_step = 1 then
+						l_offset := l_offset + l_line.count + 1
+						if l_offset > highlighted.count + 1 then
+							l_stop := True
+						else
+							l_end := highlighted.index_of ('%N', l_offset)
+							if l_end = 0 then l_end := highlighted.count + 1 end
+						end
+					elseif l_offset < 2 then
+						l_stop := True
+					else
+							-- the line break before this line ends the one before it
+						l_end := l_offset - 1
+						if l_end >= 2 then
+							l_offset := highlighted.last_index_of ('%N', l_end - 1) + 1
+						else
+							l_offset := 1
+						end
+					end
+					if not l_stop then
+						l_line := highlighted.substring (l_offset, l_end - 1)
+						l_spans := Void
+						l_lines := l_lines + 1
+						if l_step = 1 then i := 1 else i := l_line.count end
+					end
+				end
+			end
+			if l_found > 0 then
+				if l_step = 1 then
+					show_bracket_pair (bracket_asked, 1, l_found, 1)
+				else
+					show_bracket_pair (l_found, 1, bracket_asked, 1)
+				end
+			end
+		end
+
+	is_passed_over (a_spans: LIST [TUPLE [start, length, style: INTEGER]]; a_column: INTEGER): BOOLEAN
+			-- Does one of `a_spans', a line's, color column `a_column' as a string or a
+			-- comment?
+		do
+			across a_spans as ic loop
+				if (ic.style = Style_string or ic.style = Style_comment)
+					and then ic.start <= a_column and then a_column < ic.start + ic.length
+				then
+					Result := True
+				end
+			end
+		end
+
 feature {NONE} -- Finding
 
 	find_from (a_text: READABLE_STRING_GENERAL; a_case_sensitive, a_whole_word, a_forward: BOOLEAN): BOOLEAN
@@ -962,5 +1308,8 @@ feature {NONE} -- Finding
 invariant
 	starts_fit_the_text: starts.count <= highlighted.count + 1
 	folds_come_from_a_syntax: syntax = Void implies folds = Void
+	pair_only_when_matching: has_bracket_pair implies is_bracket_matching
+	pair_answers_the_bracket_asked: has_bracket_pair implies bracket_asked >= 1
+	pair_in_order: has_bracket_pair implies (1 <= bracket_first and bracket_first < bracket_second)
 
 end

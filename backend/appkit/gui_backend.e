@@ -1641,6 +1641,30 @@ feature -- Common widget state
 		alias "sga_test_field_escape($an_id);"
 		end
 
+	code_show_bracket_pair (an_id, a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_show_bracket_pair($an_id, $a_first_start, $a_first_count, $a_second_start, $a_second_count);"
+		end
+
+	code_hide_bracket_pair (an_id: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_hide_bracket_pair($an_id);"
+		end
+
+	test_bracket_tint_at (an_id, a_position: INTEGER): BOOLEAN
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_bracket_tint_at($an_id, $a_position) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	test_bracket_key (an_id: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_bracket_key($an_id);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"
