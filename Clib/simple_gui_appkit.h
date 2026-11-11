@@ -509,6 +509,9 @@ void sga_text_begin_edit_group(int a_id);
 void sga_text_end_edit_group(int a_id);
 void sga_test_code_key(int a_id, int an_action, int a_shift, const char *a_text);
 void sga_test_caret_gesture(int a_id, int a_gesture, int a_position);
+/* 1v-e-6: view-first coloring */
+double sga_clock_ms(void);
+int sga_code_visible_line(int a_id, int a_last);
 /* 1v-a: the grid view */
 int sga_grid_view(void);
 void sga_grid_view_extend(int a_id, const char *a_title, const char *a_picture, const char *an_icon);

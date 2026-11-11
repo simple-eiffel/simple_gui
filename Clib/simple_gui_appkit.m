@@ -10507,3 +10507,42 @@ void sga_test_caret_gesture(int a_id, int a_gesture, int a_position)
 	sga_push(61, a_id, a_gesture, a_position, 0);
 	sga_wake();
 }
+
+/* ------------------------------------------------------------------ 1v-e-6: view-first coloring */
+
+/* A monotonic clock in milliseconds (as simple_shell's shell_now_ms). */
+double sga_clock_ms(void) { return (double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1.0e6; }
+
+/* The first (or, when `a_last', the last) line, from 1, any part of which is in view; 0
+   before the control has a window and a size to show. The visible rectangle's glyphs, as
+   the gutter finds them; lines a closed fold hides take no room, and when the range starts
+   or ends in them it steps to the nearest shown line. */
+int sga_code_visible_line(int a_id, int a_last)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || ![t window]) return 0;
+	NSRect v = [t visibleRect];
+	if (NSIsEmptyRect(v)) return 0;
+	NSString *s = [t string];
+	NSUInteger n = [s length];
+	if (n == 0) return 1;
+	NSLayoutManager *m = [t layoutManager];
+	NSRect r = NSOffsetRect(v, -[t textContainerOrigin].x, -[t textContainerOrigin].y);
+	NSRange g = [m glyphRangeForBoundingRect:r inTextContainer:[t textContainer]];
+	NSRange c = [m characterRangeForGlyphRange:g actualGlyphRange:NULL];
+	NSUInteger k;
+	if (!a_last) {
+		k = MIN(c.location, n);
+		int i = t->hidden_count ? sga_code_hidden_at(t, k) : -1;
+		if (i >= 0) k = NSMaxRange(t->hidden[i]);
+	}
+	else {
+		/* the empty last line after a final line break, when it is in view */
+		if (NSMaxRange(c) >= n && [s hasSuffix:@"\n"] && NSIntersectsRect([m extraLineFragmentRect], r))
+			return (int)sga_line_breaks(s, 0, n, NULL) + 1;
+		k = NSMaxRange(c) > 0 ? MIN(NSMaxRange(c) - 1, n - 1) : 0;
+		int i = t->hidden_count ? sga_code_hidden_at(t, k) : -1;
+		if (i >= 0 && t->hidden[i].location > 0) k = t->hidden[i].location - 1;
+	}
+	return (int)sga_line_breaks(s, 0, MIN(k, n), NULL) + 1;
+}
