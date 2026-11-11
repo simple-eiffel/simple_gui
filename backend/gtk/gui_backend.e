@@ -831,6 +831,24 @@ feature -- Windows and containers
 		alias "sg_test_caret_gesture($an_id, $a_gesture, $a_position);"
 		end
 
+	clock_ms: REAL_64
+			-- 1v-e-6: GLib's monotonic clock.
+		external "C inline use <glib.h>"
+		alias "return (EIF_REAL_64) g_get_monotonic_time () / 1000.0;"
+		end
+
+	code_first_visible_line (an_id: INTEGER): INTEGER
+			-- View-first: the line at the top of the visible rectangle.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_code_visible_line($an_id, 0);"
+		end
+
+	code_last_visible_line (an_id: INTEGER): INTEGER
+			-- View-first: the line at the bottom of the visible rectangle.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_code_visible_line($an_id, 1);"
+		end
+
 	grid_view: INTEGER
 			-- 1v-a.
 		external "C inline use %"simple_gui_gtk.h%""

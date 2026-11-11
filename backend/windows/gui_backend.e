@@ -4925,6 +4925,26 @@ feature -- Test doors (act on the widget as a user would)
 			end
 		end
 
+	clock_ms: REAL_64
+			-- 1v-e-6: the performance counter, through simple_shell.
+		do
+			Result := desktop.now_ms
+		end
+
+	code_first_visible_line (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.first_visible_line
+			end
+		end
+
+	code_last_visible_line (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.last_visible_line
+			end
+		end
+
 	test_caret_gesture (an_id, a_gesture, a_position: INTEGER)
 		do
 			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then

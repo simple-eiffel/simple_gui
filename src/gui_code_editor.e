@@ -56,6 +56,9 @@ feature {NONE} -- Initialization
 			is_case_sensitive := True
 			is_bracket_matching := True
 			create extra_carets.make (2)
+			create pending_lines.make (2)
+			coloring_budget_ms := 8
+			coloring_chunk := 100
 			create completion_words.make (8)
 			create completion_offers.make (8)
 			create completion_shown.make (8)
@@ -302,7 +305,10 @@ feature -- Highlighting by a syntax object
 					make_plain
 					al_new.attach (Current)
 					look_for_bracket
+						-- 1v-e-6: every line is to be colored, the view first, on later turns
+					pending_all
 				else
+					pending_clear
 					highlight_all
 				end
 				folds_touched (highlighted)
@@ -330,6 +336,9 @@ feature -- Highlighting by a syntax object
 			l_colors: ARRAY [NATURAL_32]
 			i, n, l_count, l_line, l_offset, l_break, l_from, l_to, l_style: INTEGER
 		do
+				-- 1v-e-6: these lines are colored; the next slice follows on a later turn
+			pending_remove (a_first_line, a_last_line)
+			schedule_coloring
 			l_text := text
 			l_colors := style_colors
 				-- where line `a_first_line' starts; 0 when the text has no such line
@@ -779,6 +788,54 @@ feature -- Completion (1v-e-4)
 	completion_selected: INTEGER
 			-- The highlighted row; 0 when no list shows.
 
+feature -- View (1v-e-6)
+
+	first_visible_line: INTEGER
+			-- The first line any part of which is in view; 0 before the first layout.
+		do
+			Result := backend.code_first_visible_line (id)
+		end
+
+	last_visible_line: INTEGER
+			-- The last line any part of which is in view; 0 before the first layout.
+		do
+			Result := backend.code_last_visible_line (id)
+		end
+
+	coloring_budget_ms: INTEGER
+			-- With a syntax object, about how long one turn of the loop may spend asking for
+			-- lines not yet colored (8 until set).
+
+	coloring_slice_lines: INTEGER
+			-- When positive, each turn asks for that many lines instead, whatever the time.
+
+	set_coloring_budget (a_ms: INTEGER)
+		require
+			positive: a_ms > 0
+		do
+			coloring_budget_ms := a_ms
+			coloring_slice_lines := 0
+		ensure
+			set: coloring_budget_ms = a_ms and coloring_slice_lines = 0
+		end
+
+	set_coloring_slice_lines (a_lines: INTEGER)
+		require
+			positive: a_lines > 0
+		do
+			coloring_slice_lines := a_lines
+		ensure
+			set: coloring_slice_lines = a_lines
+		end
+
+	pending_line_count: INTEGER
+			-- With a syntax object, how many lines are not colored yet.
+		do
+			across pending_lines as ic loop
+				Result := Result + ic.last - ic.first + 1
+			end
+		end
+
 feature -- Multiple carets (1v-e-5)
 
 	caret_count: INTEGER
@@ -1041,6 +1098,8 @@ feature -- Element change
 			if attached syntax as al_syntax then
 				make_plain
 				al_syntax.text_replaced (highlighted)
+					-- 1v-e-6: the view first, on later turns
+				pending_all
 			else
 				starts.wipe_out
 				rehighlight (text)
@@ -1073,8 +1132,9 @@ feature {NONE} -- The application's calls
 			if enclosing_window = a_window then
 				has_bracket_pair := False
 				bracket_asked := 0
-					-- the list and the extra carets went with the control
+					-- the list and the extra carets went with the control, and no slice runs
 				extra_carets.wipe_out
+				pending_clear
 				completion_start := 0
 				completion_selected := 0
 				completion_offers.wipe_out
@@ -1187,6 +1247,9 @@ feature {NONE} -- Highlighting
 				l_tail := shared_tail (l_text, l_old, l_limit).min (l_limit - l_head)
 					-- before the call: the object may answer with `apply_spans' at once
 				highlighted := l_text
+				pending_follow_edit (line_at (l_old, l_head + 1),
+					line_breaks_in (l_old, l_head + 1, l_old.count - l_tail),
+					line_breaks_in (l_text, l_head + 1, l_text.count - l_tail))
 				a_syntax.text_edited (l_head + 1, l_old.count - l_head - l_tail,
 					l_text.substring (l_head + 1, l_text.count - l_tail))
 			end
@@ -1969,6 +2032,223 @@ feature {NONE} -- Folding
 			end
 		ensure
 			in_or_just_past: 1 <= Result and Result <= a_text.count + 1
+		end
+
+feature {NONE} -- Coloring by the view
+
+	pending_lines: ARRAYED_LIST [TUPLE [first, last: INTEGER]]
+			-- With a syntax object, the lines not colored yet: ranges in order, apart.
+
+	in_flight: detachable TUPLE [first, last: INTEGER]
+			-- Lines asked for and not yet answered (an object that answers later): not asked
+			-- again; asking goes on when an answer comes.
+
+	coloring_timer: detachable GUI_TIMER
+			-- The next slice, when one is due.
+
+	coloring_chunk: INTEGER
+			-- Lines asked at a time while a turn's time lasts: after each ask it is sized so
+			-- that one ask would take about the budget, from the lines a millisecond the last
+			-- one colored, between 50 and 5,000 (each ask also pays a read of the text and a
+			-- walk down to its lines, so a few large asks beat many small ones).
+
+	pending_all
+			-- Every line is to be colored (a new text, a new theme, a new syntax object).
+		do
+			pending_lines.wipe_out
+			pending_lines.extend ([1, line_breaks_in (highlighted, 1, highlighted.count) + 1])
+			in_flight := Void
+			schedule_coloring
+		end
+
+	pending_clear
+			-- Nothing is to be colored, and no slice is due.
+		do
+			pending_lines.wipe_out
+			in_flight := Void
+			if attached coloring_timer as al_timer then
+				al_timer.cancel
+				coloring_timer := Void
+			end
+		ensure
+			none: pending_lines.is_empty and coloring_timer = Void
+		end
+
+	pending_add (a_first, a_last: INTEGER)
+			-- Lines `a_first' to `a_last' are to be colored.
+		require
+			ordered: 1 <= a_first and a_first <= a_last
+		local
+			l_first, l_last, i: INTEGER
+			l_kept: ARRAYED_LIST [TUPLE [first, last: INTEGER]]
+		do
+			l_first := a_first
+			l_last := a_last
+			create l_kept.make (pending_lines.count + 1)
+			across pending_lines as ic loop
+				if ic.last + 1 < l_first or l_last + 1 < ic.first then
+					l_kept.extend (ic)
+				else
+					l_first := l_first.min (ic.first)
+					l_last := l_last.max (ic.last)
+				end
+			end
+			from i := 1 until i > l_kept.count or else l_kept [i].first > l_first loop
+				i := i + 1
+			end
+			l_kept.go_i_th (i)
+			l_kept.put_left ([l_first, l_last])
+			pending_lines := l_kept
+		end
+
+	pending_remove (a_first, a_last: INTEGER)
+			-- Lines `a_first' to `a_last' are colored.
+		local
+			l_kept: ARRAYED_LIST [TUPLE [first, last: INTEGER]]
+		do
+			create l_kept.make (pending_lines.count + 1)
+			across pending_lines as ic loop
+				if ic.last < a_first or a_last < ic.first then
+					l_kept.extend (ic)
+				else
+					if ic.first < a_first then
+						l_kept.extend ([ic.first, a_first - 1])
+					end
+					if a_last < ic.last then
+						l_kept.extend ([a_last + 1, ic.last])
+					end
+				end
+			end
+			pending_lines := l_kept
+			if attached in_flight as al_asked and then al_asked.last >= a_first and then al_asked.first <= a_last then
+				in_flight := Void
+			end
+		end
+
+	pending_follow_edit (a_line, a_removed_breaks, an_added_breaks: INTEGER)
+			-- An edit on line `a_line' took `a_removed_breaks' line breaks and added
+			-- `an_added_breaks': lines below move with it, and the lines it touched are pending
+			-- until the object's answer colors them.
+		local
+			l_kept: ARRAYED_LIST [TUPLE [first, last: INTEGER]]
+			l_end, l_shift: INTEGER
+		do
+			l_end := a_line + a_removed_breaks
+			l_shift := an_added_breaks - a_removed_breaks
+			create l_kept.make (pending_lines.count + 1)
+			across pending_lines as ic loop
+				if ic.last < a_line then
+					l_kept.extend (ic)
+				elseif ic.first > l_end then
+					l_kept.extend ([ic.first + l_shift, ic.last + l_shift])
+				else
+						-- it met the edited lines: what lay above stays, what lay below moves
+					if ic.first < a_line then
+						l_kept.extend ([ic.first, a_line - 1])
+					end
+					if ic.last > l_end then
+						l_kept.extend ([l_end + 1 + l_shift, ic.last + l_shift])
+					end
+				end
+			end
+			pending_lines := l_kept
+			in_flight := Void
+			pending_add (a_line, a_line + an_added_breaks)
+			schedule_coloring
+		end
+
+	schedule_coloring
+			-- A slice on a later turn of the loop, unless one is due already.
+		do
+			if coloring_timer = Void and then syntax /= Void and then window_closed_agent /= Void
+				and then not pending_lines.is_empty and then has_application
+			then
+				coloring_timer := application.after (1, agent color_slice)
+			end
+		end
+
+	color_slice
+			-- A turn's coloring: the pending lines in view first, then the rest from the top,
+			-- for about `coloring_budget_ms' (or `coloring_slice_lines' lines).
+		local
+			l_first, l_last: INTEGER
+			l_t0, l_ask: REAL_64
+			l_done: BOOLEAN
+		do
+			coloring_timer := Void
+			if attached syntax as al_syntax and then window_closed_agent /= Void and then not pending_lines.is_empty then
+				l_t0 := backend.clock_ms
+				l_first := first_visible_line
+				l_last := last_visible_line
+				if l_first > 0 and l_last >= l_first then
+					ask_pending_between (al_syntax, l_first, l_last)
+				end
+				if coloring_slice_lines > 0 then
+					if not pending_lines.is_empty and syntax = al_syntax then
+						ask_first_pending (al_syntax, coloring_slice_lines)
+					end
+				else
+					from
+						l_done := (backend.clock_ms - l_t0) >= coloring_budget_ms
+					until
+						l_done or pending_lines.is_empty or syntax /= al_syntax or in_flight /= Void
+					loop
+						l_ask := backend.clock_ms
+						ask_first_pending (al_syntax, coloring_chunk)
+						l_ask := backend.clock_ms - l_ask
+						if l_ask > 0.05 then
+							coloring_chunk := (coloring_chunk * coloring_budget_ms / l_ask).truncated_to_integer.max (50).min (5_000)
+						else
+							coloring_chunk := (coloring_chunk * 2).min (5_000)
+						end
+						l_done := (backend.clock_ms - l_t0) >= coloring_budget_ms
+					end
+				end
+				if in_flight = Void then
+					schedule_coloring
+				end
+			end
+		end
+
+	ask_pending_between (a_syntax: GUI_EDITOR_SYNTAX; a_first, a_last: INTEGER)
+			-- Ask for each pending range within lines `a_first' to `a_last'.
+		local
+			l_ranges: ARRAYED_LIST [TUPLE [first, last: INTEGER]]
+		do
+			create l_ranges.make (2)
+			across pending_lines as ic loop
+				if ic.last >= a_first and ic.first <= a_last then
+					l_ranges.extend ([ic.first.max (a_first), ic.last.min (a_last)])
+				end
+			end
+			across l_ranges as ic until in_flight /= Void or syntax /= a_syntax loop
+				ask (a_syntax, ic.first, ic.last)
+			end
+		end
+
+	ask_first_pending (a_syntax: GUI_EDITOR_SYNTAX; a_lines: INTEGER)
+			-- Ask for up to `a_lines' lines from the first pending range.
+		require
+			has_pending: not pending_lines.is_empty
+		do
+			ask (a_syntax, pending_lines.first.first, (pending_lines.first.first + a_lines - 1).min (pending_lines.first.last))
+		end
+
+	ask (a_syntax: GUI_EDITOR_SYNTAX; a_first, a_last: INTEGER)
+			-- `spans_wanted' for these lines; if they are still pending after it, the object
+			-- answers later, and they are in flight.
+		local
+			l_still: BOOLEAN
+		do
+			if a_syntax.editor = Current and then 1 <= a_first and then a_first <= a_last then
+				a_syntax.spans_wanted (a_first, a_last)
+				across pending_lines as ic until l_still loop
+					l_still := ic.last >= a_first and ic.first <= a_last
+				end
+				if l_still then
+					in_flight := [a_first, a_last]
+				end
+			end
 		end
 
 feature {NONE} -- Multiple carets

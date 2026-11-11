@@ -2560,6 +2560,245 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_view_first_asks_after_the_settle
+			-- 1v-e-6: nothing is asked inside `set_text'; once the window has settled the
+			-- first ask covers the lines in view, and in the end every line is colored.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_first, l_last: INTEGER
+		do
+			create l_window.make ("View first", 640, 400)
+			create l_code.make
+			create l_syntax.make
+			l_syntax.set_span_maker (agent coloring_spans (l_code, ?, ?))
+			l_code.set_syntax (l_syntax)
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_syntax.wanted.wipe_out
+			l_code.set_text (coloring_text (2_000))
+			assert ("nothing asked inside set_text", l_syntax.wanted.is_empty)
+			settle_window
+			l_first := l_code.first_visible_line
+			l_last := l_code.last_visible_line
+			assert ("asked after the settle", not l_syntax.wanted.is_empty)
+			assert ("the first ask is the view: " + l_syntax.wanted.first.first.out + "-" + l_syntax.wanted.first.last.out
+				+ " for " + l_first.out + "-" + l_last.out,
+				l_syntax.wanted.first.first <= l_first.max (1) and l_syntax.wanted.first.last >= l_last.min (2_000))
+			coloring_settles (l_code)
+			assert ("every line colored: " + l_code.pending_line_count.out + " left", l_code.pending_line_count = 0)
+			l_window.close
+		end
+
+	test_view_first_while_slices_are_pending
+			-- 1v-e-6: while lines are pending: an edit keeps the pending lines with it; a jump
+			-- far down is asked next; a closed fold in view, a theme change, another syntax
+			-- object and Void each do as the spec says; a closed window is asked nothing more.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax, l_other: GUI_TEST_SYNTAX
+			l_asked: INTEGER
+		do
+			create l_window.make ("Pending", 640, 400)
+			create l_code.make
+			create l_syntax.make
+				-- this object answers nothing by itself: the test answers
+			l_code.set_syntax (l_syntax)
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+				-- (the empty text was asked for once; that ask is not this test's)
+			l_syntax.wanted.wipe_out
+			l_code.set_text (coloring_text (2_000))
+			settle_window
+			assert ("one ask, in flight: " + l_syntax.wanted.count.out, l_syntax.wanted.count = 1)
+			settle_window
+			assert ("not asked again while unanswered", l_syntax.wanted.count = 1)
+			l_code.apply_spans (l_syntax.wanted.first.first, l_syntax.wanted.first.last,
+				coloring_spans (l_code, l_syntax.wanted.first.first, l_syntax.wanted.first.last))
+			settle_window
+			assert ("the answer brought the next ask", l_syntax.wanted.count = 2)
+				-- an edit on line 1 while lines are pending
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 1)
+			driver.type_code (l_code, "x")
+			assert ("the text is whole", l_code.line_count = 2_000)
+				-- a jump far down: that view is asked next
+			l_syntax.set_span_maker (agent coloring_spans (l_code, ?, ?))
+			l_syntax.wanted.wipe_out
+			l_code.go_to_line (1_500)
+			settle_window
+			assert ("the far view asked: " + asked_lines (l_syntax),
+				across l_syntax.wanted as ic some ic.first <= 1_500 and 1_500 <= ic.last end)
+			coloring_settles (l_code)
+			assert ("all colored", l_code.pending_line_count = 0)
+				-- a theme change: every line pending again, the view first
+			driver.set_dark (not app.is_dark)
+			assert ("pending again: " + l_code.pending_line_count.out, l_code.pending_line_count > 0)
+			coloring_settles (l_code)
+			assert ("all colored again", l_code.pending_line_count = 0)
+			driver.set_dark (False)
+			coloring_settles (l_code)
+				-- a closed fold in view
+			l_code.set_text ({STRING_32} "a%N    b%N    c%Nd%N" + coloring_text (500))
+			l_code.set_folding_shown (True)
+			settle_window
+			coloring_settles (l_code)
+			if l_code.is_foldable (1) then
+				l_code.fold (1)
+			end
+			l_code.set_text (l_code.text)
+			coloring_settles (l_code)
+			assert ("colored with a fold", l_code.pending_line_count = 0)
+				-- Void, then another object
+			l_code.set_syntax (Void)
+			assert ("nothing pending without one", l_code.pending_line_count = 0)
+			create l_other.make
+			l_other.set_span_maker (agent coloring_spans (l_code, ?, ?))
+			l_code.set_syntax (l_other)
+			coloring_settles (l_code)
+			assert ("the other one asked", not l_other.wanted.is_empty and l_code.pending_line_count = 0)
+				-- the window closes with lines pending: nothing more is asked
+			l_other.set_span_maker (Void)
+			l_other.wanted.wipe_out
+			l_code.set_text (coloring_text (2_000))
+			settle_window
+			l_asked := l_other.wanted.count
+			l_window.close
+			settle_window
+			assert ("nothing asked after the close", l_other.wanted.count = l_asked and l_other.editor = Void)
+		end
+
+	test_view_first_cost
+			-- 1v-e-6: at 10,000 lines of 60,000 spans: what set_text itself costs, then from its
+			-- return the view colored, the longest gap a 20 ms timer saw while the rest was
+			-- colored, and the total; by time (8 ms a turn) and by fixed 500-line slices.
+			-- Printed for the spec and the pull request.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_text: STRING_32
+			l_timer: GUI_TIMER
+			l_t0, l_set, l_view, l_total, l_view_gap: REAL_64
+			l_mode: INTEGER
+		do
+			create l_window.make ("View first cost", 720, 480)
+			create l_code.make
+			create l_syntax.make
+			l_syntax.set_span_maker (agent coloring_spans (l_code, ?, ?))
+			l_code.set_syntax (l_syntax)
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_text := coloring_text (10_000)
+				-- a first load of this size, colored out, so neither mode pays for the first
+			l_code.set_text (l_text)
+			coloring_settles (l_code)
+			from l_mode := 1 until l_mode > 2 loop
+				if l_mode = 1 then
+					l_code.set_coloring_budget (8)
+				else
+					l_code.set_coloring_slice_lines (500)
+				end
+				l_syntax.wanted.wipe_out
+				l_t0 := now_seconds
+				timed (agent l_code.set_text (l_text))
+				l_set := now_seconds - l_t0
+					-- from here: the coloring alone
+				tick_count := 0
+				tick_longest_gap := 0.0
+				tick_last := now_seconds
+				l_timer := app.every (20, agent on_tick)
+				l_t0 := now_seconds
+				from until not l_syntax.wanted.is_empty or now_seconds - l_t0 > 5.0 loop
+					timed (agent app.process_events (1))
+				end
+				timed (agent driver.pump_until_idle (0))
+				l_view := now_seconds - l_t0
+				l_view_gap := tick_longest_gap
+					-- from here: the slices alone
+				tick_longest_gap := 0.0
+				tick_last := now_seconds
+				from until l_code.pending_line_count = 0 or now_seconds - l_t0 > 30.0 loop
+					timed (agent app.process_events (1))
+				end
+				l_total := now_seconds - l_t0
+				l_timer.cancel
+				if l_mode = 1 then
+					print ("    view first, 8 ms a turn: ")
+				else
+					print ("    view first, 500 lines a turn: ")
+				end
+				print ("set_text " + (l_set * 1000.0).rounded.out + " ms; then the view colored and drawn in "
+					+ (l_view * 1000.0).rounded.out + " ms (longest gap until then " + (l_view_gap * 1000.0).rounded.out + " ms); all in " + (l_total * 1000.0).rounded.out
+					+ " ms; longest gap while slicing " + (tick_longest_gap * 1000.0).rounded.out
+					+ " ms; asks " + l_syntax.wanted.count.out + "%N")
+				io.output.flush
+				assert ("all colored", l_code.pending_line_count = 0)
+				l_mode := l_mode + 1
+			end
+			l_window.close
+		end
+
+	coloring_text (a_lines: INTEGER): STRING_32
+			-- `a_lines' lines like:     do print ("line N") end -- note
+		local
+			i: INTEGER
+		do
+			create Result.make (a_lines * 40)
+			from i := 1 until i > a_lines loop
+				Result.append ({STRING_32} "    do print (%"line ")
+				Result.append_integer (i)
+				Result.append ({STRING_32} "%") end -- note")
+				if i < a_lines then
+					Result.append_character ('%N')
+				end
+				i := i + 1
+			end
+		end
+
+	coloring_spans (a_code: GUI_CODE_EDITOR; a_first, a_last: INTEGER): GUI_TEST_SPANS
+			-- Six spans on each line `a_first' to `a_last' of `coloring_text'.
+		local
+			i, l_string_length: INTEGER
+		do
+			create Result.make ((a_last - a_first + 1) * 6)
+			from i := a_first until i > a_last loop
+				l_string_length := 7 + i.out.count
+				Result.put (i, 5, 2, a_code.Style_keyword)
+				Result.put (i, 8, 5, a_code.Style_function)
+				Result.put (i, 14, 1, a_code.Style_operator)
+				Result.put (i, 15, l_string_length, a_code.Style_string)
+				Result.put (i, 17 + l_string_length, 3, a_code.Style_keyword)
+				Result.put (i, 21 + l_string_length, 7, a_code.Style_comment)
+				i := i + 1
+			end
+		end
+
+	coloring_settles (a_code: GUI_CODE_EDITOR)
+			-- Turn the loop until no line is pending (at most 20 seconds).
+		local
+			l_t0: REAL_64
+		do
+			l_t0 := now_seconds
+			from until a_code.pending_line_count = 0 or now_seconds - l_t0 > 20.0 loop
+				app.process_events (5)
+			end
+		end
+
+	asked_lines (a_syntax: GUI_TEST_SYNTAX): STRING
+			-- The ranges asked, for a message.
+		do
+			create Result.make (32)
+			across a_syntax.wanted as ic loop
+				Result.append (ic.first.out + "-" + ic.last.out + " ")
+			end
+		end
+
 	test_code_apply_spans_cost
 			-- 1v-e-1: what `apply_spans' costs for a whole 10,000-line text of 60,000 spans
 			-- (the first answer after a load) and for one line (a keystroke's answer), each
