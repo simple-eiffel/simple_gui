@@ -99,7 +99,7 @@ To print a PDF you already have, without simple_gui, use simple_pdf's `SIMPLE_PD
 Every platform shows its own print dialog and prints the same pages; the drawing is yours and identical everywhere.
 
 - **Linux:** GTK's print dialog. The pages are drawn by Poppler, each sheet at the page's own size. Printers CUPS discovers on the network count as printers.
-- **macOS:** the standard print panel, as a sheet on your window, with the system's own preview. The pages are printed through PDFKit, macOS's own PDF library. Network printers CUPS discovers count as printers.
+- **macOS:** the standard print panel, as a sheet on your window, with the system's own preview. Its paper size, orientation and scale start from your page and can be changed there, and its PDF menu offers Save as PDF. The pages are printed through PDFKit, macOS's own PDF library. Network printers CUPS discovers count as printers.
 - **Windows:** the system's print dialog, owned by your window. The pages are printed by Poppler's `pdftocairo` (it ships in simple_pdf's `bin` folder). The dialog's printer, page range, copies, two-sided printing and paper tray are used. **Not applied on Windows:**
   - choices made under the printer's own **Preferences** button (color or black-and-white, print quality, stapling): the printer's defaults are used instead;
   - the dialog's paper size and orientation: each sheet takes the size and orientation of your page;
