@@ -15,6 +15,8 @@ class
 inherit
 	GUI_SHARED
 
+	GUI_SEPARATE_TEXT
+
 create
 	make
 
@@ -81,16 +83,8 @@ feature -- Basic operations
 
 	enqueue (a_path: separate READABLE_STRING_GENERAL)
 			-- Queue a copy of `a_path'.
-		local
-			l_copy: STRING_32
-			i: INTEGER
 		do
-			create l_copy.make (a_path.count)
-			from i := 1 until i > a_path.count loop
-				l_copy.extend (a_path.code (i).to_character_32)
-				i := i + 1
-			end
-			queued.extend (l_copy)
+			queued.extend (copied_text (a_path))
 		ensure
 			one_more: queued_count = old queued_count + 1
 		end

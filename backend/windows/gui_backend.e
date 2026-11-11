@@ -21,6 +21,8 @@ inherit
 			scale, text_area_string
 		end
 
+	GUI_PICTURE_BYTES
+
 feature -- Lifecycle and loop
 
 	init (a_name, a_id: POINTER): BOOLEAN
@@ -1299,7 +1301,7 @@ feature -- Controls
 		local
 			l_m: MANAGED_POINTER
 		do
-			l_m := (create {GUI_DECODED_PICTURE}.make_empty).file_bytes (from_c (a_path))
+			l_m := file_bytes (from_c (a_path))
 			if attached {SW_IMAGE} widget (an_id) and then attached l_m as al_m then
 				Result := image_set_bytes (an_id, al_m.item, al_m.count)
 			end
@@ -1309,7 +1311,7 @@ feature -- Controls
 			-- The picture file `a_path' on this thread, PNG through cairo else simple_stb; Void
 			-- when it is missing or will not decode. The grid view uses it when it has no worker.
 		do
-			if attached (create {GUI_DECODED_PICTURE}.make_empty).file_bytes (a_path) as al_m then
+			if attached file_bytes (a_path) as al_m then
 				Result := decoded (al_m)
 			end
 		end
