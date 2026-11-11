@@ -3924,11 +3924,23 @@ int sga_rich_text_selection_end(int a_id)
 	return (int)sga_text_index([t textStorage], NSMaxRange(r));
 }
 
+static BOOL sga_is_code_view(id t);   /* 1v-e-2: defined after SGACodeView */
+
+/* In a code editor this is the program's own move (1v-e-2): no caret event (52), and the
+   caret comes into view, as go to line does. */
 void sga_rich_text_select(int a_id, int a_start, int an_end)
 {
 	NSTextView *t = s_inner[a_id];
+	NSRange r = sga_rich_range(t, a_start, an_end);
 	sga_colors_flush();
-	[t setSelectedRange:sga_rich_range(t, a_start, an_end)];
+	if (sga_is_code_view(t)) {
+		s_suppress++;
+		[t setSelectedRange:r];
+		[t scrollRangeToVisible:NSMakeRange(r.location, 0)];
+		s_suppress--;
+		return;
+	}
+	[t setSelectedRange:r];
 }
 
 /* ------------------------------------------------- 1i: the drawn-widget view */
@@ -9214,6 +9226,11 @@ void sga_test_field_escape(int a_id)
 @public
 	int tab_width;
 	BOOL spaces;
+	/* 1v-e-2: the bracket pair shown, as two UTF-16 ranges, and the areas last drawn for it
+	   (view coordinates), which are what gets redrawn when the pair goes. */
+	BOOL pair_on;
+	NSRange pair[2];
+	NSRect pair_drawn[2];
 }
 @end
 
@@ -9241,6 +9258,62 @@ static void sga_code_line_column(NSString *s, NSUInteger k, int *a_line, int *a_
 	sga_colors_flush();   /* 1v-b: the view takes what it types with from the text at the caret */
 	[super setSelectedRanges:r affinity:a stillSelecting:s];
 	if (!s && !s_suppress && [self window]) [self tellCaret];
+}
+/* 1v-e-2: the bracket tint. Drawn here, under the text and the selection, from the kept
+   ranges: it is no attribute of the text (no color or trait query sees it), no undo step and
+   no change. A layout manager's temporary attributes would do the same, but the tint must go
+   inside the text storage's own edit notification, and there the layout manager still has
+   the old text; so the view draws it and only forgets its ranges there. */
+- (NSRect)pairRect:(NSRange)r
+{
+	NSLayoutManager *m = [self layoutManager];
+	__block NSRect l_all = NSZeroRect;
+	NSRange g = [m glyphRangeForCharacterRange:r actualCharacterRange:NULL];
+	[m enumerateEnclosingRectsForGlyphRange:g withinSelectedGlyphRange:NSMakeRange(NSNotFound, 0) inTextContainer:[self textContainer] usingBlock:^(NSRect a_rect, BOOL *a_stop) {
+		(void)a_stop;
+		l_all = NSUnionRect(l_all, a_rect);
+	}];
+	return NSIsEmptyRect(l_all) ? NSZeroRect : NSOffsetRect(l_all, [self textContainerOrigin].x, [self textContainerOrigin].y);
+}
+- (void)drawViewBackgroundInRect:(NSRect)a_rect
+{
+	[super drawViewBackgroundInRect:a_rect];
+	if (!pair_on) return;
+	NSUInteger n = [[self textStorage] length];
+	[[[NSColor controlAccentColor] colorWithAlphaComponent:0.3] setFill];
+	for (int i = 0; i < 2; i++) {
+		if (NSMaxRange(pair[i]) > n) continue;
+		NSRect f = [self pairRect:pair[i]];
+		pair_drawn[i] = f;
+		if (NSIntersectsRect(f, a_rect)) NSRectFillUsingOperation(f, NSCompositingOperationSourceOver);
+	}
+}
+- (void)hidePair
+{
+	if (!pair_on) return;
+	pair_on = NO;
+	for (int i = 0; i < 2; i++) if (!NSIsEmptyRect(pair_drawn[i])) [self setNeedsDisplayInRect:pair_drawn[i]];
+	pair_drawn[0] = pair_drawn[1] = NSZeroRect;
+}
+- (void)showPair:(NSRange)a_first second:(NSRange)a_second
+{
+	[self hidePair];
+	pair[0] = a_first; pair[1] = a_second;
+	pair_on = YES;
+	for (int i = 0; i < 2; i++) { pair_drawn[i] = [self pairRect:pair[i]]; [self setNeedsDisplayInRect:pair_drawn[i]]; }
+}
+/* Command+Shift+\ (the bar, with Shift, on a US keyboard): 56, go to the matching bracket. */
+- (BOOL)performKeyEquivalent:(NSEvent *)e
+{
+	NSEventModifierFlags f = [e modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad | NSEventModifierFlagFunction);
+	NSString *c = [e charactersIgnoringModifiers];
+	if ([[self window] firstResponder] == self && f == (NSEventModifierFlagCommand | NSEventModifierFlagShift)
+		&& ([e keyCode] == 42 || [c isEqualToString:@"\\"] || [c isEqualToString:@"|"])) {
+		sga_push(56, sga_id_of(self), 0, 0, 0);
+		sga_wake();
+		return YES;
+	}
+	return [super performKeyEquivalent:e];
 }
 /* Return keeps the line's indentation. */
 - (void)insertNewline:(id)sender
@@ -9336,6 +9409,7 @@ static void sga_code_line_column(NSString *s, NSUInteger k, int *a_line, int *a_
 @end
 
 static SGACodeView *sga_code_of(int a_id) { id t = s_inner[a_id]; return [t isKindOfClass:[SGACodeView class]] ? t : nil; }
+static BOOL sga_is_code_view(id t) { return [t isKindOfClass:[SGACodeView class]]; }
 
 int sga_code_editor(void)
 {
@@ -9373,6 +9447,11 @@ int sga_code_editor(void)
 	[[NSNotificationCenter defaultCenter] addObserverForName:NSTextDidChangeNotification object:t queue:nil usingBlock:^(NSNotification *n) { (void)n; [r setRuleThickness:[r requiredThickness]]; [r setNeedsDisplay:YES]; }];
 	[[NSNotificationCenter defaultCenter] addObserverForName:NSViewBoundsDidChangeNotification object:[l_scroll contentView] queue:nil usingBlock:^(NSNotification *n) { (void)n; [r setNeedsDisplay:YES]; }];
 	[r setRuleThickness:[r requiredThickness]];
+	/* 1v-e-2: any change of the characters, by the user, by code or by undo, drops the bracket tint */
+	__weak SGACodeView *l_view = t;
+	[[NSNotificationCenter defaultCenter] addObserverForName:NSTextStorageDidProcessEditingNotification object:[t textStorage] queue:nil usingBlock:^(NSNotification *n) {
+		if ([(NSTextStorage *)[n object] editedMask] & NSTextStorageEditedCharacters) [l_view hidePair];
+	}];
 	NSLayoutConstraint *k = [l_scroll.heightAnchor constraintGreaterThanOrEqualToConstant:64];
 	[k setPriority:NSLayoutPriorityDefaultHigh];
 	[k setActive:YES];
@@ -9492,3 +9571,35 @@ void sga_test_caret_to(int a_id, int a_line, int a_column)
 	if ([t isKindOfClass:[SGACodeView class]]) [(SGACodeView *)t tellCaret];
 	else { sga_push(52, sga_id_of(t), a_line, a_column, 0); sga_wake(); }
 }
+
+/* 1v-e-2: the bracket pair. Positions from 1 in characters (code points); a range that does
+   not lie in the text shows no pair. The tint goes by itself at the next change of the text. */
+void sga_code_show_bracket_pair(int a_id, int a_first_start, int a_first_count, int a_second_start, int a_second_count)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t) return;
+	[t hidePair];
+	NSTextStorage *m = [t textStorage];
+	NSInteger l_count = sga_text_index(m, [m length]);
+	if (a_first_start < 1 || a_first_count < 1 || a_second_start < 1 || a_second_count < 1
+		|| a_first_start > l_count || a_first_count > l_count - a_first_start + 1
+		|| a_second_start > l_count || a_second_count > l_count - a_second_start + 1) return;
+	NSUInteger a = sga_text_offset(m, a_first_start - 1), b = sga_text_offset(m, a_first_start - 1 + a_first_count);
+	NSUInteger c = sga_text_offset(m, a_second_start - 1), d = sga_text_offset(m, a_second_start - 1 + a_second_count);
+	[t showPair:NSMakeRange(a, b - a) second:NSMakeRange(c, d - c)];
+}
+
+void sga_code_hide_bracket_pair(int a_id) { SGACodeView *t = sga_code_of(a_id); if (t) [t hidePair]; }
+
+int sga_test_bracket_tint_at(int a_id, int a_position)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || !t->pair_on || a_position < 1) return 0;
+	NSTextStorage *m = [t textStorage];
+	if (a_position > sga_text_index(m, [m length])) return 0;
+	NSUInteger k = sga_text_offset(m, a_position - 1);
+	return NSLocationInRange(k, t->pair[0]) || NSLocationInRange(k, t->pair[1]);
+}
+
+/* As the user pressing Command+Shift+\ in the editor: 56. */
+void sga_test_bracket_key(int a_id) { sga_push(56, a_id, 0, 0, 0); sga_wake(); }
