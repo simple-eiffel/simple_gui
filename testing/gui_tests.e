@@ -2560,6 +2560,86 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_view_first_spike
+			-- SPIKE (view-first coloring; ways 2 and 3 share this cost): a 10,000-line text of
+			-- 60,000 spans colored the lines in view first, then the rest a slice a turn of
+			-- the loop. Printed for slices of 200, 500 and 1,000 lines: time until the view
+			-- is colored and drawn, the total, and the longest gap a 20 ms timer saw.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_text: STRING_32
+			l_timer: GUI_TIMER
+			i, l_lines, l_size, l_first, l_last, l_from: INTEGER
+			l_t0, l_view, l_total: REAL_64
+		do
+			l_lines := 10_000
+			create l_window.make ("View first", 720, 480)
+			create l_code.make
+			l_code.set_syntax (create {GUI_TEST_SYNTAX}.make)
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_text.make (400_000)
+			from i := 1 until i > l_lines loop
+				l_text.append ({STRING_32} "    do print (%"line ")
+				l_text.append_integer (i)
+				l_text.append ({STRING_32} "%") end -- note%N")
+				i := i + 1
+			end
+			l_text.remove_tail (1)
+			across <<200, 500, 1000>> as ic loop
+				l_size := ic
+				timed (agent l_code.set_text (l_text))
+				timed (agent driver.pump_until_idle (0))
+					-- GTK lays a new text out on later turns of the loop: the view is known then
+				settle_window
+				l_first := l_code.first_visible_line
+				l_last := l_code.last_visible_line
+				assert ("a view: " + l_first.out + " to " + l_last.out, 1 <= l_first and l_first <= l_last)
+				tick_count := 0
+				tick_longest_gap := 0.0
+				tick_last := now_seconds
+				l_timer := app.every (20, agent on_tick)
+				l_t0 := now_seconds
+				timed (agent l_code.apply_spans (l_first, l_last, spike_spans (l_code, l_first, l_last)))
+				timed (agent driver.pump_until_idle (0))
+				l_view := now_seconds - l_t0
+				from l_from := 1 until l_from > l_lines loop
+					timed (agent l_code.apply_spans (l_from, (l_from + l_size - 1).min (l_lines), spike_spans (l_code, l_from, (l_from + l_size - 1).min (l_lines))))
+					app.process_events (0)
+					l_from := l_from + l_size
+				end
+				timed (agent driver.pump_until_idle (0))
+				l_total := now_seconds - l_t0
+				l_timer.cancel
+				print ("    view first, slices of " + l_size.out + " lines: view (" + l_first.out + "-" + l_last.out
+					+ ") colored and drawn in " + (l_view * 1000.0).rounded.out + " ms; all in "
+					+ (l_total * 1000.0).rounded.out + " ms; longest timer gap " + (tick_longest_gap * 1000.0).rounded.out
+					+ " ms (" + tick_count.out + " ticks)%N")
+				io.output.flush
+			end
+			l_window.close
+		end
+
+	spike_spans (a_code: GUI_CODE_EDITOR; a_first, a_last: INTEGER): GUI_TEST_SPANS
+			-- The six spans of each line `a_first' to `a_last' of the spike text.
+		local
+			i, l_string_length: INTEGER
+		do
+			create Result.make ((a_last - a_first + 1) * 6)
+			from i := a_first until i > a_last loop
+				l_string_length := 7 + i.out.count
+				Result.put (i, 5, 2, a_code.Style_keyword)
+				Result.put (i, 8, 5, a_code.Style_function)
+				Result.put (i, 14, 1, a_code.Style_operator)
+				Result.put (i, 15, l_string_length, a_code.Style_string)
+				Result.put (i, 17 + l_string_length, 3, a_code.Style_keyword)
+				Result.put (i, 21 + l_string_length, 7, a_code.Style_comment)
+				i := i + 1
+			end
+		end
+
 	test_code_apply_spans_cost
 			-- 1v-e-1: what `apply_spans' costs for a whole 10,000-line text of 60,000 spans
 			-- (the first answer after a load) and for one line (a keystroke's answer), each

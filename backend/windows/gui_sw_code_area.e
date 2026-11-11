@@ -277,6 +277,31 @@ feature -- Completion (1v-e-4)
 			end
 		end
 
+feature -- View
+
+	first_visible_line: INTEGER
+			-- The first line, from 1, any part of which is in view; 0 before the first layout.
+		do
+			if is_laid_out then
+				build_bands
+				Result := line_at_shown_y ((scroll_y - Pad_y).max (0.0)) + 1
+			end
+		ensure
+			not_negative: Result >= 0
+		end
+
+	last_visible_line: INTEGER
+			-- The last line, from 1, any part of which is in view (closed folds' hidden lines
+			-- passed over); 0 before the first layout.
+		do
+			if is_laid_out then
+				build_bands
+				Result := line_at_shown_y ((scroll_y - Pad_y + (height - bottom_room)).max (0.0)) + 1
+			end
+		ensure
+			not_negative: Result >= 0
+		end
+
 feature -- Multiple carets (1v-e-5)
 
 	extra_carets: ARRAYED_LIST [TUPLE [caret, anchor: INTEGER]]

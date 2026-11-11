@@ -779,6 +779,20 @@ feature -- Completion (1v-e-4)
 	completion_selected: INTEGER
 			-- The highlighted row; 0 when no list shows.
 
+feature -- View
+
+	first_visible_line: INTEGER
+			-- The first line any part of which is in view; 0 before the first layout.
+		do
+			Result := backend.code_first_visible_line (id)
+		end
+
+	last_visible_line: INTEGER
+			-- The last line any part of which is in view; 0 before the first layout.
+		do
+			Result := backend.code_last_visible_line (id)
+		end
+
 feature -- Multiple carets (1v-e-5)
 
 	caret_count: INTEGER

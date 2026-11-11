@@ -650,6 +650,22 @@ feature -- Windows and containers
 		deferred
 		end
 
+	code_first_visible_line (an_id: INTEGER): INTEGER
+			-- View-first coloring: the first line, from 1, any part of which is in view;
+			-- 0 before the control has been laid out.
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	code_last_visible_line (an_id: INTEGER): INTEGER
+			-- The last line, from 1, any part of which is in view; 0 before the control has
+			-- been laid out. Lines a closed fold hides are passed over.
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
 	grid_view: INTEGER
 			-- 1v-a: items in a flowing grid of cells (120 by 120 until set).
 		deferred
