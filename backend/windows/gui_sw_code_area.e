@@ -93,7 +93,75 @@ feature -- Access
 	on_caret_move: detachable PROCEDURE [INTEGER, INTEGER]
 			-- Told (line, column) when the user moves the caret to another place.
 
+	on_bracket_key: detachable PROCEDURE
+			-- Told when the user presses the key that goes to the matching bracket.
+
+feature -- The bracket pair (1v-e-2)
+
+	has_bracket_pair: BOOLEAN
+			-- Are two brackets tinted?
+
+	pair_first_start, pair_first_count, pair_second_start, pair_second_count: INTEGER
+			-- The two tinted ranges, in characters from 1; meaningful with `has_bracket_pair'.
+
+	is_range_in_text (a_start, a_count: INTEGER): BOOLEAN
+			-- Do `a_count' characters from position `a_start' lie in the text, one at least?
+		do
+			Result := a_start >= 1 and a_count >= 1 and a_start <= text.count
+				and then a_count <= text.count - a_start + 1
+		end
+
+	is_bracket_tinted (a_position: INTEGER): BOOLEAN
+			-- Is the character at `a_position' under the tint?
+		do
+			Result := has_bracket_pair and then
+				((pair_first_start <= a_position and a_position < pair_first_start + pair_first_count)
+				or (pair_second_start <= a_position and a_position < pair_second_start + pair_second_count))
+		end
+
+	show_bracket_pair (a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
+			-- Tint the two ranges, in place of any pair shown before; no pair when either
+			-- does not lie in the text. The tint is dropped at the next change of the text.
+		do
+			has_bracket_pair := is_range_in_text (a_first_start, a_first_count)
+				and is_range_in_text (a_second_start, a_second_count)
+			if has_bracket_pair then
+				pair_first_start := a_first_start
+				pair_first_count := a_first_count
+				pair_second_start := a_second_start
+				pair_second_count := a_second_count
+			end
+		ensure
+			shown_when_in_text: has_bracket_pair = (is_range_in_text (a_first_start, a_first_count)
+				and is_range_in_text (a_second_start, a_second_count))
+			first_kept: has_bracket_pair implies (pair_first_start = a_first_start and pair_first_count = a_first_count)
+			second_kept: has_bracket_pair implies (pair_second_start = a_second_start and pair_second_count = a_second_count)
+		end
+
+	hide_bracket_pair
+			-- No pair is tinted.
+		do
+			has_bracket_pair := False
+		ensure
+			hidden: not has_bracket_pair
+		end
+
+	press_bracket_key
+			-- The user pressed the key that goes to the matching bracket: tell `on_bracket_key'.
+		do
+			if attached on_bracket_key as al_told then
+				al_told.call (Void)
+			end
+		end
+
 feature -- Element change
+
+	set_on_bracket_key (an_action: detachable PROCEDURE)
+		do
+			on_bracket_key := an_action
+		ensure
+			set: on_bracket_key = an_action
+		end
 
 	set_on_caret_move (an_action: detachable PROCEDURE [INTEGER, INTEGER])
 		do
@@ -128,6 +196,7 @@ feature -- Element change
 			-- New text; the caret's place is noted, not reported.
 		do
 			Precursor {GUI_SW_RICH_TEXT_AREA} (a_text)
+			hide_bracket_pair
 			is_reveal_pending := True
 			note_caret
 		end
@@ -142,6 +211,7 @@ feature -- Element change
 			l_new: STRING_32
 		do
 			create l_new.make_from_string_general (a_text)
+			hide_bracket_pair
 			remember (Kind_block)
 			if an_end >= a_start then
 				text.remove_substring (a_start, an_end)
@@ -329,7 +399,8 @@ feature -- Typing
 
 	handle_key (a_vk: INTEGER; a_shift: BOOLEAN)
 			-- Page Up and Page Down move the caret a page; Control+Home and Control+End go
-			-- to the ends of the text; the rest as the text box.
+			-- to the ends of the text; Control+Shift+\ (key 220 on a US keyboard) asks for
+			-- the matching bracket; the rest as the text box.
 		local
 			l_keys: SW_KEYS
 			l_caret, l_line: INTEGER
@@ -354,6 +425,8 @@ feature -- Typing
 					caret := text.count
 				end
 				collapse_unless (a_shift)
+			elseif a_vk = 220 and then a_shift and then l_keys.control_down then
+				press_bracket_key
 			else
 				Precursor {GUI_SW_RICH_TEXT_AREA} (a_vk, a_shift)
 			end
@@ -559,6 +632,10 @@ feature -- Drawing
 			mark_view (l_view_h)
 			draw_field (a_p)
 			a_p.push_clip (x + gutter_width, y + 1.0, l_view_w, (l_view_h - 2.0).max (0.0))
+			if has_bracket_pair then
+				draw_bracket_tint (a_p, pair_first_start, pair_first_count)
+				draw_bracket_tint (a_p, pair_second_start, pair_second_count)
+			end
 			draw_content (a_p)
 			a_p.pop_clip
 			if gutter_width > 0.0 then
@@ -566,6 +643,28 @@ feature -- Drawing
 			end
 			draw_bar (a_p)
 			h_bar.draw (a_p, scroll_x, shows_hover and then h_bar.contains (hover_px, hover_py))
+		end
+
+	draw_bracket_tint (a_p: SW_PAINTER; a_start, a_count: INTEGER)
+			-- The theme's accent wash under the `a_count' characters from `a_start', before
+			-- the glyphs are drawn over it.
+		require
+			laid_out: is_laid_out
+			in_text: is_range_in_text (a_start, a_count)
+		local
+			i, l_line: INTEGER
+			l_geometry: SW_TEXT_GEOMETRY
+		do
+			l_geometry := geometry
+			a_p.set_color (a_p.theme.wash_accent)
+			from i := a_start until i >= a_start + a_count loop
+				if l_geometry.width_of (i) > 0.0 then
+					l_line := l_geometry.line_of (i)
+					a_p.fill_rect (text_left + l_geometry.x_of (i), text_top + l_geometry.top_of_line (l_line),
+						l_geometry.width_of (i), l_geometry.height_of_line (l_line))
+				end
+				i := i + 1
+			end
 		end
 
 feature {NONE} -- Implementation
@@ -592,8 +691,9 @@ feature {NONE} -- Implementation
 			-- The caret's place when it was last reported or noted.
 
 	changed
-			-- An edit: report it, then the caret's new place.
+			-- An edit: the bracket tint goes; report the edit, then the caret's new place.
 		do
+			hide_bracket_pair
 			Precursor {GUI_SW_RICH_TEXT_AREA}
 			is_reveal_pending := True
 			report_caret
@@ -977,5 +1077,7 @@ invariant
 	tab_positive: tab_width >= 1
 	scroll_x_non_negative: scroll_x >= 0.0
 	told_positive: told_line >= 1 and told_column >= 1
+	pair_in_text: has_bracket_pair implies (is_range_in_text (pair_first_start, pair_first_count)
+		and is_range_in_text (pair_second_start, pair_second_count))
 
 end

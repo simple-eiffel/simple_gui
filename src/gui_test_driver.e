@@ -752,6 +752,23 @@ feature -- User actions
 			settle
 		end
 
+	press_bracket_key (an_editor: GUI_CODE_EDITOR)
+			-- Press the key that goes to the matching bracket, as the user would: 56.
+		require
+			has_application: has_application
+		do
+			backend.test_bracket_key (an_editor.id)
+			settle
+		end
+
+	is_bracket_tinted (an_editor: GUI_CODE_EDITOR; a_position: INTEGER): BOOLEAN
+			-- Does the control show the character at `a_position' under the bracket tint?
+		require
+			has_application: has_application
+		do
+			Result := backend.test_bracket_tint_at (an_editor.id, a_position)
+		end
+
 	choose_grid_item (a_grid: GUI_GRID_VIEW; i: INTEGER)
 			-- Click item `i', as the user would: 50.
 		require

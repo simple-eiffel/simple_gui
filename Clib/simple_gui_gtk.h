@@ -4800,9 +4800,25 @@ static int sg_rich_text_selection_end(int id) {
     if (gtk_text_buffer_get_selection_bounds(sg_rich_buffer(id), &a, &z)) return gtk_text_iter_get_offset(&z);
     return sg_rich_text_selection_start(id) - 1;
 }
+static void sg_code_caret(GtkTextBuffer *b, int *line, int *col);
+/* In a code editor (kind 59) this is the program's own move: no caret event (52) goes out,
+   the caret comes into view, and the place last told is kept in step, as sg_text_go_to_line
+   does. Before 1v-e-2 a program selection there sent 52, which the Windows half never did. */
 static void sg_rich_text_select(int id, int s, int e) {
     GtkTextIter a, z;
     sg_rich_iters(id, s, e, &a, &z);
+    if (sg_kind[id] == 59) {
+        GtkTextBuffer *b = sg_rich_buffer(id);
+        int line, col;
+        sg_quiet++;
+        gtk_text_buffer_select_range(b, &a, &z);
+        sg_quiet--;
+        gtk_text_view_scroll_to_mark(sg_view_of(id), gtk_text_buffer_get_insert(b), 0.1, FALSE, 0, 0);
+        sg_code_caret(b, &line, &col);
+        g_object_set_data(G_OBJECT(sg_w[id]), "sg-caret-line", GINT_TO_POINTER(line));
+        g_object_set_data(G_OBJECT(sg_w[id]), "sg-caret-col", GINT_TO_POINTER(col));
+        return;
+    }
     gtk_text_buffer_select_range(sg_rich_buffer(id), &a, &z);
 }
 
@@ -5802,9 +5818,58 @@ static void sg_code_tab(int id) {
         gtk_text_buffer_insert_at_cursor(b, "\t", -1);
     }
 }
+/* 1v-e-2: the bracket pair. One tag, "sg-pair", with a background of the accent blue at
+   three tenths: a name none of the rich text queries looks for (they match "sg-bold",
+   "sg-italic", "sg-underline", "sg-fg-" and "sg-size-"), so the tint is in none of their
+   answers. A tag is no text change: no "changed" signal, no undo step. The tint is dropped
+   at any change of the text, so its two ranges are never stale; "sg-pair-on" says whether
+   there is one, which keeps the cost of a change without a pair at one lookup. */
+static GtkTextTag *sg_code_pair_tag(int id) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextTag *t = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "sg-pair");
+    if (!t) t = gtk_text_buffer_create_tag(b, "sg-pair", "background", "rgba(53,132,228,0.30)", NULL);
+    return t;
+}
+static void sg_code_hide_bracket_pair(int id) {
+    GtkTextBuffer *b;
+    GtkTextIter a, z;
+    if (!sg_w[id] || !g_object_get_data(G_OBJECT(sg_w[id]), "sg-pair-on")) return;
+    b = sg_code_buffer(id);
+    gtk_text_buffer_get_bounds(b, &a, &z);
+    gtk_text_buffer_remove_tag(b, sg_code_pair_tag(id), &a, &z);
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-pair-on", NULL);
+}
+static void sg_code_show_bracket_pair(int id, int s1, int n1, int s2, int n2) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextTag *t = sg_code_pair_tag(id);
+    GtkTextIter a, z;
+    int count = gtk_text_buffer_get_char_count(b);
+    sg_code_hide_bracket_pair(id);
+    if (s1 < 1 || n1 < 1 || s2 < 1 || n2 < 1 || s1 > count || n1 > count - s1 + 1 || s2 > count || n2 > count - s2 + 1) return;
+    gtk_text_buffer_get_iter_at_offset(b, &a, s1 - 1);
+    gtk_text_buffer_get_iter_at_offset(b, &z, s1 - 1 + n1);
+    gtk_text_buffer_apply_tag(b, t, &a, &z);
+    gtk_text_buffer_get_iter_at_offset(b, &a, s2 - 1);
+    gtk_text_buffer_get_iter_at_offset(b, &z, s2 - 1 + n2);
+    gtk_text_buffer_apply_tag(b, t, &a, &z);
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-pair-on", GINT_TO_POINTER(1));
+}
+static void sg_on_code_changed_pair(GtkTextBuffer *b, gpointer d) { (void) b; sg_code_hide_bracket_pair(GPOINTER_TO_INT(d)); }
+static int sg_test_bracket_tint_at(int id, int pos) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextIter it;
+    if (pos < 1 || pos > gtk_text_buffer_get_char_count(b)) return 0;
+    gtk_text_buffer_get_iter_at_offset(b, &it, pos - 1);
+    return gtk_text_iter_has_tag(&it, sg_code_pair_tag(id)) ? 1 : 0;
+}
+static void sg_test_bracket_key(int id) { sg_push(56, id, 0, 0); }
 static gboolean sg_on_code_key(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
     int id = GPOINTER_TO_INT(d);
     (void) k; (void) code;
+    /* Control+Shift+\ (with Shift the key arrives as the bar on a US keyboard): event 56,
+       the editor goes to the matching bracket. */
+    if ((m & GDK_CONTROL_MASK) && (m & GDK_SHIFT_MASK) && !(m & (GDK_ALT_MASK | GDK_SUPER_MASK))
+        && (key == GDK_KEY_backslash || key == GDK_KEY_bar)) { sg_push(56, id, 0, 0); return TRUE; }
     if (m & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)) return FALSE;
     if (key == GDK_KEY_Return || key == GDK_KEY_KP_Enter) { if (m & GDK_SHIFT_MASK) return FALSE; sg_code_return(id); return TRUE; }
     if (key == GDK_KEY_ISO_Left_Tab || (key == GDK_KEY_Tab && (m & GDK_SHIFT_MASK))) { sg_code_indent_lines(id, 1); return TRUE; }
@@ -5828,6 +5893,7 @@ static int sg_code_editor(void) {
     g_signal_connect(gtk_text_view_get_buffer(v), "changed", G_CALLBACK(sg_code_redraw_gutter), GINT_TO_POINTER(id));
     g_signal_connect_swapped(gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(v)), "value-changed", G_CALLBACK(gtk_widget_queue_draw), g);
     g_signal_connect(gtk_text_view_get_buffer(v), "mark-set", G_CALLBACK(sg_on_code_mark), GINT_TO_POINTER(id));
+    g_signal_connect(gtk_text_view_get_buffer(v), "changed", G_CALLBACK(sg_on_code_changed_pair), GINT_TO_POINTER(id));
     gtk_event_controller_set_propagation_phase(k, GTK_PHASE_CAPTURE);
     g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_code_key), GINT_TO_POINTER(id));
     gtk_widget_add_controller(GTK_WIDGET(v), k);

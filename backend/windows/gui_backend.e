@@ -29,8 +29,13 @@ feature -- Lifecycle and loop
 			-- Windows always has a display. Become DPI aware first, before anything asks the
 			-- desktop's scale: until then Windows answers 96 DPI, so a window and its first
 			-- theme were sized at 100% on a 150% display and grew when a later theme came.
+			-- Then claim the pump for this thread, so a worker's wake always has somewhere
+			-- to go: before any shell window exists (a grid asks for its pictures on its
+			-- first frame, while its window is composed) `SHELL_WAKE.wake' found no window
+			-- and no claimed thread, answered "nobody", and the wake was lost (issue 107).
 		do
 			desktop.become_dpi_aware
+			wake_reader.claim_pump_thread
 			if not from_c (a_name).is_empty then
 				app_title.put (from_c (a_name))
 			end
@@ -2931,7 +2936,7 @@ feature -- Path controls, continued
 
 	code_editor: INTEGER
 			-- GUI_SW_CODE_AREA: event 2 on an edit, event 52 (line, column) when the user
-			-- moves the caret.
+			-- moves the caret, event 56 for the key that goes to the matching bracket.
 		local
 			l_c: GUI_SW_CODE_AREA
 		do
@@ -2939,6 +2944,25 @@ feature -- Path controls, continued
 			Result := register (l_c)
 			l_c.set_on_change (agent push (2, Result, 0, 0, 0))
 			l_c.set_on_caret_move (agent push (52, Result, ?, ?, 0))
+			l_c.set_on_bracket_key (agent push (56, Result, 0, 0, 0))
+		end
+
+	code_show_bracket_pair (an_id, a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.show_bracket_pair (a_first_start, a_first_count, a_second_start, a_second_count)
+					-- as a style: the frame comes at the next turn of the loop (a look
+					-- hides and shows, and a frame for each cost 26 ms on a large text)
+				style_changed
+			end
+		end
+
+	code_hide_bracket_pair (an_id: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then al_c.has_bracket_pair then
+				al_c.hide_bracket_pair
+				style_changed
+			end
 		end
 
 	code_set_line_numbers (an_id: INTEGER; a_on: BOOLEAN)
@@ -4706,6 +4730,21 @@ feature -- Test doors (act on the widget as a user would)
 			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then not al_c.is_read_only then
 				al_c.type_code (from_c (a_text))
 				changed
+			end
+		end
+
+	test_bracket_tint_at (an_id, a_position: INTEGER): BOOLEAN
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.is_bracket_tinted (a_position)
+			end
+		end
+
+	test_bracket_key (an_id: INTEGER)
+			-- The key that goes to the matching bracket, as the user would press it (event 56).
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.press_bracket_key
 			end
 		end
 
