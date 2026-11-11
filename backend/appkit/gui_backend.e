@@ -1470,6 +1470,61 @@ feature -- Common widget state
 		alias "return (EIF_POINTER) sga_test_help_tip_shown();"
 		end
 
+	code_editor: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_code_editor();"
+		end
+
+	code_set_line_numbers (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_set_line_numbers($an_id, $a_on ? 1 : 0);"
+		end
+
+	code_set_indent (an_id, a_tab_width: INTEGER; a_spaces: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_set_indent($an_id, $a_tab_width, $a_spaces ? 1 : 0);"
+		end
+
+	text_line_count (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_text_line_count($an_id);"
+		end
+
+	text_caret_line (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_text_caret_line($an_id);"
+		end
+
+	text_caret_column (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_text_caret_column($an_id);"
+		end
+
+	text_line_text (an_id, n: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_text_line_text($an_id, $n);"
+		end
+
+	text_go_to_line (an_id, n: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_text_go_to_line($an_id, $n);"
+		end
+
+	text_replace_range (an_id, a_start, an_end: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_text_replace_range($an_id, $a_start, $an_end, (const char *) $a_text);"
+		end
+
+	test_type_into_code (an_id: INTEGER; a_text: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_type_into_code($an_id, (const char *) $a_text);"
+		end
+
+	test_caret_to (an_id, a_line, a_column: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_caret_to($an_id, $a_line, $a_column);"
+		end
+
 	grid_view: INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_grid_view();"
@@ -1584,6 +1639,77 @@ feature -- Common widget state
 			-- As the user pressing Escape in the field: 55 (or the suggestion list closes).
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_field_escape($an_id);"
+		end
+
+	code_show_bracket_pair (an_id, a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_show_bracket_pair($an_id, $a_first_start, $a_first_count, $a_second_start, $a_second_count);"
+		end
+
+	code_hide_bracket_pair (an_id: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_hide_bracket_pair($an_id);"
+		end
+
+	test_bracket_tint_at (an_id, a_position: INTEGER): BOOLEAN
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_bracket_tint_at($an_id, $a_position) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	test_fill_event_queue (a_count: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_fill_event_queue($a_count);"
+		end
+
+	test_bracket_key (an_id: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_bracket_key($an_id);"
+		end
+
+	code_set_folding_shown (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_set_folding_shown($an_id, $a_on ? 1 : 0);"
+		end
+
+	code_set_fold_marks (an_id: INTEGER; a_lines: POINTER; a_count: INTEGER)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_set_fold_marks($an_id, (const int *) $a_lines, $a_count);"
+		end
+
+	code_set_folded_lines (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_set_folded_lines($an_id, (const int *) $a_pairs, $a_count);"
+		end
+
+	test_press_fold_marker (an_id, a_line: INTEGER)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_press_fold_marker($an_id, $a_line);"
+		end
+
+	test_fold_key (an_id: INTEGER; a_unfold: BOOLEAN)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_fold_key($an_id, $a_unfold ? 1 : 0);"
+		end
+
+	test_line_is_shown (an_id, a_line: INTEGER): BOOLEAN
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_line_is_shown($an_id, $a_line) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	test_code_arrow_key (an_id, a_direction: INTEGER)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_code_arrow_key($an_id, $a_direction);"
 		end
 
 	widget_set_style (an_id: INTEGER; a_spec: POINTER)

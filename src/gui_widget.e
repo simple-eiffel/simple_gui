@@ -731,6 +731,22 @@ feature -- Text direction
 
 feature {GUI_WIDGET} -- Containment
 
+	enclosing_window: detachable GUI_WINDOW
+			-- The window this widget is in, found up its chain of parents; Void when the
+			-- chain does not reach one (not placed yet, or in a dialog or a popover).
+		local
+			l_at: detachable GUI_WIDGET
+		do
+			from l_at := Current until l_at = Void loop
+				if attached {GUI_WINDOW} l_at as al_window then
+					Result := al_window
+					l_at := Void
+				elseif attached l_at as al_at then
+					l_at := al_at.parent
+				end
+			end
+		end
+
 	set_parent (a_parent: detachable GUI_WIDGET)
 		do
 			parent := a_parent

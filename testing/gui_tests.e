@@ -256,6 +256,35 @@ feature -- Tests
 			assert ("payload copied", received_text.same_string ("from the worker"))
 		end
 
+	test_wake_arrives_after_a_full_event_queue
+			-- A worker's wake still arrives when the event queue is full as it lands, and the
+			-- wakes after it are not lost: 4,096 events no widget answers are queued for the
+			-- loop's next turn, past the queue's size (2,048 on macOS); then a worker posts and
+			-- wakes; then the loop turns, and the flood lands just ahead of the wake.
+		local
+			l_worker: separate GUI_TEST_WORKER
+			i: INTEGER
+		do
+			received_tag := 0
+			driver.fill_event_queue (4096)
+			create l_worker.make (app.mailbox)
+			start_worker (l_worker)
+			assert ("the worker has posted and woken", worker_started (l_worker))
+			from i := 1 until received_tag /= 0 or i > 30 loop
+				app.process_events (100)
+				i := i + 1
+			end
+			assert ("the message arrived after a full queue", received_tag = 7)
+			received_tag := 0
+			create l_worker.make (app.mailbox)
+			start_worker (l_worker)
+			from i := 1 until received_tag /= 0 or i > 30 loop
+				app.process_events (100)
+				i := i + 1
+			end
+			assert ("and the next wake too", received_tag = 7)
+		end
+
 	test_close_request_without_agents_closes
 		local
 			l_window: GUI_WINDOW
@@ -2030,6 +2059,1302 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_code_editor_highlighting
+			-- 1v-b: keywords, comments, strings and numbers take their styles' colors; a block
+			-- comment opened on one line colors the lines after it until it closes, and closing
+			-- or removing it puts them back.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+		do
+			create l_window.make ("Code", 560, 360)
+			create l_code.make
+			l_code.add_keywords (<<"class", "feature", "do", "end">>, l_code.Style_keyword)
+			l_code.add_line_comment ("--", l_code.Style_comment)
+			l_code.add_delimited ("%"", "%"", l_code.Style_string)
+			l_code.add_delimited ("/*", "*/", l_code.Style_comment)
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("class A%N-- a note%Nfeature x: INTEGER = 42%Ndo print (%"hi%") end%Nplain line")
+			assert ("keyword", l_code.text_color_at (1) = l_code.style_color (l_code.Style_keyword))
+			assert ("comment", l_code.text_color_at (9) = l_code.style_color (l_code.Style_comment))
+			assert ("plain identifier", l_code.text_color_at (7) = l_code.style_color (l_code.Style_plain))
+			assert ("number", l_code.text_color_at (l_code.text.substring_index ("42", 1)) = l_code.style_color (l_code.Style_number))
+			assert ("string", l_code.text_color_at (l_code.text.substring_index ("%"hi", 1) + 1) = l_code.style_color (l_code.Style_string))
+			l_code.go_to_line (2)
+			driver.type_code (l_code, "/*")
+			assert ("the block runs on: " + l_code.text_color_at (l_code.text.substring_index ("plain", 1)).to_hex_string,
+				l_code.text_color_at (l_code.text.substring_index ("plain", 1)) = l_code.style_color (l_code.Style_comment))
+			l_code.go_to_line (4)
+			driver.type_code (l_code, "*/")
+			assert ("closed: the last line is plain again", l_code.text_color_at (l_code.text.substring_index ("plain", 1)) = l_code.style_color (l_code.Style_plain))
+			assert ("and line 3 is still inside", l_code.text_color_at (l_code.text.substring_index ("x:", 1)) = l_code.style_color (l_code.Style_comment))
+			l_window.close
+		end
+
+	test_code_editor_lines_and_indent
+			-- 1v-b: lines, the caret and go_to_line; Return keeps the indentation; Tab inserts
+			-- spaces when asked; the user's caret moves fire caret_actions.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_told: ARRAYED_LIST [STRING]
+		do
+			create l_told.make (2)
+			create l_window.make ("Code", 560, 360)
+			create l_code.make
+			l_code.set_indent_with_spaces (True)
+			l_code.caret_actions.extend (agent (l, c: INTEGER; t: ARRAYED_LIST [STRING]) do t.extend (l.out + ":" + c.out) end (?, ?, l_told))
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("feature%N    make%N")
+			assert ("three lines: " + l_code.line_count.out, l_code.line_count = 3)
+			assert ("line text", l_code.line_text (2).same_string ("    make"))
+			l_code.go_to_line (2)
+			assert ("caret at 2:1", l_code.caret_line = 2 and l_code.caret_column = 1 and l_told.is_empty)
+			driver.move_caret (l_code, 2, 9)
+			assert ("the user's caret told: " + l_told.count.out, not l_told.is_empty and l_told.last.same_string ("2:9"))
+			driver.type_code (l_code, "%Ndo")
+			assert ("auto-indent: " + l_code.line_text (3).out, l_code.line_text (3).same_string ("    do"))
+			driver.type_code (l_code, "%N%T")
+			assert ("Tab as four more spaces: [" + l_code.line_text (4).out + "]", l_code.line_text (4).same_string ("        "))
+			assert ("line numbers by default", l_code.is_line_numbers_shown)
+			l_code.set_line_numbers_shown (False)
+			assert ("hidden", not l_code.is_line_numbers_shown)
+			l_window.close
+		end
+
+	test_code_editor_find_replace
+			-- 1v-b: find selects the next match and wraps; whole words skip parts; replace_all
+			-- counts; the find bar drives the editor.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_code: GUI_CODE_EDITOR
+			l_bar: GUI_FIND_BAR
+		do
+			create l_window.make ("Find", 560, 360)
+			create l_stack.make_vertical
+			create l_code.make
+			create l_bar.make (l_code)
+			l_stack.extend (l_bar)
+			l_stack.extend_stretching (l_code)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_code.set_text ("make makes make; remake")
+			l_code.select_range (1, 0)
+			assert ("first", l_code.find_next ("make", True, False) and l_code.selection_start = 1 and l_code.selection_end = 4)
+			assert ("second, inside makes", l_code.find_next ("make", True, False) and l_code.selection_start = 6)
+			assert ("whole word skips to the third", l_code.find_next ("make", True, True) and l_code.selection_start = 12)
+			assert ("wraps to the first", l_code.find_next ("make", True, True) and l_code.selection_start = 1)
+			assert ("none", not l_code.find_next ("absent", True, False))
+			assert ("replace_all counts 2 whole words", l_code.replace_all ("make", "build", True, True) = 2)
+			assert ("replaced: " + l_code.text.out, l_code.text.same_string ("build makes build; remake"))
+			driver.type_text (l_bar.find_field, "makes")
+			driver.type_text (l_bar.replace_field, "builds")
+			driver.perform_click (l_bar.replace_all_button)
+			assert ("the bar replaced: " + l_code.text.out, l_code.text.same_string ("build builds build; remake"))
+			l_window.close
+		end
+
+	test_code_editor_large_text
+			-- 1v-b: a 10,000-line text. Reports the time to load it, to go to a line and to type
+			-- in the middle of it (each with its frame drawn), as a shipped program would
+			-- spend it: the measured steps run inside `timed'.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_text: STRING_32
+			i, l_lines: INTEGER
+			l_t0, l_load, l_go, l_key, l_worst, l_sum: REAL_64
+		do
+			l_lines := 10_000
+			if attached (create {EXECUTION_ENVIRONMENT}).item ("GUI_LARGE_LINES") as al_n and then al_n.is_integer then
+				l_lines := al_n.to_integer
+			end
+			create l_window.make ("Large code", 720, 480)
+			create l_code.make
+			l_code.add_keywords (<<"class", "feature", "do", "end">>, l_code.Style_keyword)
+			l_code.add_line_comment ("--", l_code.Style_comment)
+			l_code.add_delimited ("%"", "%"", l_code.Style_string)
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_text.make (400_000)
+			from i := 1 until i > l_lines loop
+				l_text.append ({STRING_32} "    do print (%"line ")
+				l_text.append_integer (i)
+				l_text.append ({STRING_32} "%") end -- note%N")
+				i := i + 1
+			end
+			l_text.remove_tail (1)
+			l_t0 := now_seconds
+			timed (agent l_code.set_text (l_text))
+			print ("    large text: " + l_lines.out + " lines set and colored in " + ((now_seconds - l_t0) * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+			timed (agent driver.pump_until_idle (0))
+			l_load := now_seconds - l_t0
+			print ("    large text: first frame at " + (l_load * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+			assert ("all the lines: " + l_code.line_count.out, l_code.line_count = l_lines)
+				-- one read of the text: the editor makes one after each edit, and the syntax
+				-- hook's `apply_spans' another
+			l_t0 := now_seconds
+			from i := 1 until i > 20 loop
+				timed (agent read_text (l_code))
+				i := i + 1
+			end
+			print ("    large text: one read of the text, mean of 20: " + ((now_seconds - l_t0) * 50_000.0).rounded.out + " microseconds%N")
+			io.output.flush
+			l_t0 := now_seconds
+			timed (agent l_code.go_to_line (l_lines // 2))
+			timed (agent driver.pump_until_idle (0))
+			l_go := now_seconds - l_t0
+			print ("    large text: go to line " + (l_go * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+			assert ("caret on the middle line: " + l_code.caret_line.out, l_code.caret_line = l_lines // 2 and l_code.caret_column = 1)
+			from i := 1 until i > 5 loop
+				l_t0 := now_seconds
+				timed (agent driver.type_code (l_code, "x"))
+				timed (agent driver.pump_until_idle (0))
+				l_key := now_seconds - l_t0
+				print ("    large text: keystroke " + (l_key * 1000.0).rounded.out + " ms%N")
+				io.output.flush
+				l_sum := l_sum + l_key
+				l_worst := l_worst.max (l_key)
+				i := i + 1
+			end
+			print ("    large text: " + l_text.count.out + " characters; load " + (l_load * 1000.0).rounded.out
+				+ " ms, go to line " + (l_go * 1000.0).rounded.out + " ms, keystroke mean " + (l_sum * 200.0).rounded.out
+				+ " ms, worst " + (l_worst * 1000.0).rounded.out + " ms%N")
+			assert ("typed on the middle line: " + l_code.line_text (l_lines // 2).out, l_code.line_text (l_lines // 2).starts_with ({STRING_32} "xxxxx    do print"))
+				-- 1v-e-2: the editor looks for a bracket at the caret after every move and
+				-- every change, so a keystroke pays for two looks
+			l_t0 := now_seconds
+			from i := 1 until i > 20 loop
+				timed (agent l_code.set_bracket_matching (True))
+				i := i + 1
+			end
+			print ("    large text: one look for a bracket at the caret (none there), mean of 20: " + ((now_seconds - l_t0) * 50_000.0).rounded.out + " microseconds%N")
+			io.output.flush
+			i := l_code.line_text (l_lines // 2).index_of ('(', 1)
+			if i > 0 then
+				driver.move_caret (l_code, l_lines // 2, i)
+				l_t0 := now_seconds
+				from i := 1 until i > 20 loop
+					timed (agent l_code.set_bracket_matching (True))
+					i := i + 1
+				end
+				print ("    large text: one look with a bracket at the caret (pair shown: " + l_code.has_bracket_pair.out + "), mean of 20: "
+					+ ((now_seconds - l_t0) * 50_000.0).rounded.out + " microseconds%N")
+				io.output.flush
+			end
+			assert ("the line count holds", l_code.line_count = l_lines)
+			assert ("the keyword after the typing keeps its color",
+				l_code.text_color_at (l_code.text.substring_index ("xxxxx", 1) + 9) = l_code.style_color (l_code.Style_keyword))
+			l_window.close
+		end
+
+	test_code_editor_edits_color_as_a_fresh_text
+			-- 1v-b: after an edit the editor highlights only the lines that changed and the
+			-- lines whose starting state changed, found from what the new text shares with
+			-- the old. Whatever the edit, the colors must be those a fresh editor gives the
+			-- same text: a block opened, closed and removed, a line added at the top and at
+			-- the end, a line split, lines joined, the last and the first line removed, and
+			-- lines that repeat (where the shared start and the shared end overlap).
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_code, l_fresh: GUI_CODE_EDITOR
+			l_text: STRING_32
+			l_a, l_b: INTEGER
+		do
+			create l_window.make ("Edits", 560, 480)
+			create l_stack.make_vertical
+			l_code := new_ruled_editor
+			l_fresh := new_ruled_editor
+			l_stack.extend_stretching (l_code)
+			l_stack.extend_stretching (l_fresh)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_code.set_text ("class A%Nfeature%N    x: INTEGER = 42%N    do print (%"hi%") end%Nend")
+			assert_colored_as_fresh ("as set", l_code, l_fresh)
+			l_code.go_to_line (2)
+			driver.type_code (l_code, "/*")
+			assert_colored_as_fresh ("a block opened", l_code, l_fresh)
+			l_code.go_to_line (4)
+			driver.type_code (l_code, "*/")
+			assert_colored_as_fresh ("the block closed", l_code, l_fresh)
+			l_code.go_to_line (1)
+			driver.type_code (l_code, "do%N")
+			assert_colored_as_fresh ("a line added at the top", l_code, l_fresh)
+			driver.move_caret (l_code, l_code.line_count, l_code.line_text (l_code.line_count).count + 1)
+			driver.type_code (l_code, "%Nfeature")
+			assert_colored_as_fresh ("a line added at the end", l_code, l_fresh)
+			driver.move_caret (l_code, 3, 4)
+			driver.type_code (l_code, "%N")
+			assert_colored_as_fresh ("a line split", l_code, l_fresh)
+				-- from inside line 2 to inside line 4, the block's opening with it
+			l_text := l_code.text
+			l_a := l_text.index_of ('%N', 1)
+			l_b := l_text.index_of ('%N', l_text.index_of ('%N', l_a + 1) + 1)
+			l_code.select_range (l_a + 2, l_b + 2)
+			driver.type_code (l_code, "end")
+			assert_colored_as_fresh ("lines joined and the block's opening removed", l_code, l_fresh)
+			assert ("the lines were joined: " + l_code.line_count.out, l_code.line_count < l_text.occurrences ('%N') + 1)
+			l_text := l_code.text
+			l_code.select_range (l_text.last_index_of ('%N', l_text.count), l_text.count)
+			driver.type_code (l_code, "x")
+			assert_colored_as_fresh ("the last line removed", l_code, l_fresh)
+			l_text := l_code.text
+			l_code.select_range (1, l_text.index_of ('%N', 1))
+			driver.type_code (l_code, "end ")
+			assert_colored_as_fresh ("the first line removed", l_code, l_fresh)
+			l_code.set_text ("do%Ndo%Ndo")
+			driver.move_caret (l_code, 2, 3)
+			driver.type_code (l_code, "%Ndo")
+			assert_colored_as_fresh ("a repeated line added in the middle", l_code, l_fresh)
+			assert ("four lines: " + l_code.line_count.out, l_code.line_count = 4)
+			l_code.go_to_line (1)
+			driver.type_code (l_code, "do%N")
+			assert_colored_as_fresh ("a repeated line added at the top", l_code, l_fresh)
+			driver.move_caret (l_code, 5, 3)
+			driver.type_code (l_code, " /*")
+			assert_colored_as_fresh ("a block opened on the last line", l_code, l_fresh)
+			l_code.go_to_line (2)
+			driver.type_code (l_code, "/*")
+			assert_colored_as_fresh ("and another above it", l_code, l_fresh)
+			l_window.close
+		end
+
+	test_code_syntax_hears_true_edits
+			-- 1v-e-1: a syntax object hears each change as an edit that, applied to its own
+			-- copy of the text, gives the editor's text: typing, a selection typed over, a
+			-- cut, a paste, `replace_selection', `replace_all', undo and redo, and a line
+			-- that repeats. `set_text' is told as a replaced text.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_menu: GUI_MENU
+			l_undo, l_redo, l_cut, l_paste, l_edits, l_replaced, l_round: INTEGER
+			l_before, l_theirs: STRING_32
+		do
+				-- the cut and the paste below use the clipboard: the person's own text is
+				-- put back at the end
+			l_theirs := app.clipboard.text
+			l_menu := app.menu.add_menu ("Edit")
+			l_menu.add_edit_item (l_menu.Role_undo, "Undo")
+			l_undo := l_menu.last_item_id
+			l_menu.add_edit_item (l_menu.Role_redo, "Redo")
+			l_redo := l_menu.last_item_id
+			l_menu.add_edit_item (l_menu.Role_cut, "Cut")
+			l_cut := l_menu.last_item_id
+			l_menu.add_edit_item (l_menu.Role_paste, "Paste")
+			l_paste := l_menu.last_item_id
+			create l_window.make ("Syntax edits", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_syntax.make
+			l_code.set_syntax (l_syntax)
+			assert ("attached: " + l_syntax.log, l_syntax.editor = l_code and l_syntax.log.same_string ("A"))
+			l_code.set_text ("class A%Nfeature%N    x: INTEGER = 42%Nend")
+			assert ("set_text is told as a replaced text", l_syntax.replaced_count = 1 and l_syntax.edit_count = 0)
+			assert_copy_holds ("as set", l_code, l_syntax)
+			driver.focus (l_code)
+			l_code.go_to_line (2)
+			driver.type_code (l_code, "do")
+			assert ("typing is told as edits", l_syntax.edit_count >= 1 and l_syntax.replaced_count = 1)
+			assert_copy_holds ("typed", l_code, l_syntax)
+			driver.type_code (l_code, "%N    y")
+			assert_copy_holds ("a line typed", l_code, l_syntax)
+				-- a selection typed over
+			l_code.select_range (1, 5)
+			driver.type_code (l_code, "deferred class")
+			assert ("typed over: " + l_code.line_text (1).out, l_code.line_text (1).same_string ({STRING_32} "deferred class A"))
+			assert_copy_holds ("a selection typed over", l_code, l_syntax)
+				-- a cut
+			l_before := l_code.text
+			l_code.select_range (1, 9)
+			driver.invoke_menu (l_cut)
+			assert ("the cut took the selection: " + l_code.line_text (1).out, l_code.text.count = l_before.count - 9)
+			assert_copy_holds ("cut", l_code, l_syntax)
+				-- a paste, of two lines. (GTK reads the clipboard on a later turn of the loop,
+				-- which may come after the loop first goes quiet: the paste is waited for.)
+			app.clipboard.set_text ("one%Ntwo ")
+			driver.invoke_menu (l_paste)
+			from l_round := 0 until l_round = 40 or l_code.text.has_substring ({STRING_32} "one%Ntwo ") loop
+				driver.wait (50)
+				l_round := l_round + 1
+			end
+			assert ("the paste added the lines: " + l_code.line_text (1).out, l_code.text.has_substring ({STRING_32} "one%Ntwo "))
+			assert_copy_holds ("pasted", l_code, l_syntax)
+				-- the editor's own edits
+			l_code.select_range (1, 3)
+			l_code.replace_selection ("ONE")
+			assert_copy_holds ("replace_selection", l_code, l_syntax)
+			l_edits := l_syntax.edit_count
+			assert ("some replaced", l_code.replace_all ("e", "EE", True, False) > 0)
+			assert ("replace_all is told as an edit", l_syntax.edit_count > l_edits)
+			assert_copy_holds ("replace_all", l_code, l_syntax)
+				-- undo and redo
+			l_code.go_to_line (2)
+			driver.type_code (l_code, "zz")
+			assert_copy_holds ("typed before the undo", l_code, l_syntax)
+			l_before := l_code.text
+			driver.invoke_menu (l_undo)
+			assert ("undo changed the text", not l_code.text.same_string (l_before))
+			assert_copy_holds ("undone", l_code, l_syntax)
+			driver.invoke_menu (l_redo)
+			assert ("redo brought it back", l_code.text.same_string (l_before))
+			assert_copy_holds ("redone", l_code, l_syntax)
+			assert ("only set_text was told as a replaced text", l_syntax.replaced_count = 1)
+				-- a line that repeats: the shared start and the shared end overlap
+			app.clipboard.set_text (l_theirs)
+			l_code.set_text ("do%Ndo")
+			l_replaced := l_syntax.replaced_count
+			assert ("told as replaced again", l_replaced = 2)
+			driver.move_caret (l_code, 2, 3)
+			driver.type_code (l_code, "%Ndo")
+			assert ("three lines: " + l_code.line_count.out, l_code.line_count = 3)
+			assert_copy_holds ("a repeated line added", l_code, l_syntax)
+			assert ("an edit is never told as a replaced text", l_syntax.replaced_count = l_replaced)
+			l_window.close
+		end
+
+	test_code_syntax_takes_the_place_of_the_rules
+			-- 1v-e-1: with a syntax object set the rules color nothing; a second one detaches
+			-- the first; Void detaches and the rules color again; a change of theme asks the
+			-- object to color again; the folds it gives are kept while it is set.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_first, l_second: GUI_TEST_SYNTAX
+			l_folds: GUI_TEST_RANGES
+			l_was_dark: BOOLEAN
+			l_replaced, l_keyword: INTEGER
+		do
+			create l_window.make ("Syntax or rules", 560, 320)
+			l_code := new_ruled_editor
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("class A%Nfeature -- note%Nend")
+			l_keyword := l_code.style_color (l_code.Style_keyword).to_integer_32
+			assert ("the rules color a keyword", color_at (l_code, 1) = l_keyword)
+			create l_first.make
+			l_code.set_syntax (l_first)
+			assert ("attached", l_code.syntax = l_first and l_first.editor = l_code and l_first.attach_count = 1)
+			assert ("with the text", l_first.copy_text.same_string (l_code.text))
+			assert ("every line went plain: " + first_colored (l_code).out, first_colored (l_code) = 0)
+			driver.focus (l_code)
+			l_code.go_to_line (3)
+			driver.type_code (l_code, "do ")
+			assert ("the edit was told", l_first.edit_count >= 1)
+			assert_copy_holds ("typed", l_code, l_first)
+			assert ("and the rules colored nothing: " + first_colored (l_code).out, first_colored (l_code) = 0)
+			l_replaced := l_first.replaced_count
+			l_code.add_keywords (<<"A">>, l_code.Style_type)
+			assert ("a new rule colors nothing", first_colored (l_code) = 0)
+			assert ("and asks nothing of the syntax", l_first.replaced_count = l_replaced)
+				-- folds
+			assert ("no folds yet", l_code.fold_count = 0)
+			create l_folds.make
+			l_folds.put (1, 3)
+			l_folds.put (2, 2)
+			l_code.set_folds (l_folds)
+			assert ("the fold is kept, and the range of one line is no fold: " + l_code.fold_count.out,
+				l_code.fold_count = 1 and l_code.fold_first_line (1) = 1 and l_code.fold_last_line (1) = 3)
+				-- theme
+			l_was_dark := app.is_dark
+			driver.set_dark (not l_was_dark)
+			assert ("a change of theme asks the syntax to color again", l_first.replaced_count = l_replaced + 1)
+			driver.set_dark (l_was_dark)
+				-- a second syntax, then none
+			create l_second.make
+			l_code.set_syntax (l_second)
+			assert ("the first was detached", l_first.detach_count = 1 and l_first.editor = Void)
+			assert ("the second attached", l_second.attach_count = 1 and l_second.editor = l_code)
+			assert ("the folds went with the first", l_code.fold_count = 0)
+			l_code.set_syntax (l_second)
+			assert ("the same one again changes nothing", l_second.attach_count = 1 and l_second.detach_count = 0)
+			l_code.set_syntax (Void)
+			assert ("Void detaches", l_second.detach_count = 1 and l_second.editor = Void and l_code.syntax = Void)
+			l_keyword := l_code.style_color (l_code.Style_keyword).to_integer_32
+			assert ("and the rules color again", color_at (l_code, 1) = l_keyword)
+			assert ("the typed keyword too", color_at (l_code, l_code.text.substring_index ("do end", 1)) = l_keyword)
+			assert ("and the rule added meanwhile", color_at (l_code, 7) = l_code.style_color (l_code.Style_type).to_integer_32)
+			l_window.close
+		end
+
+	test_code_apply_spans
+			-- 1v-e-1: `apply_spans' colors what it names and makes the rest of its lines
+			-- plain, leaves the other lines alone, and passes over or cuts what lies past the
+			-- text.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_spans: GUI_TEST_SPANS
+			l_text: STRING_32
+			l_keyword, l_string, l_comment, l_function, l_2, l_3, l_4: INTEGER
+		do
+			create l_window.make ("Spans", 560, 320)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("one two%Nthree four%Nfive%Nsix seven")
+			l_text := l_code.text
+			l_2 := l_text.index_of ('%N', 1) + 1
+			l_3 := l_text.index_of ('%N', l_2) + 1
+			l_4 := l_text.index_of ('%N', l_3) + 1
+			l_keyword := l_code.style_color (l_code.Style_keyword).to_integer_32
+			l_string := l_code.style_color (l_code.Style_string).to_integer_32
+			l_comment := l_code.style_color (l_code.Style_comment).to_integer_32
+			l_function := l_code.style_color (l_code.Style_function).to_integer_32
+				-- every line a comment, end to end
+			create l_spans.make (4)
+			l_spans.put (1, 1, 7, l_code.Style_comment)
+			l_spans.put (2, 1, 10, l_code.Style_comment)
+			l_spans.put (3, 1, 4, l_code.Style_comment)
+			l_spans.put (4, 1, 9, l_code.Style_comment)
+			l_code.apply_spans (1, 4, l_spans)
+			assert ("all four lines colored", color_at (l_code, 1) = l_comment and color_at (l_code, l_2) = l_comment
+				and color_at (l_code, l_3) = l_comment and color_at (l_code, l_text.count) = l_comment)
+				-- lines 2 and 3 again
+			create l_spans.make (8)
+			l_spans.put (2, 1, 5, l_code.Style_keyword)		-- "three"
+			l_spans.put (2, 7, 100, l_code.Style_string)	-- "four", and far past the line's end
+			l_spans.put (1, 1, 3, l_code.Style_function)	-- a line before the range
+			l_spans.put (4, 1, 3, l_code.Style_function)	-- a line after the range
+			l_spans.put (9, 1, 2, l_code.Style_keyword)		-- a line the text does not have
+			l_spans.put (3, 1, 2, 99)						-- a style the editor does not know
+			l_spans.put (3, 9, 2, l_code.Style_keyword)		-- starts past its line's end
+			l_spans.put (3, 3, 1, l_code.Style_function)	-- the "v" of "five", in a new style
+			l_code.apply_spans (2, 3, l_spans)
+			assert ("the keyword", color_at (l_code, l_2) = l_keyword and color_at (l_code, l_2 + 4) = l_keyword)
+			assert ("between the spans is plain", is_plain_at (l_code, l_2 + 5))
+			assert ("the long span is cut at its line's end", color_at (l_code, l_2 + 6) = l_string and color_at (l_code, l_3 - 2) = l_string)
+			assert ("and does not reach the next line", is_plain_at (l_code, l_3))
+			assert ("an unknown style shows as plain", is_plain_at (l_code, l_3 + 1))
+			assert ("a new style colors", color_at (l_code, l_3 + 2) = l_function)
+			assert ("the rest of the line went plain", is_plain_at (l_code, l_3 + 3))
+			assert ("line 1 was left alone", color_at (l_code, 1) = l_comment and color_at (l_code, 7) = l_comment)
+			assert ("line 4 was left alone", color_at (l_code, l_4) = l_comment and color_at (l_code, l_text.count) = l_comment)
+				-- past the text
+			l_code.apply_spans (7, 9, l_spans)
+			assert ("lines the text does not have change nothing", color_at (l_code, l_2) = l_keyword and color_at (l_code, 1) = l_comment)
+			create l_spans.make (0)
+			l_code.apply_spans (4, {INTEGER}.max_value, l_spans)
+			assert ("to the end with no spans: line 4 plain", is_plain_at (l_code, l_4) and is_plain_at (l_code, l_text.count))
+			assert ("and line 3 as it was", color_at (l_code, l_3 + 2) = l_function)
+			l_code.set_text ("")
+			l_code.apply_spans (1, 1, l_spans)
+			assert ("an empty text takes it", l_code.text.is_empty)
+			l_window.close
+		end
+
+	test_code_apply_spans_cost
+			-- 1v-e-1: what `apply_spans' costs for a whole 10,000-line text of 60,000 spans
+			-- (the first answer after a load) and for one line (a keystroke's answer), each
+			-- alone and with its frame drawn. Printed, as a shipped program would spend it:
+			-- the measured steps run inside `timed'.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_all, l_one: GUI_TEST_SPANS
+			l_text: STRING_32
+			i, l_lines, l_middle, l_string_length, l_offset: INTEGER
+			l_t0, l_whole, l_whole_frame, l_hundred, l_key, l_sum, l_worst: REAL_64
+		do
+			l_lines := 10_000
+			if attached (create {EXECUTION_ENVIRONMENT}).item ("GUI_LARGE_LINES") as al_n and then al_n.is_integer then
+				l_lines := al_n.to_integer
+			end
+			l_middle := l_lines // 2
+			create l_window.make ("Spans cost", 720, 480)
+			create l_code.make
+			l_code.set_syntax (create {GUI_TEST_SYNTAX}.make)
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+				-- each line:     do print ("line N") end -- note
+			create l_text.make (400_000)
+			create l_all.make (l_lines * 6)
+			create l_one.make (6)
+			from i := 1 until i > l_lines loop
+				l_text.append ({STRING_32} "    do print (%"line ")
+				l_text.append_integer (i)
+				l_text.append ({STRING_32} "%") end -- note%N")
+				l_string_length := 7 + i.out.count
+				across << l_all, l_one >> as ic loop
+					if ic = l_all or i = l_middle then
+						ic.put (i, 5, 2, l_code.Style_keyword)
+						ic.put (i, 8, 5, l_code.Style_function)
+						ic.put (i, 14, 1, l_code.Style_operator)
+						ic.put (i, 15, l_string_length, l_code.Style_string)
+						ic.put (i, 17 + l_string_length, 3, l_code.Style_keyword)
+						ic.put (i, 21 + l_string_length, 7, l_code.Style_comment)
+					end
+				end
+				i := i + 1
+			end
+			l_text.remove_tail (1)
+			timed (agent l_code.set_text (l_text))
+			timed (agent driver.pump_until_idle (0))
+			assert ("all the lines: " + l_code.line_count.out, l_code.line_count = l_lines)
+			l_t0 := now_seconds
+			timed (agent l_code.apply_spans (1, l_lines, l_all))
+			l_whole := now_seconds - l_t0
+			timed (agent driver.pump_until_idle (0))
+			l_whole_frame := now_seconds - l_t0
+			print ("    apply_spans: " + l_lines.out + " lines, " + l_all.count.out + " spans colored in "
+				+ (l_whole * 1000.0).rounded.out + " ms; with the frame drawn " + (l_whole_frame * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+			timed (agent l_code.go_to_line (l_middle))
+			timed (agent driver.pump_until_idle (0))
+			l_t0 := now_seconds
+			from i := 1 until i > 100 loop
+				timed (agent l_code.apply_spans (l_middle, l_middle, l_one))
+				i := i + 1
+			end
+			l_hundred := now_seconds - l_t0
+			from i := 1 until i > 5 loop
+				l_t0 := now_seconds
+				timed (agent l_code.apply_spans (l_middle, l_middle, l_one))
+				timed (agent driver.pump_until_idle (0))
+				l_key := now_seconds - l_t0
+				l_sum := l_sum + l_key
+				l_worst := l_worst.max (l_key)
+				i := i + 1
+			end
+			print ("    apply_spans: one line in the middle, " + l_one.count.out + " spans, mean of 100: "
+				+ (l_hundred * 10_000.0).rounded.out + " microseconds; with the frame drawn, mean of 5: "
+				+ (l_sum * 200.0).rounded.out + " ms, worst " + (l_worst * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+			assert ("six spans a line", l_all.count = l_lines * 6 and l_one.count = 6)
+			l_offset := l_code.text.substring_index ("(%"line " + l_middle.out + "%")", 1)
+			assert ("the middle line is in the text", l_offset > 0)
+			assert ("its keyword colored", color_at (l_code, l_offset - 9) = l_code.style_color (l_code.Style_keyword).to_integer_32)
+			assert ("its function colored", color_at (l_code, l_offset - 6) = l_code.style_color (l_code.Style_function).to_integer_32)
+			assert ("its string colored", color_at (l_code, l_offset + 1) = l_code.style_color (l_code.Style_string).to_integer_32)
+			assert ("its comment colored", color_at (l_code, l_offset + 14 + l_middle.out.count) = l_code.style_color (l_code.Style_comment).to_integer_32)
+			assert ("the last line's comment colored", color_at (l_code, l_code.text.count) = l_code.style_color (l_code.Style_comment).to_integer_32)
+			l_window.close
+		end
+
+	test_actions_prune_during_call
+			-- An agent that prunes itself while the collection is being called costs no
+			-- other agent its turn.
+		local
+			l_actions: GUI_ACTIONS [TUPLE]
+			l_agents: ARRAYED_LIST [PROCEDURE [TUPLE]]
+			l_ran: ARRAY [INTEGER]
+		do
+			create l_actions.make
+			create l_agents.make (3)
+			create l_ran.make_filled (0, 1, 3)
+			across 1 |..| 3 as ic loop
+				l_agents.extend (agent count_and_leave (l_actions, l_agents, ic, l_ran))
+				l_actions.extend (l_agents.last)
+			end
+			l_actions.call (Void)
+			assert ("each ran once: " + l_ran [1].out + " " + l_ran [2].out + " " + l_ran [3].out,
+				l_ran [1] = 1 and l_ran [2] = 1 and l_ran [3] = 1)
+			assert ("and each is gone", l_actions.count = 0)
+			l_actions.call (Void)
+			assert ("none runs again", l_ran [1] = 1 and l_ran [2] = 1 and l_ran [3] = 1)
+		end
+
+	count_and_leave (a_actions: GUI_ACTIONS [TUPLE]; a_agents: ARRAYED_LIST [PROCEDURE [TUPLE]]; a_index: INTEGER; a_ran: ARRAY [INTEGER])
+			-- Count one run of agent `a_index' in `a_ran', and take that agent of `a_agents'
+			-- out of `a_actions'.
+		require
+			counted: a_ran.valid_index (a_index) and a_agents.valid_index (a_index)
+		do
+			a_ran [a_index] := a_ran [a_index] + 1
+			a_actions.prune (a_agents [a_index])
+		end
+
+	test_code_editor_bracket_pairs
+			-- 1v-e-2, by the rules: a bracket at the caret (after it, else before it) and its
+			-- partner are tinted, for each kind, nested and across lines; a bracket in a
+			-- string or a comment is no partner and has none; no partner, no pair. The tint
+			-- leaves the text, the colors and undo alone and tells no change. Going to the
+			-- partner by program tells nothing; the key tells the caret once. Typing drops
+			-- the tint and the new answer shows.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_menu: GUI_MENU
+			l_undo, l_changes_before: INTEGER
+			l_text: STRING_32
+			l_told: ARRAYED_LIST [STRING]
+			l_changes: CELL [INTEGER]
+		do
+			l_menu := app.menu.add_menu ("Edit")
+			l_menu.add_edit_item (l_menu.Role_undo, "Undo")
+			l_undo := l_menu.last_item_id
+			create l_told.make (4)
+			create l_changes.put (0)
+			create l_window.make ("Brackets", 560, 360)
+			create l_code.make
+			l_code.add_line_comment ("--", l_code.Style_comment)
+			l_code.add_delimited ("%"", "%"", l_code.Style_string)
+			l_code.caret_actions.extend (agent (l, c: INTEGER; t: ARRAYED_LIST [STRING]) do t.extend (l.out + ":" + c.out) end (?, ?, l_told))
+			l_code.change_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_changes))
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+				-- line 1 from 1:  call (a [1], {b      ( 6   [ 9   ] 11   { 14
+				-- line 2 from 17:     c} -- )           } 22   ) 27, in a comment
+				-- line 3 from 29:   ")" )               ) 32, in a string   ) 35
+				-- line 4 from 37: open ( only           ( 42, without a partner
+				-- line 5 from 49: ((x) (y))             49 with 57, 50 with 52
+			l_text := "call (a [1], {b%N    c} -- )%N  %")%" )%Nopen ( only%N((x) (y))"
+			l_code.set_text (l_text)
+			driver.focus (l_code)
+			assert ("on until set", l_code.is_bracket_matching)
+			driver.move_caret (l_code, 1, 2)
+			assert_no_bracket_pair ("not at a bracket", l_code)
+			driver.move_caret (l_code, 1, 6)
+			assert_bracket_pair ("round, the caret before it, across lines", l_code, 6, 35)
+				-- a decoration only
+			l_changes_before := l_changes.item
+			driver.move_caret (l_code, 1, 7)
+			assert_bracket_pair ("round, the caret after it", l_code, 6, 35)
+			assert ("the text is as set", l_code.text.same_string (l_text))
+			assert ("no change was told", l_changes.item = l_changes_before)
+			assert ("the brackets keep the plain color", l_code.text_color_at (6) = l_code.style_color (l_code.Style_plain)
+				and l_code.text_color_at (35) = l_code.style_color (l_code.Style_plain))
+			assert ("and get no trait", not l_code.is_bold_at (6) and not l_code.is_italic_at (6) and not l_code.is_underlined_at (6))
+				-- each kind, from either end
+			driver.move_caret (l_code, 1, 9)
+			assert_bracket_pair ("square", l_code, 9, 11)
+			driver.move_caret (l_code, 1, 12)
+			assert_bracket_pair ("square, from after the closing one", l_code, 9, 11)
+			driver.move_caret (l_code, 1, 14)
+			assert_bracket_pair ("curly, across lines", l_code, 14, 22)
+			driver.move_caret (l_code, 2, 6)
+			assert_bracket_pair ("curly, from the closing one", l_code, 14, 22)
+			driver.move_caret (l_code, 3, 8)
+			assert_bracket_pair ("round, backward past a string and a comment", l_code, 6, 35)
+				-- strings and comments
+			driver.move_caret (l_code, 2, 11)
+			assert_no_bracket_pair ("a bracket in a comment", l_code)
+			driver.move_caret (l_code, 3, 4)
+			assert_no_bracket_pair ("a bracket in a string", l_code)
+				-- no partner
+			driver.move_caret (l_code, 4, 6)
+			assert_no_bracket_pair ("no partner", l_code)
+				-- nested
+			driver.move_caret (l_code, 5, 1)
+			assert_bracket_pair ("the outer pair", l_code, 49, 57)
+			driver.move_caret (l_code, 5, 2)
+			assert_bracket_pair ("the inner pair: the character after the caret comes first", l_code, 50, 52)
+			driver.move_caret (l_code, 5, 5)
+			assert_bracket_pair ("the inner pair from its end", l_code, 50, 52)
+			driver.move_caret (l_code, 5, 10)
+			assert_bracket_pair ("the outer pair from its end", l_code, 49, 57)
+				-- going to the partner
+			driver.move_caret (l_code, 1, 6)
+			l_told.wipe_out
+			l_code.go_to_matching_bracket
+			assert ("at the partner: " + l_code.caret_line.out + ":" + l_code.caret_column.out, l_code.caret_line = 3 and l_code.caret_column = 7)
+			assert ("the program's move is not told", l_told.is_empty)
+			assert_bracket_pair ("from the partner", l_code, 6, 35)
+			l_code.go_to_matching_bracket
+			assert ("and back: " + l_code.caret_line.out + ":" + l_code.caret_column.out, l_code.caret_line = 1 and l_code.caret_column = 6 and l_told.is_empty)
+			driver.press_bracket_key (l_code)
+			assert ("the key goes there: " + l_code.caret_line.out + ":" + l_code.caret_column.out, l_code.caret_line = 3 and l_code.caret_column = 7)
+			assert ("and the user's move is told once: " + l_told.count.out, l_told.count = 1 and then l_told.last.same_string ("3:7"))
+			assert_bracket_pair ("after the key", l_code, 6, 35)
+			driver.move_caret (l_code, 1, 2)
+			l_told.wipe_out
+			driver.press_bracket_key (l_code)
+			assert ("without a pair the key does nothing", l_code.caret_line = 1 and l_code.caret_column = 2 and l_told.is_empty)
+				-- off and on
+			driver.move_caret (l_code, 1, 6)
+			l_code.set_bracket_matching (False)
+			assert_no_bracket_pair ("off", l_code)
+			driver.move_caret (l_code, 1, 9)
+			assert_no_bracket_pair ("off, at another bracket", l_code)
+			l_code.go_to_matching_bracket
+			assert ("off: nowhere to go", l_code.caret_line = 1 and l_code.caret_column = 9)
+			l_code.set_bracket_matching (True)
+			assert_bracket_pair ("on again, at once", l_code, 9, 11)
+				-- typing: the tint goes with the change and the new answer shows
+			driver.move_caret (l_code, 1, 7)
+			l_changes_before := l_changes.item
+			driver.type_code (l_code, "(")
+			assert ("typing is a change", l_changes.item > l_changes_before)
+			assert_bracket_pair ("the typed bracket takes the partner", l_code, 7, 36)
+			driver.invoke_menu (l_undo)
+			assert ("one undo takes the typed bracket back (the tint was no step): [" + l_code.line_text (1).out + "]", l_code.text.same_string (l_text))
+			if l_code.has_bracket_pair then
+				assert_bracket_pair ("after the undo", l_code, l_code.bracket_first, l_code.bracket_second)
+			else
+				assert_no_bracket_pair ("after the undo", l_code)
+			end
+			l_window.close
+		end
+
+	test_code_editor_folding
+			-- 1v-e-3: the folds of a text by indentation; a closed fold hides its lines after
+			-- the first and an open one shows them, the text the same throughout; a closed
+			-- fold inside a closed fold; going to a line or finding a match in a closed fold
+			-- opens it; an edit above a closed fold moves it; deleting its first line opens
+			-- it; a marker click and the fold keys run `fold_actions', a fold by program
+			-- does not; the arrow keys step over hidden lines.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_text: STRING_32
+			l_told: ARRAYED_LIST [STRING]
+			l_start: INTEGER
+		do
+			create l_told.make (4)
+			create l_window.make ("Folding", 560, 360)
+			create l_code.make
+			l_code.fold_actions.extend (agent (l: INTEGER; f: BOOLEAN; t: ARRAYED_LIST [STRING]) do t.extend (l.out + ":" + f.out) end (?, ?, l_told))
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+				-- 1 class A, 2 feature, 3 do, 4 x, 5 y, 6 end, 7 other, 8 end, 9 tail
+			l_text := "class A%N    feature%N        do%N            x%N            y%N        end%N    other%Nend%Ntail"
+			l_code.set_text (l_text)
+			driver.focus (l_code)
+			assert ("off until set", not l_code.is_folding_shown)
+			assert ("three folds by indentation: " + folds_out (l_code), folds_out (l_code).same_string ("1-7 2-6 3-5"))
+			l_code.set_folding_shown (True)
+			assert ("the same with markers shown: " + folds_out (l_code), folds_out (l_code).same_string ("1-7 2-6 3-5"))
+			assert_shown ("nothing closed", l_code, "1 2 3 4 5 6 7 8 9")
+				-- hide and show
+			l_code.fold (3)
+			assert ("closed", l_code.is_folded (3))
+			assert_shown ("fold 3 closed", l_code, "1 2 3 6 7 8 9")
+			assert ("the text is whole", l_code.text.same_string (l_text) and l_code.line_count = 9)
+			l_code.unfold (3)
+			assert_shown ("fold 3 open", l_code, "1 2 3 4 5 6 7 8 9")
+			assert ("the text is still whole", l_code.text.same_string (l_text))
+				-- a closed fold in a closed fold
+			l_code.fold (3)
+			l_code.fold (1)
+			assert_shown ("the outer closed hides the inner", l_code, "1 8 9")
+			l_code.unfold (1)
+			assert ("the inner stays closed", l_code.is_folded (3))
+			assert_shown ("the outer open, the inner closed", l_code, "1 2 3 6 7 8 9")
+				-- going into a closed fold opens it
+			l_code.go_to_line (4)
+			assert ("going to a hidden line opens its fold", not l_code.is_folded (3) and l_code.caret_line = 4)
+			assert_shown ("after go to line", l_code, "1 2 3 4 5 6 7 8 9")
+			l_code.fold (3)
+			assert ("the caret left the hidden line for the end of the first: " + l_code.caret_line.out + ":" + l_code.caret_column.out,
+				l_code.caret_line = 3 and l_code.caret_column = 11)
+			l_code.go_to_line (1)
+			assert ("a match in a closed fold is found", l_code.find_next ("y", True, False))
+			assert ("and its fold opens", not l_code.is_folded (3) and l_code.caret_line = 5)
+			assert_shown ("after the find", l_code, "1 2 3 4 5 6 7 8 9")
+			assert ("a fold by program tells nothing: " + l_told.count.out, l_told.is_empty)
+				-- an edit above a closed fold moves it
+			l_code.fold (3)
+			l_code.select_range (1, 0)
+			l_code.replace_selection ("top%N")
+			assert ("ten lines: " + l_code.line_count.out, l_code.line_count = 10)
+			assert ("the fold is closed on its new line", l_code.is_folded (4) and not l_code.is_folded (3))
+			assert_shown ("a line put in above by program", l_code, "1 2 3 4 7 8 9 10")
+			driver.move_caret (l_code, 1, 4)
+			driver.type_code (l_code, "%N")
+			assert ("eleven lines: " + l_code.line_count.out, l_code.line_count = 11)
+			assert ("a line typed above moves it too", l_code.is_folded (5))
+			assert_shown ("a line typed above", l_code, "1 2 3 4 5 8 9 10 11")
+				-- deleting its first line opens it (from the end of line 4 through "do":
+				-- the selection touches no hidden line, so the fold is closed until the edit)
+			l_start := l_code.text.substring_index ({STRING_32} "%N        do", 1)
+			l_code.select_range (l_start, l_start + 10)
+			assert ("still closed with its first line selected", l_code.is_folded (5))
+			l_code.replace_selection ("")
+			assert ("ten lines again: " + l_code.line_count.out, l_code.line_count = 10)
+			assert_shown ("the first line of the closed fold deleted", l_code, "1 2 3 4 5 6 7 8 9 10")
+			assert ("and no fold is closed", across 1 |..| l_code.fold_count as ic all not l_code.is_folded (l_code.fold_first_line (ic)) end)
+				-- now: 1 top, 2 blank, 3 class A, 4 feature, 5 x, 6 y, 7 end, 8 other, 9 end, 10 tail
+			assert ("the folds now: " + folds_out (l_code), folds_out (l_code).same_string ("3-8 4-7"))
+				-- a marker click tells
+			driver.press_fold_marker (l_code, 4)
+			assert ("a marker click closes and tells: " + l_told.count.out,
+				l_code.is_folded (4) and l_told.count = 1 and then l_told.last.same_string ("4:True"))
+			assert_shown ("closed by its marker", l_code, "1 2 3 4 8 9 10")
+			driver.press_fold_marker (l_code, 4)
+			assert ("another opens and tells: " + l_told.count.out,
+				not l_code.is_folded (4) and l_told.count = 2 and then l_told.last.same_string ("4:False"))
+			driver.press_fold_marker (l_code, 5)
+			assert ("a line that starts no fold has no marker: " + l_told.count.out, l_told.count = 2)
+				-- the fold keys tell
+			driver.move_caret (l_code, 6, 1)
+			driver.press_fold_key (l_code, False)
+			assert ("the fold key closes the innermost open fold around the caret: " + l_told.count.out,
+				l_code.is_folded (4) and l_told.count = 3 and then l_told.last.same_string ("4:True"))
+			assert ("and the caret leaves the hidden line: " + l_code.caret_line.out + ":" + l_code.caret_column.out,
+				l_code.caret_line = 4 and l_code.caret_column = 12)
+			driver.press_fold_key (l_code, False)
+			assert ("again, the next fold out: " + l_told.count.out,
+				l_code.is_folded (3) and l_told.count = 4 and then l_told.last.same_string ("3:True"))
+			assert ("the caret on its first line: " + l_code.caret_line.out, l_code.caret_line = 3)
+			assert_shown ("both closed", l_code, "1 2 3 9 10")
+			driver.press_fold_key (l_code, True)
+			assert ("the unfold key opens the closed fold on the caret line: " + l_told.count.out,
+				not l_code.is_folded (3) and l_told.count = 5 and then l_told.last.same_string ("3:False"))
+			assert_shown ("the inner one stays closed", l_code, "1 2 3 4 8 9 10")
+			driver.press_fold_key (l_code, True)
+			assert ("the unfold key on a line with no closed fold does nothing: " + l_told.count.out, l_told.count = 5)
+				-- the arrow keys step over the hidden lines 5 to 7, and the fold stays closed
+			driver.move_caret (l_code, 4, 1)
+			driver.press_arrow_key (l_code, 2)
+			assert ("down, over the fold: " + l_code.caret_line.out, l_code.caret_line = 8 and l_code.is_folded (4))
+			driver.press_arrow_key (l_code, 1)
+			assert ("up, over the fold: " + l_code.caret_line.out, l_code.caret_line = 4 and l_code.is_folded (4))
+			driver.move_caret (l_code, 4, 12)
+			driver.press_arrow_key (l_code, 4)
+			assert ("right from the end of the first line: " + l_code.caret_line.out + ":" + l_code.caret_column.out,
+				l_code.caret_line = 8 and l_code.caret_column = 1 and l_code.is_folded (4))
+			driver.press_arrow_key (l_code, 3)
+			assert ("left, back to it: " + l_code.caret_line.out + ":" + l_code.caret_column.out,
+				l_code.caret_line = 4 and l_code.caret_column = 12 and l_code.is_folded (4))
+			assert_shown ("after the arrow keys", l_code, "1 2 3 4 8 9 10")
+			assert ("the arrow keys told no fold: " + l_told.count.out, l_told.count = 5)
+			l_window.close
+		end
+
+	test_code_editor_folds_from_syntax
+			-- 1v-e-3: with a syntax object the folds are those it gave last, whatever the
+			-- indentation; they hide and show as any fold; a closed fold stays closed while
+			-- the next set starts a fold on its line, with that one's reach, and opens when
+			-- none does; without the object the folds are by indentation again.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_folds: GUI_TEST_RANGES
+			l_text: STRING_32
+		do
+			create l_window.make ("Folds from syntax", 560, 320)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_text := "a%N    b%Nc%Nd%Ne%Nf%Ng"
+			l_code.set_text (l_text)
+			l_code.go_to_line (1)
+			l_code.set_folding_shown (True)
+			assert ("by indentation: " + folds_out (l_code), folds_out (l_code).same_string ("1-2"))
+			l_code.fold (1)
+			assert_shown ("closed by indentation", l_code, "1 3 4 5 6 7")
+			create l_syntax.make
+			l_code.set_syntax (l_syntax)
+			assert ("the syntax has given none: " + folds_out (l_code), l_code.fold_count = 0)
+			assert_shown ("so nothing is closed", l_code, "1 2 3 4 5 6 7")
+			create l_folds.make
+			l_folds.put (3, 6)
+			l_folds.put (4, 5)
+			l_folds.put (7, 7)
+			l_code.set_folds (l_folds)
+			assert ("the folds the syntax gave: " + folds_out (l_code), folds_out (l_code).same_string ("3-6 4-5"))
+			l_code.fold (4)
+			assert_shown ("the inner closed", l_code, "1 2 3 4 6 7")
+			l_code.fold (3)
+			assert_shown ("the outer closed", l_code, "1 2 3 7")
+				-- a new set: a fold still starts on line 3, none on line 4
+			create l_folds.make
+			l_folds.put (3, 5)
+			l_code.set_folds (l_folds)
+			assert ("3 stays closed and 4 starts no fold", l_code.is_folded (3) and not l_code.is_foldable (4))
+			assert_shown ("the closed fold has its new reach", l_code, "1 2 3 6 7")
+			l_code.unfold (3)
+			assert_shown ("open, and nothing is left of the old inner fold", l_code, "1 2 3 4 5 6 7")
+			driver.press_fold_marker (l_code, 3)
+			assert ("a marker click closes a fold from the syntax", l_code.is_folded (3))
+			assert_shown ("closed by its marker", l_code, "1 2 3 6 7")
+			create l_folds.make
+			l_code.set_folds (l_folds)
+			assert ("an empty set: no folds", l_code.fold_count = 0)
+			assert_shown ("and nothing hidden", l_code, "1 2 3 4 5 6 7")
+			l_code.set_syntax (Void)
+			assert ("by indentation again: " + folds_out (l_code), folds_out (l_code).same_string ("1-2"))
+			assert ("the text is whole", l_code.text.same_string (l_text))
+			l_window.close
+		end
+
+	test_code_editor_fold_cost
+			-- 1v-e-3: what folding costs on a 10,000-line text, printed: the folds by
+			-- indentation; a text set with and without markers shown; closing and opening
+			-- every fold; a keystroke without markers, with markers, and with every fold
+			-- closed (each with its frame drawn). The measured steps run inside `timed'.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_text: STRING_32
+			i, k, l_lines, l_blocks: INTEGER
+			l_t0, l_plain, l_marked: REAL_64
+		do
+			l_lines := 10_000
+			l_blocks := l_lines // 10
+			create l_window.make ("Fold cost", 720, 480)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+				-- blocks of ten lines: a head, "do", six lines of body, "end", a blank line:
+				-- two folds to a block, one inside the other
+			create l_text.make (300_000)
+			from i := 1 until i > l_blocks loop
+				l_text.append ({STRING_32} "feature_")
+				l_text.append_integer (i)
+				l_text.append ({STRING_32} "%N    do%N")
+				from k := 1 until k > 6 loop
+					l_text.append ({STRING_32} "        call (")
+					l_text.append_integer (k)
+					l_text.append ({STRING_32} ")%N")
+					k := k + 1
+				end
+				l_text.append ({STRING_32} "    end%N%N")
+				i := i + 1
+			end
+			l_text.remove_tail (1)
+				-- the folds alone
+			l_t0 := now_seconds
+			from i := 1 until i > 20 loop
+				timed (agent make_folds_by_indentation (l_text))
+				i := i + 1
+			end
+			print ("    fold cost: folds by indentation of " + l_lines.out + " lines, mean of 20: " + ((now_seconds - l_t0) * 50_000.0).rounded.out + " microseconds%N")
+			io.output.flush
+				-- a text set, markers off and on (after one set that is not measured: the
+				-- first pays for the fonts and the first layout)
+			l_code.set_text (l_text)
+			driver.pump_until_idle (0)
+			l_t0 := now_seconds
+			timed (agent l_code.set_text (l_text))
+			timed (agent driver.pump_until_idle (0))
+			l_plain := now_seconds - l_t0
+			assert ("all the lines: " + l_code.line_count.out, l_code.line_count = l_lines)
+			l_t0 := now_seconds
+			timed (agent read_fold_count (l_code))
+			print ("    fold cost: the first fold count after a new text " + ((now_seconds - l_t0) * 1000.0).rounded.out + " ms%N")
+			assert ("two folds to a block: " + l_code.fold_count.out, l_code.fold_count = 2 * l_blocks)
+			l_t0 := now_seconds
+			timed (agent l_code.set_folding_shown (True))
+			timed (agent driver.pump_until_idle (0))
+			print ("    fold cost: markers shown (" + l_code.fold_count.out + " folds) with the frame " + ((now_seconds - l_t0) * 1000.0).rounded.out + " ms%N")
+			l_t0 := now_seconds
+			timed (agent l_code.set_text (l_text))
+			timed (agent driver.pump_until_idle (0))
+			l_marked := now_seconds - l_t0
+			print ("    fold cost: text set and first frame, markers off " + (l_plain * 1000.0).rounded.out + " ms, markers on " + (l_marked * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+				-- every fold closed, then open
+			l_t0 := now_seconds
+			timed (agent l_code.fold_all)
+			timed (agent driver.pump_until_idle (0))
+			print ("    fold cost: fold all with the frame " + ((now_seconds - l_t0) * 1000.0).rounded.out + " ms%N")
+			assert ("a block shows its head alone", driver.is_line_shown (l_code, 11) and not driver.is_line_shown (l_code, 12)
+				and not driver.is_line_shown (l_code, 19) and driver.is_line_shown (l_code, 20))
+			l_t0 := now_seconds
+			timed (agent l_code.unfold_all)
+			timed (agent driver.pump_until_idle (0))
+			print ("    fold cost: unfold all with the frame " + ((now_seconds - l_t0) * 1000.0).rounded.out + " ms%N")
+			assert ("all shown again", driver.is_line_shown (l_code, 12) and driver.is_line_shown (l_code, 19))
+			io.output.flush
+				-- keystrokes on the head of the middle block
+			driver.focus (l_code)
+			l_code.set_folding_shown (False)
+			driver.move_caret (l_code, l_lines // 2 + 1, 1)
+			print ("    fold cost: keystroke, markers off, mean of 5: " + keystroke_ms (l_code).out + " ms%N")
+			l_code.set_folding_shown (True)
+			print ("    fold cost: keystroke, markers on, nothing closed, mean of 5: " + keystroke_ms (l_code).out + " ms%N")
+			l_code.fold_all
+			driver.pump_until_idle (0)
+			print ("    fold cost: keystroke, markers on, every fold closed, mean of 5: " + keystroke_ms (l_code).out + " ms%N")
+			io.output.flush
+			assert ("typed on the head of the middle block: " + l_code.line_text (l_lines // 2 + 1).out,
+				l_code.line_text (l_lines // 2 + 1).starts_with ({STRING_32} "xxxxxxxxxxxxxxxfeature_"))
+			assert ("its fold is still closed", l_code.is_folded (l_lines // 2 + 1) and not driver.is_line_shown (l_code, l_lines // 2 + 2))
+			assert ("the line count holds", l_code.line_count = l_lines)
+			l_window.close
+		end
+
+	test_line_ranges
+			-- 1v-e-3: GUI_LINE_RANGES. The folds of a text by indentation; the lines that
+			-- ranges hide together; and what an edit does to ranges: one above moves them,
+			-- one in a first line that adds no line leaves them, one that joins or splits a
+			-- first line or touches a hidden line removes the range.
+		local
+			l_folds, l_closed, l_merged: GUI_LINE_RANGES
+			l_text, l_new: STRING_32
+		do
+				-- line 1 "a", 2 tab "b", 3 tab tab "c", 4 blank, 5 tab "d", 6 "e", 7 blank,
+				-- 8 "f", 9 four spaces "g"
+			l_text := {STRING_32} "a%N%Tb%N%T%Tc%N%N%Td%Ne%N%Nf%N    g%N"
+			create l_folds.make_by_indentation (l_text, 4)
+			assert ("three folds", l_folds.count = 3)
+			assert ("a through d, the blank line between in it", l_folds.first_line (1) = 1 and l_folds.last_line (1) = 5)
+			assert ("b through c, the blank line after not in it", l_folds.first_line (2) = 2 and l_folds.last_line (2) = 3)
+			assert ("f through g, spaces as deep as a tab", l_folds.first_line (3) = 8 and l_folds.last_line (3) = 9)
+			assert ("one fold lies in another", not l_folds.is_disjoint)
+			assert ("a fold starts on line 2", l_folds.has_start (2) and l_folds.index_starting_at (2) = 2)
+			assert ("none starts on line 3", not l_folds.has_start (3))
+			create l_folds.make_by_indentation ({STRING_32} "a%N  b%N%Tc%N", 2)
+			assert ("a tab reaches the next stop", l_folds.count = 1 and l_folds.last_line (1) = 3)
+			create l_folds.make_by_indentation ({STRING_32} "", 4)
+			assert ("no text, no fold", l_folds.count = 0)
+
+			create l_folds.make_by_indentation (l_text, 4)
+			l_merged := l_folds.merged
+			assert ("hidden together: two stretches", l_merged.count = 2 and l_merged.is_disjoint)
+			assert ("lines 2 to 5", l_merged.first_line (1) = 1 and l_merged.last_line (1) = 5)
+			assert ("a first line shows", not l_merged.is_hidden (1) and not l_merged.is_hidden (8))
+			assert ("the lines after it do not", l_merged.is_hidden (2) and l_merged.is_hidden (5) and l_merged.is_hidden (9))
+			assert ("line 6 shows", not l_merged.is_hidden (6) and l_merged.index_hiding (6) = 0)
+
+				-- closed: b (2 to 3) and f (8 to 9)
+			create l_closed.make
+			l_closed.put (8, 9)
+			l_closed.put (2, 3)
+			assert ("kept in order", l_closed.first_line (1) = 2 and l_closed.first_line (2) = 8 and l_closed.is_disjoint)
+			l_new := l_text.twin
+			l_new.insert_string ({STRING_32} "x%N", 3)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("a line added above moves both", l_closed.count = 2 and l_closed.first_line (1) = 3 and l_closed.last_line (1) = 4 and l_closed.first_line (2) = 9 and l_closed.last_line (2) = 10)
+			l_closed.follow_texts (l_new, l_text)
+			assert ("and taken away moves them back", l_closed.count = 2 and l_closed.first_line (1) = 2 and l_closed.last_line (2) = 9)
+			l_new := l_text.twin
+			l_new.insert_character ('x', 5)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("typing in a first line leaves them", l_closed.count = 2 and l_closed.first_line (1) = 2 and l_closed.last_line (1) = 3)
+			l_new := l_text.twin
+			l_new.put ('x', l_text.count - 1)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("a change in a hidden line opens that one", l_closed.count = 1 and l_closed.first_line (1) = 2)
+			l_new := l_text.twin
+			l_new.remove (2)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("joining a first line to the line above opens it", l_closed.count = 0)
+			l_closed.put (2, 3)
+			l_closed.put (8, 9)
+			l_new := l_text.twin
+			l_new.insert_character ('%N', 5)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("splitting a first line opens it, and moves the one below", l_closed.count = 1 and l_closed.first_line (1) = 9 and l_closed.last_line (1) = 10)
+			l_closed.follow_texts (l_new, l_new)
+			assert ("no edit, no change", l_closed.count = 1 and l_closed.first_line (1) = 9)
+			l_closed.remove_starting_at (9)
+			assert ("removed", l_closed.count = 0)
+		end
+
+	test_code_editor_bracket_reach
+			-- 1v-e-2: the rules' search looks at 2,000 lines, the bracket's own among them.
+			-- A partner on line 2,000 is found, from either end; one on line 2,001 is not.
+			-- Prints what a look that finds nothing costs.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_text: STRING_32
+			l_t0: REAL_64
+			i: INTEGER
+		do
+			create l_window.make ("Bracket reach", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_text.make (2100)
+			l_text.append_character ('(')
+			l_text.append (create {STRING_32}.make_filled ('%N', 1999))
+			l_text.append_character (')')
+			l_code.set_text (l_text)
+			driver.move_caret (l_code, 2, 1)
+			driver.move_caret (l_code, 1, 1)
+			assert_bracket_pair ("the partner on line 2,000", l_code, 1, 2001)
+			driver.move_caret (l_code, 2000, 2)
+			assert_bracket_pair ("and from there back", l_code, 1, 2001)
+			l_text.insert_character ('%N', 2)
+			l_code.set_text (l_text)
+			driver.move_caret (l_code, 2, 1)
+			driver.move_caret (l_code, 1, 1)
+			assert ("the caret is at the bracket", l_code.caret_line = 1 and l_code.caret_column = 1)
+			assert_no_bracket_pair ("the partner on line 2,001", l_code)
+			l_t0 := now_seconds
+			from i := 1 until i > 20 loop
+				timed (agent l_code.set_bracket_matching (True))
+				i := i + 1
+			end
+			print ("    brackets: a look over 2,000 lines that finds no partner, mean of 20: " + ((now_seconds - l_t0) * 50_000.0).rounded.out + " microseconds%N")
+			io.output.flush
+			driver.move_caret (l_code, 2001, 2)
+			assert_no_bracket_pair ("nor from there back", l_code)
+			l_window.close
+		end
+
+	test_code_editor_bracket_pair_from_syntax
+			-- 1v-e-2, with a syntax object: it is asked where the bracket is, the rules do
+			-- not search, and its answer is shown, given at once or a turn later. A range
+			-- may be longer than one character. An answer out of the text shows no pair; the
+			-- answer to an older question leaves what is shown.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_asked: INTEGER
+		do
+			create l_window.make ("Brackets by a syntax object", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_syntax.make
+			l_code.set_syntax (l_syntax)
+				-- (* a *) b (c)      ( 1   ) 7   ( 11   ) 13
+			l_code.set_text ("(* a *) b (c)")
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 9)
+			l_asked := l_syntax.bracket_count
+			driver.move_caret (l_code, 1, 11)
+			assert ("asked where the bracket is: " + l_syntax.bracket_position.out, l_syntax.bracket_count = l_asked + 1 and l_syntax.bracket_position = 11)
+			assert_no_bracket_pair ("no answer yet, and the rules do not search", l_code)
+				-- the answer comes a turn later
+			driver.pump_until_idle (0)
+			l_code.show_bracket_pair (11, 1, 13, 1)
+			assert_bracket_pair ("answered later", l_code, 11, 13)
+			l_code.show_bracket_pair (1, 2, 6, 2)
+			assert_bracket_pair ("the answer to an older question leaves what is shown", l_code, 11, 13)
+			l_code.show_bracket_pair (11, 1, 50, 1)
+			assert_no_bracket_pair ("an answer out of the text", l_code)
+			l_code.show_bracket_pair (11, 1, 13, 1)
+			l_code.hide_bracket_pair
+			assert_no_bracket_pair ("the answer that there is no partner", l_code)
+				-- the answer comes at once, with ranges of two characters
+			l_syntax.set_pair_answer ([1, 2, 6, 2])
+			driver.move_caret (l_code, 1, 1)
+			assert ("asked about the first: " + l_syntax.bracket_position.out, l_syntax.bracket_position = 1)
+			assert ("shown at once: " + l_code.bracket_first.out + ", " + l_code.bracket_second.out,
+				l_code.has_bracket_pair and then (l_code.bracket_first = 1 and l_code.bracket_second = 6))
+			assert ("both ranges tinted, and only they", driver.is_bracket_tinted (l_code, 1) and driver.is_bracket_tinted (l_code, 2)
+				and driver.is_bracket_tinted (l_code, 6) and driver.is_bracket_tinted (l_code, 7) and tinted_count (l_code) = 4)
+			l_code.go_to_matching_bracket
+			assert ("to the start of the partner's range: " + l_code.caret_column.out, l_code.caret_line = 1 and l_code.caret_column = 6)
+				-- the syntax object goes: the rules search again
+			l_syntax.set_pair_answer (Void)
+			l_code.set_syntax (Void)
+			driver.move_caret (l_code, 1, 9)
+			driver.move_caret (l_code, 1, 11)
+			assert_bracket_pair ("by the rules again", l_code, 11, 13)
+			l_window.close
+		end
+
+	test_code_editor_lets_go_with_its_window
+			-- A code editor asks the application to call it on a change of theme. When the
+			-- window it is in closes (here it sits inside a splitter), it detaches its
+			-- syntax object and the application stops calling it; another window's closing
+			-- changes nothing.
+		local
+			l_window, l_other: GUI_WINDOW
+			l_split: GUI_SPLITTER
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_appearance, l_closed, l_replaced: INTEGER
+			l_was_dark: BOOLEAN
+		do
+			l_appearance := app.appearance_changed_actions.count
+			l_closed := app.window_closed_actions.count
+			create l_window.make ("Editor in a closing window", 480, 260)
+			l_code := new_ruled_editor
+			assert ("the editor asked for both calls", app.appearance_changed_actions.count = l_appearance + 1
+				and app.window_closed_actions.count = l_closed + 1)
+			create l_split.make_horizontal
+			l_split.set_first (create {GUI_LABEL}.make ("beside"))
+			l_split.set_second (l_code)
+			l_window.set_content (l_split)
+			l_window.show
+			settle_window
+			l_code.set_text ("class A%Nend")
+			create l_syntax.make
+			l_code.set_syntax (l_syntax)
+				-- another window closes
+			create l_other.make ("Another window", 240, 160)
+			l_other.show
+			settle_window
+			l_other.close
+			assert ("another window's closing leaves it attached", l_code.syntax = l_syntax and l_syntax.detach_count = 0)
+			assert ("and still called", app.appearance_changed_actions.count = l_appearance + 1
+				and app.window_closed_actions.count = l_closed + 1)
+				-- its own window closes
+			l_replaced := l_syntax.replaced_count
+			l_window.close
+			assert ("the syntax was detached", l_syntax.detach_count = 1 and l_syntax.editor = Void and l_code.syntax = Void)
+			assert ("and the application calls it no more", app.appearance_changed_actions.count = l_appearance
+				and app.window_closed_actions.count = l_closed)
+			l_was_dark := app.is_dark
+			driver.set_dark (not l_was_dark)
+			driver.set_dark (l_was_dark)
+			assert ("a change of theme asks nothing of the syntax", l_syntax.replaced_count = l_replaced)
+		end
+
+	test_from_c_reads_utf_8
+			-- A C string read back: each length of UTF-8 form at its first and its last
+			-- character, and bytes that are not UTF-8 read as the two-step path reads them
+			-- (a byte string, then UTF_CONVERTER).
+		local
+			l_text: STRING_32
+			l_c: C_STRING
+			l_bad: ARRAY [STRING_8]
+			i: INTEGER
+		do
+			assert ("null is empty", backend.from_c (default_pointer).is_empty)
+			l_c := backend.to_c ("")
+			assert ("empty is empty", backend.from_c (l_c.item).is_empty)
+			create l_text.make_from_string ("plain ")
+			across <<0x7F, 0x80, 0x7FF, 0x800, 0xD7FF, 0xE000, 0xFFFF, 0x10000, 0x1F600, 0x10FFFF>> as ic loop
+				l_text.append_code (ic.to_natural_32)
+				l_text.append_character ('.')
+			end
+			l_c := backend.to_c (l_text)
+			assert ("every form both ways", backend.from_c (l_c.item).same_string (l_text))
+			assert ("one character for each: " + backend.from_c (l_c.item).count.out, backend.from_c (l_c.item).count = 26)
+				-- a stray continuation byte; a longer form than the character needs (two
+				-- bytes, then three); a form cut short; a surrogate; past 0x10FFFF; no form
+			l_bad := <<"a%/128/b", "a%/192/%/128/b", "ok %/224/%/128/%/128/ ok", "%/226/%/130/",
+				"%/237/%/160/%/128/", "%/244/%/144/%/128/%/128/", "%/255/">>
+			from i := 1 until i > l_bad.count loop
+				create l_c.make (l_bad [i])
+				assert ("not UTF-8 reads as before, case " + i.out,
+					backend.from_c (l_c.item).same_string ({UTF_CONVERTER}.utf_8_string_8_to_string_32 (l_bad [i])))
+				i := i + 1
+			end
+		end
+
+	test_new_message_tag
+			-- 1v-e-1: a tag from `new_message_tag' is negative and never comes twice.
+		local
+			l_seen: HASH_TABLE [BOOLEAN, INTEGER]
+			i, l_tag, l_bad: INTEGER
+		do
+			create l_seen.make (1000)
+			from i := 1 until i > 1000 loop
+				l_tag := app.new_message_tag
+				if l_tag >= 0 or l_seen.has (l_tag) then
+					l_bad := l_bad + 1
+				end
+				l_seen.force (True, l_tag)
+				i := i + 1
+			end
+			assert ("1000 tags, each negative and new; bad ones: " + l_bad.out, l_bad = 0)
+		end
+
 	test_preferences_values_and_file
 			-- 1v-d: typed values with defaults; integers clamp; a file round-trips, keeps keys it
 			-- doesn't know, and a bad value falls back to its default; changes are told.
@@ -2189,6 +3514,42 @@ feature -- The remaining controls (1j)
 			l_grid.set_filter ("")
 			l_grid.remove_item (1)
 			assert ("removed", l_grid.count = 4 and l_grid.item_title (1).same_string ("Folder"))
+			l_window.close
+		end
+
+	test_grid_view_pictures_arrive_while_more_decode
+			-- 1v-a: a small picture's message arrives while three large ones are still queued
+			-- on the worker. The loader asks the worker for results from inside the message
+			-- handler, and the worker posts each result to the mailbox: with the mailbox
+			-- held while handlers ran, both processors waited on each other for good.
+		local
+			l_window: GUI_WINDOW
+			l_grid: GUI_GRID_VIEW
+			l_small, l_large: PATH
+			i: INTEGER
+			l_all: BOOLEAN
+		do
+			create l_small.make_from_string ("testing/fixtures/grid_small.jpg")
+			create l_large.make_from_string ("testing/fixtures/grid_large.jpg")
+			create l_window.make ("Pictures while more decode", 560, 400)
+			create l_grid.make
+			l_grid.extend_picture ("Small", l_small)
+			l_grid.extend_picture ("Large 1", l_large)
+			l_grid.extend_picture ("Large 2", l_large)
+			l_grid.extend_picture ("Large 3", l_large)
+			l_window.set_content (l_grid)
+			l_window.show
+			settle_window
+			from
+				i := 1
+				l_all := True
+			until
+				i > 4
+			loop
+				l_all := l_all and driver.grid_picture_ready (l_grid, i, 30000)
+				i := i + 1
+			end
+			assert ("all four pictures loaded", l_all)
 			l_window.close
 		end
 
@@ -4610,6 +5971,224 @@ feature -- Styles and the theme (1w)
 
 feature {NONE} -- Fixtures
 
+	new_ruled_editor: GUI_CODE_EDITOR
+			-- A code editor with keywords, a line comment, strings and a block comment.
+		do
+			create Result.make
+			Result.add_keywords (<<"class", "feature", "do", "end">>, Result.Style_keyword)
+			Result.add_line_comment ("--", Result.Style_comment)
+			Result.add_delimited ("%"", "%"", Result.Style_string)
+			Result.add_delimited ("/*", "*/", Result.Style_comment)
+		end
+
+	assert_colored_as_fresh (a_tag: STRING; a_code, a_fresh: GUI_CODE_EDITOR)
+			-- Give `a_fresh' the text of `a_code' and check that every character outside
+			-- the line breaks (which show no color) is colored alike in both.
+		local
+			l_text: STRING_32
+			i, l_differing: INTEGER
+		do
+			l_text := a_code.text
+			a_fresh.set_text (l_text)
+			from i := 1 until i > l_text.count loop
+				if l_text [i] /= '%N' and l_differing = 0 then
+					if a_code.has_text_color_at (i) /= a_fresh.has_text_color_at (i)
+						or else (a_code.has_text_color_at (i) and then a_code.text_color_at (i) /= a_fresh.text_color_at (i))
+					then
+						l_differing := i
+					end
+				end
+				i := i + 1
+			end
+			assert (a_tag + ": colored as a fresh text (first difference at character " + l_differing.out
+				+ " of [" + l_text.out + "])", l_differing = 0)
+		end
+
+	assert_copy_holds (a_tag: STRING; a_code: GUI_CODE_EDITOR; a_syntax: GUI_TEST_SYNTAX)
+			-- The edits `a_syntax' was told, applied in order to its own copy of the text,
+			-- give the text of `a_code'.
+		do
+			assert (a_tag + ": every edit fit the copy", a_syntax.false_edits = 0)
+			assert (a_tag + ": the copy [" + a_syntax.copy_text.out + "] is the text [" + a_code.text.out + "]",
+				a_syntax.copy_text.same_string (a_code.text))
+		end
+
+	assert_bracket_pair (a_tag: STRING; a_code: GUI_CODE_EDITOR; a_first, a_second: INTEGER)
+			-- `a_code' has the pair of the brackets at `a_first' and `a_second', and its
+			-- control tints those two characters and no other.
+		do
+			assert (a_tag + ": the pair is " + a_code.bracket_first.out + ", " + a_code.bracket_second.out + " (has one: " + a_code.has_bracket_pair.out + ")",
+				a_code.has_bracket_pair and then (a_code.bracket_first = a_first and a_code.bracket_second = a_second))
+			assert (a_tag + ": both are tinted", driver.is_bracket_tinted (a_code, a_first) and driver.is_bracket_tinted (a_code, a_second))
+			assert (a_tag + ": and nothing else: " + tinted_count (a_code).out, tinted_count (a_code) = 2)
+		end
+
+	folds_out (a_code: GUI_CODE_EDITOR): STRING
+			-- The folds of `a_code', each as "first-last", a space between.
+		do
+			create Result.make (32)
+			across 1 |..| a_code.fold_count as ic loop
+				if not Result.is_empty then
+					Result.append_character (' ')
+				end
+				Result.append (a_code.fold_first_line (ic).out + "-" + a_code.fold_last_line (ic).out)
+			end
+		end
+
+	assert_shown (a_tag: STRING; a_code: GUI_CODE_EDITOR; a_lines: STRING)
+			-- The control of `a_code' shows the lines `a_lines' (numbers, a space between)
+			-- and no other, and the editor says the same of every line.
+		local
+			l_shown: STRING
+			i: INTEGER
+		do
+			create l_shown.make (32)
+			from
+				i := 1
+			until
+				i > a_code.line_count
+			loop
+				if driver.is_line_shown (a_code, i) then
+					if not l_shown.is_empty then
+						l_shown.append_character (' ')
+					end
+					l_shown.append_integer (i)
+				end
+				assert (a_tag + ": the editor and its control agree on line " + i.out,
+					driver.is_line_shown (a_code, i) = not a_code.is_line_hidden (i))
+				i := i + 1
+			end
+			assert (a_tag + ": shown " + l_shown + ", wanted " + a_lines, l_shown.same_string (a_lines))
+		end
+
+	read_fold_count (a_code: GUI_CODE_EDITOR)
+			-- Ask `a_code' for its fold count and drop it (a measured step).
+		local
+			n: INTEGER
+		do
+			n := a_code.fold_count
+		end
+
+	make_folds_by_indentation (a_text: STRING_32)
+			-- Find the folds of `a_text' by indentation and drop them (a measured step).
+		local
+			l_folds: GUI_LINE_RANGES
+		do
+			create l_folds.make_by_indentation (a_text, 4)
+		end
+
+	keystroke_ms (a_code: GUI_CODE_EDITOR): INTEGER
+			-- The mean time, in milliseconds, of five keystrokes typed at the caret of
+			-- `a_code', each with its frame drawn (measured steps).
+		local
+			i: INTEGER
+			l_t0: REAL_64
+		do
+			l_t0 := now_seconds
+			from
+				i := 1
+			until
+				i > 5
+			loop
+				timed (agent driver.type_code (a_code, "x"))
+				timed (agent driver.pump_until_idle (0))
+				i := i + 1
+			end
+			Result := ((now_seconds - l_t0) * 200.0).rounded
+		end
+
+	assert_no_bracket_pair (a_tag: STRING; a_code: GUI_CODE_EDITOR)
+			-- `a_code' has no pair and its control tints nothing.
+		do
+			assert (a_tag + ": no pair, but " + a_code.bracket_first.out + ", " + a_code.bracket_second.out, not a_code.has_bracket_pair)
+			assert (a_tag + ": nothing tinted: " + tinted_count (a_code).out, tinted_count (a_code) = 0)
+		end
+
+	tinted_count (a_code: GUI_CODE_EDITOR): INTEGER
+			-- How many characters the control of `a_code' shows under the bracket tint.
+		local
+			i, l_count: INTEGER
+		do
+			l_count := a_code.text.count
+			from i := 1 until i > l_count loop
+				if driver.is_bracket_tinted (a_code, i) then
+					Result := Result + 1
+				end
+				i := i + 1
+			end
+		end
+
+	color_at (a_code: GUI_CODE_EDITOR; i: INTEGER): INTEGER
+			-- The color of character `i', 0xRRGGBB; -1 when it has none of its own.
+		do
+			if a_code.has_text_color_at (i) then
+				Result := a_code.text_color_at (i).to_integer_32
+			else
+				Result := -1
+			end
+		end
+
+	is_plain_at (a_code: GUI_CODE_EDITOR; i: INTEGER): BOOLEAN
+			-- Is character `i' plain: no color of its own, or the plain style's?
+		local
+			l_color: INTEGER
+		do
+			l_color := color_at (a_code, i)
+			Result := l_color = -1 or l_color = a_code.style_color (a_code.Style_plain).to_integer_32
+		end
+
+	first_colored (a_code: GUI_CODE_EDITOR): INTEGER
+			-- The first character of `a_code' that is not plain (line breaks show no color
+			-- and are passed over); 0 when every one is.
+		local
+			l_text: STRING_32
+			i, l_plain, l_color: INTEGER
+		do
+			l_text := a_code.text
+			l_plain := a_code.style_color (a_code.Style_plain).to_integer_32
+			from i := 1 until i > l_text.count or Result > 0 loop
+				if l_text [i] /= '%N' then
+					l_color := color_at (a_code, i)
+					if l_color /= -1 and l_color /= l_plain then
+						Result := i
+					end
+				end
+				i := i + 1
+			end
+		end
+
+	read_text (a_code: GUI_CODE_EDITOR)
+			-- Read the text of `a_code' and drop it (a measured step).
+		local
+			l_text: STRING_32
+		do
+			l_text := a_code.text
+		end
+
+	timed (a_work: PROCEDURE)
+			-- Run `a_work' as a shipped program would: contract checking off, then back as it
+			-- was, also when `a_work' raises. For the measured steps of a timing test only (a
+			-- time budget is the lean build's; Larry, 2026-10-25: "Timing needs trump
+			-- contracts"). GUI_TIMED_CONTRACTS in the environment keeps checking on, to
+			-- show what the contracts cost.
+		local
+			l_was, l_is_off, l_ignored: BOOLEAN
+		do
+			if attached (create {EXECUTION_ENVIRONMENT}).item ("GUI_TIMED_CONTRACTS") then
+				a_work.call (Void)
+			else
+				l_was := {ISE_RUNTIME}.check_assert (False)
+				l_is_off := True
+				a_work.call (Void)
+				l_ignored := {ISE_RUNTIME}.check_assert (l_was)
+				l_is_off := False
+			end
+		rescue
+			if l_is_off then
+				l_ignored := {ISE_RUNTIME}.check_assert (l_was)
+			end
+		end
+
 	source_calls: INTEGER
 			-- How many rows `counted_row' was asked for.
 
@@ -4713,6 +6292,12 @@ feature {NONE} -- Fixtures
 	start_worker (a_worker: separate GUI_TEST_WORKER)
 		do
 			a_worker.start
+		end
+
+	worker_started (a_worker: separate GUI_TEST_WORKER): BOOLEAN
+			-- Has `a_worker' done its `start'? Waits for it.
+		do
+			Result := a_worker.has_started
 		end
 
 	shown_window_with_button (a_text: STRING): GUI_WINDOW

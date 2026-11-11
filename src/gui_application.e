@@ -33,6 +33,7 @@ feature {NONE} -- Initialization
 			create windows.make (2)
 			create message_actions.make
 			create appearance_changed_actions.make
+			create window_closed_actions.make
 			create menu.make
 			create pills.make
 			create timers.make (4)
@@ -73,7 +74,27 @@ feature -- Access
 	message_actions: GUI_ACTIONS [TUPLE [tag: INTEGER; payload: STRING_32]]
 			-- Run for each worker message, on the GUI processor.
 
+	new_message_tag: INTEGER
+			-- A mailbox tag no one else has (1v-e-1): always negative, and different on
+			-- every call. A tag a class fixes for itself as a constant (the picture
+			-- loader's) is positive, so the two kinds never meet. Ask on the GUI processor
+			-- and hand the number to the worker that will post with it.
+		do
+			last_message_tag := last_message_tag - 1
+			Result := last_message_tag
+		ensure
+			negative: Result < 0
+			new: Result < old last_message_tag
+		end
+
+	last_message_tag: INTEGER
+			-- The tag `new_message_tag' gave last; 0 before the first.
+
 	appearance_changed_actions: GUI_ACTIONS [TUPLE [dark: BOOLEAN]]
+
+	window_closed_actions: GUI_ACTIONS [TUPLE [window: GUI_WINDOW]]
+			-- Run after a window closed, with that window: the controls of what it held
+			-- are gone. A widget that asked the application to call it lets go here.
 
 	help_actions: GUI_ACTIONS [TUPLE [topic: STRING_32; widget: detachable GUI_WIDGET]]
 			-- 1u: run when the user asks for help (F1; Command+? on macOS), with the nearest
@@ -456,6 +477,7 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 			-- `a_window' closed; quit after the last.
 		do
 			windows.prune_all (a_window)
+			window_closed_actions.call ([a_window])
 			if windows.is_empty then
 				quit
 			end
@@ -480,7 +502,7 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 					restyle_all
 					appearance_changed_actions.call ([l_a = 1])
 				when 11 then
-					take_messages (mailbox)
+					fire_waiting_messages
 				when 28 then
 					if notification_actions.valid_index (l_a) then
 						notification_actions.i_th (l_a).call (Void)
@@ -719,25 +741,41 @@ feature {NONE} -- Implementation
 
 	last_timer_id: INTEGER
 
-	take_messages (a_mailbox: separate GUI_MAILBOX)
-			-- Copy out every message, release the mailbox, then fire `message_actions'.
+	fire_waiting_messages
+			-- Copy every waiting message out of `mailbox', then fire `message_actions'.
+			-- The mailbox is released when `take_messages' returns, before anything fires:
+			-- a handler may wait on a worker (GUI_PICTURE_LOADER asks its worker for
+			-- results) while that worker waits to post to the mailbox, and firing with the
+			-- mailbox held deadlocked both processors.
 		local
 			l_tags: ARRAYED_LIST [INTEGER]
 			l_texts: ARRAYED_LIST [STRING_32]
-			l_text: STRING_32
 		do
 			create l_tags.make (4)
 			create l_texts.make (4)
+			take_messages (mailbox, l_tags, l_texts)
+			fire_messages (l_tags, l_texts)
+		end
+
+	take_messages (a_mailbox: separate GUI_MAILBOX; a_tags: ARRAYED_LIST [INTEGER]; a_texts: ARRAYED_LIST [STRING_32])
+			-- Move every message in `a_mailbox' to the ends of `a_tags' and `a_texts'. Fires
+			-- nothing: `a_mailbox' stays held until this returns.
+		require
+			paired: a_tags.count = a_texts.count
+		local
+			l_text: STRING_32
+		do
 			from
 			until
 				a_mailbox.is_empty
 			loop
-				l_tags.extend (a_mailbox.first_tag)
+				a_tags.extend (a_mailbox.first_tag)
 				create l_text.make_from_separate (a_mailbox.first_payload)
-				l_texts.extend (l_text)
+				a_texts.extend (l_text)
 				a_mailbox.remove_first
 			end
-			fire_messages (l_tags, l_texts)
+		ensure
+			still_paired: a_tags.count = a_texts.count
 		end
 
 	fire_messages (a_tags: ARRAYED_LIST [INTEGER]; a_texts: ARRAYED_LIST [STRING_32])

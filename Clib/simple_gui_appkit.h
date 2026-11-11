@@ -23,6 +23,7 @@ void sga_pump_until_idle(int a_ms);
 void sga_start_heartbeat(int a_ms);
 void sga_wake(void);
 int sga_next(int *a_type, int *a_id, int *a_a, int *a_b, int *a_c);
+void sga_test_fill_event_queue(int a_count);
 
 /* Windows and layout */
 int sga_window(const char *a_title, int a_width, int a_height);
@@ -479,6 +480,31 @@ const char *sga_test_dialog_button_order(int a_dialog);
 void sga_test_press_help(int a_window);
 const char *sga_test_help_tip_shown(void);
 
+/* 1v-b: the code editor */
+int sga_code_editor(void);
+void sga_code_set_line_numbers(int a_id, int a_on);
+void sga_code_set_indent(int a_id, int a_tab_width, int a_spaces);
+int sga_text_line_count(int a_id);
+int sga_text_caret_line(int a_id);
+int sga_text_caret_column(int a_id);
+const char *sga_text_line_text(int a_id, int n);
+void sga_text_go_to_line(int a_id, int n);
+void sga_text_replace_range(int a_id, int a_start, int an_end, const char *a_text);
+void sga_test_type_into_code(int a_id, const char *a_text);
+void sga_test_caret_to(int a_id, int a_line, int a_column);
+/* 1v-e-2: the bracket pair */
+void sga_code_show_bracket_pair(int a_id, int a_first_start, int a_first_count, int a_second_start, int a_second_count);
+void sga_code_hide_bracket_pair(int a_id);
+int sga_test_bracket_tint_at(int a_id, int a_position);
+void sga_test_bracket_key(int a_id);
+/* 1v-e-3: folding */
+void sga_code_set_folding_shown(int a_id, int a_on);
+void sga_code_set_fold_marks(int a_id, const int *a_lines, int a_count);
+void sga_code_set_folded_lines(int a_id, const int *a_pairs, int a_count);
+void sga_test_press_fold_marker(int a_id, int a_line);
+void sga_test_fold_key(int a_id, int an_unfold);
+int sga_test_line_is_shown(int a_id, int a_line);
+void sga_test_code_arrow_key(int a_id, int a_direction);
 /* 1v-a: the grid view */
 int sga_grid_view(void);
 void sga_grid_view_extend(int a_id, const char *a_title, const char *a_picture, const char *an_icon);

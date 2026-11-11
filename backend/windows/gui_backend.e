@@ -18,8 +18,10 @@ class
 inherit
 	GUI_BACKEND_API
 		redefine
-			scale
+			scale, text_area_string
 		end
+
+	GUI_PICTURE_BYTES
 
 feature -- Lifecycle and loop
 
@@ -27,8 +29,13 @@ feature -- Lifecycle and loop
 			-- Windows always has a display. Become DPI aware first, before anything asks the
 			-- desktop's scale: until then Windows answers 96 DPI, so a window and its first
 			-- theme were sized at 100% on a 150% display and grew when a later theme came.
+			-- Then claim the pump for this thread, so a worker's wake always has somewhere
+			-- to go: before any shell window exists (a grid asks for its pictures on its
+			-- first frame, while its window is composed) `SHELL_WAKE.wake' found no window
+			-- and no claimed thread, answered "nobody", and the wake was lost (issue 107).
 		do
 			desktop.become_dpi_aware
+			wake_reader.claim_pump_thread
 			if not from_c (a_name).is_empty then
 				app_title.put (from_c (a_name))
 			end
@@ -47,6 +54,9 @@ feature -- Lifecycle and loop
 		local
 			l_wait: INTEGER
 		do
+			if is_render_due then
+				changed
+			end
 			if events.is_empty then
 				l_wait := a_ms.max (0).min (ms_to_next_timer)
 				if attached open_window as al_w and then al_w.is_window_open then
@@ -64,6 +74,7 @@ feature -- Lifecycle and loop
 			-- Dispatch what is waiting, then lay out and draw, so positions and sizes are current
 			-- (the shared tests' rule 2).
 		do
+			is_render_due := False
 			if attached open_window as al_w and then al_w.is_window_open then
 				al_w.shell_turn_pending
 				al_w.request_render
@@ -1295,7 +1306,7 @@ feature -- Controls
 		local
 			l_m: MANAGED_POINTER
 		do
-			l_m := (create {GUI_DECODED_PICTURE}.make_empty).file_bytes (from_c (a_path))
+			l_m := file_bytes (from_c (a_path))
 			if attached {SW_IMAGE} widget (an_id) and then attached l_m as al_m then
 				Result := image_set_bytes (an_id, al_m.item, al_m.count)
 			end
@@ -1305,7 +1316,7 @@ feature -- Controls
 			-- The picture file `a_path' on this thread, PNG through cairo else simple_stb; Void
 			-- when it is missing or will not decode. The grid view uses it when it has no worker.
 		do
-			if attached (create {GUI_DECODED_PICTURE}.make_empty).file_bytes (a_path) as al_m then
+			if attached file_bytes (a_path) as al_m then
 				Result := decoded (al_m)
 			end
 		end
@@ -1319,21 +1330,12 @@ feature -- Controls
 	release_picture_loaders (a_window: SW_WINDOW)
 			-- Let go the workers of the grids in `a_window' (they restart on the next request).
 		do
-			across picture_loaders as ic loop
-				if ic.is_started and then is_in_window (ic.grid, a_window) then
-					ic.release
+			if attached a_window.root as al_root then
+				across picture_loaders as ic loop
+					if ic.is_started and then is_inside (ic.grid, al_root) then
+						ic.release
+					end
 				end
-			end
-		end
-
-	is_in_window (a_widget: SW_WIDGET; a_window: SW_WINDOW): BOOLEAN
-			-- Is `a_widget' under `a_window''s root?
-		local
-			l_w: detachable SW_WIDGET
-		do
-			from l_w := a_widget until l_w = Void or Result loop
-				Result := l_w = a_window.root
-				l_w := l_w.parent
 			end
 		end
 
@@ -2860,7 +2862,7 @@ feature -- Path controls, continued
 		do
 			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
 				al_r.set_trait (a_start, an_end, a_trait, a_on)
-				changed
+				style_changed
 			end
 		end
 
@@ -2868,7 +2870,7 @@ feature -- Path controls, continued
 		do
 			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
 				al_r.set_color (a_start, an_end, a_rgb)
-				changed
+				style_changed
 			end
 		end
 
@@ -2876,6 +2878,7 @@ feature -- Path controls, continued
 		do
 			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
 				al_r.set_size (a_start, an_end, a_points)
+				style_changed
 			end
 		end
 
@@ -2927,6 +2930,172 @@ feature -- Path controls, continued
 		do
 			if attached {GUI_SW_RICH_TEXT_AREA} widget (an_id) as al_r then
 				al_r.select_characters (a_start, an_end)
+				changed
+			end
+		end
+
+	code_editor: INTEGER
+			-- GUI_SW_CODE_AREA: event 2 on an edit, event 52 (line, column) when the user
+			-- moves the caret, event 56 for the key that goes to the matching bracket.
+		local
+			l_c: GUI_SW_CODE_AREA
+		do
+			create l_c.make_rich (themed (is_dark).size_body)
+			Result := register (l_c)
+			l_c.set_on_change (agent push (2, Result, 0, 0, 0))
+			l_c.set_on_caret_move (agent push (52, Result, ?, ?, 0))
+			l_c.set_on_bracket_key (agent push (56, Result, 0, 0, 0))
+			l_c.set_on_fold (agent push (57, Result, ?, ?, 0))
+		end
+
+	code_show_bracket_pair (an_id, a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.show_bracket_pair (a_first_start, a_first_count, a_second_start, a_second_count)
+					-- as a style: the frame comes at the next turn of the loop (a look
+					-- hides and shows, and a frame for each cost 26 ms on a large text)
+				style_changed
+			end
+		end
+
+	code_hide_bracket_pair (an_id: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then al_c.has_bracket_pair then
+				al_c.hide_bracket_pair
+				style_changed
+			end
+		end
+
+	code_set_folding_shown (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then al_c.is_folding_shown /= a_on then
+				al_c.set_folding_shown (a_on)
+				changed
+			end
+		end
+
+	code_set_fold_marks (an_id: INTEGER; a_lines: POINTER; a_count: INTEGER)
+		local
+			l_marks: GUI_LINE_RANGES
+			l_data: MANAGED_POINTER
+			i, l_line: INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				create l_marks.make
+				if a_count > 0 and then a_lines /= default_pointer then
+					create l_data.share_from_pointer (a_lines, a_count * 4)
+					from
+						i := 0
+					until
+						i >= a_count
+					loop
+						l_line := l_data.read_integer_32 (i * 4)
+						if l_line >= 1 then
+							l_marks.put (l_line, l_line)
+						end
+						i := i + 1
+					end
+				end
+				al_c.set_fold_marks (l_marks)
+				style_changed
+			end
+		end
+
+	code_set_folded_lines (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- (A pair that hides nothing is left out; pairs that reach one another, which
+			-- the caller promised not to send, hide what they hide together.)
+		local
+			l_ranges: GUI_LINE_RANGES
+			l_data: MANAGED_POINTER
+			i, l_first, l_last: INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				create l_ranges.make
+				if a_count > 0 and then a_pairs /= default_pointer then
+					create l_data.share_from_pointer (a_pairs, a_count * 8)
+					from
+						i := 0
+					until
+						i >= a_count
+					loop
+						l_first := l_data.read_integer_32 (i * 8)
+						l_last := l_data.read_integer_32 (i * 8 + 4)
+						if l_first >= 1 and l_last > l_first then
+							l_ranges.put (l_first, l_last)
+						end
+						i := i + 1
+					end
+				end
+				if not l_ranges.is_disjoint then
+					l_ranges := l_ranges.merged
+				end
+				al_c.set_hidden_lines (l_ranges)
+				style_changed
+			end
+		end
+
+	code_set_line_numbers (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.set_line_numbers_shown (a_on)
+				changed
+			end
+		end
+
+	code_set_indent (an_id, a_tab_width: INTEGER; a_spaces: BOOLEAN)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then a_tab_width >= 1 then
+				al_c.set_indent (a_tab_width, a_spaces)
+				changed
+			end
+		end
+
+	text_line_count (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.code_line_count
+			end
+		end
+
+	text_caret_line (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.code_caret_line
+			end
+		end
+
+	text_caret_column (an_id: INTEGER): INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.code_caret_column
+			end
+		end
+
+	text_line_text (an_id, n: INTEGER): POINTER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then 1 <= n and then n <= al_c.code_line_count then
+				Result := c_text (al_c.code_line_text (n))
+			else
+				Result := c_text ("")
+			end
+		end
+
+	text_go_to_line (an_id, n: INTEGER)
+			-- The program's own move: no event.
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then 1 <= n and then n <= al_c.code_line_count then
+				al_c.go_to_line (n)
+				changed
+			end
+		end
+
+	text_replace_range (an_id, a_start, an_end: INTEGER; a_text: POINTER)
+			-- The program's own change, one undo step: no event.
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c
+				and then 1 <= a_start and then a_start <= an_end + 1 and then an_end <= al_c.text.count
+			then
+				al_c.replace_characters (a_start, an_end, from_c (a_text))
 				changed
 			end
 		end
@@ -3052,6 +3221,16 @@ feature -- Path controls, continued
 		do
 			if attached {SW_TEXT_BOX} widget (an_id) as al_t then
 				Result := c_text (al_t.text)
+			end
+		end
+
+	text_area_string (an_id: INTEGER): STRING_32
+			-- A copy of the box's own string: no pass through UTF-8 and back.
+		do
+			if attached {SW_TEXT_BOX} widget (an_id) as al_t then
+				Result := al_t.text.twin
+			else
+				create Result.make_empty
 			end
 		end
 
@@ -4810,6 +4989,91 @@ feature -- Test doors (act on the widget as a user would)
 		do
 			if attached {SW_TEXT_BOX} widget (an_id) as al_t and then not al_t.is_read_only then
 				al_t.type_text (from_c (a_text))
+				changed
+			end
+		end
+
+	test_type_into_code (an_id: INTEGER; a_text: POINTER)
+			-- Type at the caret as the user would: Return and Tab through the editor's own
+			-- handling.
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then not al_c.is_read_only then
+				al_c.type_code (from_c (a_text))
+				changed
+			end
+		end
+
+	test_bracket_tint_at (an_id, a_position: INTEGER): BOOLEAN
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.is_bracket_tinted (a_position)
+			end
+		end
+
+	test_fill_event_queue (a_count: INTEGER)
+			-- The queue is a list here, unbounded: every one is kept.
+		local
+			i: INTEGER
+		do
+			from i := 1 until i > a_count loop
+				push (0, 0, 0, 0, 0)
+				i := i + 1
+			end
+		end
+
+	test_bracket_key (an_id: INTEGER)
+			-- The key that goes to the matching bracket, as the user would press it (event 56).
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.press_bracket_key
+			end
+		end
+
+	test_press_fold_marker (an_id, a_line: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.press_fold_marker (a_line)
+			end
+		end
+
+	test_fold_key (an_id: INTEGER; a_unfold: BOOLEAN)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.press_fold_key (a_unfold)
+			end
+		end
+
+	test_line_is_shown (an_id, a_line: INTEGER): BOOLEAN
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.is_line_shown (a_line)
+			end
+		end
+
+	test_code_arrow_key (an_id, a_direction: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				inspect a_direction
+				when 1 then
+					al_c.handle_key (38, False)
+				when 2 then
+					al_c.handle_key (40, False)
+				when 3 then
+					al_c.handle_key (37, False)
+				else
+					al_c.handle_key (39, False)
+				end
+				changed
+			end
+		end
+
+	test_caret_to (an_id, a_line, a_column: INTEGER)
+			-- Move the caret as the user would (event 52).
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c
+				and then 1 <= a_line and then a_line <= al_c.code_line_count and then a_column >= 1
+			then
+				al_c.move_caret_to (a_line, a_column)
 				changed
 			end
 		end
@@ -7167,6 +7431,7 @@ feature {NONE} -- Implementation
 		end
 
 	is_inside (a_w, a_ancestor: SW_WIDGET): BOOLEAN
+			-- Is `a_w' `a_ancestor' itself or under it?
 		local
 			l_w: detachable SW_WIDGET
 		do
@@ -7176,10 +7441,25 @@ feature {NONE} -- Implementation
 			end
 		end
 
+	is_render_due: BOOLEAN
+			-- Has a styling call changed what a frame would show since the last one drawn?
+
+	style_changed
+			-- A style was set over a range of a text: draw at the next turn of the loop, not
+			-- now. A highlighter sets thousands of ranges in a row, and a frame for each lays
+			-- the text out and draws it thousands of times (measured: 30 lines of code took
+			-- 30 seconds to color).
+		do
+			is_render_due := True
+		ensure
+			due: is_render_due
+		end
+
 	changed
 			-- A programmatic change: lay out and draw again (and place a splitter whose position
 			-- was set before it had a size).
 		do
+			is_render_due := False
 			if attached open_window as al_w and then al_w.is_window_open then
 				al_w.request_render
 				apply_pending_positions

@@ -3,7 +3,7 @@ note
 		Decodes picture files on its own processor, so the GUI thread never waits on a JPEG.
 		The GUI side `enqueue's a path (copied in) and starts `work', which decodes one queued
 		file, keeps the pixels, tells the GUI through the mailbox with a message tagged
-		GUI_PICTURE_LOADER.Picture_tag and wakes the loop. The GUI side then reads the result's
+		`Picture_tag' and wakes the loop. The GUI side then reads the result's
 		size and pixel pointer and copies the pixels into a surface of its own; only a copy
 		crosses, and `drop_result' lets the worker free its pixels. The worker never calls into
 		the GUI processor.
@@ -14,6 +14,8 @@ class
 
 inherit
 	GUI_SHARED
+
+	GUI_SEPARATE_TEXT
 
 create
 	make
@@ -31,6 +33,9 @@ feature {NONE} -- Initialization
 		end
 
 feature -- Access
+
+	Picture_tag: INTEGER = 0x47524450
+			-- The mailbox message tag for a decoded picture ("GRDP").
 
 	queued_count: INTEGER
 			-- Files waiting to be decoded.
@@ -81,16 +86,8 @@ feature -- Basic operations
 
 	enqueue (a_path: separate READABLE_STRING_GENERAL)
 			-- Queue a copy of `a_path'.
-		local
-			l_copy: STRING_32
-			i: INTEGER
 		do
-			create l_copy.make (a_path.count)
-			from i := 1 until i > a_path.count loop
-				l_copy.extend (a_path.code (i).to_character_32)
-				i := i + 1
-			end
-			queued.extend (l_copy)
+			queued.extend (copied_text (a_path))
 		ensure
 			one_more: queued_count = old queued_count + 1
 		end
@@ -140,7 +137,7 @@ feature {NONE} -- Implementation
 
 	post (a_mailbox: separate GUI_MAILBOX; a_path: STRING_32)
 		do
-			a_mailbox.put ({GUI_PICTURE_LOADER}.Picture_tag, a_path)
+			a_mailbox.put (Picture_tag, a_path)
 		end
 
 invariant

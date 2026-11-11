@@ -11,6 +11,9 @@ note
 class
 	GUI_MAILBOX
 
+inherit
+	GUI_SEPARATE_TEXT
+
 create
 	make
 
@@ -56,22 +59,9 @@ feature -- Element change
 
 	put (a_tag: INTEGER; a_payload: separate READABLE_STRING_GENERAL)
 			-- Queue a copy of `a_payload' under `a_tag'.
-		local
-			l_copy: STRING_32
-			i, n: INTEGER
 		do
-			n := a_payload.count
-			create l_copy.make (n)
-			from
-				i := 1
-			until
-				i > n
-			loop
-				l_copy.extend (a_payload.code (i).to_character_32)
-				i := i + 1
-			end
 			tags.extend (a_tag)
-			payloads.extend (l_copy)
+			payloads.extend (copied_text (a_payload))
 		ensure
 			one_more: count = old count + 1
 		end

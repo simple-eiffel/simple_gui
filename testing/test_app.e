@@ -18,6 +18,9 @@ feature {NONE} -- Initialization
 			l_app: GUI_APPLICATION
 		do
 			print ("simple_gui tests%N%N")
+			if (create {ARGUMENTS_32}).argument_count >= 1 then
+				only := (create {ARGUMENTS_32}).argument (1).to_string_32
+			end
 			create l_app.make ("simple_gui tests", "org.simple-eiffel.simple-gui-tests")
 			if not l_app.is_available then
 				print ("  SKIP: no display (the toolkit did not start)%N")
@@ -38,6 +41,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_dark_mode_switch_fires_and_reads, "dark_mode_switch_fires_and_reads")
 				run_test (agent t.test_snapshots_light_and_dark, "snapshots_light_and_dark")
 				run_test (agent t.test_worker_message_arrives_through_mailbox_and_wake, "worker_message_arrives_through_mailbox_and_wake")
+				run_test (agent t.test_wake_arrives_after_a_full_event_queue, "wake_arrives_after_a_full_event_queue")
 				run_test (agent t.test_close_request_without_agents_closes, "close_request_without_agents_closes")
 				run_test (agent t.test_splitter, "splitter")
 				run_test (agent t.test_wrapping_label_grows_taller, "wrapping_label_grows_taller")
@@ -117,9 +121,30 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_drops_find_rows_by_place, "drops_find_rows_by_place")
 				run_test (agent t.test_list_rich_rows, "list_rich_rows")
 				run_test (agent t.test_tabs_positions, "tabs_positions")
+				run_test (agent t.test_code_editor_highlighting, "code_editor_highlighting")
+				run_test (agent t.test_code_editor_lines_and_indent, "code_editor_lines_and_indent")
+				run_test (agent t.test_code_editor_find_replace, "code_editor_find_replace")
+				run_test (agent t.test_code_editor_large_text, "code_editor_large_text")
+				run_test (agent t.test_code_editor_edits_color_as_a_fresh_text, "code_editor_edits_color_as_a_fresh_text")
+				run_test (agent t.test_code_syntax_hears_true_edits, "code_syntax_hears_true_edits")
+				run_test (agent t.test_code_syntax_takes_the_place_of_the_rules, "code_syntax_takes_the_place_of_the_rules")
+				run_test (agent t.test_code_apply_spans, "code_apply_spans")
+				run_test (agent t.test_code_apply_spans_cost, "code_apply_spans_cost")
+				run_test (agent t.test_code_editor_bracket_pairs, "code_editor_bracket_pairs")
+				run_test (agent t.test_line_ranges, "line_ranges")
+				run_test (agent t.test_code_editor_folding, "code_editor_folding")
+				run_test (agent t.test_code_editor_folds_from_syntax, "code_editor_folds_from_syntax")
+				run_test (agent t.test_code_editor_fold_cost, "code_editor_fold_cost")
+				run_test (agent t.test_code_editor_bracket_reach, "code_editor_bracket_reach")
+				run_test (agent t.test_code_editor_bracket_pair_from_syntax, "code_editor_bracket_pair_from_syntax")
+				run_test (agent t.test_new_message_tag, "new_message_tag")
+				run_test (agent t.test_actions_prune_during_call, "actions_prune_during_call")
+				run_test (agent t.test_code_editor_lets_go_with_its_window, "code_editor_lets_go_with_its_window")
+				run_test (agent t.test_from_c_reads_utf_8, "from_c_reads_utf_8")
 				run_test (agent t.test_preferences_values_and_file, "preferences_values_and_file")
 				run_test (agent t.test_preferences_window, "preferences_window")
 				run_test (agent t.test_grid_view_items, "grid_view_items")
+				run_test (agent t.test_grid_view_pictures_arrive_while_more_decode, "grid_view_pictures_arrive_while_more_decode")
 				run_test (agent t.test_grid_view_keeps_turning_while_a_large_picture_decodes, "grid_view_keeps_turning_while_a_large_picture_decodes")
 				run_test (agent t.test_slideshow_moves, "slideshow_moves")
 				run_test (agent t.test_file_field_address_bar, "file_field_address_bar")
@@ -169,7 +194,9 @@ feature {NONE} -- Initialization
 		local
 			l_retried: BOOLEAN
 		do
-			if not l_retried then
+			if attached only as al_only and then not a_name.has_substring (al_only.to_string_8) then
+					-- not asked for
+			elseif not l_retried then
 				a_test.call (Void)
 				print ("  PASS: " + a_name + "%N")
 				passed := passed + 1
@@ -192,6 +219,9 @@ feature {NONE} -- Initialization
 			l_retried := True
 			retry
 		end
+
+	only: detachable STRING_32
+			-- Run just the tests whose name contains this (the first command-line argument).
 
 	passed: INTEGER
 

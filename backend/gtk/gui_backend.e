@@ -620,6 +620,145 @@ feature -- Windows and containers
 		alias "return (EIF_POINTER) sg_test_help_tip_shown();"
 		end
 
+	code_editor: INTEGER
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_code_editor();"
+		end
+
+	code_set_line_numbers (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_set_line_numbers($an_id, $a_on);"
+		end
+
+	code_set_indent (an_id, a_tab_width: INTEGER; a_spaces: BOOLEAN)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_set_indent($an_id, $a_tab_width, $a_spaces);"
+		end
+
+	text_line_count (an_id: INTEGER): INTEGER
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_text_line_count($an_id);"
+		end
+
+	text_caret_line (an_id: INTEGER): INTEGER
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_text_caret_line($an_id);"
+		end
+
+	text_caret_column (an_id: INTEGER): INTEGER
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_text_caret_column($an_id);"
+		end
+
+	text_line_text (an_id, n: INTEGER): POINTER
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_text_line_text($an_id, $n);"
+		end
+
+	text_go_to_line (an_id, n: INTEGER)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_text_go_to_line($an_id, $n);"
+		end
+
+	text_replace_range (an_id, a_start, an_end: INTEGER; a_text: POINTER)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_text_replace_range($an_id, $a_start, $an_end, (const char *) $a_text);"
+		end
+
+	test_type_into_code (an_id: INTEGER; a_text: POINTER)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_type_into_code($an_id, (const char *) $a_text);"
+		end
+
+	test_caret_to (an_id, a_line, a_column: INTEGER)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_caret_to($an_id, $a_line, $a_column);"
+		end
+
+	code_show_bracket_pair (an_id, a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_show_bracket_pair($an_id, $a_first_start, $a_first_count, $a_second_start, $a_second_count);"
+		end
+
+	code_hide_bracket_pair (an_id: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_hide_bracket_pair($an_id);"
+		end
+
+	test_bracket_tint_at (an_id, a_position: INTEGER): BOOLEAN
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_bracket_tint_at($an_id, $a_position) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	test_fill_event_queue (a_count: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_fill_event_queue($a_count);"
+		end
+
+	test_bracket_key (an_id: INTEGER)
+			-- 1v-e-2.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_bracket_key($an_id);"
+		end
+
+	code_set_folding_shown (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1v-e-3. The markers are drawn in the gutter, after the line numbers.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_set_folding_shown($an_id, $a_on);"
+		end
+
+	code_set_fold_marks (an_id: INTEGER; a_lines: POINTER; a_count: INTEGER)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_set_fold_marks($an_id, (const int *) $a_lines, $a_count);"
+		end
+
+	code_set_folded_lines (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- 1v-e-3. The hidden lines carry an invisible text tag, so GTK itself keeps the
+			-- caret out of them and moves them with the text; the mark that lines are
+			-- hidden is a faint tint of the fold's first line.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_set_folded_lines($an_id, (const int *) $a_pairs, $a_count);"
+		end
+
+	test_press_fold_marker (an_id, a_line: INTEGER)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_press_fold_marker($an_id, $a_line);"
+		end
+
+	test_fold_key (an_id: INTEGER; a_unfold: BOOLEAN)
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_fold_key($an_id, $a_unfold);"
+		end
+
+	test_line_is_shown (an_id, a_line: INTEGER): BOOLEAN
+			-- 1v-e-3.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_line_is_shown($an_id, $a_line) ? EIF_TRUE : EIF_FALSE;"
+		end
+
+	test_code_arrow_key (an_id, a_direction: INTEGER)
+			-- 1v-e-3. The move GTK binds to the arrow key.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_code_arrow_key($an_id, $a_direction);"
+		end
+
 	grid_view: INTEGER
 			-- 1v-a.
 		external "C inline use %"simple_gui_gtk.h%""

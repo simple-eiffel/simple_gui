@@ -23,14 +23,19 @@ typedef struct { int type, id, a, b, c; } sga_event;
 static sga_event s_events[SGA_QUEUE];
 static int s_head, s_tail;
 static atomic_int s_wake_pending;
+/* A wake that found the queue full: sga_next hands its event 11 out once the queue is
+   empty. Without it the wake was dropped while `s_wake_pending' stayed set, and every
+   later wake returned at once: no message was read again (issue 107). */
+static atomic_int s_wake_owed;
 
-static void sga_push(int a_type, int a_id, int a, int b, int c)
+/* Queue one event; False when the queue is full and it is dropped. */
+static int sga_push(int a_type, int a_id, int a, int b, int c)
 {
 	int next = (s_tail + 1) % SGA_QUEUE;
-	if (next != s_head) {
-		s_events[s_tail] = (sga_event){a_type, a_id, a, b, c};
-		s_tail = next;
-	}
+	if (next == s_head) return 0;
+	s_events[s_tail] = (sga_event){a_type, a_id, a, b, c};
+	s_tail = next;
+	return 1;
 }
 
 /* ---------------------------------------------------------------- handles */
@@ -267,6 +272,7 @@ static int sga_gdk_key(NSEvent *e)
 /* ------------------------------------------------ targets and delegates */
 
 static int s_suppress;
+static void sga_colors_flush(void);   /* 1v-b: the colors that wait go to their text (see its definition) */
 static int s_setting_dark;
 
 @interface SGATarget : NSObject <NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate, NSTabViewDelegate>
@@ -352,6 +358,8 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 	return sga_suggest_key(sga_id_of(c), a_command);
 }
 - (void)textDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
+/* 1v-b: before a text view changes its characters (typing, paste, undo, a replace), the colors that wait go in */
+- (BOOL)textView:(NSTextView *)t shouldChangeTextInRange:(NSRange)r replacementString:(NSString *)s { (void)t; (void)r; (void)s; sga_colors_flush(); return YES; }
 - (NSMutableArray *)rowsOf:(NSTableView *)t { return rows[[NSValue valueWithNonretainedObject:t]]; }
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)t
 {
@@ -482,6 +490,7 @@ static NSWindow *s_modal_window;   /* 1u: the app-modal dialog up, nil none */
 static int sga_run_once(NSDate *a_until)
 {
 	int n = 0;
+	sga_colors_flush();
 	@autoreleasepool {
 		NSEvent *e = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:a_until inMode:NSDefaultRunLoopMode dequeue:YES];
 		if (e) {
@@ -512,6 +521,7 @@ void sga_pump_until_idle(int a_ms)
 {
 	NSDate *l_until = [NSDate dateWithTimeIntervalSinceNow:a_ms / 1000.0];
 	while ([l_until timeIntervalSinceNow] > 0) sga_run_once(l_until);
+	sga_colors_flush();
 	for (NSWindow *w in [NSApp windows]) { [[w contentView] layoutSubtreeIfNeeded]; [w displayIfNeeded]; }
 }
 
@@ -527,7 +537,7 @@ void sga_wake(void)
 	int l_expected = 0;
 	if (!atomic_compare_exchange_strong(&s_wake_pending, &l_expected, 1)) return;
 	dispatch_async(dispatch_get_main_queue(), ^{
-		sga_push(11, 0, 0, 0, 0);
+		if (!sga_push(11, 0, 0, 0, 0)) atomic_store(&s_wake_owed, 1);
 		NSEvent *e = [NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint
 			modifierFlags:0 timestamp:0 windowNumber:0 context:nil subtype:0 data1:0 data2:0];
 		[NSApp postEvent:e atStart:NO];
@@ -536,12 +546,26 @@ void sga_wake(void)
 
 int sga_next(int *a_type, int *a_id, int *a, int *b, int *c)
 {
-	if (s_head == s_tail) return 0;
+	if (s_head == s_tail) {
+		if (!atomic_exchange(&s_wake_owed, 0)) return 0;
+		/* the wake that found the queue full */
+		*a_type = 11; *a_id = 0; *a = 0; *b = 0; *c = 0;
+		atomic_store(&s_wake_pending, 0);
+		return 1;
+	}
 	*a_type = s_events[s_head].type; *a_id = s_events[s_head].id;
 	*a = s_events[s_head].a; *b = s_events[s_head].b; *c = s_events[s_head].c;
 	if (*a_type == 11) atomic_store(&s_wake_pending, 0);
 	s_head = (s_head + 1) % SGA_QUEUE;
 	return 1;
+}
+
+/* For the tests of a full queue: `a_count' events no widget answers (type 0, id 0), queued
+   when the loop next turns, through the main dispatch queue as a wake is. So a wake sent
+   after this call meets the queue full: the main queue runs its blocks in order. */
+void sga_test_fill_event_queue(int a_count)
+{
+	dispatch_async(dispatch_get_main_queue(), ^{ for (int i = 0; i < a_count; i++) sga_push(0, 0, 0, 0, 0); });
 }
 
 /* ------------------------------------------------------ 1l: reference pills */
@@ -1556,6 +1580,7 @@ int sga_text_area(void)
 }
 void sga_text_area_set(int a_id, const char *a_text)
 {
+	sga_colors_flush();
 	s_suppress++;
 	[(NSTextView *)sga_core(a_id) setString:sga_string(a_text)];
 	s_suppress--;
@@ -3768,10 +3793,196 @@ static NSInteger sga_code_point_index(NSString *s, NSUInteger an_offset)
 	return i;
 }
 
+/* Colors wait, and go to their text in one edit.
+   A text storage tells its layout manager of every edit that is not inside a group, and
+   for a text already on screen that costs time that grows with the text: the 60,000 color
+   runs of a 10,000-line text, each its own edit, took 44 seconds; in one edit they take
+   some 12 milliseconds. The Eiffel side sends one color at a time, so the colors wait
+   here and `sga_colors_flush' applies them, in the order they came, grouped. It runs
+   before anything can tell the difference: before the run loop turns (events, drawing),
+   before an attribute is read or another one set, before a view is drawn into an image,
+   and before the characters change (a waiting range is that of the text as it was when
+   the color came). Should characters change with colors still waiting all the same,
+   `sga_colors_moved' moves the ranges as the text moved. */
+typedef struct { NSUInteger from, length; int rgb; } sga_color_run;
+static NSTextStorage *s_color_storage;   /* the text the waiting colors are for */
+static sga_color_run *s_color_runs;
+static NSUInteger s_color_count, s_color_room;
+#define SGA_COLOR_MOST 65536             /* no more than these wait */
+#define SGA_COLOR_GAP 4096               /* runs farther apart than this get edits of their own */
+
+static void sga_colors_flush(void)
+{
+	if (!s_color_count) return;
+	NSTextStorage *m = s_color_storage;
+	NSUInteger l_count = s_color_count, l_length = [m length], l_low = 0, l_high = 0;
+	s_color_count = 0;
+	s_color_storage = nil;
+	NSColor *l_color = nil;
+	int l_rgb = -1;
+	BOOL l_open = NO;
+	for (NSUInteger i = 0; i < l_count; i++) {
+		sga_color_run r = s_color_runs[i];
+		if (r.from >= l_length || !r.length) continue;
+		r.length = MIN(r.length, l_length - r.from);
+		/* One edit tells the layout manager one range, from its first run to its last. Runs
+		   far from the others get an edit of their own, so that two changed lines do not
+		   cost all the text between them. */
+		if (l_open && (r.from > l_high + SGA_COLOR_GAP || r.from + r.length + SGA_COLOR_GAP < l_low)) { [m endEditing]; l_open = NO; }
+		if (!l_open) { [m beginEditing]; l_open = YES; l_low = r.from; l_high = r.from + r.length; }
+		l_low = MIN(l_low, r.from);
+		l_high = MAX(l_high, r.from + r.length);
+		/* -1 is the default color: the attribute goes, so the text follows the appearance */
+		if (r.rgb < 0) [m removeAttribute:NSForegroundColorAttributeName range:NSMakeRange(r.from, r.length)];
+		else {
+			if (!l_color || r.rgb != l_rgb) { l_color = sga_rgb_color(r.rgb); l_rgb = r.rgb; }
+			[m addAttribute:NSForegroundColorAttributeName value:l_color range:NSMakeRange(r.from, r.length)];
+		}
+	}
+	if (l_open) [m endEditing];
+}
+
+/* The characters of the text changed with colors waiting: `a_new' is the changed range as
+   it is now, `a_delta' what it grew by. A run before the change stays, a run after it
+   moves, and a run across it keeps what lies outside the change (with the new text, when
+   it reaches out on both sides). */
+static void sga_colors_moved(NSRange a_new, NSInteger a_delta)
+{
+	NSUInteger l_from = a_new.location, l_new_end = NSMaxRange(a_new);
+	NSUInteger l_old_end = (NSUInteger)MAX((NSInteger)l_new_end - a_delta, (NSInteger)l_from);
+	for (NSUInteger i = 0; i < s_color_count; i++) {
+		sga_color_run *r = &s_color_runs[i];
+		NSUInteger a = r->from, b = a + r->length;
+		if (b <= l_from) continue;
+		if (a >= l_old_end) { r->from = (NSUInteger)((NSInteger)a + a_delta); continue; }
+		NSUInteger l_a = a < l_from ? a : l_new_end;
+		NSUInteger l_b = b > l_old_end ? (NSUInteger)((NSInteger)b + a_delta) : l_from;
+		r->from = l_a;
+		r->length = l_b > l_a ? l_b - l_a : 0;
+	}
+}
+
+/* Positions in a text view's own text, without a walk from its start.
+   The two functions above walk the string for every answer, one characterAtIndex: call
+   for each character. That is right for one line. For the text of a view it is not: a
+   code editor colors a 10,000-line text in some 60,000 runs, two positions each, and
+   those walks took 158 seconds. So for a text storage the answers are kept:
+   - `s_pos_table': the offset of every `SGA_POS_STEP'th code point, made in one pass
+     over the text, so a position is a look in the table and a walk of less than one step;
+   - `s_pos_pairs': whether the text holds a surrogate pair at all. Mostly it does not,
+     and then a position is its offset.
+   They stand until the characters of a text storage change, which every storage tells
+   in its notification (a change of attributes alone leaves them). The answers are those
+   of the two functions above, for every text. */
+#define SGA_POS_STEP 256
+static NSUInteger s_text_generation;          /* goes up when the characters of any text storage change */
+static __weak NSTextStorage *s_pos_storage;   /* the text the answers below are for */
+static NSUInteger s_pos_generation, s_pos_length;
+static BOOL s_pos_pairs;
+static NSUInteger *s_pos_table;
+static NSUInteger s_pos_slots, s_pos_room;
+static NSInteger s_pos_count;                 /* its code points */
+
+/* Make the kept answers those of `m' as it is now. */
+static void sga_pos_sync(NSTextStorage *m)
+{
+	static BOOL l_watching;
+	if (!l_watching) {
+		l_watching = YES;
+		[[NSNotificationCenter defaultCenter] addObserverForName:NSTextStorageDidProcessEditingNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
+			NSTextStorage *l_edited = [n object];
+			if ([l_edited editedMask] & NSTextStorageEditedCharacters) {
+				s_text_generation++;
+				if (s_color_count && l_edited == s_color_storage) sga_colors_moved([l_edited editedRange], [l_edited changeInLength]);
+			}
+		}];
+	}
+	NSString *s = [m string];
+	NSUInteger n = [s length];
+	if (m && s_pos_storage == m && s_pos_generation == s_text_generation && s_pos_length == n) return;
+	s_pos_storage = m; s_pos_generation = s_text_generation; s_pos_length = n;
+	s_pos_pairs = NO; s_pos_slots = 0;
+	unichar l_buffer[1024];
+	NSInteger i = 0;      /* the code points before unit `k' */
+	BOOL l_second = NO;   /* is unit `k' the second half of a pair? */
+	for (NSUInteger k = 0; k < n; ) {
+		NSUInteger c = MIN((NSUInteger)1024, n - k);
+		[s getCharacters:l_buffer range:NSMakeRange(k, c)];
+		for (NSUInteger j = 0; j < c; j++, k++) {
+			if (l_second) { l_second = NO; continue; }
+			if (i % SGA_POS_STEP == 0) {
+				if (s_pos_slots == s_pos_room) {
+					s_pos_room = s_pos_room ? 2 * s_pos_room : 1024;
+					s_pos_table = realloc(s_pos_table, s_pos_room * sizeof(NSUInteger));
+				}
+				s_pos_table[s_pos_slots++] = k;
+			}
+			if (CFStringIsSurrogateHighCharacter(l_buffer[j]) && k + 1 < n) { l_second = YES; s_pos_pairs = YES; }
+			i++;
+		}
+	}
+	s_pos_count = i;
+}
+
+/* The UTF-16 offset of code point `a_index' (0-based) in the text of `m'. */
+static NSUInteger sga_text_offset(NSTextStorage *m, NSInteger a_index)
+{
+	if (a_index <= 0) return 0;
+	sga_pos_sync(m);
+	if (a_index >= s_pos_count) return s_pos_length;
+	if (!s_pos_pairs) return (NSUInteger)a_index;
+	NSUInteger k = s_pos_table[a_index / SGA_POS_STEP], n = s_pos_length, j = 0;
+	NSInteger l_left = a_index % SGA_POS_STEP;
+	unichar l_buffer[2 * SGA_POS_STEP];
+	NSUInteger c = MIN((NSUInteger)(2 * l_left), n - k);
+	[[m string] getCharacters:l_buffer range:NSMakeRange(k, c)];
+	for (; l_left > 0 && j < c; l_left--) j += (CFStringIsSurrogateHighCharacter(l_buffer[j]) && k + j + 1 < n) ? 2 : 1;
+	return MIN(k + j, n);
+}
+
+/* The code-point index (0-based) of UTF-16 offset `an_offset' in the text of `m'. */
+static NSInteger sga_text_index(NSTextStorage *m, NSUInteger an_offset)
+{
+	sga_pos_sync(m);
+	if (an_offset >= s_pos_length) return s_pos_count;
+	if (!s_pos_pairs) return (NSInteger)an_offset;
+	/* the last entry of the table at or before the offset */
+	NSUInteger l_low = 0, l_high = s_pos_slots;
+	while (l_high - l_low > 1) {
+		NSUInteger l_mid = (l_low + l_high) / 2;
+		if (s_pos_table[l_mid] <= an_offset) l_low = l_mid; else l_high = l_mid;
+	}
+	NSUInteger k = s_pos_table[l_low], n = s_pos_length;
+	NSInteger i = (NSInteger)(l_low * SGA_POS_STEP);
+	unichar l_buffer[2 * SGA_POS_STEP];
+	NSUInteger c = MIN(an_offset - k, (NSUInteger)(2 * SGA_POS_STEP));
+	[[m string] getCharacters:l_buffer range:NSMakeRange(k, c)];
+	for (NSUInteger j = 0; j < c; i++) j += (CFStringIsSurrogateHighCharacter(l_buffer[j]) && k + j + 1 < n) ? 2 : 1;
+	return i;
+}
+
+/* The line breaks in units `a_from' up to (not with) `a_to' of `s'; `a_start', when given, gets
+   where the last line among them starts (`a_from' when there is no break). Read in
+   blocks, not with one characterAtIndex: call for each character. */
+static NSUInteger sga_line_breaks(NSString *s, NSUInteger a_from, NSUInteger a_to, NSUInteger *a_start)
+{
+	unichar l_buffer[1024];
+	NSUInteger l_count = 0, l_start = a_from;
+	a_to = MIN(a_to, [s length]);
+	for (NSUInteger k = a_from; k < a_to; ) {
+		NSUInteger c = MIN((NSUInteger)1024, a_to - k);
+		[s getCharacters:l_buffer range:NSMakeRange(k, c)];
+		for (NSUInteger j = 0; j < c; j++) if (l_buffer[j] == '\n') { l_count++; l_start = k + j + 1; }
+		k += c;
+	}
+	if (a_start) *a_start = l_start;
+	return l_count;
+}
+
 static NSRange sga_rich_range(NSTextView *t, int a_start, int an_end)
 {
-	NSString *s = [[t textStorage] string];
-	NSUInteger l_from = sga_utf16_offset(s, a_start - 1), l_to = sga_utf16_offset(s, an_end);
+	NSTextStorage *m = [t textStorage];
+	NSUInteger l_from = sga_text_offset(m, a_start - 1), l_to = sga_text_offset(m, an_end);
 	return NSMakeRange(l_from, l_to > l_from ? l_to - l_from : 0);
 }
 
@@ -3782,6 +3993,7 @@ void sga_rich_text_set_trait(int a_id, int a_start, int an_end, int a_trait, int
 	NSTextStorage *m = [t textStorage];
 	NSRange r = sga_rich_range(t, a_start, an_end);
 	if (r.length == 0) return;
+	sga_colors_flush();
 	[m beginEditing];
 	if (a_trait == 3) {
 		if (a_on) [m addAttribute:NSUnderlineStyleAttributeName value:@(NSUnderlineStyleSingle) range:r];
@@ -3802,8 +4014,25 @@ void sga_rich_text_set_trait(int a_id, int a_start, int an_end, int a_trait, int
 void sga_rich_text_set_color(int a_id, int a_start, int an_end, int a_rgb)
 {
 	NSTextView *t = s_inner[a_id];
+	NSTextStorage *m = [t textStorage];
 	NSRange r = sga_rich_range(t, a_start, an_end);
-	if (r.length) [[t textStorage] addAttribute:NSForegroundColorAttributeName value:sga_rgb_color(a_rgb) range:r];
+	if (!r.length || !m) return;
+	/* The color waits (see `sga_colors_flush'). Every run loop of the main thread, whichever
+	   mode it runs in (a dialog's, a menu's, a drag's), applies what waits before it does
+	   anything else. */
+	static CFRunLoopObserverRef l_observer;
+	if (!l_observer) {
+		l_observer = CFRunLoopObserverCreateWithHandler(NULL, kCFRunLoopEntry | kCFRunLoopBeforeTimers | kCFRunLoopBeforeSources | kCFRunLoopBeforeWaiting, true, 0,
+			^(CFRunLoopObserverRef an_observer, CFRunLoopActivity an_activity) { (void)an_observer; (void)an_activity; sga_colors_flush(); });
+		CFRunLoopAddObserver(CFRunLoopGetMain(), l_observer, kCFRunLoopCommonModes);
+	}
+	if (s_color_count && (s_color_storage != m || s_color_count >= SGA_COLOR_MOST)) sga_colors_flush();
+	if (s_color_count == s_color_room) {
+		s_color_room = s_color_room ? s_color_room * 2 : 256;
+		s_color_runs = realloc(s_color_runs, s_color_room * sizeof(sga_color_run));
+	}
+	s_color_storage = m;
+	s_color_runs[s_color_count++] = (sga_color_run){r.location, r.length, a_rgb < 0 ? -1 : a_rgb};
 }
 
 void sga_rich_text_set_size(int a_id, int a_start, int an_end, double a_points)
@@ -3812,6 +4041,7 @@ void sga_rich_text_set_size(int a_id, int a_start, int an_end, double a_points)
 	NSTextStorage *m = [t textStorage];
 	NSRange r = sga_rich_range(t, a_start, an_end);
 	if (r.length == 0 || a_points <= 0) return;
+	sga_colors_flush();
 	[m beginEditing];
 	[m enumerateAttribute:NSFontAttributeName inRange:r options:0 usingBlock:^(id a_font, NSRange a_run, BOOL *a_stop) {
 		(void)a_stop;
@@ -3824,9 +4054,9 @@ void sga_rich_text_set_size(int a_id, int a_start, int an_end, double a_points)
 static NSDictionary *sga_rich_attributes_at(int a_id, int i)
 {
 	NSTextView *t = s_inner[a_id];
-	NSString *s = [[t textStorage] string];
-	NSUInteger k = sga_utf16_offset(s, i - 1);
-	return k < [s length] ? [[t textStorage] attributesAtIndex:k effectiveRange:NULL] : @{};
+	sga_colors_flush();
+	NSUInteger k = sga_text_offset([t textStorage], i - 1);
+	return k < [[t textStorage] length] ? [[t textStorage] attributesAtIndex:k effectiveRange:NULL] : @{};
 }
 
 /* 1 when character `i' has the trait (1 bold, 2 italic, 3 underline). */
@@ -3843,9 +4073,10 @@ int sga_rich_text_trait_at(int a_id, int i, int a_trait)
 int sga_rich_text_color_at(int a_id, int i)
 {
 	NSColor *c = sga_rich_attributes_at(a_id, i)[NSForegroundColorAttributeName];
-	NSTextView *t = s_inner[a_id];
-	/* A rich text view gives new text its own text color as an attribute: that is the default. */
-	BOOL l_default = !c || [c isEqual:[t textColor]] || [c isEqual:[NSColor textColor]] || [c isEqual:[NSColor labelColor]];
+	/* A rich text view gives new text its own text color as an attribute: that is the default.
+	   (Not [t textColor]: NSTextView answers the first character's color there, so a colored
+	   first character would read as the default.) */
+	BOOL l_default = !c || [c isEqual:[NSColor textColor]] || [c isEqual:[NSColor labelColor]];
 	return l_default ? -1 : sga_color_rgb(c);
 }
 
@@ -3859,20 +4090,33 @@ double sga_rich_text_size_at(int a_id, int i)
 int sga_rich_text_selection_start(int a_id)
 {
 	NSTextView *t = s_inner[a_id];
-	return (int)sga_code_point_index([[t textStorage] string], [t selectedRange].location) + 1;
+	return (int)sga_text_index([t textStorage], [t selectedRange].location) + 1;
 }
 
 int sga_rich_text_selection_end(int a_id)
 {
 	NSTextView *t = s_inner[a_id];
 	NSRange r = [t selectedRange];
-	return (int)sga_code_point_index([[t textStorage] string], NSMaxRange(r));
+	return (int)sga_text_index([t textStorage], NSMaxRange(r));
 }
 
+static BOOL sga_is_code_view(id t);   /* 1v-e-2: defined after SGACodeView */
+
+/* In a code editor this is the program's own move (1v-e-2): no caret event (52), and the
+   caret comes into view, as go to line does. */
 void sga_rich_text_select(int a_id, int a_start, int an_end)
 {
 	NSTextView *t = s_inner[a_id];
-	[t setSelectedRange:sga_rich_range(t, a_start, an_end)];
+	NSRange r = sga_rich_range(t, a_start, an_end);
+	sga_colors_flush();
+	if (sga_is_code_view(t)) {
+		s_suppress++;
+		[t setSelectedRange:r];
+		[t scrollRangeToVisible:NSMakeRange(r.location, 0)];
+		s_suppress--;
+		return;
+	}
+	[t setSelectedRange:r];
 }
 
 /* ------------------------------------------------- 1i: the drawn-widget view */
@@ -4270,6 +4514,7 @@ static SGADragOutSource *s_out_object;
 
 static NSImage *sga_drag_image(NSView *v, NSRect r)
 {
+	sga_colors_flush();
 	NSBitmapImageRep *l_rep = [v bitmapImageRepForCachingDisplayInRect:r];
 	if (!l_rep) return nil;
 	[v cacheDisplayInRect:r toBitmapImageRep:l_rep];
@@ -6301,6 +6546,7 @@ void sga_test_type(int a_id, const char *a_text)
 		/* As a user: replace everything through the text system, which sends textDidChange. */
 		NSTextView *t = o;
 		NSRange l_all = NSMakeRange(0, [[t string] length]);
+		sga_colors_flush();
 		[t setSelectedRange:l_all];
 		[t insertText:sga_string(a_text) replacementRange:l_all];
 		return;
@@ -6474,6 +6720,7 @@ static NSBitmapImageRep *sga_window_image(NSWindow *w)
 {
 	NSView *v = [[w contentView] superview];
 	__block NSBitmapImageRep *r = nil;
+	sga_colors_flush();
 	[v layoutSubtreeIfNeeded];
 	[v setNeedsDisplay:YES];
 	[v displayIfNeeded];
@@ -9147,6 +9394,722 @@ void sga_test_field_escape(int a_id)
 	NSControl *f = sga_get(a_id);
 	if ([[f window] firstResponder] != [f currentEditor] || ![f currentEditor]) [[f window] makeFirstResponder:f];
 	[s_target control:f textView:(NSTextView *)[f currentEditor] doCommandBySelector:@selector(cancelOperation:)];
+}
+
+/* ------------------------------------------------------------------ 1v-b: the code editor */
+
+/* A code editor: an NSTextView in monospace with no wrapping, a gutter of line numbers (an
+   NSRulerView), auto-indent on Return (the line's leading white space), and Tab and
+   Shift+Tab indenting or outdenting the selected lines (by a tab, or by spaces). The user's
+   caret moves send 52 (a = line, b = column, from 1, in characters); code is quiet. */
+@interface SGACodeView : NSTextView
+{
+@public
+	int tab_width;
+	BOOL spaces;
+	/* 1v-e-2: the bracket pair shown, as two UTF-16 ranges, and the areas last drawn for it
+	   (view coordinates), which are what gets redrawn when the pair goes. */
+	BOOL pair_on;
+	NSRange pair[2];
+	NSRect pair_drawn[2];
+	/* 1v-e-3: folding. `numbers' and `folding' say what the gutter shows; `marks' are the
+	   lines that start a fold (ascending); `hidden' are the closed folds' hidden lines as
+	   UTF-16 ranges, ascending and apart, each from the start of the line after a fold's
+	   first line to the start of the line after its last (or the end of the text). */
+	BOOL numbers_off;
+	BOOL folding;
+	int *marks;
+	int mark_count;
+	NSRange *hidden;
+	int hidden_count;
+}
+@end
+
+@interface SGACodeView () <NSLayoutManagerDelegate>
+@end
+
+static NSString *sga_code_indent_unit(SGACodeView *v) { return v->spaces ? [@"" stringByPaddingToLength:(NSUInteger)v->tab_width withString:@" " startingAtIndex:0] : @"\t"; }
+
+/* Line (from 1) and column (from 1, in characters) of UTF-16 offset `k'. */
+static void sga_code_line_column(NSString *s, NSUInteger k, int *a_line, int *a_column)
+{
+	NSUInteger l_start = 0;
+	k = MIN(k, [s length]);
+	*a_line = (int)sga_line_breaks(s, 0, k, &l_start) + 1;
+	*a_column = (int)sga_code_point_index([s substringWithRange:NSMakeRange(l_start, k - l_start)], k - l_start) + 1;
+}
+
+/* 1v-e-3: the first hidden range of `v' that ends after UTF-16 offset `k' (hidden_count when none). */
+static int sga_code_hidden_after(SGACodeView *v, NSUInteger k)
+{
+	int l_low = 0, l_high = v->hidden_count;
+	while (l_low < l_high) {
+		int l_mid = (l_low + l_high) / 2;
+		if (NSMaxRange(v->hidden[l_mid]) <= k) l_low = l_mid + 1; else l_high = l_mid;
+	}
+	return l_low;
+}
+
+/* The hidden range of `v' that holds offset `k', or -1. */
+static int sga_code_hidden_at(SGACodeView *v, NSUInteger k)
+{
+	int i = sga_code_hidden_after(v, k);
+	return i < v->hidden_count && NSLocationInRange(k, v->hidden[i]) ? i : -1;
+}
+
+/* Does line `n' (from 1) start a fold, by the marks last set? */
+static BOOL sga_code_has_mark(SGACodeView *v, int n)
+{
+	int l_low = 0, l_high = v->mark_count;
+	while (l_low < l_high) {
+		int l_mid = (l_low + l_high) / 2;
+		if (v->marks[l_mid] == n) return YES;
+		if (v->marks[l_mid] < n) l_low = l_mid + 1; else l_high = l_mid;
+	}
+	return NO;
+}
+
+@implementation SGACodeView
+- (void)tellCaret
+{
+	int l, c;
+	sga_code_line_column([self string], [self selectedRange].location, &l, &c);
+	sga_push(52, sga_id_of(self), l, c, 0);
+	sga_wake();
+}
+/* 1v-e-3: an offset in hidden lines goes to the nearest shown place on the side it came
+   from: the end of the fold's first line when moving back, the start of the line after
+   the fold when moving on. AppKit's own arrow keys and clicks already step over hidden
+   lines (no room, no glyphs); this keeps anything else out too. */
+- (NSUInteger)shownOffset:(NSUInteger)k from:(NSUInteger)an_old
+{
+	int i = sga_code_hidden_at(self, k);
+	if (i < 0) return k;
+	return k >= an_old || hidden[i].location == 0 ? NSMaxRange(hidden[i]) : hidden[i].location - 1;
+}
+- (void)setSelectedRanges:(NSArray<NSValue *> *)r affinity:(NSSelectionAffinity)a stillSelecting:(BOOL)s
+{
+	sga_colors_flush();   /* 1v-b: the view takes what it types with from the text at the caret */
+	if (hidden_count) {
+		NSUInteger l_old = [self selectedRange].location;
+		NSMutableArray<NSValue *> *l_shown = [NSMutableArray arrayWithCapacity:[r count]];
+		for (NSValue *v in r) {
+			NSRange x = [v rangeValue];
+			NSUInteger l_start = [self shownOffset:x.location from:l_old];
+			NSUInteger l_end = x.length ? [self shownOffset:NSMaxRange(x) from:l_old] : l_start;
+			[l_shown addObject:[NSValue valueWithRange:NSMakeRange(l_start, l_end >= l_start ? l_end - l_start : 0)]];
+		}
+		r = l_shown;
+	}
+	[super setSelectedRanges:r affinity:a stillSelecting:s];
+	if (!s && !s_suppress && [self window]) [self tellCaret];
+}
+/* 1v-e-3: the hidden lines get null glyphs, and their line breaks no advance, so they take
+   no room and the text stays whole. */
+- (NSUInteger)layoutManager:(NSLayoutManager *)m shouldGenerateGlyphs:(const CGGlyph *)g properties:(const NSGlyphProperty *)p characterIndexes:(const NSUInteger *)c font:(NSFont *)f forGlyphRange:(NSRange)r
+{
+	if (!hidden_count || !r.length) return 0;
+	int i = sga_code_hidden_after(self, c[0]);
+	if (i >= hidden_count || hidden[i].location >= c[r.length - 1] + 1) return 0;
+	NSGlyphProperty *q = malloc(sizeof(NSGlyphProperty) * r.length);
+	for (NSUInteger j = 0; j < r.length; j++) {
+		while (i < hidden_count && NSMaxRange(hidden[i]) <= c[j]) i++;
+		q[j] = i < hidden_count && NSLocationInRange(c[j], hidden[i]) ? NSGlyphPropertyNull : p[j];
+	}
+	[m setGlyphs:g properties:q characterIndexes:c font:f forGlyphRange:r];
+	free(q);
+	return r.length;
+}
+- (NSControlCharacterAction)layoutManager:(NSLayoutManager *)m shouldUseAction:(NSControlCharacterAction)an_action forControlCharacterAtIndex:(NSUInteger)k
+{
+	(void)m;
+	return hidden_count && sga_code_hidden_at(self, k) >= 0 ? NSControlCharacterActionZeroAdvancement : an_action;
+}
+/* The characters changed: the hidden ranges move with the text, so what was hidden stays
+   hidden until the editor sets the closed folds again. Called from the text storage's edit
+   notification, before the layout manager hears of the edit. */
+- (void)foldsFollowEdit:(NSRange)an_edited change:(NSInteger)a_change
+{
+	if (!hidden_count) return;
+	NSUInteger a = an_edited.location, b = an_edited.location + an_edited.length - a_change, l_new_end = NSMaxRange(an_edited);
+	int n = 0;
+	for (int i = 0; i < hidden_count; i++) {
+		NSUInteger s = hidden[i].location, z = NSMaxRange(hidden[i]);
+		/* text put at a range's start or end stays out of it */
+		s = s < a ? s : (s >= b ? s + a_change : l_new_end);
+		z = z <= a ? z : (z >= b ? z + a_change : l_new_end);
+		if (z > s) hidden[n++] = NSMakeRange(s, z - s);
+	}
+	hidden_count = n;
+}
+/* The "…" after a closed fold's first line. */
+- (void)drawFoldMarksInRect:(NSRect)a_rect
+{
+	NSLayoutManager *m = [self layoutManager];
+	NSRange l_glyphs = [m glyphRangeForBoundingRectWithoutAdditionalLayout:a_rect inTextContainer:[self textContainer]];
+	NSRange l_chars = [m characterRangeForGlyphRange:l_glyphs actualGlyphRange:NULL];
+	NSDictionary *l_attributes = @{NSFontAttributeName: [self font] ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular], NSForegroundColorAttributeName: [NSColor secondaryLabelColor]};
+	NSSize l_size = [@"…" sizeWithAttributes:l_attributes];
+	for (int i = sga_code_hidden_after(self, l_chars.location); i < hidden_count && hidden[i].location <= NSMaxRange(l_chars) + 1; i++) {
+		if (hidden[i].location == 0) continue;
+		NSUInteger g = [m glyphIndexForCharacterAtIndex:hidden[i].location - 1];
+		NSRect l_used = [m lineFragmentUsedRectForGlyphAtIndex:g effectiveRange:NULL];
+		NSRect l_box = NSMakeRect(NSMaxX(l_used) + [self textContainerOrigin].x + 6, NSMinY(l_used) + [self textContainerOrigin].y + 1, l_size.width + 8, NSHeight(l_used) - 2);
+		if (!NSIntersectsRect(l_box, a_rect)) continue;
+		[[NSColor quaternaryLabelColor] setFill];
+		[[NSBezierPath bezierPathWithRoundedRect:l_box xRadius:3 yRadius:3] fill];
+		[@"…" drawAtPoint:NSMakePoint(NSMinX(l_box) + 4, NSMidY(l_box) - l_size.height / 2) withAttributes:l_attributes];
+	}
+}
+/* 1v-e-2: the bracket tint. Drawn here, under the text and the selection, from the kept
+   ranges: it is no attribute of the text (no color or trait query sees it), no undo step and
+   no change. A layout manager's temporary attributes would do the same, but the tint must go
+   inside the text storage's own edit notification, and there the layout manager still has
+   the old text; so the view draws it and only forgets its ranges there. */
+- (NSRect)pairRect:(NSRange)r
+{
+	NSLayoutManager *m = [self layoutManager];
+	__block NSRect l_all = NSZeroRect;
+	NSRange g = [m glyphRangeForCharacterRange:r actualCharacterRange:NULL];
+	[m enumerateEnclosingRectsForGlyphRange:g withinSelectedGlyphRange:NSMakeRange(NSNotFound, 0) inTextContainer:[self textContainer] usingBlock:^(NSRect a_rect, BOOL *a_stop) {
+		(void)a_stop;
+		l_all = NSUnionRect(l_all, a_rect);
+	}];
+	return NSIsEmptyRect(l_all) ? NSZeroRect : NSOffsetRect(l_all, [self textContainerOrigin].x, [self textContainerOrigin].y);
+}
+- (void)drawViewBackgroundInRect:(NSRect)a_rect
+{
+	[super drawViewBackgroundInRect:a_rect];
+	if (hidden_count) [self drawFoldMarksInRect:a_rect];
+	if (!pair_on) return;
+	NSUInteger n = [[self textStorage] length];
+	[[[NSColor controlAccentColor] colorWithAlphaComponent:0.3] setFill];
+	for (int i = 0; i < 2; i++) {
+		if (NSMaxRange(pair[i]) > n) continue;
+		NSRect f = [self pairRect:pair[i]];
+		pair_drawn[i] = f;
+		if (NSIntersectsRect(f, a_rect)) NSRectFillUsingOperation(f, NSCompositingOperationSourceOver);
+	}
+}
+- (void)hidePair
+{
+	if (!pair_on) return;
+	pair_on = NO;
+	for (int i = 0; i < 2; i++) if (!NSIsEmptyRect(pair_drawn[i])) [self setNeedsDisplayInRect:pair_drawn[i]];
+	pair_drawn[0] = pair_drawn[1] = NSZeroRect;
+}
+- (void)showPair:(NSRange)a_first second:(NSRange)a_second
+{
+	[self hidePair];
+	pair[0] = a_first; pair[1] = a_second;
+	pair_on = YES;
+	for (int i = 0; i < 2; i++) { pair_drawn[i] = [self pairRect:pair[i]]; [self setNeedsDisplayInRect:pair_drawn[i]]; }
+}
+/* Command+Shift+\ (the bar, with Shift, on a US keyboard): 56, go to the matching bracket. */
+- (BOOL)performKeyEquivalent:(NSEvent *)e
+{
+	NSEventModifierFlags f = [e modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad | NSEventModifierFlagFunction);
+	NSString *c = [e charactersIgnoringModifiers];
+	if ([[self window] firstResponder] == self && f == (NSEventModifierFlagCommand | NSEventModifierFlagShift)
+		&& ([e keyCode] == 42 || [c isEqualToString:@"\\"] || [c isEqualToString:@"|"])) {
+		sga_push(56, sga_id_of(self), 0, 0, 0);
+		sga_wake();
+		return YES;
+	}
+	/* 1v-e-3: Command+Option+[ and ], while folding is shown: 57 with the caret's line, b 1
+	   the fold key, 2 the unfold key. By key code: with Option the characters change. */
+	if ([[self window] firstResponder] == self && folding && f == (NSEventModifierFlagCommand | NSEventModifierFlagOption)
+		&& ([e keyCode] == 33 || [e keyCode] == 30)) {
+		int l, k;
+		sga_code_line_column([self string], [self selectedRange].location, &l, &k);
+		sga_push(57, sga_id_of(self), l, [e keyCode] == 30 ? 2 : 1, 0);
+		sga_wake();
+		return YES;
+	}
+	return [super performKeyEquivalent:e];
+}
+/* Return keeps the line's indentation. */
+- (void)insertNewline:(id)sender
+{
+	NSString *s = [self string];
+	NSRange l_line = [s lineRangeForRange:NSMakeRange([self selectedRange].location, 0)];
+	NSUInteger k = l_line.location;
+	while (k < NSMaxRange(l_line) && k < [self selectedRange].location && ([s characterAtIndex:k] == ' ' || [s characterAtIndex:k] == '\t')) k++;
+	NSString *l_indent = [s substringWithRange:NSMakeRange(l_line.location, k - l_line.location)];
+	[super insertNewline:sender];
+	if ([l_indent length]) [self insertText:l_indent replacementRange:[self selectedRange]];
+}
+/* The lines the selection touches, as one range. */
+- (NSRange)selectedLines { return [[self string] lineRangeForRange:[self selectedRange]]; }
+- (void)shiftLines:(BOOL)a_in
+{
+	NSRange r = [self selectedLines];
+	NSString *s = [[self string] substringWithRange:r];
+	NSMutableArray<NSString *> *l_lines = [[s componentsSeparatedByString:@"\n"] mutableCopy];
+	BOOL l_last_empty = [s hasSuffix:@"\n"];
+	if (l_last_empty) [l_lines removeLastObject];
+	NSString *u = sga_code_indent_unit(self);
+	for (NSUInteger i = 0; i < [l_lines count]; i++) {
+		NSString *x = l_lines[i];
+		if (a_in) x = [u stringByAppendingString:x];
+		else if ([x hasPrefix:@"\t"]) x = [x substringFromIndex:1];
+		else { NSUInteger n = 0; while (n < (NSUInteger)tab_width && n < [x length] && [x characterAtIndex:n] == ' ') n++; x = [x substringFromIndex:n]; }
+		l_lines[i] = x;
+	}
+	NSString *l_new = [[l_lines componentsJoinedByString:@"\n"] stringByAppendingString:l_last_empty ? @"\n" : @""];
+	if ([self shouldChangeTextInRange:r replacementString:l_new]) {
+		[[self textStorage] replaceCharactersInRange:r withString:l_new];
+		[self didChangeText];
+		[self setSelectedRange:NSMakeRange(r.location, [l_new length])];
+	}
+}
+/* Tab: indents the selected lines when the selection spans a line break; else a tab or spaces. */
+- (void)insertTab:(id)sender
+{
+	(void)sender;
+	NSRange r = [self selectedRange];
+	if (r.length > 0 && [[[self string] substringWithRange:r] rangeOfString:@"\n"].location != NSNotFound) [self shiftLines:YES];
+	else [self insertText:sga_code_indent_unit(self) replacementRange:r];
+}
+- (void)insertBacktab:(id)sender { (void)sender; [self shiftLines:NO]; }
+@end
+
+/* The gutter: each shown line's number, right-aligned, beside its first line fragment; and,
+   while folding is shown (1v-e-3), a column of markers at its right: a triangle pointing down
+   beside a line that starts an open fold, to the right beside one whose fold is closed. Lines
+   hidden in a closed fold take no room and get nothing here; the numbers skip them. */
+@interface SGALineRuler : NSRulerView
+@end
+static NSDictionary *sga_ruler_attributes(void) { return @{NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightRegular], NSForegroundColorAttributeName: [NSColor secondaryLabelColor]}; }
+/* The width of the marker column: a line's height, while folding is shown. */
+static CGFloat sga_ruler_marker_width(SGACodeView *v) { return v && v->folding ? ceil([[v layoutManager] defaultLineHeightForFont:[v font] ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]]) : 0; }
+static void sga_ruler_draw_marker(NSRect a_cell, BOOL a_closed)
+{
+	CGFloat s = MIN(NSWidth(a_cell), NSHeight(a_cell)) * 0.3, cx = NSMidX(a_cell), cy = NSMidY(a_cell);
+	NSBezierPath *b = [NSBezierPath bezierPath];
+	/* flipped: y grows downward */
+	if (a_closed) { [b moveToPoint:NSMakePoint(cx - s * 0.6, cy - s)]; [b lineToPoint:NSMakePoint(cx + s * 0.6, cy)]; [b lineToPoint:NSMakePoint(cx - s * 0.6, cy + s)]; }
+	else { [b moveToPoint:NSMakePoint(cx - s, cy - s * 0.6)]; [b lineToPoint:NSMakePoint(cx + s, cy - s * 0.6)]; [b lineToPoint:NSMakePoint(cx, cy + s * 0.6)]; }
+	[b closePath];
+	[[NSColor secondaryLabelColor] setFill];
+	[b fill];
+}
+@implementation SGALineRuler
+- (SGACodeView *)codeView { id t = [self clientView]; return [t isKindOfClass:[SGACodeView class]] ? t : nil; }
+- (CGFloat)requiredThickness
+{
+	NSString *s = [(NSTextView *)[self clientView] string];
+	SGACodeView *v = [self codeView];
+	CGFloat l_marks = sga_ruler_marker_width(v);
+	if (v && v->numbers_off) return 2 + l_marks;
+	NSUInteger n = sga_line_breaks(s, 0, [s length], NULL) + 1;
+	NSString *l_widest = [NSString stringWithFormat:@"%lu", (unsigned long)MAX(n, (NSUInteger)99)];
+	return ceil([l_widest sizeWithAttributes:sga_ruler_attributes()].width) + 14 + l_marks;
+}
+/* Calls `a_block' with each shown line in the visible part: its number, the UTF-16 range of
+   the line, and its row (its first line fragment, in this ruler's coordinates). */
+- (void)eachShownLine:(void (^)(int a_line, NSRange a_range, NSRect a_row, BOOL *a_stop))a_block
+{
+	NSTextView *t = (NSTextView *)[self clientView];
+	SGACodeView *v = [self codeView];
+	NSLayoutManager *m = [t layoutManager];
+	NSString *s = [t string];
+	NSRect l_visible = [[t enclosingScrollView] documentVisibleRect];
+	NSRange l_glyphs = [m glyphRangeForBoundingRect:l_visible inTextContainer:[t textContainer]];
+	NSRange l_chars = [m characterRangeForGlyphRange:l_glyphs actualGlyphRange:NULL];
+	int l_line = (int)sga_line_breaks(s, 0, l_chars.location, NULL) + 1;
+	NSUInteger k = l_chars.location;
+	BOOL l_stop = NO;
+	for (;;) {
+		int i = v && v->hidden_count ? sga_code_hidden_at(v, MIN(k, [s length])) : -1;
+		if (i >= 0) {   /* hidden lines: skip them, counting their line breaks */
+			NSUInteger z = NSMaxRange(v->hidden[i]);
+			l_line += (int)sga_line_breaks(s, k, z, NULL);
+			k = z;
+			if (k >= [s length] && ![s hasSuffix:@"\n"]) break;
+			continue;
+		}
+		NSRange l_line_range = [s lineRangeForRange:NSMakeRange(MIN(k, [s length]), 0)];
+		BOOL l_extra = k >= [s length];   /* the empty last line, after a final line break, or empty text */
+		NSRect f = l_extra ? [m extraLineFragmentRect] : [m lineFragmentRectForGlyphAtIndex:[m glyphIndexForCharacterAtIndex:l_line_range.location] effectiveRange:NULL];
+		CGFloat y = NSMinY(f) + [t textContainerInset].height - NSMinY(l_visible);
+		if (y > NSHeight([self bounds])) break;
+		a_block(l_line, l_line_range, NSMakeRect(0, y, [self ruleThickness], NSHeight(f)), &l_stop);
+		if (l_stop || l_extra) break;
+		if (NSMaxRange(l_line_range) >= [s length]) {
+			if (![s hasSuffix:@"\n"]) break;
+		}
+		else if (NSMaxRange(l_line_range) > NSMaxRange(l_chars)) break;
+		k = NSMaxRange(l_line_range);
+		l_line++;
+	}
+}
+- (void)drawHashMarksAndLabelsInRect:(NSRect)a_rect
+{
+	(void)a_rect;
+	SGACodeView *v = [self codeView];
+	NSDictionary *a = sga_ruler_attributes();
+	CGFloat w = [self ruleThickness], l_marks = sga_ruler_marker_width(v);
+	BOOL l_numbers = !(v && v->numbers_off);
+	[self eachShownLine:^(int a_line, NSRange a_range, NSRect a_row, BOOL *a_stop) {
+		(void)a_stop;
+		if (l_numbers) {
+			NSString *l_label = [NSString stringWithFormat:@"%d", a_line];
+			NSSize z = [l_label sizeWithAttributes:a];
+			[l_label drawAtPoint:NSMakePoint(w - l_marks - z.width - 6, NSMinY(a_row) + (NSHeight(a_row) - z.height) / 2) withAttributes:a];
+		}
+		if (l_marks > 0 && sga_code_has_mark(v, a_line))
+			sga_ruler_draw_marker(NSMakeRect(w - l_marks, NSMinY(a_row), l_marks, NSHeight(a_row)), v->hidden_count && sga_code_hidden_at(v, NSMaxRange(a_range)) >= 0);
+	}];
+}
+/* The line whose marker is at `p' (this ruler's coordinates), or 0. */
+- (int)markerLineAt:(NSPoint)p
+{
+	SGACodeView *v = [self codeView];
+	CGFloat l_marks = sga_ruler_marker_width(v);
+	__block int l_found = 0;
+	if (l_marks <= 0 || p.x < [self ruleThickness] - l_marks) return 0;
+	[self eachShownLine:^(int a_line, NSRange a_range, NSRect a_row, BOOL *a_stop) {
+		(void)a_range;
+		if (p.y >= NSMinY(a_row) && p.y < NSMaxY(a_row)) { if (sga_code_has_mark(v, a_line)) l_found = a_line; *a_stop = YES; }
+	}];
+	return l_found;
+}
+- (void)mouseDown:(NSEvent *)e
+{
+	int n = [self markerLineAt:[self convertPoint:[e locationInWindow] fromView:nil]];
+	if (n > 0) { sga_push(57, sga_id_of([self clientView]), n, 0, 0); sga_wake(); }
+	else [super mouseDown:e];
+}
+@end
+
+static SGACodeView *sga_code_of(int a_id) { id t = s_inner[a_id]; return [t isKindOfClass:[SGACodeView class]] ? t : nil; }
+static BOOL sga_is_code_view(id t) { return [t isKindOfClass:[SGACodeView class]]; }
+
+int sga_code_editor(void)
+{
+	NSScrollView *l_scroll = [[NSScrollView alloc] init];
+	SGACodeView *t = [[SGACodeView alloc] initWithFrame:NSMakeRect(0, 0, 400, 200)];
+	t->tab_width = 4;
+	[t setRichText:YES];
+	[t setImportsGraphics:NO];
+	[t setAllowsUndo:YES];
+	[t setFont:[NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]];
+	[t setAutomaticQuoteSubstitutionEnabled:NO];
+	[t setAutomaticDashSubstitutionEnabled:NO];
+	[t setAutomaticTextReplacementEnabled:NO];
+	[t setAutomaticSpellingCorrectionEnabled:NO];
+	[t setContinuousSpellCheckingEnabled:NO];
+	[t setSmartInsertDeleteEnabled:NO];
+	[t setDelegate:(id<NSTextViewDelegate>)s_target];
+	/* no wrapping: the text runs on, the view scrolls across */
+	[t setHorizontallyResizable:YES];
+	[t setVerticallyResizable:YES];
+	[t setMaxSize:NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX)];
+	[t setAutoresizingMask:NSViewWidthSizable];
+	[[t textContainer] setWidthTracksTextView:NO];
+	[[t textContainer] setContainerSize:NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX)];
+	[l_scroll setDocumentView:t];
+	[l_scroll setBorderType:NSBezelBorder];
+	[l_scroll setHasVerticalScroller:YES];
+	[l_scroll setHasHorizontalScroller:YES];
+	[l_scroll setAutohidesScrollers:YES];
+	SGALineRuler *r = [[SGALineRuler alloc] initWithScrollView:l_scroll orientation:NSVerticalRuler];
+	[r setClientView:t];
+	[l_scroll setVerticalRulerView:r];
+	[l_scroll setHasVerticalRuler:YES];
+	[l_scroll setRulersVisible:YES];
+	[[NSNotificationCenter defaultCenter] addObserverForName:NSTextDidChangeNotification object:t queue:nil usingBlock:^(NSNotification *n) { (void)n; [r setRuleThickness:[r requiredThickness]]; [r setNeedsDisplay:YES]; }];
+	[[NSNotificationCenter defaultCenter] addObserverForName:NSViewBoundsDidChangeNotification object:[l_scroll contentView] queue:nil usingBlock:^(NSNotification *n) { (void)n; [r setNeedsDisplay:YES]; }];
+	[r setRuleThickness:[r requiredThickness]];
+	/* 1v-e-2: any change of the characters, by the user, by code or by undo, drops the bracket
+	   tint. 1v-e-3: and moves the hidden lines with the text, before the layout manager hears
+	   of the edit and makes the glyphs again. */
+	__weak SGACodeView *l_view = t;
+	[[NSNotificationCenter defaultCenter] addObserverForName:NSTextStorageDidProcessEditingNotification object:[t textStorage] queue:nil usingBlock:^(NSNotification *n) {
+		NSTextStorage *l_storage = [n object];
+		if ([l_storage editedMask] & NSTextStorageEditedCharacters) {
+			[l_view hidePair];
+			[l_view foldsFollowEdit:[l_storage editedRange] change:[l_storage changeInLength]];
+		}
+	}];
+	[[t layoutManager] setDelegate:t];
+	NSLayoutConstraint *k = [l_scroll.heightAnchor constraintGreaterThanOrEqualToConstant:64];
+	[k setPriority:NSLayoutPriorityDefaultHigh];
+	[k setActive:YES];
+	int l_id = sga_keep(l_scroll);
+	s_inner[l_id] = t;
+	return l_id;
+}
+
+/* The gutter shows while it has line numbers or fold markers to show. */
+static void sga_code_gutter_changed(SGACodeView *t)
+{
+	NSRulerView *r = [[t enclosingScrollView] verticalRulerView];
+	[[t enclosingScrollView] setRulersVisible:!t->numbers_off || t->folding];
+	[r setRuleThickness:[r requiredThickness]];
+	[r setNeedsDisplay:YES];
+}
+
+void sga_code_set_line_numbers(int a_id, int a_on) { SGACodeView *t = sga_code_of(a_id); if (t) { t->numbers_off = a_on == 0; sga_code_gutter_changed(t); } }
+
+void sga_code_set_indent(int a_id, int a_tab_width, int a_spaces)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || a_tab_width < 1) return;
+	t->tab_width = a_tab_width;
+	t->spaces = a_spaces != 0;
+	NSMutableParagraphStyle *p = [[NSMutableParagraphStyle alloc] init];
+	CGFloat l_char = [@" " sizeWithAttributes:@{NSFontAttributeName: [t font] ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]}].width;
+	[p setTabStops:@[]];
+	[p setDefaultTabInterval:l_char * a_tab_width];
+	[t setDefaultParagraphStyle:p];
+	NSMutableDictionary *a = [[t typingAttributes] mutableCopy];
+	a[NSParagraphStyleAttributeName] = p;
+	[t setTypingAttributes:a];
+	sga_colors_flush();
+	[[t textStorage] addAttribute:NSParagraphStyleAttributeName value:p range:NSMakeRange(0, [[t textStorage] length])];
+}
+
+int sga_text_line_count(int a_id)
+{
+	NSString *s = [(NSTextView *)s_inner[a_id] string];
+	return (int)sga_line_breaks(s, 0, [s length], NULL) + 1;
+}
+
+int sga_text_caret_line(int a_id) { NSTextView *t = s_inner[a_id]; int l, c; sga_code_line_column([t string], [t selectedRange].location, &l, &c); return l; }
+int sga_text_caret_column(int a_id) { NSTextView *t = s_inner[a_id]; int l, c; sga_code_line_column([t string], [t selectedRange].location, &l, &c); return c; }
+
+/* The UTF-16 range of line `n' (from 1), without its line break; location NSNotFound past the end. */
+static NSRange sga_line_range(NSString *s, int n)
+{
+	unichar l_buffer[1024];
+	NSUInteger l_length = [s length], l_start = 0;
+	int l = 1;   /* the line that starts at `l_start' */
+	for (NSUInteger k = 0; k < l_length; ) {
+		NSUInteger c = MIN((NSUInteger)1024, l_length - k);
+		[s getCharacters:l_buffer range:NSMakeRange(k, c)];
+		for (NSUInteger j = 0; j < c; j++) if (l_buffer[j] == '\n') {
+			if (l >= n) return NSMakeRange(l_start, k + j - l_start);
+			l++;
+			l_start = k + j + 1;
+		}
+		k += c;
+	}
+	return l >= n ? NSMakeRange(l_start, l_length - l_start) : NSMakeRange(NSNotFound, 0);
+}
+
+const char *sga_text_line_text(int a_id, int n)
+{
+	NSTextView *t = s_inner[a_id];
+	NSRange r = sga_line_range([t string], n);
+	return sga_return(Kind_area, r.location == NSNotFound ? @"" : [[t string] substringWithRange:r]);
+}
+
+void sga_text_go_to_line(int a_id, int n)
+{
+	NSTextView *t = s_inner[a_id];
+	NSRange r = sga_line_range([t string], n);
+	if (r.location == NSNotFound) return;
+	s_suppress++;
+	[t setSelectedRange:NSMakeRange(r.location, 0)];
+	[t scrollRangeToVisible:NSMakeRange(r.location, 0)];
+	s_suppress--;
+}
+
+/* Characters `a_start' .. `an_end' (from 1, inclusive; an empty range inserts at `a_start')
+   become `a_text', selected; quiet. */
+void sga_text_replace_range(int a_id, int a_start, int an_end, const char *a_text)
+{
+	NSTextView *t = s_inner[a_id];
+	NSUInteger a = sga_text_offset([t textStorage], a_start - 1), b = an_end >= a_start ? sga_text_offset([t textStorage], an_end) : a;
+	NSString *l_new = sga_string(a_text);
+	s_suppress++;
+	if ([t shouldChangeTextInRange:NSMakeRange(a, b - a) replacementString:l_new]) {
+		[[t textStorage] replaceCharactersInRange:NSMakeRange(a, b - a) withString:l_new];
+		[t didChangeText];
+	}
+	[t setSelectedRange:NSMakeRange(a, [l_new length])];
+	s_suppress--;
+}
+
+/* As the user: `a_text' typed at the caret (%N as Return, %T as Tab); the caret moved to
+   (line, column) (52). */
+void sga_test_type_into_code(int a_id, const char *a_text)
+{
+	NSTextView *t = s_inner[a_id];
+	NSString *s = sga_string(a_text);
+	sga_colors_flush();
+	[[t window] makeFirstResponder:t];
+	[s enumerateSubstringsInRange:NSMakeRange(0, [s length]) options:NSStringEnumerationByComposedCharacterSequences usingBlock:^(NSString *c, NSRange r, NSRange e, BOOL *a_stop) {
+		(void)r; (void)e; (void)a_stop;
+		if ([c isEqualToString:@"\n"]) [t insertNewline:nil];
+		else if ([c isEqualToString:@"\t"]) [t insertTab:nil];
+		else [t insertText:c replacementRange:[t selectedRange]];
+	}];
+}
+
+void sga_test_caret_to(int a_id, int a_line, int a_column)
+{
+	NSTextView *t = s_inner[a_id];
+	NSRange r = sga_line_range([t string], a_line);
+	if (r.location == NSNotFound) return;
+	NSString *l_line = [[t string] substringWithRange:r];
+	NSUInteger k = r.location + sga_utf16_offset(l_line, a_column - 1);
+	s_suppress++;
+	[t setSelectedRange:NSMakeRange(k, 0)];
+	s_suppress--;
+	if ([t isKindOfClass:[SGACodeView class]]) [(SGACodeView *)t tellCaret];
+	else { sga_push(52, sga_id_of(t), a_line, a_column, 0); sga_wake(); }
+}
+
+/* 1v-e-2: the bracket pair. Positions from 1 in characters (code points); a range that does
+   not lie in the text shows no pair. The tint goes by itself at the next change of the text. */
+void sga_code_show_bracket_pair(int a_id, int a_first_start, int a_first_count, int a_second_start, int a_second_count)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t) return;
+	[t hidePair];
+	NSTextStorage *m = [t textStorage];
+	NSInteger l_count = sga_text_index(m, [m length]);
+	if (a_first_start < 1 || a_first_count < 1 || a_second_start < 1 || a_second_count < 1
+		|| a_first_start > l_count || a_first_count > l_count - a_first_start + 1
+		|| a_second_start > l_count || a_second_count > l_count - a_second_start + 1) return;
+	NSUInteger a = sga_text_offset(m, a_first_start - 1), b = sga_text_offset(m, a_first_start - 1 + a_first_count);
+	NSUInteger c = sga_text_offset(m, a_second_start - 1), d = sga_text_offset(m, a_second_start - 1 + a_second_count);
+	[t showPair:NSMakeRange(a, b - a) second:NSMakeRange(c, d - c)];
+}
+
+void sga_code_hide_bracket_pair(int a_id) { SGACodeView *t = sga_code_of(a_id); if (t) [t hidePair]; }
+
+int sga_test_bracket_tint_at(int a_id, int a_position)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || !t->pair_on || a_position < 1) return 0;
+	NSTextStorage *m = [t textStorage];
+	if (a_position > sga_text_index(m, [m length])) return 0;
+	NSUInteger k = sga_text_offset(m, a_position - 1);
+	return NSLocationInRange(k, t->pair[0]) || NSLocationInRange(k, t->pair[1]);
+}
+
+/* As the user pressing Command+Shift+\ in the editor: 56. */
+void sga_test_bracket_key(int a_id) { sga_push(56, a_id, 0, 0, 0); sga_wake(); }
+
+/* ------------------------------------------------------------------ 1v-e-3: folding */
+
+void sga_code_set_folding_shown(int a_id, int a_on)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t) return;
+	t->folding = a_on != 0;
+	sga_code_gutter_changed(t);
+}
+
+void sga_code_set_fold_marks(int a_id, const int *a_lines, int a_count)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t) return;
+	free(t->marks);
+	t->marks = NULL;
+	t->mark_count = 0;
+	if (a_lines && a_count > 0) {
+		t->marks = malloc(sizeof(int) * (size_t)a_count);
+		memcpy(t->marks, a_lines, sizeof(int) * (size_t)a_count);
+		t->mark_count = a_count;
+	}
+	[[[t enclosingScrollView] verticalRulerView] setNeedsDisplay:YES];
+}
+
+/* The glyphs and layout of UTF-16 range `r' are made again (the hidden lines changed there). */
+static void sga_code_relayout(SGACodeView *t, NSRange r)
+{
+	NSLayoutManager *m = [t layoutManager];
+	NSUInteger n = [[t textStorage] length];
+	if (r.location > n) return;
+	r.length = MIN(r.length, n - r.location);
+	/* with the line before, whose "…" mark comes or goes */
+	if (r.location > 0) { r.location--; r.length++; }
+	[m invalidateGlyphsForCharacterRange:r changeInLength:0 actualCharacterRange:NULL];
+	[m invalidateLayoutForCharacterRange:r actualCharacterRange:NULL];
+}
+
+void sga_code_set_folded_lines(int a_id, const int *a_pairs, int a_count)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t) return;
+	NSString *s = [t string];
+	NSUInteger l_length = [s length];
+	NSRange *l_new = a_count > 0 ? malloc(sizeof(NSRange) * (size_t)a_count) : NULL;
+	int n = 0;
+	/* one walk through the text, as the pairs ascend: `k' is where line `l' starts */
+	NSUInteger k = 0;
+	int l = 1;
+	unichar l_buffer[1024];
+	NSUInteger l_have = 0, l_at = 0;   /* the buffer holds units l_at .. l_at + l_have */
+	for (int i = 0; a_pairs && i < a_count; i++) {
+		int l_first = a_pairs[2 * i], l_last = a_pairs[2 * i + 1];
+		NSUInteger l_bounds[2];
+		BOOL l_ok = l_first >= 1 && l_last > l_first && l_first >= l;
+		for (int j = 0; l_ok && j < 2; j++) {
+			int l_target = (j == 0 ? l_first : l_last) + 1;   /* the line whose start is wanted */
+			while (l < l_target && k < l_length) {
+				if (k >= l_at + l_have) { l_at = k; l_have = MIN((NSUInteger)1024, l_length - k); [s getCharacters:l_buffer range:NSMakeRange(l_at, l_have)]; }
+				if (l_buffer[k - l_at] == '\n') l++;
+				k++;
+			}
+			if (l < l_target) { if (j == 0) l_ok = NO; else l_bounds[1] = l_length; }   /* the text ends first */
+			else l_bounds[j] = k;
+		}
+		if (l_ok && l_bounds[1] > l_bounds[0] && (n == 0 || l_bounds[0] >= NSMaxRange(l_new[n - 1]))) l_new[n++] = NSMakeRange(l_bounds[0], l_bounds[1] - l_bounds[0]);
+	}
+	/* what changes: each old range and each new one is laid out again */
+	NSRange *l_old = t->hidden;
+	int l_old_count = t->hidden_count;
+	t->hidden = l_new;
+	t->hidden_count = n;
+	for (int i = 0; i < l_old_count; i++) sga_code_relayout(t, l_old[i]);
+	for (int i = 0; i < n; i++) sga_code_relayout(t, l_new[i]);
+	free(l_old);
+	[t setNeedsDisplay:YES];
+	[[[t enclosingScrollView] verticalRulerView] setNeedsDisplay:YES];
+}
+
+void sga_test_press_fold_marker(int a_id, int a_line)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || !t->folding || !sga_code_has_mark(t, a_line) || !sga_test_line_is_shown(a_id, a_line)) return;
+	sga_push(57, a_id, a_line, 0, 0);
+	sga_wake();
+}
+
+void sga_test_fold_key(int a_id, int an_unfold)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	int l, c;
+	if (!t || !t->folding) return;
+	sga_code_line_column([t string], [t selectedRange].location, &l, &c);
+	sga_push(57, a_id, l, an_unfold ? 2 : 1, 0);
+	sga_wake();
+}
+
+int sga_test_line_is_shown(int a_id, int a_line)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || a_line < 1) return 0;
+	NSRange r = sga_line_range([t string], a_line);
+	return r.location != NSNotFound && sga_code_hidden_at(t, r.location) < 0;
+}
+
+/* As the user pressing an arrow key in the editor, no modifier: AppKit's own moves, which
+   step over hidden lines; 52 when the caret moves. */
+void sga_test_code_arrow_key(int a_id, int a_direction)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	static SEL l_moves[4];
+	if (!t || a_direction < 1 || a_direction > 4) return;
+	if (!l_moves[0]) { l_moves[0] = @selector(moveUp:); l_moves[1] = @selector(moveDown:); l_moves[2] = @selector(moveLeft:); l_moves[3] = @selector(moveRight:); }
+	[[t window] makeFirstResponder:t];
+	[t doCommandBySelector:l_moves[a_direction - 1]];
 }
 
 /* ------------------------------------------------------------------ 1w: styles and the theme */

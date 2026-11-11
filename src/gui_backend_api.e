@@ -29,6 +29,9 @@ note
 deferred class
 	GUI_BACKEND_API
 
+inherit
+	STRING_HANDLER
+
 feature -- Lifecycle and loop
 
 	init (a_name, a_id: POINTER): BOOLEAN
@@ -389,6 +392,154 @@ feature -- Windows and containers
 
 	test_cell_note (a_table: INTEGER): POINTER
 			-- The refusal note showing in the table; empty: none.
+		deferred
+		end
+
+	code_editor: INTEGER
+			-- 1v-b: a rich text area with a line-number gutter, monospace, no wrapping,
+			-- auto-indent on Return, Tab and Shift+Tab indenting the selected lines.
+		deferred
+		end
+
+	code_set_line_numbers (an_id: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	code_set_indent (an_id, a_tab_width: INTEGER; a_spaces: BOOLEAN)
+			-- Tab stops every `a_tab_width' spaces; Tab inserts spaces when `a_spaces'.
+		deferred
+		end
+
+	text_line_count (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	text_caret_line (an_id: INTEGER): INTEGER
+			-- From 1.
+		deferred
+		end
+
+	text_caret_column (an_id: INTEGER): INTEGER
+			-- From 1, in characters.
+		deferred
+		end
+
+	text_line_text (an_id, n: INTEGER): POINTER
+			-- Line `n' without its line break.
+		deferred
+		end
+
+	text_go_to_line (an_id, n: INTEGER)
+			-- The caret at line `n''s start, scrolled into view, quietly.
+		deferred
+		end
+
+	text_replace_range (an_id, a_start, an_end: INTEGER; a_text: POINTER)
+			-- Characters `a_start' .. `an_end' (1-based, inclusive; an empty range inserts)
+			-- become `a_text', selected; quiet.
+		deferred
+		end
+
+	test_type_into_code (an_id: INTEGER; a_text: POINTER)
+			-- As the user typing `a_text' at the caret, %N as Return and %T as Tab included.
+		deferred
+		end
+
+	test_caret_to (an_id, a_line, a_column: INTEGER)
+			-- As the user moving the caret: 52.
+		deferred
+		end
+
+	code_show_bracket_pair (an_id, a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
+			-- 1v-e-2: a background tint from the theme under the `a_first_count' characters
+			-- from position `a_first_start' and the `a_second_count' from `a_second_start',
+			-- in place of any pair shown before. A decoration: not a text color, not an undo
+			-- step, no change event. A range that does not lie in the text shows no pair.
+			-- The control drops the tint by itself at the next change of its text.
+			-- Control+Shift+\ (Command+Shift+\ on macOS) in the control sends event 56.
+		deferred
+		end
+
+	code_hide_bracket_pair (an_id: INTEGER)
+			-- No pair is tinted.
+		deferred
+		end
+
+	test_bracket_tint_at (an_id, a_position: INTEGER): BOOLEAN
+			-- Is the character at `a_position' under the bracket tint?
+		deferred
+		end
+
+	test_bracket_key (an_id: INTEGER)
+			-- As the user pressing the key that goes to the matching bracket: 56.
+		deferred
+		end
+
+	code_set_folding_shown (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1v-e-3: the gutter shows a marker beside each line that starts a fold (see
+			-- `code_set_fold_marks'), and the fold keys work. Off until set.
+			-- A click on a marker sends event 57 with a = its line and b = 0. The fold key,
+			-- Control+Shift+[ (Command+Option+[ on macOS), sends 57 with a = the caret's
+			-- line and b = 1; the unfold key, Control+Shift+] (Command+Option+]), sends it
+			-- with b = 2. The control folds nothing by itself.
+		deferred
+		end
+
+	code_set_fold_marks (an_id: INTEGER; a_lines: POINTER; a_count: INTEGER)
+			-- The lines that start a fold: `a_count' 32-bit integers at `a_lines', ascending,
+			-- in place of the last set. Read during the call. Shown while folding is shown.
+		require
+			count_not_negative: a_count >= 0
+		deferred
+		end
+
+	code_set_folded_lines (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- The closed folds, as the lines they hide together: `a_count' pairs of 32-bit
+			-- integers at `a_pairs', each a fold's first line and its last, ascending, no
+			-- pair reaching the next; in place of the last set. Read during the call.
+			-- A pair's first line stays shown, with a mark after it that lines are hidden,
+			-- and its marker shows the fold closed. The lines after it through its last are
+			-- not shown, take no room, and the caret does not enter them by the keys or the
+			-- pointer. The text is whole for every query. A decoration: no change event, no
+			-- undo step.
+			-- From a change of its text to the next call the control keeps what was hidden
+			-- hidden, moved by the lines the edit added or took above it.
+		require
+			count_not_negative: a_count >= 0
+		deferred
+		end
+
+	test_press_fold_marker (an_id, a_line: INTEGER)
+			-- As the user clicking the marker beside `a_line': 57 with b = 0. Nothing when
+			-- the line has no marker.
+		deferred
+		end
+
+	test_fold_key (an_id: INTEGER; a_unfold: BOOLEAN)
+			-- As the user pressing the fold key, or the unfold key when `a_unfold': 57 with
+			-- a = the caret's line and b = 1 or 2. Nothing while folding is not shown.
+		deferred
+		end
+
+	test_line_is_shown (an_id, a_line: INTEGER): BOOLEAN
+			-- Is line `a_line' shown: in the text, and not hidden in a closed fold?
+		deferred
+		end
+
+	test_code_arrow_key (an_id, a_direction: INTEGER)
+			-- As the user pressing an arrow key in a code editor, no modifier held:
+			-- `a_direction' 1 up, 2 down, 3 left, 4 right. Event 52 when the caret moves.
+		require
+			a_direction: 1 <= a_direction and a_direction <= 4
+		deferred
+		end
+
+	test_fill_event_queue (a_count: INTEGER)
+			-- Queue `a_count' events that no widget answers (type 0, id 0), as a flood would:
+			-- for the tests of a full event queue. They are queued by the time the loop next
+			-- turns, ahead of a wake sent after this call. A bounded queue keeps what fits.
+		require
+			count_not_negative: a_count >= 0
 		deferred
 		end
 
@@ -777,6 +928,17 @@ feature -- Controls
 
 	text_area_get (an_id: INTEGER): POINTER
 		deferred
+		end
+
+	text_area_string (an_id: INTEGER): STRING_32
+			-- The text area's text: a string of the caller's own, never one the control
+			-- keeps. Read here from `text_area_get'. A backend whose control holds its text
+			-- as an Eiffel string answers with a copy of it and spares the two conversions:
+			-- on Windows they were 65 to 74 ms of every keystroke in a text of 389,000
+			-- characters (measured 2026-11-10), since the code editor reads the text after
+			-- each edit.
+		do
+			Result := from_c (text_area_get (an_id))
 		end
 
 	text_area_set_read_only (an_id: INTEGER; a_on: BOOLEAN)
@@ -2238,15 +2400,92 @@ feature -- Strings across the boundary
 
 	from_c (a_pointer: POINTER): STRING_32
 			-- The UTF-8 C string at `a_pointer', or empty for a null pointer.
+			-- Well-formed UTF-8 is decoded in C in one pass, straight into the storage of
+			-- the result. Anything else takes the two steps this always took (a byte string,
+			-- then UTF_CONVERTER), so bytes that are not UTF-8 read as they always did.
 		local
 			l_c: C_STRING
+			l_bytes, l_count: INTEGER
 		do
 			if a_pointer = default_pointer then
 				create Result.make_empty
 			else
-				create l_c.make_by_pointer (a_pointer)
-				Result := {UTF_CONVERTER}.utf_8_string_8_to_string_32 (l_c.string)
+				l_bytes := c_byte_count (a_pointer)
+					-- room for the most there can be: one character for each byte
+				create Result.make (l_bytes)
+				l_count := c_decode_utf_8 (a_pointer, l_bytes, Result.area.base_address)
+				if l_count >= 0 then
+					Result.set_count (l_count)
+				else
+					create l_c.make_by_pointer (a_pointer)
+					Result := {UTF_CONVERTER}.utf_8_string_8_to_string_32 (l_c.string)
+				end
 			end
+		ensure
+			empty_for_null: a_pointer = default_pointer implies Result.is_empty
+		end
+
+feature {NONE} -- Strings across the boundary: the C side
+
+	c_byte_count (a_pointer: POINTER): INTEGER
+			-- The bytes of the C string at `a_pointer', before its closing zero.
+		require
+			not_null: a_pointer /= default_pointer
+		external
+			"C inline use <string.h>"
+		alias
+			"return (EIF_INTEGER) strlen ((const char *) $a_pointer);"
+		ensure
+			non_negative: Result >= 0
+		end
+
+	c_decode_utf_8 (a_source: POINTER; a_bytes: INTEGER; a_target: POINTER): INTEGER
+			-- Decode the `a_bytes' bytes of UTF-8 at `a_source' into the 32-bit characters
+			-- at `a_target', which has room for `a_bytes' of them. The count of characters
+			-- written, or -1 when the bytes are not well-formed UTF-8 (a stray or missing
+			-- continuation byte, a longer form than the character needs, a surrogate, a
+			-- value past 0x10FFFF): what was written then means nothing.
+		require
+			source: a_source /= default_pointer
+			target: a_target /= default_pointer
+			non_negative: a_bytes >= 0
+		external
+			"C inline"
+		alias
+			"[
+				{
+					const unsigned char *s = (const unsigned char *) $a_source;
+					const unsigned char *e = s + $a_bytes;
+					EIF_CHARACTER_32 *d0 = (EIF_CHARACTER_32 *) $a_target;
+					EIF_CHARACTER_32 *d = d0;
+					unsigned int c, v;
+					while (s < e) {
+						c = *s;
+						if (c < 0x80) {
+							*d++ = (EIF_CHARACTER_32) c;
+							s += 1;
+						} else if (c >= 0xC2 && c <= 0xDF && e - s >= 2 && (s[1] & 0xC0) == 0x80) {
+							*d++ = (EIF_CHARACTER_32) (((c & 0x1F) << 6) | (s[1] & 0x3F));
+							s += 2;
+						} else if ((c & 0xF0) == 0xE0 && e - s >= 3 && (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80) {
+							v = ((c & 0x0F) << 12) | ((s[1] & 0x3F) << 6) | (s[2] & 0x3F);
+							if (v < 0x800 || (v >= 0xD800 && v <= 0xDFFF)) return -1;
+							*d++ = (EIF_CHARACTER_32) v;
+							s += 3;
+						} else if ((c & 0xF8) == 0xF0 && e - s >= 4 && (s[1] & 0xC0) == 0x80 && (s[2] & 0xC0) == 0x80 && (s[3] & 0xC0) == 0x80) {
+							v = ((c & 0x07) << 18) | ((s[1] & 0x3F) << 12) | ((s[2] & 0x3F) << 6) | (s[3] & 0x3F);
+							if (v < 0x10000 || v > 0x10FFFF) return -1;
+							*d++ = (EIF_CHARACTER_32) v;
+							s += 4;
+						} else {
+							return -1;
+						}
+					}
+					return (EIF_INTEGER) (d - d0);
+				}
+			]"
+		ensure
+			in_range: Result >= -1 and Result <= a_bytes
 		end
 
 end

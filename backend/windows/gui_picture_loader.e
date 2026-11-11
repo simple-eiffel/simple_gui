@@ -14,6 +14,8 @@ class
 inherit
 	GUI_SHARED
 
+	GUI_PICTURE_BYTES
+
 create
 	make
 
@@ -24,16 +26,12 @@ feature {NONE} -- Initialization
 		do
 			grid := a_grid
 			delivered := a_delivered
-			create helper.make_empty
 			handler := agent on_message
 		ensure
 			idle: not is_started
 		end
 
 feature -- Access
-
-	Picture_tag: INTEGER = 0x47524450
-			-- The mailbox message tag for a decoded picture ("GRDP").
 
 	grid: SW_GRID_VIEW
 
@@ -76,8 +74,6 @@ feature {NONE} -- Implementation
 
 	worker: detachable separate GUI_PICTURE_WORKER
 
-	helper: GUI_DECODED_PICTURE
-
 	delivered: PROCEDURE
 
 	handler: PROCEDURE [TUPLE [INTEGER, STRING_32]]
@@ -106,7 +102,7 @@ feature {NONE} -- Implementation
 	on_message (a_tag: INTEGER; a_payload: STRING_32)
 			-- A decoded picture is waiting on the worker: take every one.
 		do
-			if a_tag = Picture_tag and then attached worker as al_w then
+			if a_tag = {GUI_PICTURE_WORKER}.Picture_tag and then attached worker as al_w then
 				take_results (al_w)
 			end
 		end
@@ -125,7 +121,7 @@ feature {NONE} -- Implementation
 				create l_path.make_from_separate (a_worker.result_path)
 				l_surface := Void
 				if a_worker.result_width > 0 and then a_worker.result_height > 0 then
-					l_surface := helper.surface_from (a_worker.result_width, a_worker.result_height, a_worker.result_pixels)
+					l_surface := surface_from (a_worker.result_width, a_worker.result_height, a_worker.result_pixels)
 				end
 				a_worker.drop_result
 				grid.deliver_picture (l_path, l_surface).do_nothing

@@ -752,6 +752,90 @@ feature -- User actions
 			settle
 		end
 
+	type_code (an_editor: GUI_CODE_EDITOR; a_text: READABLE_STRING_GENERAL)
+			-- Type `a_text' at the caret, as the user would (%N is Return, %T is Tab).
+		require
+			has_application: has_application
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_text)
+			backend.test_type_into_code (an_editor.id, l_c.item)
+			settle
+		end
+
+	move_caret (an_editor: GUI_CODE_EDITOR; a_line, a_column: INTEGER)
+		require
+			has_application: has_application
+		do
+			backend.test_caret_to (an_editor.id, a_line, a_column)
+			settle
+		end
+
+	fill_event_queue (a_count: INTEGER)
+			-- Queue `a_count' events no widget answers, at once, as a flood would.
+		require
+			has_application: has_application
+			count_not_negative: a_count >= 0
+		do
+			backend.test_fill_event_queue (a_count)
+		end
+
+	press_bracket_key (an_editor: GUI_CODE_EDITOR)
+			-- Press the key that goes to the matching bracket, as the user would: 56.
+		require
+			has_application: has_application
+		do
+			backend.test_bracket_key (an_editor.id)
+			settle
+		end
+
+	is_bracket_tinted (an_editor: GUI_CODE_EDITOR; a_position: INTEGER): BOOLEAN
+			-- Does the control show the character at `a_position' under the bracket tint?
+		require
+			has_application: has_application
+		do
+			Result := backend.test_bracket_tint_at (an_editor.id, a_position)
+		end
+
+	press_fold_marker (an_editor: GUI_CODE_EDITOR; a_line: INTEGER)
+			-- Click the fold marker beside `a_line', as the user would: 57. Nothing when
+			-- the line shows no marker.
+		require
+			has_application: has_application
+		do
+			backend.test_press_fold_marker (an_editor.id, a_line)
+			settle
+		end
+
+	press_fold_key (an_editor: GUI_CODE_EDITOR; a_unfold: BOOLEAN)
+			-- Press the fold key (the unfold key when `a_unfold'), as the user would: 57.
+		require
+			has_application: has_application
+		do
+			backend.test_fold_key (an_editor.id, a_unfold)
+			settle
+		end
+
+	press_arrow_key (an_editor: GUI_CODE_EDITOR; a_direction: INTEGER)
+			-- Press an arrow key in `an_editor', as the user would: `a_direction' 1 up,
+			-- 2 down, 3 left, 4 right.
+		require
+			has_application: has_application
+			a_direction: 1 <= a_direction and a_direction <= 4
+		do
+			backend.test_code_arrow_key (an_editor.id, a_direction)
+			settle
+		end
+
+	is_line_shown (an_editor: GUI_CODE_EDITOR; a_line: INTEGER): BOOLEAN
+			-- Does the control show line `a_line': is it in the text and in no closed fold?
+		require
+			has_application: has_application
+		do
+			Result := backend.test_line_is_shown (an_editor.id, a_line)
+		end
+
 	choose_grid_item (a_grid: GUI_GRID_VIEW; i: INTEGER)
 			-- Click item `i', as the user would: 50.
 		require
