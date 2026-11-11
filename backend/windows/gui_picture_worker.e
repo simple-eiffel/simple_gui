@@ -3,7 +3,7 @@ note
 		Decodes picture files on its own processor, so the GUI thread never waits on a JPEG.
 		The GUI side `enqueue's a path (copied in) and starts `work', which decodes one queued
 		file, keeps the pixels, tells the GUI through the mailbox with a message tagged
-		GUI_PICTURE_LOADER.Picture_tag and wakes the loop. The GUI side then reads the result's
+		`Picture_tag' and wakes the loop. The GUI side then reads the result's
 		size and pixel pointer and copies the pixels into a surface of its own; only a copy
 		crosses, and `drop_result' lets the worker free its pixels. The worker never calls into
 		the GUI processor.
@@ -33,6 +33,9 @@ feature {NONE} -- Initialization
 		end
 
 feature -- Access
+
+	Picture_tag: INTEGER = 0x47524450
+			-- The mailbox message tag for a decoded picture ("GRDP").
 
 	queued_count: INTEGER
 			-- Files waiting to be decoded.
@@ -134,7 +137,7 @@ feature {NONE} -- Implementation
 
 	post (a_mailbox: separate GUI_MAILBOX; a_path: STRING_32)
 		do
-			a_mailbox.put ({GUI_PICTURE_LOADER}.Picture_tag, a_path)
+			a_mailbox.put (Picture_tag, a_path)
 		end
 
 invariant

@@ -33,9 +33,6 @@ feature {NONE} -- Initialization
 
 feature -- Access
 
-	Picture_tag: INTEGER = 0x47524450
-			-- The mailbox message tag for a decoded picture ("GRDP").
-
 	grid: SW_GRID_VIEW
 
 	is_started: BOOLEAN
@@ -105,7 +102,7 @@ feature {NONE} -- Implementation
 	on_message (a_tag: INTEGER; a_payload: STRING_32)
 			-- A decoded picture is waiting on the worker: take every one.
 		do
-			if a_tag = Picture_tag and then attached worker as al_w then
+			if a_tag = {GUI_PICTURE_WORKER}.Picture_tag and then attached worker as al_w then
 				take_results (al_w)
 			end
 		end
