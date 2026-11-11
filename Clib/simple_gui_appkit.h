@@ -481,6 +481,11 @@ void sga_text_go_to_line(int a_id, int n);
 void sga_text_replace_range(int a_id, int a_start, int an_end, const char *a_text);
 void sga_test_type_into_code(int a_id, const char *a_text);
 void sga_test_caret_to(int a_id, int a_line, int a_column);
+/* 1v-e-2: the bracket pair */
+void sga_code_show_bracket_pair(int a_id, int a_first_start, int a_first_count, int a_second_start, int a_second_count);
+void sga_code_hide_bracket_pair(int a_id);
+int sga_test_bracket_tint_at(int a_id, int a_position);
+void sga_test_bracket_key(int a_id);
 /* 1v-a: the grid view */
 int sga_grid_view(void);
 void sga_grid_view_extend(int a_id, const char *a_title, const char *a_picture, const char *an_icon);
