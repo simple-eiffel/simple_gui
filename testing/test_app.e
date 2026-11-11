@@ -130,6 +130,8 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_code_apply_spans, "code_apply_spans")
 				run_test (agent t.test_code_apply_spans_cost, "code_apply_spans_cost")
 				run_test (agent t.test_new_message_tag, "new_message_tag")
+				run_test (agent t.test_actions_prune_during_call, "actions_prune_during_call")
+				run_test (agent t.test_code_editor_lets_go_with_its_window, "code_editor_lets_go_with_its_window")
 				run_test (agent t.test_preferences_values_and_file, "preferences_values_and_file")
 				run_test (agent t.test_preferences_window, "preferences_window")
 				run_test (agent t.test_grid_view_items, "grid_view_items")

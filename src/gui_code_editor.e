@@ -37,6 +37,9 @@ create
 feature {NONE} -- Initialization
 
 	make
+		local
+			l_appearance: PROCEDURE [TUPLE [dark: BOOLEAN]]
+			l_closed: PROCEDURE [TUPLE [window: GUI_WINDOW]]
 		do
 			create change_actions.make
 			create caret_actions.make
@@ -49,7 +52,12 @@ feature {NONE} -- Initialization
 			tab_width := 4
 			register (backend.code_editor)
 			change_actions.extend (agent text_changed)
-			application.appearance_changed_actions.extend (agent (d: BOOLEAN) do highlight_all end)
+			l_appearance := agent appearance_changed
+			l_closed := agent window_closed
+			appearance_agent := l_appearance
+			window_closed_agent := l_closed
+			application.appearance_changed_actions.extend (l_appearance)
+			application.window_closed_actions.extend (l_closed)
 		end
 
 feature -- Styles
@@ -504,6 +512,45 @@ feature -- Element change
 			else
 				starts.wipe_out
 				rehighlight
+			end
+		end
+
+feature {NONE} -- The application's calls
+
+	appearance_agent: detachable PROCEDURE [TUPLE [dark: BOOLEAN]]
+			-- What `make' gave the application's `appearance_changed_actions'; Void once
+			-- this editor has let go.
+
+	window_closed_agent: detachable PROCEDURE [TUPLE [window: GUI_WINDOW]]
+			-- What `make' gave the application's `window_closed_actions'; Void once this
+			-- editor has let go.
+
+	appearance_changed (a_dark: BOOLEAN)
+			-- The theme changed: color everything again.
+		do
+			highlight_all
+		end
+
+	window_closed (a_window: GUI_WINDOW)
+			-- `a_window' closed. If this editor was in it, its control is gone: the syntax
+			-- object is detached (it must make no further call here) and the application
+			-- stops calling. Before this, every editor ever made was colored again on each
+			-- change of theme, its window open or not.
+		do
+			if enclosing_window = a_window then
+				if attached syntax as al_syntax then
+					al_syntax.detach
+					syntax := Void
+					folds := Void
+				end
+				if attached appearance_agent as al_agent then
+					application.appearance_changed_actions.prune (al_agent)
+					appearance_agent := Void
+				end
+				if attached window_closed_agent as al_agent then
+					application.window_closed_actions.prune (al_agent)
+					window_closed_agent := Void
+				end
 			end
 		end
 

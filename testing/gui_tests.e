@@ -2590,6 +2590,87 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_actions_prune_during_call
+			-- An agent that prunes itself while the collection is being called costs no
+			-- other agent its turn.
+		local
+			l_actions: GUI_ACTIONS [TUPLE]
+			l_agents: ARRAYED_LIST [PROCEDURE [TUPLE]]
+			l_ran: ARRAY [INTEGER]
+		do
+			create l_actions.make
+			create l_agents.make (3)
+			create l_ran.make_filled (0, 1, 3)
+			across 1 |..| 3 as ic loop
+				l_agents.extend (agent count_and_leave (l_actions, l_agents, ic, l_ran))
+				l_actions.extend (l_agents.last)
+			end
+			l_actions.call (Void)
+			assert ("each ran once: " + l_ran [1].out + " " + l_ran [2].out + " " + l_ran [3].out,
+				l_ran [1] = 1 and l_ran [2] = 1 and l_ran [3] = 1)
+			assert ("and each is gone", l_actions.count = 0)
+			l_actions.call (Void)
+			assert ("none runs again", l_ran [1] = 1 and l_ran [2] = 1 and l_ran [3] = 1)
+		end
+
+	count_and_leave (a_actions: GUI_ACTIONS [TUPLE]; a_agents: ARRAYED_LIST [PROCEDURE [TUPLE]]; a_index: INTEGER; a_ran: ARRAY [INTEGER])
+			-- Count one run of agent `a_index' in `a_ran', and take that agent of `a_agents'
+			-- out of `a_actions'.
+		require
+			counted: a_ran.valid_index (a_index) and a_agents.valid_index (a_index)
+		do
+			a_ran [a_index] := a_ran [a_index] + 1
+			a_actions.prune (a_agents [a_index])
+		end
+
+	test_code_editor_lets_go_with_its_window
+			-- A code editor asks the application to call it on a change of theme. When the
+			-- window it is in closes (here it sits inside a splitter), it detaches its
+			-- syntax object and the application stops calling it; another window's closing
+			-- changes nothing.
+		local
+			l_window, l_other: GUI_WINDOW
+			l_split: GUI_SPLITTER
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_appearance, l_closed, l_replaced: INTEGER
+			l_was_dark: BOOLEAN
+		do
+			l_appearance := app.appearance_changed_actions.count
+			l_closed := app.window_closed_actions.count
+			create l_window.make ("Editor in a closing window", 480, 260)
+			l_code := new_ruled_editor
+			assert ("the editor asked for both calls", app.appearance_changed_actions.count = l_appearance + 1
+				and app.window_closed_actions.count = l_closed + 1)
+			create l_split.make_horizontal
+			l_split.set_first (create {GUI_LABEL}.make ("beside"))
+			l_split.set_second (l_code)
+			l_window.set_content (l_split)
+			l_window.show
+			settle_window
+			l_code.set_text ("class A%Nend")
+			create l_syntax.make
+			l_code.set_syntax (l_syntax)
+				-- another window closes
+			create l_other.make ("Another window", 240, 160)
+			l_other.show
+			settle_window
+			l_other.close
+			assert ("another window's closing leaves it attached", l_code.syntax = l_syntax and l_syntax.detach_count = 0)
+			assert ("and still called", app.appearance_changed_actions.count = l_appearance + 1
+				and app.window_closed_actions.count = l_closed + 1)
+				-- its own window closes
+			l_replaced := l_syntax.replaced_count
+			l_window.close
+			assert ("the syntax was detached", l_syntax.detach_count = 1 and l_syntax.editor = Void and l_code.syntax = Void)
+			assert ("and the application calls it no more", app.appearance_changed_actions.count = l_appearance
+				and app.window_closed_actions.count = l_closed)
+			l_was_dark := app.is_dark
+			driver.set_dark (not l_was_dark)
+			driver.set_dark (l_was_dark)
+			assert ("a change of theme asks nothing of the syntax", l_syntax.replaced_count = l_replaced)
+		end
+
 	test_new_message_tag
 			-- 1v-e-1: a tag from `new_message_tag' is negative and never comes twice.
 		local
