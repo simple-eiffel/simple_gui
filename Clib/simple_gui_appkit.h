@@ -22,6 +22,7 @@ void sga_pump(int a_ms);
 void sga_pump_until_idle(int a_ms);
 void sga_start_heartbeat(int a_ms);
 void sga_wake(void);
+void *sga_window_native_handle(int a_id);
 int sga_next(int *a_type, int *a_id, int *a_a, int *a_b, int *a_c);
 void sga_test_fill_event_queue(int a_count);
 

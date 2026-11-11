@@ -1,0 +1,121 @@
+# Printing
+
+`GUI_PRINT_JOB` prints pages you draw. You draw each page with [Cairo](canvas.md), in points, the same drawing API as the canvas; the job writes the pages into a PDF, then prints that PDF through the system's own print dialog, or saves it as a PDF file with no dialog. Text alone needs no drawing at all: `print_text` lays it out into pages with a page number in the footer.
+
+Printing the PDF is simple_pdf's work (its print library, `simple_pdf_print`), so any program that has a PDF can print it the same way.
+
+## Example
+
+```eiffel
+class
+	PSALM_PRINTER
+
+create
+	make
+
+feature {NONE} -- Initialization
+
+	make
+		local
+			l_window: GUI_WINDOW
+			l_stack, l_buttons: GUI_STACK
+			l_print, l_save: GUI_BUTTON
+		do
+			create app.make ("Psalm", "org.example.psalm")
+			create l_window.make ("Psalm 23", 440, 200)
+			create l_stack.make_vertical
+			l_stack.extend (create {GUI_LABEL}.make (Psalm))
+			create l_buttons.make_horizontal
+			create l_print.make ("Print…")
+			l_print.click_actions.extend (agent print_psalm (l_window))
+			create l_save.make ("Save as PDF")
+			l_save.click_actions.extend (agent save_psalm)
+			l_buttons.extend (l_print)
+			l_buttons.extend (l_save)
+			l_stack.extend (l_buttons)
+			l_window.set_content (l_stack)
+			l_window.show
+			app.run
+		end
+
+feature {NONE} -- Printing
+
+	print_psalm (a_window: GUI_WINDOW)
+		local
+			l_job: GUI_PRINT_JOB
+		do
+			create l_job.make ("Psalm 23")
+			l_job.print_text (Psalm)
+			l_job.run_dialog (a_window)
+			if l_job.last_outcome = l_job.Outcome_failed and then attached l_job.last_error as al_why then
+				app.dialogs.inform ("Printing failed", al_why)
+			end
+		end
+
+	save_psalm
+		local
+			l_job: GUI_PRINT_JOB
+		do
+			create l_job.make ("Psalm 23")
+			l_job.print_pages (1, agent (a_page: INTEGER; a_context: CAIRO_CONTEXT)
+				do
+					a_context.select_font ("serif", a_context.Slant_normal, a_context.Weight_normal).set_font_size (14.0).do_nothing
+					a_context.move_to (72.0, 96.0).show_text ("The Lord is my shepherd; I shall not want.").do_nothing
+				end)
+			if not l_job.save_pdf ("psalm-23.pdf") and then attached l_job.last_error as al_why then
+				app.dialogs.inform ("Saving failed", al_why)
+			end
+		end
+
+	app: GUI_APPLICATION
+
+	Psalm: STRING = "Psalm 23%NThe Lord is my shepherd; I shall not want.%NHe maketh me to lie down in green pastures:%Nhe leadeth me beside the still waters."
+
+end
+```
+
+## Try it
+
+Press **Print…**: the system's print dialog opens over the window. Choose a printer and press Print: the psalm prints with "Page 1 of 1" in the footer, and `last_outcome` is `Outcome_printed`. Open it again and press Cancel: nothing prints and `last_outcome` is `Outcome_cancelled`. Press **Save as PDF**: `psalm-23.pdf` appears beside the program, with no dialog; open it in any PDF reader. On a computer with no printer at all, Print… shows no dialog and `last_outcome` is `Outcome_no_printer`.
+
+## API
+
+| Feature | What it does |
+|---|---|
+| `make (a_title)` | A job called `a_title` (the name the print queue shows), portrait, on A4 where the system's default paper is A4 and on Letter otherwise, with nothing rendered. |
+| `set_page_size (a_width, a_height)`, `paper_width`, `paper_height` | The paper, in points (72 to the inch). `Letter_width`, `Letter_height`, `A4_width` and `A4_height` are there for you. |
+| `set_orientation (a_landscape)`, `is_landscape`, `page_width`, `page_height` | Portrait or landscape; `page_width` and `page_height` are the drawing area, turned with the orientation. |
+| `print_text (a_text)` | Render `a_text` into pages: each line break starts a line, long lines wrap at spaces, one-inch margins, "Page N of M" in the footer. An empty text is one empty page. |
+| `print_pages (a_count, a_draw)` | Render `a_count` pages, each drawn by `a_draw` (the page's number from 1, and a `CAIRO_CONTEXT` in points with the origin at the page's top left). |
+| `page_count`, `last_error` | The pages rendered (0 before a rendering and after printing); why the last step failed. |
+| `save_pdf (a_path)` | Write the rendered pages to `a_path` as a PDF, with no dialog: this is Save as PDF. False, with `last_error`, when the file can't be written. |
+| `run_dialog (a_parent)` | The system's print dialog over window `a_parent`, then the rendered pages printed as the user chose. Afterwards `last_outcome` says how it ended, and the rendering is gone: render again to print or save again. |
+| `last_outcome` | `Outcome_printed` (1: the job went to the system's print queue), `Outcome_cancelled` (0), `Outcome_failed` (-1, with `last_error`) or `Outcome_no_printer` (-2: no dialog was shown). The same values on every platform. |
+
+To print a PDF you already have, without simple_gui, use simple_pdf's `SIMPLE_PDF_PRINTER` from `simple_pdf_print.ecf`: `print_file (a_path, a_title, a_parent_handle)` with the same four outcomes, `has_printer`, and the system's default paper.
+
+## On each platform
+
+Every platform shows its own print dialog and prints the same pages; the drawing is yours and identical everywhere.
+
+- **Linux:** GTK's print dialog. The pages are drawn by Poppler, each sheet at the page's own size. Printers CUPS discovers on the network count as printers.
+- **macOS:** the standard print panel, as a sheet on your window, with the system's own preview. Its paper size, orientation and scale start from your page and can be changed there, and its PDF menu offers Save as PDF. The pages are printed through PDFKit, macOS's own PDF library. Network printers CUPS discovers count as printers.
+- **Windows:** the system's print dialog, owned by your window. The pages are printed by Poppler's `pdftocairo` (it ships in simple_pdf's `bin` folder). The dialog's printer, page range, copies, two-sided printing and paper tray are used. **Not applied on Windows:**
+  - choices made under the printer's own **Preferences** button (color or black-and-white, print quality, stapling): the printer's defaults are used instead;
+  - the dialog's paper size and orientation: each sheet takes the size and orientation of your page;
+  - collation off: copies always print as whole sets.
+
+  Printers whose names use characters outside plain ASCII can't be reached, and printing to them fails with a message. A PDF printed on Windows through a PDF printer carries its text as drawn shapes, so it can't be searched.
+
+## Design guidance
+
+- Lay pages out for paper, not for the screen: points, margins of about an inch, and type of 10 to 12 points.
+- Offer **Save as PDF** beside **Print…**; it needs no printer, and it's how people send a page.
+- Say what happened only when it failed. A cancelled dialog needs no message, and a printed job is the system's to report.
+- Long jobs: render first, then call `run_dialog`. The dialog appears only once every page is ready.
+
+## Gallery
+
+| Linux | macOS | Windows |
+|---|---|---|
+| ![printing on Linux](images/linux/printing.png) | ![printing on macOS](images/macos/printing.png) | ![printing on Windows](images/windows/printing.png) |

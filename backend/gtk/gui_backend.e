@@ -1424,6 +1424,12 @@ feature -- Controls
 		alias "return sg_window_is_fullscreen($a_window) != 0;"
 		end
 
+	window_native_handle (a_window: INTEGER): POINTER
+			-- The window's GtkWindow (its slot in the widget table).
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_w[$a_window];"
+		end
+
 	follow_system_appearance
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_follow_system_appearance();"

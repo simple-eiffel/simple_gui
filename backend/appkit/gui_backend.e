@@ -1842,6 +1842,12 @@ feature -- Common widget state
 		alias "return sga_code_visible_line($an_id, 1);"
 		end
 
+	window_native_handle (a_window: INTEGER): POINTER
+			-- 1v-c: the NSWindow, for simple_pdf's print panel; default_pointer when not a window.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_window_native_handle($a_window);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

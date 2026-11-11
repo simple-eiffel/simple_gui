@@ -1597,6 +1597,14 @@ feature -- Controls
 			Result := fullscreen_saves.has (a_window)
 		end
 
+	window_native_handle (a_window: INTEGER): POINTER
+			-- The window's HWND.
+		do
+			if attached windows.item (a_window) as al_w then
+				Result := al_w.hwnd
+			end
+		end
+
 	follow_system_appearance
 			-- Every window follows the Windows light or dark setting again.
 		local
