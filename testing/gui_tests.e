@@ -2560,6 +2560,114 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_print_job_renders_and_saves
+			-- 1v-c: `print_text' lays a long text out over several pages and `print_pages'
+			-- makes exactly the pages asked for; `save_pdf' writes a whole PDF with that many
+			-- pages; landscape turns the page; A4 sets the paper; an empty text is one page;
+			-- a word wider than the line is cut, not lost.
+		local
+			l_job: GUI_PRINT_JOB
+			l_text: STRING_32
+			l_path: STRING_32
+			l_pdf: STRING_8
+			i: INTEGER
+		do
+			create l_job.make ("Print test")
+			assert ("Letter, portrait", l_job.page_width = 612.0 and l_job.page_height = 792.0)
+			create l_text.make (8_000)
+			from i := 1 until i > 200 loop
+				l_text.append ({STRING_32} "Line ")
+				l_text.append_integer (i)
+				l_text.append ({STRING_32} " of a long text that wraps when its words run past the right margin of the page.%N")
+				i := i + 1
+			end
+			l_job.print_text (l_text)
+			assert ("rendered: " + l_job.page_count.out, l_job.page_count > 1 and l_job.last_error = Void)
+			l_path := print_test_path ("text")
+			assert ("saved", l_job.save_pdf (l_path))
+			l_pdf := file_bytes (l_path)
+			assert ("a whole PDF", l_pdf.starts_with ("%%PDF") and l_pdf.has_substring ("%%%%EOF"))
+			assert ("its pages: " + pdf_page_count (l_pdf).out + " of " + l_job.page_count.out, pdf_page_count (l_pdf) = l_job.page_count)
+			l_job.print_pages (3, agent (a_page: INTEGER; a_context: CAIRO_CONTEXT)
+				do
+					a_context.set_color_rgb (0.2, 0.4, 0.8).rectangle (72.0, 72.0, 100.0 * a_page, 50.0).fill.do_nothing
+				end)
+			assert ("three pages", l_job.page_count = 3)
+			assert ("saved again", l_job.save_pdf (l_path))
+			assert ("three in the file", pdf_page_count (file_bytes (l_path)) = 3)
+			l_job.set_orientation (True)
+			assert ("landscape", l_job.page_width = 792.0 and l_job.page_height = 612.0)
+			l_job.set_page_size (l_job.A4_width, l_job.A4_height)
+			l_job.set_orientation (False)
+			assert ("A4", l_job.page_width = l_job.A4_width and l_job.page_height = l_job.A4_height)
+			l_job.print_text ("")
+			assert ("an empty text is one page", l_job.page_count = 1)
+			l_job.print_text ({STRING_32} "a" + create {STRING_32}.make_filled ('w', 400))
+			assert ("a long word is cut over lines, still one page", l_job.page_count = 1 and l_job.last_error = Void)
+			delete_file (l_path)
+		end
+
+	print_test_path (a_name: STRING): STRING_32
+			-- A file in the temporary folder for a printing test.
+		local
+			l_env: EXECUTION_ENVIRONMENT
+		do
+			create l_env
+			if attached l_env.item ("TMPDIR") as al_t then
+				Result := al_t
+			elseif attached l_env.item ("TEMP") as al_t then
+				Result := al_t
+			else
+				Result := {STRING_32} "/tmp"
+			end
+			Result := Result + operating_environment.directory_separator.out + "simple_gui_print_test_" + a_name + ".pdf"
+		end
+
+	file_bytes (a_path: READABLE_STRING_GENERAL): STRING_8
+			-- The file `a_path' byte for byte (a binary read: a text read on Windows stops at
+			-- a byte 26, which a PDF can hold).
+		local
+			l_file: RAW_FILE
+		do
+			create Result.make (4096)
+			create l_file.make_with_name (a_path)
+			if l_file.exists then
+				l_file.open_read
+				from until l_file.end_of_file loop
+					l_file.read_stream (65_536)
+					Result.append (l_file.last_string)
+				end
+				l_file.close
+			end
+		end
+
+	pdf_page_count (a_pdf: STRING_8): INTEGER
+			-- How many page objects `a_pdf' holds: each "/Type /Page" that is not "/Type /Pages".
+		local
+			i: INTEGER
+		do
+			from
+				i := a_pdf.substring_index ("/Type /Page", 1)
+			until
+				i = 0
+			loop
+				if i + 11 > a_pdf.count or else a_pdf [i + 11] /= 's' then
+					Result := Result + 1
+				end
+				i := a_pdf.substring_index ("/Type /Page", i + 1)
+			end
+		end
+
+	delete_file (a_path: READABLE_STRING_GENERAL)
+		local
+			l_file: RAW_FILE
+		do
+			create l_file.make_with_name (a_path)
+			if l_file.exists then
+				l_file.delete
+			end
+		end
+
 	test_code_apply_spans_cost
 			-- 1v-e-1: what `apply_spans' costs for a whole 10,000-line text of 60,000 spans
 			-- (the first answer after a load) and for one line (a keystroke's answer), each
