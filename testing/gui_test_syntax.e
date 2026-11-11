@@ -85,9 +85,32 @@ feature -- Changes
 
 feature -- Brackets
 
+	bracket_position: INTEGER
+			-- Where the bracket last asked about is; 0 before any.
+
+	bracket_count: INTEGER
+			-- How many times a bracket's partner was wanted.
+
+	pair_answer: detachable TUPLE [first_start, first_count, second_start, second_count: INTEGER]
+			-- What `bracket_wanted' answers with at once; Void: it answers nothing (a test
+			-- then answers a turn later, as a parser on another processor would).
+
+	set_pair_answer (an_answer: like pair_answer)
+		do
+			pair_answer := an_answer
+		ensure
+			set: pair_answer = an_answer
+		end
+
 	bracket_wanted (a_position: INTEGER)
 		do
 			log.append_character ('B')
+			bracket_position := a_position
+			bracket_count := bracket_count + 1
+			if attached editor as al_editor and then attached pair_answer as al_answer then
+				al_editor.show_bracket_pair (al_answer.first_start, al_answer.first_count,
+					al_answer.second_start, al_answer.second_count)
+			end
 		end
 
 end

@@ -2202,6 +2202,27 @@ feature -- The remaining controls (1j)
 				+ " ms, go to line " + (l_go * 1000.0).rounded.out + " ms, keystroke mean " + (l_sum * 200.0).rounded.out
 				+ " ms, worst " + (l_worst * 1000.0).rounded.out + " ms%N")
 			assert ("typed on the middle line: " + l_code.line_text (l_lines // 2).out, l_code.line_text (l_lines // 2).starts_with ({STRING_32} "xxxxx    do print"))
+				-- 1v-e-2: the editor looks for a bracket at the caret after every move and
+				-- every change, so a keystroke pays for two looks
+			l_t0 := now_seconds
+			from i := 1 until i > 20 loop
+				timed (agent l_code.set_bracket_matching (True))
+				i := i + 1
+			end
+			print ("    large text: one look for a bracket at the caret (none there), mean of 20: " + ((now_seconds - l_t0) * 50_000.0).rounded.out + " microseconds%N")
+			io.output.flush
+			i := l_code.line_text (l_lines // 2).index_of ('(', 1)
+			if i > 0 then
+				driver.move_caret (l_code, l_lines // 2, i)
+				l_t0 := now_seconds
+				from i := 1 until i > 20 loop
+					timed (agent l_code.set_bracket_matching (True))
+					i := i + 1
+				end
+				print ("    large text: one look with a bracket at the caret (pair shown: " + l_code.has_bracket_pair.out + "), mean of 20: "
+					+ ((now_seconds - l_t0) * 50_000.0).rounded.out + " microseconds%N")
+				io.output.flush
+			end
 			assert ("the line count holds", l_code.line_count = l_lines)
 			assert ("the keyword after the typing keeps its color",
 				l_code.text_color_at (l_code.text.substring_index ("xxxxx", 1) + 9) = l_code.style_color (l_code.Style_keyword))
@@ -2630,6 +2651,229 @@ feature -- The remaining controls (1j)
 		do
 			a_ran [a_index] := a_ran [a_index] + 1
 			a_actions.prune (a_agents [a_index])
+		end
+
+	test_code_editor_bracket_pairs
+			-- 1v-e-2, by the rules: a bracket at the caret (after it, else before it) and its
+			-- partner are tinted, for each kind, nested and across lines; a bracket in a
+			-- string or a comment is no partner and has none; no partner, no pair. The tint
+			-- leaves the text, the colors and undo alone and tells no change. Going to the
+			-- partner by program tells nothing; the key tells the caret once. Typing drops
+			-- the tint and the new answer shows.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_menu: GUI_MENU
+			l_undo, l_changes_before: INTEGER
+			l_text: STRING_32
+			l_told: ARRAYED_LIST [STRING]
+			l_changes: CELL [INTEGER]
+		do
+			l_menu := app.menu.add_menu ("Edit")
+			l_menu.add_edit_item (l_menu.Role_undo, "Undo")
+			l_undo := l_menu.last_item_id
+			create l_told.make (4)
+			create l_changes.put (0)
+			create l_window.make ("Brackets", 560, 360)
+			create l_code.make
+			l_code.add_line_comment ("--", l_code.Style_comment)
+			l_code.add_delimited ("%"", "%"", l_code.Style_string)
+			l_code.caret_actions.extend (agent (l, c: INTEGER; t: ARRAYED_LIST [STRING]) do t.extend (l.out + ":" + c.out) end (?, ?, l_told))
+			l_code.change_actions.extend (agent (c: CELL [INTEGER]) do c.put (c.item + 1) end (l_changes))
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+				-- line 1 from 1:  call (a [1], {b      ( 6   [ 9   ] 11   { 14
+				-- line 2 from 17:     c} -- )           } 22   ) 27, in a comment
+				-- line 3 from 29:   ")" )               ) 32, in a string   ) 35
+				-- line 4 from 37: open ( only           ( 42, without a partner
+				-- line 5 from 49: ((x) (y))             49 with 57, 50 with 52
+			l_text := "call (a [1], {b%N    c} -- )%N  %")%" )%Nopen ( only%N((x) (y))"
+			l_code.set_text (l_text)
+			driver.focus (l_code)
+			assert ("on until set", l_code.is_bracket_matching)
+			driver.move_caret (l_code, 1, 2)
+			assert_no_bracket_pair ("not at a bracket", l_code)
+			driver.move_caret (l_code, 1, 6)
+			assert_bracket_pair ("round, the caret before it, across lines", l_code, 6, 35)
+				-- a decoration only
+			l_changes_before := l_changes.item
+			driver.move_caret (l_code, 1, 7)
+			assert_bracket_pair ("round, the caret after it", l_code, 6, 35)
+			assert ("the text is as set", l_code.text.same_string (l_text))
+			assert ("no change was told", l_changes.item = l_changes_before)
+			assert ("the brackets keep the plain color", l_code.text_color_at (6) = l_code.style_color (l_code.Style_plain)
+				and l_code.text_color_at (35) = l_code.style_color (l_code.Style_plain))
+			assert ("and get no trait", not l_code.is_bold_at (6) and not l_code.is_italic_at (6) and not l_code.is_underlined_at (6))
+				-- each kind, from either end
+			driver.move_caret (l_code, 1, 9)
+			assert_bracket_pair ("square", l_code, 9, 11)
+			driver.move_caret (l_code, 1, 12)
+			assert_bracket_pair ("square, from after the closing one", l_code, 9, 11)
+			driver.move_caret (l_code, 1, 14)
+			assert_bracket_pair ("curly, across lines", l_code, 14, 22)
+			driver.move_caret (l_code, 2, 6)
+			assert_bracket_pair ("curly, from the closing one", l_code, 14, 22)
+			driver.move_caret (l_code, 3, 8)
+			assert_bracket_pair ("round, backward past a string and a comment", l_code, 6, 35)
+				-- strings and comments
+			driver.move_caret (l_code, 2, 11)
+			assert_no_bracket_pair ("a bracket in a comment", l_code)
+			driver.move_caret (l_code, 3, 4)
+			assert_no_bracket_pair ("a bracket in a string", l_code)
+				-- no partner
+			driver.move_caret (l_code, 4, 6)
+			assert_no_bracket_pair ("no partner", l_code)
+				-- nested
+			driver.move_caret (l_code, 5, 1)
+			assert_bracket_pair ("the outer pair", l_code, 49, 57)
+			driver.move_caret (l_code, 5, 2)
+			assert_bracket_pair ("the inner pair: the character after the caret comes first", l_code, 50, 52)
+			driver.move_caret (l_code, 5, 5)
+			assert_bracket_pair ("the inner pair from its end", l_code, 50, 52)
+			driver.move_caret (l_code, 5, 10)
+			assert_bracket_pair ("the outer pair from its end", l_code, 49, 57)
+				-- going to the partner
+			driver.move_caret (l_code, 1, 6)
+			l_told.wipe_out
+			l_code.go_to_matching_bracket
+			assert ("at the partner: " + l_code.caret_line.out + ":" + l_code.caret_column.out, l_code.caret_line = 3 and l_code.caret_column = 7)
+			assert ("the program's move is not told", l_told.is_empty)
+			assert_bracket_pair ("from the partner", l_code, 6, 35)
+			l_code.go_to_matching_bracket
+			assert ("and back: " + l_code.caret_line.out + ":" + l_code.caret_column.out, l_code.caret_line = 1 and l_code.caret_column = 6 and l_told.is_empty)
+			driver.press_bracket_key (l_code)
+			assert ("the key goes there: " + l_code.caret_line.out + ":" + l_code.caret_column.out, l_code.caret_line = 3 and l_code.caret_column = 7)
+			assert ("and the user's move is told once: " + l_told.count.out, l_told.count = 1 and then l_told.last.same_string ("3:7"))
+			assert_bracket_pair ("after the key", l_code, 6, 35)
+			driver.move_caret (l_code, 1, 2)
+			l_told.wipe_out
+			driver.press_bracket_key (l_code)
+			assert ("without a pair the key does nothing", l_code.caret_line = 1 and l_code.caret_column = 2 and l_told.is_empty)
+				-- off and on
+			driver.move_caret (l_code, 1, 6)
+			l_code.set_bracket_matching (False)
+			assert_no_bracket_pair ("off", l_code)
+			driver.move_caret (l_code, 1, 9)
+			assert_no_bracket_pair ("off, at another bracket", l_code)
+			l_code.go_to_matching_bracket
+			assert ("off: nowhere to go", l_code.caret_line = 1 and l_code.caret_column = 9)
+			l_code.set_bracket_matching (True)
+			assert_bracket_pair ("on again, at once", l_code, 9, 11)
+				-- typing: the tint goes with the change and the new answer shows
+			driver.move_caret (l_code, 1, 7)
+			l_changes_before := l_changes.item
+			driver.type_code (l_code, "(")
+			assert ("typing is a change", l_changes.item > l_changes_before)
+			assert_bracket_pair ("the typed bracket takes the partner", l_code, 7, 36)
+			driver.invoke_menu (l_undo)
+			assert ("one undo takes the typed bracket back (the tint was no step): [" + l_code.line_text (1).out + "]", l_code.text.same_string (l_text))
+			if l_code.has_bracket_pair then
+				assert_bracket_pair ("after the undo", l_code, l_code.bracket_first, l_code.bracket_second)
+			else
+				assert_no_bracket_pair ("after the undo", l_code)
+			end
+			l_window.close
+		end
+
+	test_code_editor_bracket_reach
+			-- 1v-e-2: the rules' search looks at 2,000 lines, the bracket's own among them.
+			-- A partner on line 2,000 is found, from either end; one on line 2,001 is not.
+			-- Prints what a look that finds nothing costs.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_text: STRING_32
+			l_t0: REAL_64
+			i: INTEGER
+		do
+			create l_window.make ("Bracket reach", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_text.make (2100)
+			l_text.append_character ('(')
+			l_text.append (create {STRING_32}.make_filled ('%N', 1999))
+			l_text.append_character (')')
+			l_code.set_text (l_text)
+			driver.move_caret (l_code, 2, 1)
+			driver.move_caret (l_code, 1, 1)
+			assert_bracket_pair ("the partner on line 2,000", l_code, 1, 2001)
+			driver.move_caret (l_code, 2000, 2)
+			assert_bracket_pair ("and from there back", l_code, 1, 2001)
+			l_text.insert_character ('%N', 2)
+			l_code.set_text (l_text)
+			driver.move_caret (l_code, 2, 1)
+			driver.move_caret (l_code, 1, 1)
+			assert ("the caret is at the bracket", l_code.caret_line = 1 and l_code.caret_column = 1)
+			assert_no_bracket_pair ("the partner on line 2,001", l_code)
+			l_t0 := now_seconds
+			from i := 1 until i > 20 loop
+				timed (agent l_code.set_bracket_matching (True))
+				i := i + 1
+			end
+			print ("    brackets: a look over 2,000 lines that finds no partner, mean of 20: " + ((now_seconds - l_t0) * 50_000.0).rounded.out + " microseconds%N")
+			io.output.flush
+			driver.move_caret (l_code, 2001, 2)
+			assert_no_bracket_pair ("nor from there back", l_code)
+			l_window.close
+		end
+
+	test_code_editor_bracket_pair_from_syntax
+			-- 1v-e-2, with a syntax object: it is asked where the bracket is, the rules do
+			-- not search, and its answer is shown, given at once or a turn later. A range
+			-- may be longer than one character. An answer out of the text shows no pair; the
+			-- answer to an older question leaves what is shown.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_asked: INTEGER
+		do
+			create l_window.make ("Brackets by a syntax object", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_syntax.make
+			l_code.set_syntax (l_syntax)
+				-- (* a *) b (c)      ( 1   ) 7   ( 11   ) 13
+			l_code.set_text ("(* a *) b (c)")
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 9)
+			l_asked := l_syntax.bracket_count
+			driver.move_caret (l_code, 1, 11)
+			assert ("asked where the bracket is: " + l_syntax.bracket_position.out, l_syntax.bracket_count = l_asked + 1 and l_syntax.bracket_position = 11)
+			assert_no_bracket_pair ("no answer yet, and the rules do not search", l_code)
+				-- the answer comes a turn later
+			driver.pump_until_idle (0)
+			l_code.show_bracket_pair (11, 1, 13, 1)
+			assert_bracket_pair ("answered later", l_code, 11, 13)
+			l_code.show_bracket_pair (1, 2, 6, 2)
+			assert_bracket_pair ("the answer to an older question leaves what is shown", l_code, 11, 13)
+			l_code.show_bracket_pair (11, 1, 50, 1)
+			assert_no_bracket_pair ("an answer out of the text", l_code)
+			l_code.show_bracket_pair (11, 1, 13, 1)
+			l_code.hide_bracket_pair
+			assert_no_bracket_pair ("the answer that there is no partner", l_code)
+				-- the answer comes at once, with ranges of two characters
+			l_syntax.set_pair_answer ([1, 2, 6, 2])
+			driver.move_caret (l_code, 1, 1)
+			assert ("asked about the first: " + l_syntax.bracket_position.out, l_syntax.bracket_position = 1)
+			assert ("shown at once: " + l_code.bracket_first.out + ", " + l_code.bracket_second.out,
+				l_code.has_bracket_pair and then (l_code.bracket_first = 1 and l_code.bracket_second = 6))
+			assert ("both ranges tinted, and only they", driver.is_bracket_tinted (l_code, 1) and driver.is_bracket_tinted (l_code, 2)
+				and driver.is_bracket_tinted (l_code, 6) and driver.is_bracket_tinted (l_code, 7) and tinted_count (l_code) = 4)
+			l_code.go_to_matching_bracket
+			assert ("to the start of the partner's range: " + l_code.caret_column.out, l_code.caret_line = 1 and l_code.caret_column = 6)
+				-- the syntax object goes: the rules search again
+			l_syntax.set_pair_answer (Void)
+			l_code.set_syntax (Void)
+			driver.move_caret (l_code, 1, 9)
+			driver.move_caret (l_code, 1, 11)
+			assert_bracket_pair ("by the rules again", l_code, 11, 13)
+			l_window.close
 		end
 
 	test_code_editor_lets_go_with_its_window
@@ -4768,6 +5012,37 @@ feature {NONE} -- Fixtures
 			assert (a_tag + ": every edit fit the copy", a_syntax.false_edits = 0)
 			assert (a_tag + ": the copy [" + a_syntax.copy_text.out + "] is the text [" + a_code.text.out + "]",
 				a_syntax.copy_text.same_string (a_code.text))
+		end
+
+	assert_bracket_pair (a_tag: STRING; a_code: GUI_CODE_EDITOR; a_first, a_second: INTEGER)
+			-- `a_code' has the pair of the brackets at `a_first' and `a_second', and its
+			-- control tints those two characters and no other.
+		do
+			assert (a_tag + ": the pair is " + a_code.bracket_first.out + ", " + a_code.bracket_second.out + " (has one: " + a_code.has_bracket_pair.out + ")",
+				a_code.has_bracket_pair and then (a_code.bracket_first = a_first and a_code.bracket_second = a_second))
+			assert (a_tag + ": both are tinted", driver.is_bracket_tinted (a_code, a_first) and driver.is_bracket_tinted (a_code, a_second))
+			assert (a_tag + ": and nothing else: " + tinted_count (a_code).out, tinted_count (a_code) = 2)
+		end
+
+	assert_no_bracket_pair (a_tag: STRING; a_code: GUI_CODE_EDITOR)
+			-- `a_code' has no pair and its control tints nothing.
+		do
+			assert (a_tag + ": no pair, but " + a_code.bracket_first.out + ", " + a_code.bracket_second.out, not a_code.has_bracket_pair)
+			assert (a_tag + ": nothing tinted: " + tinted_count (a_code).out, tinted_count (a_code) = 0)
+		end
+
+	tinted_count (a_code: GUI_CODE_EDITOR): INTEGER
+			-- How many characters the control of `a_code' shows under the bracket tint.
+		local
+			i, l_count: INTEGER
+		do
+			l_count := a_code.text.count
+			from i := 1 until i > l_count loop
+				if driver.is_bracket_tinted (a_code, i) then
+					Result := Result + 1
+				end
+				i := i + 1
+			end
 		end
 
 	color_at (a_code: GUI_CODE_EDITOR; i: INTEGER): INTEGER
