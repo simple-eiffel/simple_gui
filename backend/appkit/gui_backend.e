@@ -1748,6 +1748,42 @@ feature -- Common widget state
 		alias "return sga_test_completions_shown($an_id) ? EIF_TRUE : EIF_FALSE;"
 		end
 
+	code_set_extra_carets (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- 1v-e-5.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_set_extra_carets($an_id, (const int *) $a_pairs, $a_count);"
+		end
+
+	code_typed_text (an_id: INTEGER): POINTER
+			-- 1v-e-5.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_code_typed_text($an_id);"
+		end
+
+	text_begin_edit_group (an_id: INTEGER)
+			-- 1v-e-5.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_text_begin_edit_group($an_id);"
+		end
+
+	text_end_edit_group (an_id: INTEGER)
+			-- 1v-e-5.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_text_end_edit_group($an_id);"
+		end
+
+	test_code_key (an_id, an_action: INTEGER; a_shift: BOOLEAN; a_text: POINTER)
+			-- 1v-e-5.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_code_key($an_id, $an_action, $a_shift ? 1 : 0, (const char *) $a_text);"
+		end
+
+	test_caret_gesture (an_id, a_gesture, a_position: INTEGER)
+			-- 1v-e-5.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_caret_gesture($an_id, $a_gesture, $a_position);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"
