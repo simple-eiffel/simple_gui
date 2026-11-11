@@ -2776,6 +2776,74 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_line_ranges
+			-- 1v-e-3: GUI_LINE_RANGES. The folds of a text by indentation; the lines that
+			-- ranges hide together; and what an edit does to ranges: one above moves them,
+			-- one in a first line that adds no line leaves them, one that joins or splits a
+			-- first line or touches a hidden line removes the range.
+		local
+			l_folds, l_closed, l_merged: GUI_LINE_RANGES
+			l_text, l_new: STRING_32
+		do
+				-- line 1 "a", 2 tab "b", 3 tab tab "c", 4 blank, 5 tab "d", 6 "e", 7 blank,
+				-- 8 "f", 9 four spaces "g"
+			l_text := {STRING_32} "a%N%Tb%N%T%Tc%N%N%Td%Ne%N%Nf%N    g%N"
+			create l_folds.make_by_indentation (l_text, 4)
+			assert ("three folds", l_folds.count = 3)
+			assert ("a through d, the blank line between in it", l_folds.first_line (1) = 1 and l_folds.last_line (1) = 5)
+			assert ("b through c, the blank line after not in it", l_folds.first_line (2) = 2 and l_folds.last_line (2) = 3)
+			assert ("f through g, spaces as deep as a tab", l_folds.first_line (3) = 8 and l_folds.last_line (3) = 9)
+			assert ("one fold lies in another", not l_folds.is_disjoint)
+			assert ("a fold starts on line 2", l_folds.has_start (2) and l_folds.index_starting_at (2) = 2)
+			assert ("none starts on line 3", not l_folds.has_start (3))
+			create l_folds.make_by_indentation ({STRING_32} "a%N  b%N%Tc%N", 2)
+			assert ("a tab reaches the next stop", l_folds.count = 1 and l_folds.last_line (1) = 3)
+			create l_folds.make_by_indentation ({STRING_32} "", 4)
+			assert ("no text, no fold", l_folds.count = 0)
+
+			create l_folds.make_by_indentation (l_text, 4)
+			l_merged := l_folds.merged
+			assert ("hidden together: two stretches", l_merged.count = 2 and l_merged.is_disjoint)
+			assert ("lines 2 to 5", l_merged.first_line (1) = 1 and l_merged.last_line (1) = 5)
+			assert ("a first line shows", not l_merged.is_hidden (1) and not l_merged.is_hidden (8))
+			assert ("the lines after it do not", l_merged.is_hidden (2) and l_merged.is_hidden (5) and l_merged.is_hidden (9))
+			assert ("line 6 shows", not l_merged.is_hidden (6) and l_merged.index_hiding (6) = 0)
+
+				-- closed: b (2 to 3) and f (8 to 9)
+			create l_closed.make
+			l_closed.put (8, 9)
+			l_closed.put (2, 3)
+			assert ("kept in order", l_closed.first_line (1) = 2 and l_closed.first_line (2) = 8 and l_closed.is_disjoint)
+			l_new := l_text.twin
+			l_new.insert_string ({STRING_32} "x%N", 3)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("a line added above moves both", l_closed.count = 2 and l_closed.first_line (1) = 3 and l_closed.last_line (1) = 4 and l_closed.first_line (2) = 9 and l_closed.last_line (2) = 10)
+			l_closed.follow_texts (l_new, l_text)
+			assert ("and taken away moves them back", l_closed.count = 2 and l_closed.first_line (1) = 2 and l_closed.last_line (2) = 9)
+			l_new := l_text.twin
+			l_new.insert_character ('x', 5)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("typing in a first line leaves them", l_closed.count = 2 and l_closed.first_line (1) = 2 and l_closed.last_line (1) = 3)
+			l_new := l_text.twin
+			l_new.put ('x', l_text.count - 1)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("a change in a hidden line opens that one", l_closed.count = 1 and l_closed.first_line (1) = 2)
+			l_new := l_text.twin
+			l_new.remove (2)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("joining a first line to the line above opens it", l_closed.count = 0)
+			l_closed.put (2, 3)
+			l_closed.put (8, 9)
+			l_new := l_text.twin
+			l_new.insert_character ('%N', 5)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("splitting a first line opens it, and moves the one below", l_closed.count = 1 and l_closed.first_line (1) = 9 and l_closed.last_line (1) = 10)
+			l_closed.follow_texts (l_new, l_new)
+			assert ("no edit, no change", l_closed.count = 1 and l_closed.first_line (1) = 9)
+			l_closed.remove_starting_at (9)
+			assert ("removed", l_closed.count = 0)
+		end
+
 	test_code_editor_bracket_reach
 			-- 1v-e-2: the rules' search looks at 2,000 lines, the bracket's own among them.
 			-- A partner on line 2,000 is found, from either end; one on line 2,001 is not.

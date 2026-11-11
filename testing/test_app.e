@@ -130,6 +130,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_code_apply_spans, "code_apply_spans")
 				run_test (agent t.test_code_apply_spans_cost, "code_apply_spans_cost")
 				run_test (agent t.test_code_editor_bracket_pairs, "code_editor_bracket_pairs")
+				run_test (agent t.test_line_ranges, "line_ranges")
 				run_test (agent t.test_code_editor_bracket_reach, "code_editor_bracket_reach")
 				run_test (agent t.test_code_editor_bracket_pair_from_syntax, "code_editor_bracket_pair_from_syntax")
 				run_test (agent t.test_new_message_tag, "new_message_tag")
