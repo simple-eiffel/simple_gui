@@ -104,5 +104,6 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - **Native:** each control is the platform's own. Nothing is drawn to imitate a platform.
 - **Code is silent:** setting a value from the program (`set_text`, `select_row`, `set_value`) never fires an event. Only the user's actions do.
 - **Accessible by default:** every control has a label for screen readers (its visible text unless you set one). A placeholder is never the label. Each page names the control's accessibility role.
+- **Characters beyond ASCII by code point:** the compiler reads a class file saved without a UTF-8 byte-order mark one character per byte, so "Print…" typed into one shows as "Printâ€¦" on every platform, whatever the string type. Write the code point: `{STRING_32} "Print%/8230/"`. (A file saved as UTF-8 with the mark reads as written.)
 - **Layout by containers:** stacks and grids place widgets, with leading and trailing margins, so a right-to-left window mirrors correctly.
 - **Testable:** `GUI_TEST_DRIVER` acts as a user would, takes snapshots, and reads the accessibility tree. Every control in this guide has shared tests that pass on all three platforms.

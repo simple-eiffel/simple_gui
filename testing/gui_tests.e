@@ -2560,6 +2560,33 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_a_label_beyond_ascii_reads_as_written
+			-- The guide's rule (2026-11-11, from the printing example): the compiler reads a source
+			-- file saved without a UTF-8 byte-order mark one character per byte, so an ellipsis typed
+			-- into one becomes three characters; the escape %/8230/ is right in any file. The labels
+			-- come from GUI_LABEL_ENCODING (saved without the mark) and are read back from the
+			-- platform's own accessibility tree.
+		local
+			l_labels: GUI_LABEL_ENCODING
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_tree: STRING_32
+		do
+			create l_labels
+			assert ("the escape is one character: " + l_labels.escaped_ellipsis_label.count.out, l_labels.escaped_ellipsis_label.count = 6)
+			assert ("a raw ellipsis in a file without the mark is three: " + l_labels.raw_ellipsis_label.count.out, l_labels.raw_ellipsis_label.count = 7)
+			create l_window.make ("Labels", 300, 140)
+			create l_stack.make_vertical
+			l_stack.extend (create {GUI_BUTTON}.make (l_labels.escaped_ellipsis_label))
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_tree := driver.describe_accessibility (l_window)
+			print (indented (l_tree))
+			assert ("the platform reads Print and the ellipsis", l_tree.has_substring ({STRING_32} "button: Print%/8230/"))
+			l_window.close
+		end
+
 	test_print_job_renders_and_saves
 			-- 1v-c: `print_text' lays a long text out over several pages and `print_pages'
 			-- makes exactly the pages asked for; `save_pdf' writes a whole PDF with that many

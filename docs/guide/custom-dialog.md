@@ -17,7 +17,7 @@ feature
 		do
 			create app.make ("Books", "org.example.books")
 			create window.make ("Books", 480, 300)
-			create l_rename.make ("Rename…")
+			create l_rename.make ({STRING_32} "Rename%/8230/")
 			l_rename.click_actions.extend (agent rename)
 			window.set_content (l_rename)
 			window.show
