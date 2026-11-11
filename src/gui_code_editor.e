@@ -55,6 +55,13 @@ feature {NONE} -- Initialization
 			is_fold_lines_stale := True
 			is_case_sensitive := True
 			is_bracket_matching := True
+			create completion_words.make (8)
+			create completion_offers.make (8)
+			create completion_shown.make (8)
+			create completion_word.make_empty
+			create completion_opened_actions.make
+			create completion_accepted_actions.make
+			completion_auto_count := 2
 			tab_width := 4
 			register (backend.code_editor)
 			change_actions.extend (agent text_changed)
@@ -673,6 +680,104 @@ feature -- Bracket matching (1v-e-2)
 				and then a_second_count <= highlighted.count - a_second_start + 1
 		end
 
+feature -- Completion (1v-e-4)
+
+	completion_auto_count: INTEGER
+			-- How many word characters, typed, open a list by itself (2 until set); 0: a list
+			-- opens only on request (Control+Space, or `complete').
+
+	set_completion_auto_count (a_count: INTEGER)
+		require
+			not_negative: a_count >= 0
+		do
+			completion_auto_count := a_count
+		ensure
+			set: completion_auto_count = a_count
+		end
+
+	set_completion_words (a_words: ITERABLE [READABLE_STRING_GENERAL])
+			-- Offer each of `a_words' that is not empty, as plain offers, in place of the
+			-- words set before. A list already open keeps what it has.
+		do
+			completion_words.wipe_out
+			across a_words as ic loop
+				if not ic.is_empty then
+					completion_words.extend (create {GUI_COMPLETION}.make (ic))
+				end
+			end
+		end
+
+	completer: detachable FUNCTION [STRING_32, INTEGER, INTEGER, ITERABLE [GUI_COMPLETION]]
+			-- Given the word so far, the caret's line and its column, the offers.
+
+	set_completer (a_function: like completer)
+			-- `a_function' answers offers when a list opens. It runs on the GUI processor, so
+			-- it must be quick; a slow source answers through `completion_opened_actions' and
+			-- `add_completions' instead. Void: none.
+		do
+			completer := a_function
+		ensure
+			set: completer = a_function
+		end
+
+	completion_opened_actions: GUI_ACTIONS [TUPLE [start: INTEGER]]
+			-- Run when a list is wanted for the word that starts at position `start' (the
+			-- caret's position when the word is empty): a slow source answers later with
+			-- `add_completions'.
+
+	completion_accepted_actions: GUI_ACTIONS [TUPLE [text: STRING_32]]
+			-- Run after an offer's `text' is put in place of the word.
+
+	complete
+			-- Open a list for the word before the caret, as Control+Space does. No list shows
+			-- while there are no offers.
+		require
+			gui_thread: is_gui_thread
+		do
+			open_completion
+		end
+
+	add_completions (a_start: INTEGER; an_offers: ITERABLE [GUI_COMPLETION])
+			-- Add `an_offers' to the list opened for the word that starts at `a_start'.
+			-- Nothing when that list has closed or a list belongs to another word.
+		require
+			gui_thread: is_gui_thread
+		do
+			if a_start > 0 and a_start = completion_start then
+				across an_offers as ic loop
+					completion_offers.extend (ic)
+				end
+				filter_completions
+			end
+		end
+
+	is_completing: BOOLEAN
+			-- Does a list show?
+		do
+			Result := completion_start > 0 and completion_shown.count > 0
+		end
+
+	completion_count: INTEGER
+			-- How many rows the list has; 0 when none shows.
+		do
+			if completion_start > 0 then
+				Result := completion_shown.count
+			end
+		ensure
+			none_when_closed: not is_completing implies Result = 0
+		end
+
+	completion_label (i: INTEGER): STRING_32
+			-- Row `i''s label.
+		require
+			valid: 1 <= i and i <= completion_count
+		do
+			Result := completion_shown [i].label
+		end
+
+	completion_selected: INTEGER
+			-- The highlighted row; 0 when no list shows.
+
 feature -- Find and replace
 
 	find_next (a_text: READABLE_STRING_GENERAL; a_case_sensitive, a_whole_word: BOOLEAN): BOOLEAN
@@ -740,12 +845,20 @@ feature {GUI_APPLICATION} -- Events
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)
 			-- 52: the user moved the caret (line, column); 56: the user pressed the key that
 			-- goes to the matching bracket; 57: the user clicked a fold marker or pressed a
-			-- fold key (line, which); else as a text area.
+			-- fold key (line, which); 58: a completion key (which); 59: a click on a
+			-- completion row (row); else as a text area.
 		do
 			if a_type = 52 then
 				show_lines (a_a, a_a)
 				look_for_bracket
+				completion_caret_moved
 				caret_actions.call ([a_a, a_b])
+			elseif a_type = 58 then
+				completion_key (a_a)
+			elseif a_type = 59 then
+				if 1 <= a_a and a_a <= completion_count then
+					accept_completion (a_a)
+				end
 			elseif a_type = 57 then
 				fold_by_user (a_a, a_b)
 			elseif a_type = 56 then
@@ -761,8 +874,9 @@ feature {GUI_APPLICATION} -- Events
 feature -- Element change
 
 	set_text (a_text: READABLE_STRING_GENERAL)
-			-- Also: every fold opens, and the folds are found again.
+			-- Also: every fold opens, and the folds are found again; a completion list closes.
 		do
+			close_completion
 			Precursor (a_text)
 			open_every_fold
 			if syntax = Void then
@@ -830,6 +944,11 @@ feature {NONE} -- The application's calls
 			if enclosing_window = a_window then
 				has_bracket_pair := False
 				bracket_asked := 0
+					-- the list went with the control
+				completion_start := 0
+				completion_selected := 0
+				completion_offers.wipe_out
+				completion_shown.wipe_out
 				if attached syntax as al_syntax then
 					al_syntax.detach
 					syntax := Void
@@ -865,8 +984,10 @@ feature {NONE} -- Highlighting
 			-- hears what changed, or the rules color the changed lines.
 		local
 			l_text: STRING_32
+			l_before: INTEGER
 		do
 			l_text := text
+			l_before := highlighted.count
 				-- before the syntax object hears: it may answer with `set_folds' at once
 			folds_follow (highlighted, l_text)
 			if attached syntax as al_syntax then
@@ -875,6 +996,7 @@ feature {NONE} -- Highlighting
 				rehighlight (l_text)
 			end
 			look_for_bracket
+			completion_follow_edit (l_text.count - l_before)
 		end
 
 	rules_changed
@@ -1717,6 +1839,248 @@ feature {NONE} -- Folding
 			end
 		ensure
 			in_or_just_past: 1 <= Result and Result <= a_text.count + 1
+		end
+
+feature {NONE} -- Completion
+
+	completion_words: ARRAYED_LIST [GUI_COMPLETION]
+			-- The fixed list (`set_completion_words').
+
+	completion_offers: ARRAYED_LIST [GUI_COMPLETION]
+			-- Every offer for the word with a list, in the sources' order: the fixed list,
+			-- the completer's, then what `add_completions' added.
+
+	completion_shown: ARRAYED_LIST [GUI_COMPLETION]
+			-- The rows: the offers that match `completion_word'.
+
+	completion_start: INTEGER
+			-- Where the word with a list starts; 0 when there is none. A list with no rows
+			-- yet (a slow source has not answered) keeps its word here.
+
+	completion_word: STRING_32
+			-- The word the rows were matched against.
+
+	Completion_page: INTEGER = 8
+			-- Rows Page Up and Page Down move: the list's height.
+
+	open_completion
+			-- A list for the word before the caret: gather the offers, tell
+			-- `completion_opened_actions', and show the rows that match.
+		local
+			l_caret, l_start: INTEGER
+		do
+			close_completion
+			l_caret := selection_start.min (highlighted.count + 1)
+			l_start := word_start_before (l_caret)
+			completion_start := l_start
+			completion_word := highlighted.substring (l_start, l_caret - 1)
+			completion_offers.append (completion_words)
+			if attached completer as al_completer then
+				across al_completer.item ([completion_word.twin, caret_line, caret_column]) as ic loop
+					completion_offers.extend (ic)
+				end
+			end
+			completion_opened_actions.call ([l_start])
+			filter_completions
+		ensure
+			for_the_word: completion_start > 0
+		end
+
+	filter_completions
+			-- The rows again: offers whose label starts with `completion_word', then those
+			-- whose label holds it elsewhere, each group in the sources' order, case ignored.
+			-- Shown (the first row highlighted), or hidden when none match.
+		local
+			l_word: STRING_32
+			l_later: ARRAYED_LIST [GUI_COMPLETION]
+			l_at: INTEGER
+		do
+			l_word := completion_word.as_lower
+			completion_shown.wipe_out
+			create l_later.make (4)
+			across completion_offers as ic loop
+				if l_word.is_empty then
+					completion_shown.extend (ic)
+				else
+					l_at := ic.label.as_lower.substring_index (l_word, 1)
+					if l_at = 1 then
+						completion_shown.extend (ic)
+					elseif l_at > 1 then
+						l_later.extend (ic)
+					end
+				end
+			end
+			completion_shown.append (l_later)
+			if completion_shown.is_empty then
+				completion_selected := 0
+				backend.code_hide_completions (id)
+			else
+				completion_selected := 1
+				show_completion_rows
+			end
+		ensure
+			first_highlighted: completion_selected = completion_shown.count.min (1)
+		end
+
+	show_completion_rows
+			-- Hand the rows to the control: rows joined by 0x1F, and in a row the label, the
+			-- detail and the kind joined by 0x1E.
+		require
+			has_rows: completion_shown.count > 0
+			highlighted_row: 1 <= completion_selected and completion_selected <= completion_shown.count
+		local
+			l_joined: STRING_32
+			l_c: C_STRING
+			l_first: BOOLEAN
+		do
+			create l_joined.make (32 * completion_shown.count)
+			l_first := True
+			across completion_shown as ic loop
+				if not l_first then
+					l_joined.append_character ((0x1F).to_character_32)
+				end
+				l_first := False
+				l_joined.append (ic.label)
+				l_joined.append_character ((0x1E).to_character_32)
+				l_joined.append (ic.detail)
+				l_joined.append_character ((0x1E).to_character_32)
+				l_joined.append_integer (ic.kind)
+			end
+			l_c := backend.to_c (l_joined)
+			backend.code_show_completions (id, l_c.item, completion_selected)
+		end
+
+	close_completion
+			-- No list, and no word waiting for one.
+		do
+			if completion_start > 0 then
+				backend.code_hide_completions (id)
+				completion_start := 0
+				completion_selected := 0
+				completion_offers.wipe_out
+				completion_shown.wipe_out
+			end
+		ensure
+			closed: completion_start = 0 and not is_completing
+		end
+
+	completion_key (a_key: INTEGER)
+			-- Event 58: 0 open a list; with one showing, 1 Up, 2 Down, 3 Page Up, 4 Page Down
+			-- move, 5 accepts, 6 closes (Escape, or the control hid it).
+		do
+			inspect a_key
+			when 0 then
+				open_completion
+			when 1 then
+				move_completion (-1)
+			when 2 then
+				move_completion (1)
+			when 3 then
+				move_completion (- Completion_page)
+			when 4 then
+				move_completion (Completion_page)
+			when 5 then
+				if is_completing then
+					accept_completion (completion_selected)
+				end
+			when 6 then
+				close_completion
+			else
+			end
+		end
+
+	move_completion (a_by: INTEGER)
+			-- Highlight the row `a_by' rows on, kept within the list.
+		do
+			if is_completing then
+				completion_selected := (completion_selected + a_by).max (1).min (completion_shown.count)
+				backend.code_select_completion (id, completion_selected)
+			end
+		ensure
+			in_list: is_completing implies (1 <= completion_selected and completion_selected <= completion_count)
+		end
+
+	accept_completion (a_row: INTEGER)
+			-- Put row `a_row''s text in place of the word, as one undo step, with the caret
+			-- after it; then `completion_accepted_actions'.
+		require
+			valid: 1 <= a_row and a_row <= completion_count
+		local
+			l_text: STRING_32
+			l_start, l_end, l_after: INTEGER
+			l_c: C_STRING
+		do
+			l_text := completion_shown [a_row].text.twin
+			l_start := completion_start
+			l_end := (selection_start - 1).max (l_start - 1)
+			close_completion
+			l_c := backend.to_c (l_text)
+			backend.text_replace_range (id, l_start, l_end, l_c.item)
+			l_after := l_start + l_text.count
+			backend.rich_text_select (id, l_after, l_after - 1)
+			program_edited
+			completion_accepted_actions.call ([l_text])
+		ensure
+			closed: not is_completing
+		end
+
+	completion_follow_edit (a_grown: INTEGER)
+			-- The user edited the text, which grew by `a_grown' characters: an open list
+			-- narrows or widens to the word before the caret, and closes when the caret has
+			-- left the word or the word is gone. With none open, typing that brings the word
+			-- before the caret to `completion_auto_count' characters or more opens one.
+		local
+			l_caret, l_start: INTEGER
+		do
+			l_caret := selection_start.min (highlighted.count + 1)
+			l_start := word_start_before (l_caret)
+			if completion_start > 0 then
+				if l_start = completion_start and l_caret > l_start then
+					completion_word := highlighted.substring (l_start, l_caret - 1)
+					filter_completions
+				else
+					close_completion
+				end
+			elseif completion_auto_count > 0 and then a_grown >= 1 and then a_grown <= l_caret - l_start
+				and then l_caret - l_start >= completion_auto_count
+			then
+					-- what the edit added is all word, before the caret: typed (two keys can
+					-- land before one change event), not pasted with other text
+				open_completion
+			end
+		end
+
+	completion_caret_moved
+			-- The user moved the caret (52): an open list closes unless the caret is still at
+			-- the end of its word (typing moves the caret there too).
+		local
+			l_caret: INTEGER
+		do
+			if completion_start > 0 then
+				l_caret := selection_start.min (highlighted.count + 1)
+				if word_start_before (l_caret) /= completion_start
+					or else (l_caret <= highlighted.count and then is_word_character (highlighted [l_caret]))
+				then
+					close_completion
+				end
+			end
+		end
+
+	word_start_before (a_caret: INTEGER): INTEGER
+			-- Where the run of word characters that ends just before position `a_caret'
+			-- starts in `highlighted'; `a_caret' itself when there is none.
+		require
+			in_text: 1 <= a_caret and a_caret <= highlighted.count + 1
+		do
+			from
+				Result := a_caret
+			until
+				Result <= 1 or else not is_word_character (highlighted [Result - 1])
+			loop
+				Result := Result - 1
+			end
+		ensure
+			at_or_before: 1 <= Result and Result <= a_caret
 		end
 
 feature {NONE} -- Finding

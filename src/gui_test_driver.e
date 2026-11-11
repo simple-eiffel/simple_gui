@@ -769,6 +769,36 @@ feature -- User actions
 			Result := backend.test_bracket_tint_at (an_editor.id, a_position)
 		end
 
+	press_completion_key (an_editor: GUI_CODE_EDITOR; a_key: INTEGER)
+			-- Press completion key `a_key' as the user would: 0 Control+Space, 1 Up, 2 Down,
+			-- 3 Page Up, 4 Page Down, 5 Return, 6 Escape (58, for 1 to 6 only while a list
+			-- shows).
+		require
+			has_application: has_application
+			a_key: 0 <= a_key and a_key <= 6
+		do
+			backend.test_completion_key (an_editor.id, a_key)
+			settle
+		end
+
+	press_completion_row (an_editor: GUI_CODE_EDITOR; a_row: INTEGER)
+			-- Click row `a_row' of the completion list, as the user would: 59.
+		require
+			has_application: has_application
+			row_from_one: a_row >= 1
+		do
+			backend.test_press_completion (an_editor.id, a_row)
+			settle
+		end
+
+	are_completions_shown (an_editor: GUI_CODE_EDITOR): BOOLEAN
+			-- Does the control show a completion list?
+		require
+			has_application: has_application
+		do
+			Result := backend.test_completions_shown (an_editor.id)
+		end
+
 	press_fold_marker (an_editor: GUI_CODE_EDITOR; a_line: INTEGER)
 			-- Click the fold marker beside `a_line', as the user would: 57. Nothing when
 			-- the line shows no marker.

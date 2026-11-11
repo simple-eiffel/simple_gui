@@ -35,7 +35,8 @@ inherit
 			make_rich, set_text, changed, ensure_layout, refresh_marks, draw, text_left, text_top,
 			wrap_width_in, effective_text_alignment, preferred_height, select_characters,
 			handle_click, handle_double_click, handle_triple_click, handle_drag,
-			handle_char, handle_key, handle_wheel, handle_release, wants_tab, offset_at
+			handle_char, handle_key, handle_wheel, handle_release, wants_tab, offset_at,
+			set_focused
 		end
 
 	SW_VSCROLLING
@@ -151,6 +152,128 @@ feature -- The bracket pair (1v-e-2)
 		do
 			if attached on_bracket_key as al_told then
 				al_told.call (Void)
+			end
+		end
+
+feature -- Completion (1v-e-4)
+
+	completion_rows: ARRAYED_LIST [TUPLE [label, detail: STRING_32; kind: INTEGER]]
+			-- The rows of the completion list; empty while none shows.
+		attribute
+			create Result.make (0)
+		end
+
+	completion_at: INTEGER
+			-- The highlighted row; 0 while no list shows.
+
+	is_completion_shown: BOOLEAN
+			-- Does the completion list show?
+		do
+			Result := completion_rows.count > 0
+		end
+
+	on_completion_key: detachable PROCEDURE [INTEGER]
+			-- Told 0 for Control+Space; with the list showing, 1 Up, 2 Down, 3 Page Up,
+			-- 4 Page Down, 5 Return or Tab, 6 Escape, in place of the key's usual work; and 6
+			-- when the list hid itself (the focus left, or the lines scrolled).
+
+	on_completion_press: detachable PROCEDURE [INTEGER]
+			-- Told the row the user clicked.
+
+	set_on_completion_key (a_action: like on_completion_key)
+		do
+			on_completion_key := a_action
+		end
+
+	set_on_completion_press (a_action: like on_completion_press)
+		do
+			on_completion_press := a_action
+		end
+
+	show_completions (a_rows: ITERABLE [TUPLE [label, detail: STRING_32; kind: INTEGER]]; a_selected: INTEGER)
+			-- The list, at the caret's line, with row `a_selected' highlighted (kept within the
+			-- rows); in place of what it showed. No rows: no list.
+		do
+			completion_rows.wipe_out
+			across a_rows as ic loop
+				completion_rows.extend (ic)
+			end
+			completion_top := 1
+			if completion_rows.is_empty then
+				completion_at := 0
+			else
+				select_completion (a_selected)
+			end
+		ensure
+			highlighted: is_completion_shown implies (1 <= completion_at and completion_at <= completion_rows.count)
+		end
+
+	select_completion (a_row: INTEGER)
+			-- Highlight row `a_row' (kept within the rows) and scroll it into view.
+		do
+			if is_completion_shown then
+				completion_at := a_row.max (1).min (completion_rows.count)
+				if completion_at < completion_top then
+					completion_top := completion_at
+				elseif completion_at >= completion_top + Completion_rows_shown then
+					completion_top := completion_at - Completion_rows_shown + 1
+				end
+			end
+		end
+
+	hide_completions
+			-- No list. Tells nothing.
+		do
+			completion_rows.wipe_out
+			completion_at := 0
+			completion_top := 1
+		ensure
+			hidden: not is_completion_shown
+		end
+
+	press_completion_key (a_key: INTEGER)
+			-- As the user pressing completion key `a_key' (0 Control+Space, 1 Up, 2 Down,
+			-- 3 Page Up, 4 Page Down, 5 Return, 6 Escape): 0 always tells
+			-- `on_completion_key'; 1 to 6 tell it while the list shows, and otherwise do the
+			-- key's usual work.
+		require
+			a_key: 0 <= a_key and a_key <= 6
+		do
+			if a_key = 0 or is_completion_shown then
+				tell_completion_key (a_key)
+			else
+				inspect a_key
+				when 1 then
+					handle_key (38, False)
+				when 2 then
+					handle_key (40, False)
+				when 3 then
+					handle_key (33, False)
+				when 4 then
+					handle_key (34, False)
+				when 5 then
+					handle_char (13)
+				else
+						-- Escape does nothing in a code editor
+				end
+			end
+		end
+
+	press_completion_row (a_row: INTEGER)
+			-- As the user clicking row `a_row' of the list: tell `on_completion_press'.
+			-- Nothing when no list shows or there is no such row.
+		do
+			if 1 <= a_row and a_row <= completion_rows.count and then attached on_completion_press as al_told then
+				al_told.call (a_row)
+			end
+		end
+
+	set_focused (a_focused: BOOLEAN)
+			-- Also: losing the focus hides the completion list, and says so.
+		do
+			Precursor {GUI_SW_RICH_TEXT_AREA} (a_focused)
+			if not a_focused then
+				completion_hides_itself
 			end
 		end
 
@@ -440,7 +563,7 @@ feature -- Typing
 
 	type_code (a_text: READABLE_STRING_GENERAL)
 			-- Type `a_text' as the user would: a line break through Return, a tab through
-			-- Tab, every other character as itself.
+			-- Tab, character 8 through Backspace, every other character as itself.
 		require
 			writable: not is_read_only
 		local
@@ -457,6 +580,8 @@ feature -- Typing
 					press_return
 				elseif c = '%T' then
 					press_tab (False)
+				elseif c.code = 8 then
+					handle_char (8)
 				elseif c.code >= 32 then
 					handle_char (c.code)
 				end
@@ -470,9 +595,16 @@ feature -- Typing
 		local
 			l_keys: SW_KEYS
 			l_caret: INTEGER
+			l_eaten: BOOLEAN
 		do
 			l_caret := caret
-			if is_read_only then
+				-- the character that trails a key the completion list took (Return, Tab,
+				-- Escape, or the space of Control+Space)
+			l_eaten := is_completion_char_pending and (a_code = 13 or a_code = 9 or a_code = 27 or a_code = 32)
+			is_completion_char_pending := False
+			if l_eaten then
+				do_nothing
+			elseif is_read_only then
 				Precursor {GUI_SW_RICH_TEXT_AREA} (a_code)
 			elseif a_code = 13 then
 				press_return
@@ -509,7 +641,14 @@ feature -- Typing
 				l_was_x := caret_x
 			end
 			create l_keys
-			if (a_vk = 33 or a_vk = 34) and then is_laid_out then
+			if a_vk = 32 and then l_keys.control_down then
+					-- Control+Space: a completion list is wanted
+				is_completion_char_pending := True
+				tell_completion_key (0)
+			elseif is_completion_shown and then completion_key_of (a_vk) > 0 then
+				is_completion_char_pending := True
+				tell_completion_key (completion_key_of (a_vk))
+			elseif (a_vk = 33 or a_vk = 34) and then is_laid_out then
 				l_line := caret_line
 				l_x := caret_x
 				if a_vk = 33 then
@@ -545,13 +684,20 @@ feature -- Typing
 feature -- Pointer
 
 	handle_click (a_px, a_py: REAL_64): BOOLEAN
-			-- A press on a scrollbar scrolls; on a fold marker it tells `on_fold';
-			-- anywhere else it places the caret.
+			-- A press on a completion row tells `on_completion_press'; on a scrollbar it
+			-- scrolls; on a fold marker it tells `on_fold'; anywhere else it places the caret.
 		local
-			l_line: INTEGER
+			l_line, l_row: INTEGER
 		do
 			is_marker_pressed := False
-			if press_bar (a_px, a_py) then
+			if is_completion_shown then
+				l_row := completion_row_at (a_px, a_py)
+			end
+			if l_row > 0 then
+				press_completion_row (l_row)
+				Result := True
+			elseif press_bar (a_px, a_py) then
+				completion_hides_itself
 				Result := True
 			elseif h_bar.contains (a_px, a_py) then
 				scroll_x := h_bar.press (a_px, scroll_x)
@@ -666,6 +812,7 @@ feature -- Pointer
 		local
 			l_keys: SW_KEYS
 		do
+			completion_hides_itself
 			create l_keys
 			if l_keys.shift_down then
 				scroll_x := h_bar.wheel_scroll (scroll_x, a_delta, wheel_line)
@@ -822,6 +969,57 @@ feature -- Drawing
 			end
 			draw_bar (a_p)
 			h_bar.draw (a_p, scroll_x, shows_hover and then h_bar.contains (hover_px, hover_py))
+			if is_completion_shown then
+				draw_completions (a_p)
+			end
+		end
+
+	draw_completions (a_p: SW_PAINTER)
+			-- The completion list over the text: under the caret's line, or above it when
+			-- there is no room below in the view; at most `Completion_rows_shown' rows from
+			-- `completion_top', each with its kind's mark, its label and, at the right, its
+			-- detail in the muted ink.
+		require
+			showing: is_completion_shown
+			laid_out: is_laid_out
+		local
+			l_theme: SW_THEME
+			r: like completion_drawn
+			i: INTEGER
+			l_y, l_base: REAL_64
+			l_row: TUPLE [label, detail: STRING_32; kind: INTEGER]
+		do
+			l_theme := a_p.theme
+			r := completion_rect (a_p)
+			completion_drawn := r
+			a_p.set_color (l_theme.surface)
+			a_p.rrect_fill (r.x, r.y, r.w, r.h, 4.0)
+			a_p.set_color (l_theme.outline)
+			a_p.rrect_stroke (r.x + 0.5, r.y + 0.5, r.w - 1.0, r.h - 1.0, 4.0)
+			from
+				i := completion_top
+			until
+				i > completion_rows.count or i >= completion_top + Completion_rows_shown
+			loop
+				l_row := completion_rows [i]
+				l_y := r.y + 2.0 + (i - completion_top) * r.row
+				l_base := a_p.baseline_in (l_y, r.row)
+				if i = completion_at then
+					a_p.set_color (l_theme.wash_accent)
+					a_p.fill_rect (r.x + 2.0, l_y, r.w - 4.0, r.row)
+				end
+				if l_row.kind > 0 then
+					a_p.set_color (l_theme.ink_accent)
+					a_p.text (r.x + 8.0, l_base, kind_mark (l_row.kind))
+				end
+				a_p.set_color (l_theme.ink)
+				a_p.text (r.x + Completion_label_x, l_base, l_row.label)
+				if not l_row.detail.is_empty then
+					a_p.set_color (l_theme.ink_muted)
+					a_p.text (r.x + r.w - 10.0 - a_p.advance (l_row.detail), l_base, l_row.detail)
+				end
+				i := i + 1
+			end
 		end
 
 	draw_bracket_tint (a_p: SW_PAINTER; a_start, a_count: INTEGER)
@@ -843,6 +1041,120 @@ feature -- Drawing
 						l_geometry.width_of (i), l_geometry.height_of_line (l_line))
 				end
 				i := i + 1
+			end
+		end
+
+feature {NONE} -- Completion
+
+	completion_rect (a_p: SW_PAINTER): TUPLE [x, y, w, h, row: REAL_64]
+			-- Where the list goes: as wide as its widest row needs (within the view), under
+			-- the caret's line, or above it when the rows do not fit below and do above.
+			-- Leaves `a_p' set to the list's font.
+		require
+			showing: is_completion_shown
+			laid_out: is_laid_out
+			built: band_firsts.count >= 1
+		local
+			l_row, l_w, l_h, l_top, l_bottom, l_x: REAL_64
+			l_line: INTEGER
+		do
+			a_p.font ({SW_PAINTER}.Role_ui, a_p.theme.size_label, False)
+			l_row := 22.0 * a_p.theme.text_scale
+			l_h := completion_rows.count.min (Completion_rows_shown) * l_row + 4.0
+			l_w := 160.0
+			across completion_rows as ic loop
+				l_w := l_w.max (Completion_label_x + a_p.advance (ic.label) + 24.0 + a_p.advance (ic.detail) + 10.0)
+			end
+			l_w := l_w.min ((width - gutter_width).max (40.0))
+			l_line := caret_line
+			l_top := text_top + shown_top (l_line)
+			l_bottom := l_top + geometry.height_of_line (l_line)
+			l_x := (text_left + caret_x).min (x + width - l_w).max (x + gutter_width)
+			if l_bottom + 2.0 + l_h > y + height and then l_top - 2.0 - l_h >= y then
+				Result := [l_x, l_top - 2.0 - l_h, l_w, l_h, l_row]
+			else
+				Result := [l_x, l_bottom + 2.0, l_w, l_h, l_row]
+			end
+		end
+
+	Completion_rows_shown: INTEGER = 8
+			-- The list's height in rows; more scroll.
+
+	Completion_label_x: REAL_64 = 26.0
+			-- Where a row's label starts, after its kind's mark.
+
+	completion_top: INTEGER
+			-- The first row in view.
+
+	completion_drawn: TUPLE [x, y, w, h, row: REAL_64]
+			-- Where the list was last drawn, for the pointer.
+		attribute
+			Result := [0.0, 0.0, 0.0, 0.0, 0.0]
+		end
+
+	is_completion_char_pending: BOOLEAN
+			-- Did the completion list take a key whose character is still to come?
+
+	completion_key_of (a_vk: INTEGER): INTEGER
+			-- The completion key for virtual key `a_vk' while the list shows; 0 for none.
+		do
+			inspect a_vk
+			when 38 then Result := 1
+			when 40 then Result := 2
+			when 33 then Result := 3
+			when 34 then Result := 4
+			when 13, 9 then Result := 5
+			when 27 then Result := 6
+			else
+			end
+		ensure
+			a_key: 0 <= Result and Result <= 6
+		end
+
+	tell_completion_key (a_key: INTEGER)
+		do
+			if attached on_completion_key as al_told then
+				al_told.call (a_key)
+			end
+		end
+
+	completion_hides_itself
+			-- The focus left or the lines scroll: no list, and `on_completion_key' hears 6.
+		do
+			if is_completion_shown then
+				hide_completions
+				tell_completion_key (6)
+			end
+		ensure
+			hidden: not is_completion_shown
+		end
+
+	completion_row_at (a_px, a_py: REAL_64): INTEGER
+			-- The list's row at the point, as last drawn; 0 for none.
+		local
+			r: like completion_drawn
+		do
+			r := completion_drawn
+			if r.row > 0.0 and then a_px >= r.x and then a_px < r.x + r.w
+				and then a_py >= r.y + 2.0 and then a_py < r.y + r.h - 2.0
+			then
+				Result := completion_top + ((a_py - r.y - 2.0) / r.row).truncated_to_integer
+				if Result > completion_rows.count then
+					Result := 0
+				end
+			end
+		end
+
+	kind_mark (a_kind: INTEGER): STRING_32
+			-- The small mark before a row of kind `a_kind'.
+		do
+			inspect a_kind
+			when 1 then Result := {STRING_32} "k"
+			when 2 then Result := {STRING_32} "T"
+			when 3 then Result := {STRING_32} "f"
+			when 4 then Result := {STRING_32} "v"
+			when 5 then Result := {STRING_32} "s"
+			else Result := {STRING_32} ""
 			end
 		end
 

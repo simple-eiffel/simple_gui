@@ -441,7 +441,8 @@ feature -- Windows and containers
 		end
 
 	test_type_into_code (an_id: INTEGER; a_text: POINTER)
-			-- As the user typing `a_text' at the caret, %N as Return and %T as Tab included.
+			-- As the user typing `a_text' at the caret, %N as Return, %T as Tab and
+			-- character 8 as Backspace included (1v-e-4).
 		deferred
 		end
 
