@@ -494,6 +494,13 @@ void sga_test_press_fold_marker(int a_id, int a_line);
 void sga_test_fold_key(int a_id, int an_unfold);
 int sga_test_line_is_shown(int a_id, int a_line);
 void sga_test_code_arrow_key(int a_id, int a_direction);
+/* 1v-e-4: completion */
+void sga_code_show_completions(int a_id, const char *a_joined, int a_selected);
+void sga_code_select_completion(int a_id, int a_row);
+void sga_code_hide_completions(int a_id);
+void sga_test_completion_key(int a_id, int a_key);
+void sga_test_press_completion(int a_id, int a_row);
+int sga_test_completions_shown(int a_id);
 /* 1v-a: the grid view */
 int sga_grid_view(void);
 void sga_grid_view_extend(int a_id, const char *a_title, const char *a_picture, const char *an_icon);
