@@ -28,7 +28,7 @@ feature
 			prefs.add_path ("projects", "Projects folder", Void)
 			prefs.changed_actions.extend (agent (k: STRING_32) do print ("Changed " + k + "%N") end)
 			create l_window.make ("Editor", 400, 200)
-			create l_button.make ("Preferences…")
+			create l_button.make ({STRING_32} "Preferences%/8230/")
 			l_button.click_actions.extend (agent do prefs.show_window (Void) end)
 			l_window.set_content (l_button)
 			l_window.show

@@ -26,7 +26,7 @@ feature {NONE} -- Initialization
 			create l_stack.make_vertical
 			l_stack.extend (create {GUI_LABEL}.make (Psalm))
 			create l_buttons.make_horizontal
-			create l_print.make ("Print…")
+			create l_print.make ({STRING_32} "Print%/8230/")
 			l_print.click_actions.extend (agent print_psalm (l_window))
 			create l_save.make ("Save as PDF")
 			l_save.click_actions.extend (agent save_psalm)
@@ -53,17 +53,16 @@ feature {NONE} -- Printing
 		end
 
 	save_psalm
+			-- Ask where, as every program does, then save there. A cancelled dialog does nothing.
 		local
 			l_job: GUI_PRINT_JOB
 		do
-			create l_job.make ("Psalm 23")
-			l_job.print_pages (1, agent (a_page: INTEGER; a_context: CAIRO_CONTEXT)
-				do
-					a_context.select_font ("serif", a_context.Slant_normal, a_context.Weight_normal).set_font_size (14.0).do_nothing
-					a_context.move_to (72.0, 96.0).show_text ("The Lord is my shepherd; I shall not want.").do_nothing
-				end)
-			if not l_job.save_pdf ("psalm-23.pdf") and then attached l_job.last_error as al_why then
-				app.dialogs.inform ("Saving failed", al_why)
+			if attached app.dialogs.save_file_named ("Save as PDF", <<"pdf">>, "psalm-23.pdf") as al_path then
+				create l_job.make ("Psalm 23")
+				l_job.print_text (Psalm)
+				if not l_job.save_pdf (al_path.name) and then attached l_job.last_error as al_why then
+					app.dialogs.inform ("Saving failed", al_why)
+				end
 			end
 		end
 
@@ -76,7 +75,7 @@ end
 
 ## Try it
 
-Press **Print…**: the system's print dialog opens over the window. Choose a printer and press Print: the psalm prints with "Page 1 of 1" in the footer, and `last_outcome` is `Outcome_printed`. Open it again and press Cancel: nothing prints and `last_outcome` is `Outcome_cancelled`. Press **Save as PDF**: `psalm-23.pdf` appears beside the program, with no dialog; open it in any PDF reader. On a computer with no printer at all, Print… shows no dialog and `last_outcome` is `Outcome_no_printer`.
+Press **Print…**: the system's print dialog opens over the window. Choose a printer and press Print: the psalm prints with "Page 1 of 1" in the footer, and `last_outcome` is `Outcome_printed`. Open it again and press Cancel: nothing prints and `last_outcome` is `Outcome_cancelled`. Press **Save as PDF**: the system's save dialog asks where, offering `psalm-23.pdf`; save, and open the file in any PDF reader. Cancel the save dialog and nothing is written. On a computer with no printer at all, Print… shows no dialog and `last_outcome` is `Outcome_no_printer`.
 
 ## API
 
@@ -102,15 +101,17 @@ Every platform shows its own print dialog and prints the same pages; the drawing
 - **macOS:** the standard print panel, as a sheet on your window, with the system's own preview. Its paper size, orientation and scale start from your page and can be changed there, and its PDF menu offers Save as PDF. The pages are printed through PDFKit, macOS's own PDF library. Network printers CUPS discovers count as printers.
 - **Windows:** the system's print dialog, owned by your window. The pages are printed by Poppler's `pdftocairo` (it ships in simple_pdf's `bin` folder). The dialog's printer, page range, copies, two-sided printing and paper tray are used. **Not applied on Windows:**
   - choices made under the printer's own **Preferences** button (color or black-and-white, print quality, stapling): the printer's defaults are used instead;
-  - the dialog's paper size and orientation: each sheet takes the size and orientation of your page;
-  - collation off: copies always print as whole sets.
+  - the dialog's paper size and orientation: each sheet takes the size and orientation of your page.
+
+  Copies follow the dialog's collation: whole sets when it's on, and each page's copies together when it's off.
 
   Printers whose names use characters outside plain ASCII can't be reached, and printing to them fails with a message. A PDF printed on Windows through a PDF printer carries its text as drawn shapes, so it can't be searched.
 
 ## Design guidance
 
 - Lay pages out for paper, not for the screen: points, margins of about an inch, and type of 10 to 12 points.
-- Offer **Save as PDF** beside **Print…**; it needs no printer, and it's how people send a page.
+- Offer **Save as PDF** beside **Print…**; it needs no printer, and it's how people send a page. Ask where with the system's save dialog (`app.dialogs.save_file_named`) and say nothing more on success: the file is where the user put it.
+- For a character beyond ASCII in a label, such as the ellipsis in "Print…", write its code point: `{STRING_32} "Print%/8230/"`. The compiler reads a class file saved without a UTF-8 byte-order mark one character per byte, so an ellipsis typed into one shows as "Printâ€¦", even in a `STRING_32`; the escape is right in any file.
 - Say what happened only when it failed. A cancelled dialog needs no message, and a printed job is the system's to report.
 - Long jobs: render first, then call `run_dialog`. The dialog appears only once every page is ready.
 

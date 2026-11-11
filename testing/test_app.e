@@ -133,6 +133,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_view_first_asks_after_the_settle, "view_first_asks_after_the_settle")
 				run_test (agent t.test_view_first_while_slices_are_pending, "view_first_while_slices_are_pending")
 				run_test (agent t.test_view_first_cost, "view_first_cost")
+				run_test (agent t.test_a_label_beyond_ascii_reads_as_written, "a_label_beyond_ascii_reads_as_written")
 				run_test (agent t.test_print_job_renders_and_saves, "print_job_renders_and_saves")
 				run_test (agent t.test_code_editor_bracket_pairs, "code_editor_bracket_pairs")
 				run_test (agent t.test_line_ranges, "line_ranges")
