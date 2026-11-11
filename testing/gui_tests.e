@@ -2171,6 +2171,15 @@ feature -- The remaining controls (1j)
 			print ("    large text: first frame at " + (l_load * 1000.0).rounded.out + " ms%N")
 			io.output.flush
 			assert ("all the lines: " + l_code.line_count.out, l_code.line_count = l_lines)
+				-- one read of the text: the editor makes one after each edit, and the syntax
+				-- hook's `apply_spans' another
+			l_t0 := now_seconds
+			from i := 1 until i > 20 loop
+				timed (agent read_text (l_code))
+				i := i + 1
+			end
+			print ("    large text: one read of the text, mean of 20: " + ((now_seconds - l_t0) * 50_000.0).rounded.out + " microseconds%N")
+			io.output.flush
 			l_t0 := now_seconds
 			timed (agent l_code.go_to_line (l_lines // 2))
 			timed (agent driver.pump_until_idle (0))
@@ -2669,6 +2678,39 @@ feature -- The remaining controls (1j)
 			driver.set_dark (not l_was_dark)
 			driver.set_dark (l_was_dark)
 			assert ("a change of theme asks nothing of the syntax", l_syntax.replaced_count = l_replaced)
+		end
+
+	test_from_c_reads_utf_8
+			-- A C string read back: each length of UTF-8 form at its first and its last
+			-- character, and bytes that are not UTF-8 read as the two-step path reads them
+			-- (a byte string, then UTF_CONVERTER).
+		local
+			l_text: STRING_32
+			l_c: C_STRING
+			l_bad: ARRAY [STRING_8]
+			i: INTEGER
+		do
+			assert ("null is empty", backend.from_c (default_pointer).is_empty)
+			l_c := backend.to_c ("")
+			assert ("empty is empty", backend.from_c (l_c.item).is_empty)
+			create l_text.make_from_string ("plain ")
+			across <<0x7F, 0x80, 0x7FF, 0x800, 0xD7FF, 0xE000, 0xFFFF, 0x10000, 0x1F600, 0x10FFFF>> as ic loop
+				l_text.append_code (ic.to_natural_32)
+				l_text.append_character ('.')
+			end
+			l_c := backend.to_c (l_text)
+			assert ("every form both ways", backend.from_c (l_c.item).same_string (l_text))
+			assert ("one character for each: " + backend.from_c (l_c.item).count.out, backend.from_c (l_c.item).count = 26)
+				-- a stray continuation byte; a longer form than the character needs (two
+				-- bytes, then three); a form cut short; a surrogate; past 0x10FFFF; no form
+			l_bad := <<"a%/128/b", "a%/192/%/128/b", "ok %/224/%/128/%/128/ ok", "%/226/%/130/",
+				"%/237/%/160/%/128/", "%/244/%/144/%/128/%/128/", "%/255/">>
+			from i := 1 until i > l_bad.count loop
+				create l_c.make (l_bad [i])
+				assert ("not UTF-8 reads as before, case " + i.out,
+					backend.from_c (l_c.item).same_string ({UTF_CONVERTER}.utf_8_string_8_to_string_32 (l_bad [i])))
+				i := i + 1
+			end
 		end
 
 	test_new_message_tag
@@ -4765,6 +4807,14 @@ feature {NONE} -- Fixtures
 				end
 				i := i + 1
 			end
+		end
+
+	read_text (a_code: GUI_CODE_EDITOR)
+			-- Read the text of `a_code' and drop it (a measured step).
+		local
+			l_text: STRING_32
+		do
+			l_text := a_code.text
 		end
 
 	timed (a_work: PROCEDURE)
