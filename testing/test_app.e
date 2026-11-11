@@ -140,6 +140,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_preferences_values_and_file, "preferences_values_and_file")
 				run_test (agent t.test_preferences_window, "preferences_window")
 				run_test (agent t.test_grid_view_items, "grid_view_items")
+				run_test (agent t.test_grid_view_pictures_arrive_while_more_decode, "grid_view_pictures_arrive_while_more_decode")
 				run_test (agent t.test_grid_view_keeps_turning_while_a_large_picture_decodes, "grid_view_keeps_turning_while_a_large_picture_decodes")
 				run_test (agent t.test_slideshow_moves, "slideshow_moves")
 				run_test (agent t.test_file_field_address_bar, "file_field_address_bar")
