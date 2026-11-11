@@ -7,6 +7,7 @@
    - the content view paints the window background, so snapshots match the screen;
    - the wake is a main-queue block, so it also lands inside modal loops. */
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <UserNotifications/UserNotifications.h>
 #import <CoreText/CoreText.h>
@@ -9439,6 +9440,11 @@ void sga_test_field_escape(int a_id)
 	NSUInteger *extra_at, *extra_anchor;
 	int extra_count;
 	NSMutableArray<NSView *> *extra_marks;
+	/* Every caret blinks in step (EIF-GROUP's ruling, 2026-11-11): while extra carets show,
+	   a display link copies the main caret's on-screen opacity to them each frame.
+	   `blink_restarted' is when the text system last restarted the main caret's blink. */
+	id blink_link;
+	NSTimeInterval blink_restarted;
 	NSString *typed;
 }
 @end
@@ -9900,8 +9906,8 @@ static NSImage *sga_completion_kind_image(NSString *a_kind)
 }
 /* The caret lines are the system's own insertion indicator, shown while the editor has the
    focus (as its own caret is) and hidden otherwise. In the automatic mode an indicator the
-   text system does not manage never shows, so they are set visible or hidden here; they do
-   not blink (the main caret's blink is the text system's own). */
+   text system does not manage never shows, so they are set visible or hidden here, and they
+   blink by copying the main caret (see `mirrorCaret:'). */
 - (void)syncExtraMarks { [self showExtraMarks:[[self window] isKeyWindow] && [[self window] firstResponder] == self]; }
 /* (Inside becomeFirstResponder and resignFirstResponder the window does not name the new first
    responder yet, so they say outright which it is.) */
@@ -9914,6 +9920,60 @@ static NSImage *sga_completion_kind_image(NSString *a_kind)
 		}
 		else [v setHidden:!l_focused];
 	}
+	if (l_focused && extra_count) [self startBlinkMirror]; else [self stopBlinkMirror];
+}
+/* The text system restarts the main caret's blink at each move; the extras follow it. */
+- (void)updateInsertionPointStateAndRestartTimer:(BOOL)a_restart
+{
+	if (a_restart) blink_restarted = [NSDate timeIntervalSinceReferenceDate];
+	[super updateInsertionPointStateAndRestartTimer:a_restart];
+}
+- (void)startBlinkMirror
+{
+	if (blink_link) return;
+	if (@available(macOS 14.0, *)) {
+		blink_link = [self displayLinkWithTarget:self selector:@selector(mirrorCaret:)];
+		[(CADisplayLink *)blink_link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+	}
+}
+- (void)stopBlinkMirror
+{
+	if (!blink_link) return;
+	[(CADisplayLink *)blink_link invalidate];
+	blink_link = nil;
+	[CATransaction begin];
+	[CATransaction setDisableActions:YES];
+	for (NSView *v in extra_marks) [[v layer] setOpacity:1];
+	[CATransaction commit];
+}
+/* How much of `l' shows on screen now: its presentation's opacity, times its most visible
+   sublayer's. */
+static float sga_shown_opacity(CALayer *l)
+{
+	CALayer *p = [l presentationLayer] ?: l;
+	float o = [p isHidden] ? 0 : [p opacity], l_best = 0;
+	if (![[l sublayers] count]) return o;
+	for (CALayer *x in [l sublayers]) l_best = MAX(l_best, sga_shown_opacity(x));
+	return o * l_best;
+}
+/* Each frame: the extras show what the main caret shows, so they blink in step and stay
+   steady when the system keeps its caret steady (the "prefer non-blinking cursor" setting).
+   When the main caret is hidden because it has a selection, the extras keep the system's
+   rhythm from its last restart (on for half a second, off for half), steady when Reduce
+   Motion is on. */
+- (void)mirrorCaret:(id)a_link
+{
+	(void)a_link;
+	NSView *l_main = nil;
+	for (NSView *v in [self subviews]) if ([v isKindOfClass:NSClassFromString(@"NSTextInsertionIndicator")] && ![extra_marks containsObject:v]) { l_main = v; break; }
+	float o;
+	if (l_main && [self selectedRange].length == 0) o = sga_shown_opacity([l_main layer]);
+	else if ([[NSWorkspace sharedWorkspace] accessibilityDisplayShouldReduceMotion]) o = 1;
+	else o = fmod([NSDate timeIntervalSinceReferenceDate] - blink_restarted, 1.0) < 0.5 ? 1 : 0;
+	[CATransaction begin];
+	[CATransaction setDisableActions:YES];
+	for (NSView *v in extra_marks) [[v layer] setOpacity:o];
+	[CATransaction commit];
 }
 - (BOOL)becomeFirstResponder
 {
