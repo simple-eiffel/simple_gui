@@ -2945,6 +2945,97 @@ feature -- Path controls, continued
 			l_c.set_on_change (agent push (2, Result, 0, 0, 0))
 			l_c.set_on_caret_move (agent push (52, Result, ?, ?, 0))
 			l_c.set_on_bracket_key (agent push (56, Result, 0, 0, 0))
+			l_c.set_on_fold (agent push (57, Result, ?, ?, 0))
+			l_c.set_on_completion_key (agent push (58, Result, ?, 0, 0))
+			l_c.set_on_completion_press (agent push (59, Result, ?, 0, 0))
+			l_c.set_on_code_key (agent (an_action: INTEGER; a_shift: BOOLEAN; an_id: INTEGER)
+				do
+					push (60, an_id, an_action, a_shift.to_integer, 0)
+				end (?, ?, Result))
+			l_c.set_on_caret_gesture (agent push (61, Result, ?, ?, 0))
+		end
+
+	code_set_extra_carets (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+		local
+			l_data: MANAGED_POINTER
+			l_carets: ARRAYED_LIST [TUPLE [caret, anchor: INTEGER]]
+			i: INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				create l_carets.make (a_count.max (0))
+				if a_count > 0 and then a_pairs /= default_pointer then
+					create l_data.share_from_pointer (a_pairs, a_count * 8)
+					from i := 0 until i >= a_count loop
+						l_carets.extend ([l_data.read_integer_32 (i * 8), l_data.read_integer_32 (i * 8 + 4)])
+						i := i + 1
+					end
+				end
+				al_c.set_extra_carets (l_carets)
+				style_changed
+			end
+		end
+
+	code_typed_text (an_id: INTEGER): POINTER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := c_text (al_c.typed_text)
+			else
+				Result := c_text ({STRING_32} "")
+			end
+		end
+
+	text_begin_edit_group (an_id: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.begin_edit_group
+			end
+		end
+
+	text_end_edit_group (an_id: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.end_edit_group
+				changed
+			end
+		end
+
+	code_show_completions (an_id: INTEGER; a_joined: POINTER; a_selected: INTEGER)
+		local
+			l_rows: ARRAYED_LIST [TUPLE [label, detail: STRING_32; kind: INTEGER]]
+			l_parts: LIST [STRING_32]
+			l_kind: INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				create l_rows.make (8)
+				across from_c (a_joined).split ((0x1F).to_character_32) as ic loop
+					l_parts := ic.split ((0x1E).to_character_32)
+					if l_parts.count = 3 and then not l_parts [1].is_empty then
+						l_kind := 0
+						if l_parts [3].is_integer then
+							l_kind := l_parts [3].to_integer
+						end
+						l_rows.extend ([l_parts [1], l_parts [2], l_kind])
+					end
+				end
+				al_c.show_completions (l_rows, a_selected)
+				style_changed
+			end
+		end
+
+	code_select_completion (an_id, a_row: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then al_c.is_completion_shown then
+				al_c.select_completion (a_row)
+				style_changed
+			end
+		end
+
+	code_hide_completions (an_id: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then al_c.is_completion_shown then
+				al_c.hide_completions
+				style_changed
+			end
 		end
 
 	code_show_bracket_pair (an_id, a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
@@ -2961,6 +3052,74 @@ feature -- Path controls, continued
 		do
 			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then al_c.has_bracket_pair then
 				al_c.hide_bracket_pair
+				style_changed
+			end
+		end
+
+	code_set_folding_shown (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then al_c.is_folding_shown /= a_on then
+				al_c.set_folding_shown (a_on)
+				changed
+			end
+		end
+
+	code_set_fold_marks (an_id: INTEGER; a_lines: POINTER; a_count: INTEGER)
+		local
+			l_marks: GUI_LINE_RANGES
+			l_data: MANAGED_POINTER
+			i, l_line: INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				create l_marks.make
+				if a_count > 0 and then a_lines /= default_pointer then
+					create l_data.share_from_pointer (a_lines, a_count * 4)
+					from
+						i := 0
+					until
+						i >= a_count
+					loop
+						l_line := l_data.read_integer_32 (i * 4)
+						if l_line >= 1 then
+							l_marks.put (l_line, l_line)
+						end
+						i := i + 1
+					end
+				end
+				al_c.set_fold_marks (l_marks)
+				style_changed
+			end
+		end
+
+	code_set_folded_lines (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- (A pair that hides nothing is left out; pairs that reach one another, which
+			-- the caller promised not to send, hide what they hide together.)
+		local
+			l_ranges: GUI_LINE_RANGES
+			l_data: MANAGED_POINTER
+			i, l_first, l_last: INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				create l_ranges.make
+				if a_count > 0 and then a_pairs /= default_pointer then
+					create l_data.share_from_pointer (a_pairs, a_count * 8)
+					from
+						i := 0
+					until
+						i >= a_count
+					loop
+						l_first := l_data.read_integer_32 (i * 8)
+						l_last := l_data.read_integer_32 (i * 8 + 4)
+						if l_first >= 1 and l_last > l_first then
+							l_ranges.put (l_first, l_last)
+						end
+						i := i + 1
+					end
+				end
+				if not l_ranges.is_disjoint then
+					l_ranges := l_ranges.merged
+				end
+				al_c.set_hidden_lines (l_ranges)
 				style_changed
 			end
 		end
@@ -4756,6 +4915,79 @@ feature -- Test doors (act on the widget as a user would)
 		do
 			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
 				al_c.press_bracket_key
+			end
+		end
+
+	test_code_key (an_id, an_action: INTEGER; a_shift: BOOLEAN; a_text: POINTER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.press_code_key (an_action, a_shift, from_c (a_text))
+			end
+		end
+
+	test_caret_gesture (an_id, a_gesture, a_position: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.tell_caret_gesture (a_gesture, a_position)
+			end
+		end
+
+	test_completion_key (an_id, a_key: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.press_completion_key (a_key)
+			end
+		end
+
+	test_press_completion (an_id, a_row: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then al_c.is_completion_shown then
+				al_c.press_completion_row (a_row)
+			end
+		end
+
+	test_completions_shown (an_id: INTEGER): BOOLEAN
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.is_completion_shown
+			end
+		end
+
+	test_press_fold_marker (an_id, a_line: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.press_fold_marker (a_line)
+			end
+		end
+
+	test_fold_key (an_id: INTEGER; a_unfold: BOOLEAN)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.press_fold_key (a_unfold)
+			end
+		end
+
+	test_line_is_shown (an_id, a_line: INTEGER): BOOLEAN
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.is_line_shown (a_line)
+			end
+		end
+
+	test_code_arrow_key (an_id, a_direction: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				inspect a_direction
+				when 1 then
+					al_c.handle_key (38, False)
+				when 2 then
+					al_c.handle_key (40, False)
+				when 3 then
+					al_c.handle_key (37, False)
+				else
+					al_c.handle_key (39, False)
+				end
+				changed
 			end
 		end
 

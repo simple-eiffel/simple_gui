@@ -315,13 +315,24 @@ feature {NONE} -- Implementation
 			matched: styles.count = text.count
 			first_in_text: a_first >= 1
 			last_in_text: a_last <= styles.count
+		do
+			marks.clear
+			marks.clamp_to (text.count)
+			add_marks (a_first, a_last)
+		end
+
+	add_marks (a_first, a_last: INTEGER)
+			-- As `apply_marks', beside the marks there are: for a view of several
+			-- stretches (the code editor's, around its closed folds).
+		require
+			matched: styles.count = text.count
+			first_in_text: a_first >= 1
+			last_in_text: a_last <= styles.count
 		local
 			i, j: INTEGER
 			l_mark: SW_MARK
 			a: TUPLE [bold, italic, underline: BOOLEAN; color: INTEGER; size: REAL_64]
 		do
-			marks.clear
-			marks.clamp_to (text.count)
 			from i := a_first until i > a_last loop
 				a := styles.i_th (i)
 				from j := i until j + 1 > a_last or else not same_look (a, styles.i_th (j + 1)) loop

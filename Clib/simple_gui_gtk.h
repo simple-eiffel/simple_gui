@@ -2745,7 +2745,7 @@ static const char *sg_text_area_get(int id) {
     GtkTextIter s, e;
     gtk_text_buffer_get_bounds(b, &s, &e);
     g_free(sg_text_buf);
-    sg_text_buf = gtk_text_buffer_get_text(b, &s, &e, FALSE);
+    sg_text_buf = gtk_text_buffer_get_text(b, &s, &e, TRUE);
     return sg_text_buf;
 }
 static void sg_text_area_set_read_only(int id, int on) {
@@ -5695,12 +5695,30 @@ static const char *sg_test_help_tip_shown(void) {
    lines (Tab with no selection inserts spaces to the next stop when asked). Moving the
    insert mark, by the user, sends 52 (line, column). ---------- */
 static GtkTextBuffer *sg_code_buffer(int id) { return gtk_text_view_get_buffer(sg_view_of(id)); }
+static int sg_code_has_fold_mark(int id, int line);
+static int sg_code_line_hidden(int id, int line);
+/* A fold marker in the cell (x, y, w, h): a triangle pointing down while the fold is open,
+   to the right while it is closed. */
+static void sg_code_draw_fold_marker(cairo_t *cr, double x, double y, double w, double h, int closed) {
+    double s = (w < h ? w : h) * 0.3, cx = x + w / 2, cy = y + h / 2;
+    cairo_new_path(cr);
+    if (closed) { cairo_move_to(cr, cx - s * 0.6, cy - s); cairo_line_to(cr, cx + s * 0.6, cy); cairo_line_to(cr, cx - s * 0.6, cy + s); }
+    else { cairo_move_to(cr, cx - s, cy - s * 0.6); cairo_line_to(cr, cx + s, cy - s * 0.6); cairo_line_to(cr, cx, cy + s * 0.6); }
+    cairo_close_path(cr);
+    cairo_fill(cr);
+}
+/* The gutter: the line numbers (unless "sg-numbers-off"), then a column "sg-marker-w" wide
+   for the fold markers (0 while folding is not shown). Lines hidden in a closed fold take
+   no room in the view and get nothing here. */
 static void sg_code_gutter_draw(GtkDrawingArea *a, cairo_t *cr, int w, int h, gpointer d) {
     GtkTextView *v = GTK_TEXT_VIEW(d);
     GdkRectangle vis;
     GtkTextIter it;
     PangoLayout *pl = gtk_widget_create_pango_layout(GTK_WIDGET(a), NULL);
     GdkRGBA fg;
+    int id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(a), "sg-code-id"));
+    int numbers = g_object_get_data(G_OBJECT(a), "sg-numbers-off") == NULL;
+    int mw = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(a), "sg-marker-w"));
     int y, line_h, wy, n;
     char num[16];
     (void) h;
@@ -5710,18 +5728,21 @@ static void sg_code_gutter_draw(GtkDrawingArea *a, cairo_t *cr, int w, int h, gp
     gtk_text_view_get_visible_rect(v, &vis);
     gtk_text_view_get_line_at_y(v, &it, vis.y, NULL);
     while (1) {
-        gtk_text_view_get_line_yrange(v, &it, &y, &line_h);
-        if (y > vis.y + vis.height) break;
-        gtk_text_view_buffer_to_window_coords(v, GTK_TEXT_WINDOW_LEFT, 0, y, NULL, &wy);
         n = gtk_text_iter_get_line(&it) + 1;
-        g_snprintf(num, sizeof num, "%d", n);
-        pango_layout_set_text(pl, num, -1);
-        {
-            int tw, th;
-            pango_layout_get_pixel_size(pl, &tw, &th);
-            cairo_move_to(cr, w - tw - 6, wy);
+        if (!sg_code_line_hidden(id, n)) {
+            gtk_text_view_get_line_yrange(v, &it, &y, &line_h);
+            if (y > vis.y + vis.height) break;
+            gtk_text_view_buffer_to_window_coords(v, GTK_TEXT_WINDOW_LEFT, 0, y, NULL, &wy);
+            if (numbers) {
+                int tw, th;
+                g_snprintf(num, sizeof num, "%d", n);
+                pango_layout_set_text(pl, num, -1);
+                pango_layout_get_pixel_size(pl, &tw, &th);
+                cairo_move_to(cr, w - mw - tw - 6, wy);
+                pango_cairo_show_layout(cr, pl);
+            }
+            if (mw > 0 && sg_code_has_fold_mark(id, n)) sg_code_draw_fold_marker(cr, w - mw, wy, mw, line_h, sg_code_line_hidden(id, n + 1));
         }
-        pango_cairo_show_layout(cr, pl);
         if (!gtk_text_iter_forward_line(&it)) break;
     }
     g_object_unref(pl);
@@ -5730,13 +5751,17 @@ static void sg_code_gutter_width(int id) {
     GtkWidget *g = g_object_get_data(G_OBJECT(sg_w[id]), "sg-gutter");
     PangoLayout *pl;
     char num[16];
-    int tw, th;
+    int tw, th, numbers, mw;
     if (!g) return;
     g_snprintf(num, sizeof num, "%d", gtk_text_buffer_get_line_count(sg_code_buffer(id)) * 10 + 9);
     pl = gtk_widget_create_pango_layout(g, num);
     pango_layout_get_pixel_size(pl, &tw, &th);
     g_object_unref(pl);
-    gtk_drawing_area_set_content_width(GTK_DRAWING_AREA(g), tw + 10);
+    numbers = g_object_get_data(G_OBJECT(g), "sg-numbers-off") == NULL;
+    mw = g_object_get_data(G_OBJECT(sg_w[id]), "sg-folding") ? th : 0;
+    g_object_set_data(G_OBJECT(g), "sg-marker-w", GINT_TO_POINTER(mw));
+    gtk_drawing_area_set_content_width(GTK_DRAWING_AREA(g), (numbers ? tw + 10 : 2) + mw);
+    gtk_widget_set_visible(g, numbers || mw > 0);
     gtk_widget_queue_draw(g);
 }
 static void sg_code_redraw_gutter(gpointer o, gpointer d) { (void) o; sg_code_gutter_width(GPOINTER_TO_INT(d)); }
@@ -5764,7 +5789,7 @@ static char *sg_code_indent_of_caret_line(GtkTextBuffer *b) {
     gtk_text_iter_set_line_offset(&s, 0);
     e = s;
     while (!gtk_text_iter_ends_line(&e) && (gtk_text_iter_get_char(&e) == ' ' || gtk_text_iter_get_char(&e) == '\t')) gtk_text_iter_forward_char(&e);
-    return gtk_text_buffer_get_text(b, &s, &e, FALSE);
+    return gtk_text_buffer_get_text(b, &s, &e, TRUE);
 }
 static void sg_code_return(int id) {
     GtkTextBuffer *b = sg_code_buffer(id);
@@ -5865,13 +5890,387 @@ static int sg_test_bracket_tint_at(int id, int pos) {
 static void sg_test_bracket_key(int id) { sg_push(56, id, 0, 0); }
 /* For the tests of a full queue: `n' events no widget answers (type 0, id 0). */
 static void sg_test_fill_event_queue(int n) { int i; for (i = 0; i < n; i++) sg_push(0, 0, 0, 0); }
+/* ---------- 1v-e-3: folding. The lines closed folds hide carry the invisible tag "sg-fold",
+   whole lines each (from the start of the line after a fold's first line to the start of
+   the line after its last), so GTK gives them no height and its cursor movement steps over
+   them; the tags move with the text between one sg_code_set_folded_lines and the next. A
+   closed fold's first line carries "sg-fold-head", a faint tint of its row: the mark that
+   lines are hidden. While "sg-folding" is set the gutter draws a marker beside each line
+   in "sg-fold-marks" and the fold keys work. 57: a = the line, b = 0 a marker click, 1 the
+   fold key, 2 the unfold key. The text is whole for every query: each
+   gtk_text_buffer_get_text in this file asks for the hidden characters too. */
+static int sg_code_folding_shown(int id) { return g_object_get_data(G_OBJECT(sg_w[id]), "sg-folding") != NULL; }
+static GtkTextTag *sg_code_fold_tag(int id) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextTag *t = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "sg-fold");
+    if (!t) t = gtk_text_buffer_create_tag(b, "sg-fold", "invisible", TRUE, NULL);
+    return t;
+}
+static GtkTextTag *sg_code_fold_head_tag(int id) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextTag *t = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "sg-fold-head");
+    if (!t) t = gtk_text_buffer_create_tag(b, "sg-fold-head", "paragraph-background", "rgba(128,128,128,0.18)", NULL);
+    return t;
+}
+static int sg_code_line_hidden(int id, int line) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextTag *t = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "sg-fold");
+    GtkTextIter it;
+    if (!t || line < 1 || line > gtk_text_buffer_get_line_count(b)) return 0;
+    gtk_text_buffer_get_iter_at_line(b, &it, line - 1);
+    return gtk_text_iter_has_tag(&it, t) ? 1 : 0;
+}
+static int sg_code_has_fold_mark(int id, int line) {
+    GArray *m = g_object_get_data(G_OBJECT(sg_w[id]), "sg-fold-marks");
+    guint lo = 0, hi;
+    if (!m) return 0;
+    hi = m->len;
+    while (lo < hi) {
+        guint mid = lo + (hi - lo) / 2;
+        int v = g_array_index(m, int, mid);
+        if (v == line) return 1;
+        if (v < line) lo = mid + 1; else hi = mid;
+    }
+    return 0;
+}
+static void sg_code_set_folding_shown(int id, int on) {
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-folding", on ? GINT_TO_POINTER(1) : NULL);
+    sg_code_gutter_width(id);
+}
+static void sg_code_set_fold_marks(int id, const int *lines, int n) {
+    GArray *m = g_array_sized_new(FALSE, FALSE, sizeof(int), n > 0 ? n : 1);
+    GtkWidget *g = g_object_get_data(G_OBJECT(sg_w[id]), "sg-gutter");
+    if (n > 0 && lines) g_array_append_vals(m, lines, n);
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-fold-marks", m, (GDestroyNotify) g_array_unref);
+    if (g) gtk_widget_queue_draw(g);
+}
+static void sg_code_set_folded_lines(int id, const int *pairs, int n) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextTag *t = sg_code_fold_tag(id), *head = sg_code_fold_head_tag(id);
+    GtkWidget *g = g_object_get_data(G_OBJECT(sg_w[id]), "sg-gutter");
+    GtkTextIter a, z;
+    int i, lines = gtk_text_buffer_get_line_count(b);
+    if (g_object_get_data(G_OBJECT(sg_w[id]), "sg-fold-on")) {
+        gtk_text_buffer_get_bounds(b, &a, &z);
+        gtk_text_buffer_remove_tag(b, t, &a, &z);
+        gtk_text_buffer_remove_tag(b, head, &a, &z);
+        g_object_set_data(G_OBJECT(sg_w[id]), "sg-fold-on", NULL);
+    }
+    for (i = 0; pairs && i < n; i++) {
+        int first = pairs[2 * i], last = pairs[2 * i + 1];
+        if (first < 1 || last <= first || first >= lines) continue;
+        gtk_text_buffer_get_iter_at_line(b, &a, first);            /* where line first + 1 starts */
+        if (last >= lines) gtk_text_buffer_get_end_iter(b, &z);
+        else gtk_text_buffer_get_iter_at_line(b, &z, last);        /* where line last + 1 starts */
+        gtk_text_buffer_apply_tag(b, t, &a, &z);
+        gtk_text_buffer_get_iter_at_line(b, &z, first - 1);
+        gtk_text_buffer_apply_tag(b, head, &z, &a);
+        g_object_set_data(G_OBJECT(sg_w[id]), "sg-fold-on", GINT_TO_POINTER(1));
+    }
+    if (g) gtk_widget_queue_draw(g);
+}
+static void sg_on_code_gutter_press(GtkGestureClick *c, int n, double x, double y, gpointer d) {
+    int id = GPOINTER_TO_INT(d), line, by, ly, lh;
+    GtkWidget *g = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(c));
+    GtkTextView *v = sg_view_of(id);
+    GtkTextIter it;
+    (void) n;
+    if (!sg_code_folding_shown(id)) return;
+    if (x < gtk_widget_get_width(g) - GPOINTER_TO_INT(g_object_get_data(G_OBJECT(g), "sg-marker-w"))) return;
+    gtk_text_view_window_to_buffer_coords(v, GTK_TEXT_WINDOW_LEFT, 0, (int) y, NULL, &by);
+    gtk_text_view_get_line_at_y(v, &it, by, NULL);
+    gtk_text_view_get_line_yrange(v, &it, &ly, &lh);
+    if (by < ly || by >= ly + lh) return;
+    line = gtk_text_iter_get_line(&it) + 1;
+    if (sg_code_has_fold_mark(id, line) && !sg_code_line_hidden(id, line)) {
+        gtk_gesture_set_state(GTK_GESTURE(c), GTK_EVENT_SEQUENCE_CLAIMED);
+        sg_push(57, id, line, 0);
+    }
+}
+static void sg_test_press_fold_marker(int id, int line) {
+    if (sg_code_folding_shown(id) && sg_code_has_fold_mark(id, line) && !sg_code_line_hidden(id, line)) sg_push(57, id, line, 0);
+}
+static void sg_test_fold_key(int id, int unfold) {
+    int l, c;
+    if (!sg_code_folding_shown(id)) return;
+    sg_code_caret(sg_code_buffer(id), &l, &c);
+    sg_push(57, id, l, unfold ? 2 : 1);
+}
+static int sg_test_line_is_shown(int id, int line) {
+    return line >= 1 && line <= gtk_text_buffer_get_line_count(sg_code_buffer(id)) && !sg_code_line_hidden(id, line);
+}
+/* The arrow keys as GTK binds them: "move-cursor" by display lines or visual positions. */
+static void sg_test_code_arrow_key(int id, int dir) {
+    GtkTextView *v = sg_view_of(id);
+    if (dir == 1 || dir == 2) g_signal_emit_by_name(v, "move-cursor", GTK_MOVEMENT_DISPLAY_LINES, dir == 1 ? -1 : 1, FALSE);
+    else g_signal_emit_by_name(v, "move-cursor", GTK_MOVEMENT_VISUAL_POSITIONS, dir == 3 ? -1 : 1, FALSE);
+}
+/* ---------- 1v-e-4: completion. An overlay of the text view (gtk_text_view_add_overlay): a
+   frame placed in the text's own coordinates under the caret's line, or above it when the rows
+   do not fit below in view; it never takes the focus (nothing in it is focusable). In it a
+   GtkListBox in a scrolled window at most 8 rows tall; a row is the kind's mark, the label and
+   the detail (dim). (A GtkPopover parented to the text view is not one of its children: GTK
+   warned at every allocation.)
+   58: 0 Control+Space at any time; with the list up, 1 Up, 2 Down, 3 Page Up, 4 Page Down,
+   5 Return or Tab, 6 Escape, in place of the key's work. 59: a click on a row (a = the row,
+   from 1). Losing the focus or scrolling the lines hides it and sends 58 (6).
+   Completion keeps its own record of each editor's text view, set when the list is first made
+   and emptied when the view is destroyed: an editor's slot in sg_w is not cleared when its
+   window closes, and the focus and scroll handlers run during that teardown. */
+static GtkTextView *sg_compl_view[SG_MAX];
+static gulong sg_compl_scroll_handler[SG_MAX];
+static GtkWidget *sg_compl_frame(int id) { return (id > 0 && id < SG_MAX && sg_compl_view[id]) ? g_object_get_data(G_OBJECT(sg_compl_view[id]), "sg-compl-frame") : NULL; }
+static GtkListBox *sg_compl_list(int id) { return (id > 0 && id < SG_MAX && sg_compl_view[id]) ? g_object_get_data(G_OBJECT(sg_compl_view[id]), "sg-compl-list") : NULL; }
+static int sg_compl_shown(int id) { GtkWidget *f = sg_compl_frame(id); return f && gtk_widget_get_visible(f); }
+static void sg_compl_hide(int id) { if (sg_compl_shown(id)) gtk_widget_set_visible(sg_compl_frame(id), FALSE); }
+static void sg_compl_hides_itself(int id) { if (sg_compl_shown(id)) { sg_compl_hide(id); sg_push(58, id, 6, 0); } }
+static void sg_on_compl_row(GtkListBox *l, GtkListBoxRow *r, gpointer d) { (void) l; sg_push(59, GPOINTER_TO_INT(d), gtk_list_box_row_get_index(r) + 1, 0); }
+static void sg_on_compl_focus_leave(GtkEventControllerFocus *f, gpointer d) { (void) f; sg_compl_hides_itself(GPOINTER_TO_INT(d)); }
+static void sg_on_compl_scrolled(GtkAdjustment *a, gpointer d) { (void) a; sg_compl_hides_itself(GPOINTER_TO_INT(d)); }
+static void sg_on_compl_view_destroy(GtkWidget *v, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    GtkAdjustment *a = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(v));
+    if (a && sg_compl_scroll_handler[id]) g_signal_handler_disconnect(a, sg_compl_scroll_handler[id]);
+    sg_compl_scroll_handler[id] = 0;
+    sg_compl_view[id] = NULL;
+    g_object_set_data(G_OBJECT(v), "sg-compl-frame", NULL);
+    g_object_set_data(G_OBJECT(v), "sg-compl-list", NULL);
+}
+static GtkWidget *sg_compl_make(int id) {
+    GtkWidget *frame = sg_compl_frame(id);
+    GtkTextView *v;
+    GtkWidget *sw, *l;
+    GtkEventController *f;
+    if (frame) return frame;
+    v = sg_view_of(id);
+    frame = gtk_frame_new(NULL);
+    sw = gtk_scrolled_window_new();
+    l = gtk_list_box_new();
+    gtk_widget_add_css_class(frame, "view");
+    gtk_widget_set_focusable(frame, FALSE);
+    gtk_widget_set_can_focus(frame, FALSE);
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(l), GTK_SELECTION_SINGLE);
+    gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(l), TRUE);
+    gtk_widget_set_focusable(l, FALSE);
+    gtk_widget_set_can_focus(l, FALSE);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(sw), TRUE);
+    gtk_scrolled_window_set_propagate_natural_width(GTK_SCROLLED_WINDOW(sw), TRUE);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(sw), 8 * 28);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sw), l);
+    gtk_frame_set_child(GTK_FRAME(frame), sw);
+    gtk_widget_set_visible(frame, FALSE);
+    gtk_text_view_add_overlay(v, frame, 0, 0);
+    g_signal_connect(l, "row-activated", G_CALLBACK(sg_on_compl_row), GINT_TO_POINTER(id));
+    g_signal_connect(v, "destroy", G_CALLBACK(sg_on_compl_view_destroy), GINT_TO_POINTER(id));
+    f = gtk_event_controller_focus_new();
+    g_signal_connect(f, "leave", G_CALLBACK(sg_on_compl_focus_leave), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(GTK_WIDGET(v), f);
+    sg_compl_scroll_handler[id] = g_signal_connect(gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(v)), "value-changed", G_CALLBACK(sg_on_compl_scrolled), GINT_TO_POINTER(id));
+    g_object_set_data(G_OBJECT(v), "sg-compl-frame", frame);
+    g_object_set_data(G_OBJECT(v), "sg-compl-list", l);
+    sg_compl_view[id] = v;
+    return frame;
+}
+static void sg_code_select_completion(int id, int row) {
+    GtkListBox *l = sg_compl_list(id);
+    GtkListBoxRow *r;
+    GtkWidget *sw;
+    graphene_point_t at;
+    if (!l) return;
+    r = gtk_list_box_get_row_at_index(l, row - 1);
+    if (!r) return;
+    gtk_list_box_select_row(l, r);
+    /* into view: the scrolled window's page clamped round the row, once rows are placed */
+    sw = gtk_widget_get_ancestor(GTK_WIDGET(l), GTK_TYPE_SCROLLED_WINDOW);
+    if (sw && gtk_widget_compute_point(GTK_WIDGET(r), GTK_WIDGET(l), &GRAPHENE_POINT_INIT(0, 0), &at)) {
+        GtkAdjustment *a = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sw));
+        gtk_adjustment_clamp_page(a, at.y, at.y + gtk_widget_get_height(GTK_WIDGET(r)));
+    }
+}
+static const char *sg_compl_marks[] = { "", "k", "T", "f", "v", "s" };
+static void sg_code_show_completions(int id, const char *joined, int selected) {
+    GtkWidget *frame = sg_compl_make(id);
+    GtkListBox *l = sg_compl_list(id);
+    GtkTextView *v = sg_view_of(id);
+    GtkTextBuffer *b = gtk_text_view_get_buffer(v);
+    GtkTextIter it;
+    GdkRectangle r, seen;
+    GtkWidget *c;
+    gchar **rows, **row;
+    int n = 0, h, y;
+    while ((c = gtk_widget_get_first_child(GTK_WIDGET(l))) != NULL) gtk_list_box_remove(l, c);
+    rows = g_strsplit(joined, "\x1f", -1);
+    for (row = rows; *row; row++) {
+        gchar **f = g_strsplit(*row, "\x1e", 3);
+        if (f[0] && f[1] && f[2] && f[0][0]) {
+            GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+            int kind = (f[2][0] >= '0' && f[2][0] <= '5') ? f[2][0] - '0' : 0;
+            GtkWidget *mark = gtk_label_new(sg_compl_marks[kind]);
+            GtkWidget *lab = gtk_label_new(f[0]);
+            GtkWidget *det = gtk_label_new(f[1]);
+            GtkListBoxRow *added;
+            gtk_widget_set_size_request(mark, 14, -1);
+            gtk_widget_add_css_class(mark, "accent");
+            gtk_label_set_xalign(GTK_LABEL(lab), 0.0f);
+            gtk_widget_set_hexpand(lab, TRUE);
+            gtk_widget_add_css_class(det, "dim-label");
+            gtk_box_append(GTK_BOX(box), mark);
+            gtk_box_append(GTK_BOX(box), lab);
+            gtk_box_append(GTK_BOX(box), det);
+            gtk_list_box_append(l, box);
+            added = gtk_list_box_get_row_at_index(l, n);
+            if (added) gtk_widget_set_focusable(GTK_WIDGET(added), FALSE);
+            n++;
+        }
+        g_strfreev(f);
+    }
+    g_strfreev(rows);
+    if (n == 0) { sg_compl_hide(id); return; }
+    /* under the caret's line, in buffer coordinates; above it when the rows would pass the
+       bottom of the view and fit above */
+    gtk_text_buffer_get_iter_at_mark(b, &it, gtk_text_buffer_get_insert(b));
+    gtk_text_view_get_iter_location(v, &it, &r);
+    gtk_text_view_get_visible_rect(v, &seen);
+    gtk_widget_measure(frame, GTK_ORIENTATION_VERTICAL, -1, NULL, &h, NULL, NULL);
+    y = r.y + r.height;
+    if (y + h > seen.y + seen.height && r.y - h >= seen.y) y = r.y - h;
+    gtk_text_view_move_overlay(v, frame, r.x, y);
+    gtk_widget_set_visible(frame, TRUE);
+    sg_code_select_completion(id, selected < 1 ? 1 : (selected > n ? n : selected));
+}
+static void sg_test_completion_key(int id, int key) {
+    if (key == 0 || sg_compl_shown(id)) { sg_push(58, id, key, 0); return; }
+    switch (key) {   /* with no list, the key's usual work */
+    case 1: sg_test_code_arrow_key(id, 1); break;
+    case 2: sg_test_code_arrow_key(id, 2); break;
+    case 3: g_signal_emit_by_name(sg_view_of(id), "move-cursor", GTK_MOVEMENT_PAGES, -1, FALSE); break;
+    case 4: g_signal_emit_by_name(sg_view_of(id), "move-cursor", GTK_MOVEMENT_PAGES, 1, FALSE); break;
+    case 5: sg_code_return(id); break;
+    default: break;
+    }
+}
+static void sg_test_press_completion(int id, int row) {
+    GtkListBox *l = sg_compl_list(id);
+    GtkListBoxRow *r;
+    if (!sg_compl_shown(id) || !l || row < 1) return;
+    r = gtk_list_box_get_row_at_index(l, row - 1);
+    if (r) g_signal_emit_by_name(l, "row-activated", r);
+}
+/* ---------- 1v-e-5: multiple carets, the part the key handler needs (the rest follows
+   sg_test_caret_to). While an editor has extra carets its editing keys go to Eiffel as event
+   60 (a = the action, b = 1 with Shift): 1 typed text (sg_code_typed_text), 2 Return, 3 Tab,
+   4 Backspace, 5 Delete, 6 Left, 7 Right, 8 Up, 9 Down, 10 Home, 11 End, 12 cut, 13 copy,
+   14 paste, 15 Escape. With any number of carets the gestures send 61 (a = the gesture,
+   b = a position): 1 Alt+click, 2 Control+Alt+Down, 3 Control+Alt+Up, 4 Control+D. */
+static int sg_extra_caret_count[SG_MAX];
+static char *sg_typed_text[SG_MAX];
+static void sg_tell_code_key(int id, int action, int shift, const char *text) {
+    if (id <= 0 || id >= SG_MAX) return;
+    g_free(sg_typed_text[id]);
+    sg_typed_text[id] = g_strdup(text ? text : "");
+    sg_push(60, id, action, shift ? 1 : 0);
+}
+static const char *sg_code_typed_text(int id) { return (id > 0 && id < SG_MAX && sg_typed_text[id]) ? sg_typed_text[id] : ""; }
+static int sg_code_caret_pos(int id) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextIter it;
+    gtk_text_buffer_get_iter_at_mark(b, &it, gtk_text_buffer_get_insert(b));
+    return gtk_text_iter_get_offset(&it) + 1;
+}
+static int sg_code_key_of(guint key, GdkModifierType m) {
+    if (m & GDK_CONTROL_MASK) {
+        if (key == GDK_KEY_x || key == GDK_KEY_X) return 12;
+        if (key == GDK_KEY_c || key == GDK_KEY_C) return 13;
+        if (key == GDK_KEY_v || key == GDK_KEY_V) return 14;
+        return 0;
+    }
+    switch (key) {
+    case GDK_KEY_Return: case GDK_KEY_KP_Enter: return 2;
+    case GDK_KEY_Tab: case GDK_KEY_ISO_Left_Tab: return 3;
+    case GDK_KEY_BackSpace: return 4;
+    case GDK_KEY_Delete: case GDK_KEY_KP_Delete: return 5;
+    case GDK_KEY_Left: case GDK_KEY_KP_Left: return 6;
+    case GDK_KEY_Right: case GDK_KEY_KP_Right: return 7;
+    case GDK_KEY_Up: case GDK_KEY_KP_Up: return 8;
+    case GDK_KEY_Down: case GDK_KEY_KP_Down: return 9;
+    case GDK_KEY_Home: case GDK_KEY_KP_Home: return 10;
+    case GDK_KEY_End: case GDK_KEY_KP_End: return 11;
+    case GDK_KEY_Escape: return 15;
+    default: return 0;
+    }
+}
+/* Alt+click: 61 with the position clicked, and the click places no caret itself */
+static void sg_on_code_alt_press(GtkGestureClick *g, int n, double x, double y, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    GdkModifierType m = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(g));
+    GtkTextView *v;
+    GtkTextIter it;
+    int bx, by;
+    (void) n;
+    if (!(m & GDK_ALT_MASK)) return;
+    v = sg_view_of(id);
+    gtk_text_view_window_to_buffer_coords(v, GTK_TEXT_WINDOW_WIDGET, (int) x, (int) y, &bx, &by);
+    gtk_text_view_get_iter_at_location(v, &it, bx, by);
+    gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_CLAIMED);
+    sg_push(61, id, 1, gtk_text_iter_get_offset(&it) + 1);
+}
+/* The caret gestures and, with extra carets, the editing keys; TRUE when taken. */
+static gboolean sg_code_caret_key(int id, guint key, GdkModifierType m) {
+    if ((m & GDK_CONTROL_MASK) && !(m & (GDK_ALT_MASK | GDK_SUPER_MASK | GDK_SHIFT_MASK)) && (key == GDK_KEY_d || key == GDK_KEY_D)) {
+        sg_push(61, id, 4, sg_code_caret_pos(id));
+        return TRUE;
+    }
+    if ((m & GDK_CONTROL_MASK) && (m & GDK_ALT_MASK) && (key == GDK_KEY_Down || key == GDK_KEY_Up)) {
+        sg_push(61, id, key == GDK_KEY_Down ? 2 : 3, sg_code_caret_pos(id));
+        return TRUE;
+    }
+    if (id > 0 && id < SG_MAX && sg_extra_caret_count[id] > 0 && !(m & (GDK_ALT_MASK | GDK_SUPER_MASK))) {
+        int a = sg_code_key_of(key, m);
+        if (a) { sg_tell_code_key(id, a, (m & GDK_SHIFT_MASK) || key == GDK_KEY_ISO_Left_Tab, ""); return TRUE; }
+        if (!(m & GDK_CONTROL_MASK)) {
+            gunichar u = gdk_keyval_to_unicode(key);
+            if (u && g_unichar_isprint(u)) {
+                char buf[8];
+                int n = g_unichar_to_utf8(u, buf);
+                buf[n] = 0;
+                sg_tell_code_key(id, 1, 0, buf);
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
 static gboolean sg_on_code_key(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
     int id = GPOINTER_TO_INT(d);
     (void) k; (void) code;
+    if (sg_code_caret_key(id, key, m)) return TRUE;
+    /* 1v-e-4: Control+Space asks for completions; the list's keys while it shows. */
+    if ((m & GDK_CONTROL_MASK) && !(m & (GDK_SHIFT_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)) && key == GDK_KEY_space) {
+        sg_push(58, id, 0, 0);
+        return TRUE;
+    }
+    if (sg_compl_shown(id) && !(m & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK))) {
+        int a = 0;
+        if (key == GDK_KEY_Up || key == GDK_KEY_KP_Up) a = 1;
+        else if (key == GDK_KEY_Down || key == GDK_KEY_KP_Down) a = 2;
+        else if (key == GDK_KEY_Page_Up || key == GDK_KEY_KP_Page_Up) a = 3;
+        else if (key == GDK_KEY_Page_Down || key == GDK_KEY_KP_Page_Down) a = 4;
+        else if (key == GDK_KEY_Return || key == GDK_KEY_KP_Enter || key == GDK_KEY_Tab || key == GDK_KEY_ISO_Left_Tab) a = 5;
+        else if (key == GDK_KEY_Escape) a = 6;
+        if (a) { sg_push(58, id, a, 0); return TRUE; }
+    }
     /* Control+Shift+\ (with Shift the key arrives as the bar on a US keyboard): event 56,
        the editor goes to the matching bracket. */
     if ((m & GDK_CONTROL_MASK) && (m & GDK_SHIFT_MASK) && !(m & (GDK_ALT_MASK | GDK_SUPER_MASK))
         && (key == GDK_KEY_backslash || key == GDK_KEY_bar)) { sg_push(56, id, 0, 0); return TRUE; }
+    /* Control+Shift+[ and Control+Shift+] (with Shift they arrive as the braces on a US
+       keyboard): event 57, the fold key and the unfold key, while folding is shown. */
+    if ((m & GDK_CONTROL_MASK) && (m & GDK_SHIFT_MASK) && !(m & (GDK_ALT_MASK | GDK_SUPER_MASK)) && sg_code_folding_shown(id)
+        && (key == GDK_KEY_bracketleft || key == GDK_KEY_braceleft || key == GDK_KEY_bracketright || key == GDK_KEY_braceright)) {
+        sg_test_fold_key(id, key == GDK_KEY_bracketright || key == GDK_KEY_braceright);
+        return TRUE;
+    }
     if (m & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)) return FALSE;
     if (key == GDK_KEY_Return || key == GDK_KEY_KP_Enter) { if (m & GDK_SHIFT_MASK) return FALSE; sg_code_return(id); return TRUE; }
     if (key == GDK_KEY_ISO_Left_Tab || (key == GDK_KEY_Tab && (m & GDK_SHIFT_MASK))) { sg_code_indent_lines(id, 1); return TRUE; }
@@ -5884,6 +6283,7 @@ static int sg_code_editor(void) {
     GtkTextView *v = sg_view_of(id);
     GtkWidget *g = gtk_drawing_area_new();
     GtkEventController *k = gtk_event_controller_key_new();
+    GtkGesture *press = gtk_gesture_click_new();
     sg_kind[id] = 59;
     gtk_text_view_set_monospace(v, TRUE);
     gtk_text_view_set_wrap_mode(v, GTK_WRAP_NONE);
@@ -5892,6 +6292,9 @@ static int sg_code_editor(void) {
     gtk_widget_add_css_class(g, "dim-label");
     gtk_text_view_set_gutter(v, GTK_TEXT_WINDOW_LEFT, g);
     g_object_set_data(G_OBJECT(sg_w[id]), "sg-gutter", g);
+    g_object_set_data(G_OBJECT(g), "sg-code-id", GINT_TO_POINTER(id));
+    g_signal_connect(press, "pressed", G_CALLBACK(sg_on_code_gutter_press), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(g, GTK_EVENT_CONTROLLER(press));
     /* real tab stops four columns apart from the start: recording the width alone left
        GTK's default of eight until a program called set_tab_width */
     sg_code_set_indent(id, 4, 0);
@@ -5902,12 +6305,20 @@ static int sg_code_editor(void) {
     gtk_event_controller_set_propagation_phase(k, GTK_PHASE_CAPTURE);
     g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_code_key), GINT_TO_POINTER(id));
     gtk_widget_add_controller(GTK_WIDGET(v), k);
+    {   /* 1v-e-5: Alt+click adds or removes a caret (61), before the view places its own */
+        GtkGesture *alt = gtk_gesture_click_new();
+        gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(alt), GTK_PHASE_CAPTURE);
+        g_signal_connect(alt, "pressed", G_CALLBACK(sg_on_code_alt_press), GINT_TO_POINTER(id));
+        gtk_widget_add_controller(GTK_WIDGET(v), GTK_EVENT_CONTROLLER(alt));
+    }
     sg_code_gutter_width(id);
     return id;
 }
 static void sg_code_set_line_numbers(int id, int on) {
     GtkWidget *g = g_object_get_data(G_OBJECT(sg_w[id]), "sg-gutter");
-    if (g) gtk_widget_set_visible(g, on);
+    if (!g) return;
+    g_object_set_data(G_OBJECT(g), "sg-numbers-off", on ? NULL : GINT_TO_POINTER(1));
+    sg_code_gutter_width(id);
 }
 static void sg_code_set_indent(int id, int width, int spaces) {
     GtkTextView *v = sg_view_of(id);
@@ -5933,7 +6344,7 @@ static const char *sg_text_line_text(int id, int n) {
     gtk_text_buffer_get_iter_at_line(b, &s, n - 1);
     e = s;
     if (!gtk_text_iter_ends_line(&e)) gtk_text_iter_forward_to_line_end(&e);
-    last = gtk_text_buffer_get_text(b, &s, &e, FALSE);
+    last = gtk_text_buffer_get_text(b, &s, &e, TRUE);
     return last;
 }
 static void sg_text_go_to_line(int id, int n) {
@@ -5971,6 +6382,14 @@ static void sg_test_type_into_code(int id, const char *text) {
         gunichar c = g_utf8_get_char(p);
         if (c == '\n') sg_code_return(id);
         else if (c == '\t') sg_code_tab(id);
+        else if (c == 8) {
+            /* Backspace (1v-e-4): the selection, or the character before the caret */
+            if (!gtk_text_buffer_delete_selection(b, TRUE, TRUE)) {
+                GtkTextIter it;
+                gtk_text_buffer_get_iter_at_mark(b, &it, gtk_text_buffer_get_insert(b));
+                gtk_text_buffer_backspace(b, &it, TRUE, TRUE);
+            }
+        }
         else { char buf[8]; int n = g_unichar_to_utf8(c, buf); gtk_text_buffer_delete_selection(b, TRUE, TRUE); gtk_text_buffer_insert_at_cursor(b, buf, n); }
     }
 }
@@ -5980,6 +6399,90 @@ static void sg_test_caret_to(int id, int line, int col) {
     gtk_text_buffer_get_iter_at_line_offset(b, &it, line - 1, col - 1);
     gtk_text_buffer_place_cursor(b, &it);
 }
+/* ---------- 1v-e-5: multiple carets, the rest. Extra selections carry the tag "sg-extra-sel"
+   (a decoration: tags are no undo step and send no change); each extra caret is a 2-pixel
+   bar, an overlay of the text view in the theme's error color, steady (as on the Mac). An
+   edit group is one user action (one undo step) and sends one change event at its end. */
+static GtkTextTag *sg_extra_sel_tag(int id) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextTag *t = gtk_text_tag_table_lookup(gtk_text_buffer_get_tag_table(b), "sg-extra-sel");
+    if (!t) t = gtk_text_buffer_create_tag(b, "sg-extra-sel", "background", "rgba(53,132,228,0.30)", NULL);
+    return t;
+}
+static void sg_caret_bar_draw(GtkDrawingArea *a, cairo_t *cr, int w, int h, gpointer d) {
+    GdkRGBA c;
+    (void) d;
+    gtk_widget_get_color(GTK_WIDGET(a), &c);
+    gdk_cairo_set_source_rgba(cr, &c);
+    cairo_rectangle(cr, 0, 0, w, h);
+    cairo_fill(cr);
+}
+static void sg_code_set_extra_carets(int id, const int *pairs, int n) {
+    GtkTextView *v = sg_view_of(id);
+    GtkTextBuffer *b = gtk_text_view_get_buffer(v);
+    GPtrArray *bars = g_object_get_data(G_OBJECT(v), "sg-caret-bars");
+    GtkTextIter s, e;
+    int i, count = gtk_text_buffer_get_char_count(b);
+    if (!bars) {
+        bars = g_ptr_array_new();
+        g_object_set_data_full(G_OBJECT(v), "sg-caret-bars", bars, (GDestroyNotify) g_ptr_array_unref);
+    }
+    gtk_text_buffer_get_bounds(b, &s, &e);
+    gtk_text_buffer_remove_tag(b, sg_extra_sel_tag(id), &s, &e);
+    if (n < 0 || !pairs) n = 0;
+    sg_extra_caret_count[id] = n;
+    for (i = 0; i < n; i++) {
+        int c = CLAMP(pairs[2 * i], 1, count + 1), a = CLAMP(pairs[2 * i + 1], 1, count + 1);
+        int lo = c < a ? c : a, hi = c < a ? a : c;
+        GtkTextIter it;
+        GdkRectangle r;
+        GtkWidget *bar;
+        if (hi > lo) {
+            gtk_text_buffer_get_iter_at_offset(b, &s, lo - 1);
+            gtk_text_buffer_get_iter_at_offset(b, &e, hi - 1);
+            gtk_text_buffer_apply_tag(b, sg_extra_sel_tag(id), &s, &e);
+        }
+        if ((guint) i < bars->len) bar = g_ptr_array_index(bars, i);
+        else {
+            bar = gtk_drawing_area_new();
+            gtk_widget_add_css_class(bar, "error");
+            gtk_widget_set_can_target(bar, FALSE);
+            gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(bar), sg_caret_bar_draw, NULL, NULL);
+            gtk_text_view_add_overlay(v, bar, 0, 0);
+            g_ptr_array_add(bars, bar);
+        }
+        gtk_text_buffer_get_iter_at_offset(b, &it, c - 1);
+        gtk_text_view_get_iter_location(v, &it, &r);
+        gtk_widget_set_size_request(bar, 2, r.height > 0 ? r.height : 16);
+        gtk_text_view_move_overlay(v, bar, r.x, r.y);
+        gtk_widget_set_visible(bar, TRUE);
+    }
+    for (i = n; (guint) i < bars->len; i++) gtk_widget_set_visible(g_ptr_array_index(bars, i), FALSE);
+}
+static void sg_text_begin_edit_group(int id) { gtk_text_buffer_begin_user_action(sg_code_buffer(id)); }
+static void sg_text_end_edit_group(int id) {
+    gtk_text_buffer_end_user_action(sg_code_buffer(id));
+    sg_push(2, id, 0, 0);
+}
+static void sg_test_code_key(int id, int action, int shift, const char *text) {
+    GtkTextView *v = sg_view_of(id);
+    if (id > 0 && id < SG_MAX && sg_extra_caret_count[id] > 0) { sg_tell_code_key(id, action, shift, text); return; }
+    switch (action) {   /* with one caret, the key's usual work */
+    case 1: sg_test_type_into_code(id, text); break;
+    case 2: sg_code_return(id); break;
+    case 3: if (shift) sg_code_indent_lines(id, 1); else sg_code_tab(id); break;
+    case 4: sg_test_type_into_code(id, "\b"); break;
+    case 5: g_signal_emit_by_name(v, "delete-from-cursor", GTK_DELETE_CHARS, 1); break;
+    case 6: case 7: g_signal_emit_by_name(v, "move-cursor", GTK_MOVEMENT_VISUAL_POSITIONS, action == 6 ? -1 : 1, shift ? TRUE : FALSE); break;
+    case 8: case 9: g_signal_emit_by_name(v, "move-cursor", GTK_MOVEMENT_DISPLAY_LINES, action == 8 ? -1 : 1, shift ? TRUE : FALSE); break;
+    case 10: case 11: g_signal_emit_by_name(v, "move-cursor", GTK_MOVEMENT_DISPLAY_LINE_ENDS, action == 10 ? -1 : 1, shift ? TRUE : FALSE); break;
+    case 12: g_signal_emit_by_name(v, "cut-clipboard"); break;
+    case 13: g_signal_emit_by_name(v, "copy-clipboard"); break;
+    case 14: g_signal_emit_by_name(v, "paste-clipboard"); break;
+    default: break;
+    }
+}
+static void sg_test_caret_gesture(int id, int gesture, int position) { sg_push(61, id, gesture, position); }
 static int sg_int_compare(const int *a, const int *b);
 
 /* ---------- 1v-a: grid view (kind 58). A GtkGridView in a scrolled window over a selection

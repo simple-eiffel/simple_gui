@@ -441,7 +441,8 @@ feature -- Windows and containers
 		end
 
 	test_type_into_code (an_id: INTEGER; a_text: POINTER)
-			-- As the user typing `a_text' at the caret, %N as Return and %T as Tab included.
+			-- As the user typing `a_text' at the caret, %N as Return, %T as Tab and
+			-- character 8 as Backspace included (1v-e-4).
 		deferred
 		end
 
@@ -475,12 +476,177 @@ feature -- Windows and containers
 		deferred
 		end
 
+	code_set_folding_shown (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1v-e-3: the gutter shows a marker beside each line that starts a fold (see
+			-- `code_set_fold_marks'), and the fold keys work. Off until set.
+			-- A click on a marker sends event 57 with a = its line and b = 0. The fold key,
+			-- Control+Shift+[ (Command+Option+[ on macOS), sends 57 with a = the caret's
+			-- line and b = 1; the unfold key, Control+Shift+] (Command+Option+]), sends it
+			-- with b = 2. The control folds nothing by itself.
+		deferred
+		end
+
+	code_set_fold_marks (an_id: INTEGER; a_lines: POINTER; a_count: INTEGER)
+			-- The lines that start a fold: `a_count' 32-bit integers at `a_lines', ascending,
+			-- in place of the last set. Read during the call. Shown while folding is shown.
+		require
+			count_not_negative: a_count >= 0
+		deferred
+		end
+
+	code_set_folded_lines (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- The closed folds, as the lines they hide together: `a_count' pairs of 32-bit
+			-- integers at `a_pairs', each a fold's first line and its last, ascending, no
+			-- pair reaching the next; in place of the last set. Read during the call.
+			-- A pair's first line stays shown, with a mark after it that lines are hidden,
+			-- and its marker shows the fold closed. The lines after it through its last are
+			-- not shown, take no room, and the caret does not enter them by the keys or the
+			-- pointer. The text is whole for every query. A decoration: no change event, no
+			-- undo step.
+			-- From a change of its text to the next call the control keeps what was hidden
+			-- hidden, moved by the lines the edit added or took above it.
+		require
+			count_not_negative: a_count >= 0
+		deferred
+		end
+
+	test_press_fold_marker (an_id, a_line: INTEGER)
+			-- As the user clicking the marker beside `a_line': 57 with b = 0. Nothing when
+			-- the line has no marker.
+		deferred
+		end
+
+	test_fold_key (an_id: INTEGER; a_unfold: BOOLEAN)
+			-- As the user pressing the fold key, or the unfold key when `a_unfold': 57 with
+			-- a = the caret's line and b = 1 or 2. Nothing while folding is not shown.
+		deferred
+		end
+
+	test_line_is_shown (an_id, a_line: INTEGER): BOOLEAN
+			-- Is line `a_line' shown: in the text, and not hidden in a closed fold?
+		deferred
+		end
+
+	test_code_arrow_key (an_id, a_direction: INTEGER)
+			-- As the user pressing an arrow key in a code editor, no modifier held:
+			-- `a_direction' 1 up, 2 down, 3 left, 4 right. Event 52 when the caret moves.
+		require
+			a_direction: 1 <= a_direction and a_direction <= 4
+		deferred
+		end
+
+	code_show_completions (an_id: INTEGER; a_joined: POINTER; a_selected: INTEGER)
+			-- 1v-e-4: show the completion list at the caret, or replace its rows. `a_joined' is
+			-- UTF-8, ending in NUL: rows joined by 0x1F, and in a row the label, the detail and
+			-- the kind (one digit, 0 to 5) joined by 0x1E. Row `a_selected', from 1, is
+			-- highlighted. Read during the call.
+			-- A native popup under the caret's line (above it when there is no room below), at
+			-- most 8 rows tall, scrolling; it never takes the focus.
+			-- While it shows, Up, Down, Page Up, Page Down, Return or Tab, and Escape send 58
+			-- with a = 1 to 6 in place of their usual work, and a click on a row sends 59 with
+			-- a = the row. Control+Space sends 58 with a = 0 at any time (on macOS the
+			-- `complete:' action does too). The control hides the list itself when the editor
+			-- loses the focus or scrolls, and sends 58 with a = 6.
+		require
+			has_rows: a_joined /= default_pointer
+			selected_from_one: a_selected >= 1
+		deferred
+		end
+
+	code_select_completion (an_id, a_row: INTEGER)
+			-- Highlight row `a_row', from 1, and scroll it into view.
+		require
+			row_from_one: a_row >= 1
+		deferred
+		end
+
+	code_hide_completions (an_id: INTEGER)
+			-- No completion list; nothing when none shows. Sends no event.
+		deferred
+		end
+
+	test_completion_key (an_id, a_key: INTEGER)
+			-- As the user pressing completion key `a_key': 0 Control+Space, 1 Up, 2 Down,
+			-- 3 Page Up, 4 Page Down, 5 Return, 6 Escape. 58 with a = `a_key' for 0 always,
+			-- and for 1 to 6 while the list shows; otherwise the key does its usual work.
+		require
+			a_key: 0 <= a_key and a_key <= 6
+		deferred
+		end
+
+	test_press_completion (an_id, a_row: INTEGER)
+			-- As the user clicking row `a_row' of the list: 59. Nothing when no list shows.
+		require
+			row_from_one: a_row >= 1
+		deferred
+		end
+
+	test_completions_shown (an_id: INTEGER): BOOLEAN
+			-- Does the completion list show?
+		deferred
+		end
+
+	code_set_extra_carets (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- 1v-e-5: the carets after the control's own, in place of the last set: `a_count'
+			-- pairs of 32-bit integers at `a_pairs', each a caret's position and its anchor
+			-- (the other end of its selection; equal to the position when nothing is
+			-- selected), positions from 1 as the text counts them. Read during the call.
+			-- The control draws a caret line and a selection tint for each, blinking with its
+			-- own; a decoration (no change event, no undo step).
+			-- While extra carets are set (`a_count' > 0) the control's editing keys go to the
+			-- editor instead of acting: event 60 with a = the action and b = 1 with Shift
+			-- held: 1 typed text (read it with `code_typed_text'), 2 Return, 3 Tab, 4 Backspace,
+			-- 5 Delete, 6 Left, 7 Right, 8 Up, 9 Down, 10 Home, 11 End, 12 cut, 13 copy,
+			-- 14 paste, 15 Escape.
+			-- With any number of carets, the gestures send event 61 with a = the gesture and
+			-- b = a position: 1 Alt+click (Option+click) at b, 2 add a caret on the next line
+			-- (Control+Alt+Down; Command+Option+Down), 3 on the previous line (Up), 4 add the
+			-- next occurrence (Control+D; Command+D). The control adds no caret by itself.
+		require
+			count_not_negative: a_count >= 0
+		deferred
+		end
+
 	test_fill_event_queue (a_count: INTEGER)
 			-- Queue `a_count' events that no widget answers (type 0, id 0), as a flood would:
 			-- for the tests of a full event queue. They are queued by the time the loop next
 			-- turns, ahead of a wake sent after this call. A bounded queue keeps what fits.
 		require
 			count_not_negative: a_count >= 0
+		deferred
+		end
+
+	code_typed_text (an_id: INTEGER): POINTER
+			-- The text of the last event 60 with a = 1, UTF-8 ending in NUL; valid until the
+			-- next event from this control.
+		deferred
+		end
+
+	text_begin_edit_group (an_id: INTEGER)
+			-- 1v-e-5: the text changes until `text_end_edit_group' are one undo step, and
+			-- send one change event (2), at the end.
+		deferred
+		end
+
+	text_end_edit_group (an_id: INTEGER)
+			-- End the group `text_begin_edit_group' began.
+		deferred
+		end
+
+	test_code_key (an_id, an_action: INTEGER; a_shift: BOOLEAN; a_text: POINTER)
+			-- As the user pressing editing key `an_action' (as for event 60) with Shift held
+			-- when `a_shift', `a_text' (UTF-8) being the typed text for action 1. While extra
+			-- carets are set: event 60. Otherwise the key does its usual work.
+		require
+			an_action: 1 <= an_action and an_action <= 15
+		deferred
+		end
+
+	test_caret_gesture (an_id, a_gesture, a_position: INTEGER)
+			-- As the user making caret gesture `a_gesture' (1 to 4, as for event 61); for 1 an
+			-- Alt+click at character position `a_position'. Event 61.
+		require
+			a_gesture: 1 <= a_gesture and a_gesture <= 4
 		deferred
 		end
 

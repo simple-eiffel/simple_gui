@@ -487,6 +487,28 @@ void sga_code_show_bracket_pair(int a_id, int a_first_start, int a_first_count, 
 void sga_code_hide_bracket_pair(int a_id);
 int sga_test_bracket_tint_at(int a_id, int a_position);
 void sga_test_bracket_key(int a_id);
+/* 1v-e-3: folding */
+void sga_code_set_folding_shown(int a_id, int a_on);
+void sga_code_set_fold_marks(int a_id, const int *a_lines, int a_count);
+void sga_code_set_folded_lines(int a_id, const int *a_pairs, int a_count);
+void sga_test_press_fold_marker(int a_id, int a_line);
+void sga_test_fold_key(int a_id, int an_unfold);
+int sga_test_line_is_shown(int a_id, int a_line);
+void sga_test_code_arrow_key(int a_id, int a_direction);
+/* 1v-e-4: completion */
+void sga_code_show_completions(int a_id, const char *a_joined, int a_selected);
+void sga_code_select_completion(int a_id, int a_row);
+void sga_code_hide_completions(int a_id);
+void sga_test_completion_key(int a_id, int a_key);
+void sga_test_press_completion(int a_id, int a_row);
+int sga_test_completions_shown(int a_id);
+/* 1v-e-5: multiple carets */
+void sga_code_set_extra_carets(int a_id, const int *a_pairs, int a_count);
+const char *sga_code_typed_text(int a_id);
+void sga_text_begin_edit_group(int a_id);
+void sga_text_end_edit_group(int a_id);
+void sga_test_code_key(int a_id, int an_action, int a_shift, const char *a_text);
+void sga_test_caret_gesture(int a_id, int a_gesture, int a_position);
 /* 1v-a: the grid view */
 int sga_grid_view(void);
 void sga_grid_view_extend(int a_id, const char *a_title, const char *a_picture, const char *an_icon);

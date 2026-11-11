@@ -2469,8 +2469,8 @@ feature -- The remaining controls (1j)
 			l_folds.put (1, 3)
 			l_folds.put (2, 2)
 			l_code.set_folds (l_folds)
-			assert ("the folds are kept", l_code.fold_count = 2 and l_code.fold_first_line (1) = 1
-				and l_code.fold_last_line (1) = 3 and l_code.fold_first_line (2) = 2 and l_code.fold_last_line (2) = 2)
+			assert ("the fold is kept, and the range of one line is no fold: " + l_code.fold_count.out,
+				l_code.fold_count = 1 and l_code.fold_first_line (1) = 1 and l_code.fold_last_line (1) = 3)
 				-- theme
 			l_was_dark := app.is_dark
 			driver.set_dark (not l_was_dark)
@@ -2803,6 +2803,615 @@ feature -- The remaining controls (1j)
 				assert_no_bracket_pair ("after the undo", l_code)
 			end
 			l_window.close
+		end
+
+	test_code_carets_type_and_undo
+			-- 1v-e-5: text typed at three carets, two of them on one line, goes in at each;
+			-- one undo takes all three back; the syntax object hears one true edit.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_menu: GUI_MENU
+			l_undo, l_edits: INTEGER
+		do
+			l_menu := app.menu.add_menu ("Edit")
+			l_menu.add_edit_item (l_menu.Role_undo, "Undo")
+			l_undo := l_menu.last_item_id
+			create l_window.make ("Carets", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_syntax.make
+			l_code.set_syntax (l_syntax)
+			l_code.set_text ("abc%Nabc%N")
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 1)
+			l_code.add_caret (1, 3)
+			l_code.add_caret (2, 1)
+			assert ("three carets: " + l_code.caret_count.out, l_code.caret_count = 3)
+			l_edits := l_syntax.edit_count
+			driver.press_code_key (l_code, 1, False, "X")
+			assert ("typed at all three: " + l_code.text.to_string_8, l_code.text.same_string ("XabXc%NXabc%N"))
+			assert ("still three", l_code.caret_count = 3)
+			assert ("one edit heard: " + (l_syntax.edit_count - l_edits).out, l_syntax.edit_count = l_edits + 1)
+			assert_copy_holds ("the syntax copy holds", l_code, l_syntax)
+			driver.invoke_menu (l_undo)
+			assert ("one undo takes all three back: " + l_code.text.to_string_8, l_code.text.same_string ("abc%Nabc%N"))
+			driver.press_code_key (l_code, 15, False, "")
+			assert ("Escape: back to one", l_code.caret_count = 1)
+			l_window.close
+		end
+
+	test_code_carets_meet_and_occurrences
+			-- 1v-e-5: Backspace at two carets until they meet makes one; Control+D selects
+			-- the word, then adds each next occurrence; typing replaces all of them.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+		do
+			create l_window.make ("Carets meet", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("ab")
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 2)
+			l_code.add_caret (1, 3)
+			assert ("two carets", l_code.caret_count = 2)
+			driver.press_code_key (l_code, 4, False, "")
+			assert ("both gone: " + l_code.text.to_string_8, l_code.text.is_empty)
+			assert ("they met: one caret", l_code.caret_count = 1)
+			l_code.set_text ("foo bar foo baz foo")
+			driver.move_caret (l_code, 1, 2)
+			driver.make_caret_gesture (l_code, 4, 0)
+			assert ("the word selected", l_code.caret_count = 1 and l_code.selection_start = 1 and l_code.selection_end = 3)
+			driver.make_caret_gesture (l_code, 4, 0)
+			driver.make_caret_gesture (l_code, 4, 0)
+			assert ("three occurrences: " + l_code.caret_count.out, l_code.caret_count = 3)
+			assert ("the last one", l_code.caret_start (3) = 17 and l_code.caret_end (3) = 19)
+			driver.press_code_key (l_code, 1, False, "x")
+			assert ("each replaced: " + l_code.text.to_string_8, l_code.text.same_string ("x bar x baz x"))
+			driver.press_code_key (l_code, 15, False, "")
+			assert ("Escape", l_code.caret_count = 1)
+			l_window.close
+		end
+
+	test_code_carets_paste_copy_and_shift
+			-- 1v-e-5: a paste of as many lines as there are carets gives each its line; any
+			-- other text goes whole to each; Shift+Left grows each selection; copy joins the
+			-- selections top to bottom.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_theirs: STRING_32
+		do
+				-- the person's own clipboard text is put back at the end
+			l_theirs := app.clipboard.text
+			create l_window.make ("Carets paste", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("a%Nb%Nc")
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 2)
+			l_code.add_caret (2, 2)
+			l_code.add_caret (3, 2)
+			assert ("three carets", l_code.caret_count = 3)
+			app.clipboard.set_text ("1%N2%N3")
+			driver.press_code_key (l_code, 14, False, "")
+			assert ("a line each: " + l_code.text.to_string_8, l_code.text.same_string ("a1%Nb2%Nc3"))
+			app.clipboard.set_text ("Z")
+			driver.press_code_key (l_code, 14, False, "")
+			assert ("whole to each: " + l_code.text.to_string_8, l_code.text.same_string ("a1Z%Nb2Z%Nc3Z"))
+			driver.press_code_key (l_code, 6, True, "")
+			assert ("Shift+Left grew the second", l_code.caret_end (2) - l_code.caret_start (2) = 0
+				and l_code.caret_start (2) = 7)
+			driver.press_code_key (l_code, 13, False, "")
+			assert ("copy joins them: " + app.clipboard.text.to_string_8, app.clipboard.text.same_string ("Z%NZ%NZ"))
+			app.clipboard.set_text (l_theirs)
+			l_window.close
+		end
+
+	test_code_completion_lists_and_narrows
+			-- 1v-e-4: a list opens by itself at the second word character typed and not the
+			-- first; labels that start with the word come first, then those that hold it,
+			-- each in the source's order, case ignored; typing narrows, Backspace widens and
+			-- closes the list when the word is gone; no list shows without offers;
+			-- Control+Space on no word offers everything.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+		do
+			create l_window.make ("Completion lists", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_completion_words (<<"print", "Precursor", "sprint", "deferred", "do">>)
+			driver.focus (l_code)
+			driver.type_code (l_code, "p")
+			assert ("not after one character", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			driver.type_code (l_code, "r")
+			assert ("after two: " + l_code.completion_count.out, l_code.is_completing and driver.are_completions_shown (l_code))
+			assert ("three rows: " + l_code.completion_count.out, l_code.completion_count = 3)
+			assert ("starting with it first, in order", l_code.completion_label (1).same_string ("print")
+				and l_code.completion_label (2).same_string ("Precursor"))
+			assert ("then holding it", l_code.completion_label (3).same_string ("sprint"))
+			assert ("the first highlighted", l_code.completion_selected = 1)
+			driver.type_code (l_code, "e")
+			assert ("narrowed: " + l_code.completion_count.out, l_code.completion_count = 1
+				and l_code.completion_label (1).same_string ("Precursor"))
+			driver.type_code (l_code, {STRING_32} "%/8/")
+			assert ("widened: " + l_code.completion_count.out, l_code.completion_count = 3)
+			driver.type_code (l_code, {STRING_32} "%/8/%/8/")
+			assert ("closed with the word gone", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			assert ("the text is empty again", l_code.text.is_empty)
+			driver.type_code (l_code, "zz")
+			assert ("no list without offers", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			l_code.set_text ("")
+			driver.press_completion_key (l_code, 0)
+			assert ("Control+Space on no word offers all five: " + l_code.completion_count.out,
+				l_code.completion_count = 5 and driver.are_completions_shown (l_code))
+			l_window.close
+		end
+
+	test_code_completion_keys_and_accepting
+			-- 1v-e-4: Up, Down, Page Up and Page Down move within the list; Return puts the
+			-- highlighted offer in place of the word as one undo step, with the caret after
+			-- it, and runs `completion_accepted_actions'; a click on a row accepts it; Escape
+			-- closes the list and types nothing; "(" closes it and is typed.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_menu: GUI_MENU
+			l_undo: INTEGER
+			l_accepted: ARRAYED_LIST [STRING_32]
+		do
+			create l_accepted.make (2)
+			l_menu := app.menu.add_menu ("Edit")
+			l_menu.add_edit_item (l_menu.Role_undo, "Undo")
+			l_undo := l_menu.last_item_id
+			create l_window.make ("Completion keys", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_completion_words (<<"print", "Precursor", "sprint">>)
+			l_code.completion_accepted_actions.extend (agent (a_text: STRING_32; a_list: ARRAYED_LIST [STRING_32])
+				do
+					a_list.extend (a_text)
+				end (?, l_accepted))
+			driver.focus (l_code)
+			driver.type_code (l_code, "pr")
+			driver.press_completion_key (l_code, 2)
+			assert ("Down: selected " + l_code.completion_selected.out + " of " + l_code.completion_count.out + ", shown " + driver.are_completions_shown (l_code).out, l_code.completion_selected = 2)
+			driver.press_completion_key (l_code, 4)
+			assert ("Page Down stops at the last", l_code.completion_selected = 3)
+			driver.press_completion_key (l_code, 3)
+			assert ("Page Up stops at the first", l_code.completion_selected = 1)
+			driver.press_completion_key (l_code, 1)
+			assert ("Up stops at the first", l_code.completion_selected = 1)
+			driver.press_completion_key (l_code, 2)
+			driver.press_completion_key (l_code, 5)
+			assert ("Return accepted Precursor: " + l_code.text.to_string_8, l_code.text.same_string ("Precursor"))
+			assert ("closed", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			assert ("the caret after it", l_code.caret_line = 1 and l_code.caret_column = 10)
+			assert ("told once", l_accepted.count = 1 and l_accepted [1].same_string ("Precursor"))
+			driver.invoke_menu (l_undo)
+			assert ("one undo step back to the word: " + l_code.text.to_string_8, l_code.text.same_string ("pr"))
+			l_code.set_text ("")
+			driver.type_code (l_code, "pr")
+			driver.press_completion_row (l_code, 3)
+			assert ("a click accepted sprint: " + l_code.text.to_string_8, l_code.text.same_string ("sprint"))
+			assert ("told again", l_accepted.count = 2 and l_accepted [2].same_string ("sprint"))
+			l_code.set_text ("")
+			driver.type_code (l_code, "sp")
+			assert ("open for sp", l_code.is_completing)
+			driver.press_completion_key (l_code, 6)
+			assert ("Escape closed it", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			assert ("and typed nothing: " + l_code.text.to_string_8, l_code.text.same_string ("sp"))
+			driver.type_code (l_code, "r")
+			assert ("open again for spr", l_code.is_completing)
+			driver.type_code (l_code, "(")
+			assert ("( closed it", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			assert ("and was typed: " + l_code.text.to_string_8, l_code.text.same_string ("spr("))
+			l_window.close
+		end
+
+	test_code_completion_sources
+			-- 1v-e-4: the completer hears the word, the line and the column; a slow source is
+			-- told where the word starts and adds to that list later; an answer for another
+			-- word is ignored.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_heard: STRING_32
+			l_start: CELL [INTEGER]
+		do
+			create l_heard.make_empty
+			create l_start.put (0)
+			create l_window.make ("Completion sources", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_completer (agent (a_word: STRING_32; a_line, a_column: INTEGER; a_log: STRING_32): ITERABLE [GUI_COMPLETION]
+				do
+					a_log.wipe_out
+					a_log.append (a_word + " " + a_line.out + " " + a_column.out)
+					Result := <<create {GUI_COMPLETION}.make_with ("feature_one", "", "INTEGER", {GUI_COMPLETION}.Kind_feature)>>
+				end (?, ?, ?, l_heard))
+			l_code.set_text ("x%N  fe")
+			driver.move_caret (l_code, 2, 5)
+			driver.press_completion_key (l_code, 0)
+			assert ("the completer heard the word, line and column: " + l_heard.to_string_8, l_heard.same_string ("fe 2 5"))
+			assert ("its offer shows", l_code.completion_count = 1 and l_code.completion_label (1).same_string ("feature_one"))
+			driver.press_completion_key (l_code, 6)
+			l_code.set_completer (Void)
+			l_code.completion_opened_actions.extend (agent (a_at: INTEGER; a_cell: CELL [INTEGER]) do a_cell.put (a_at) end (?, l_start))
+			driver.press_completion_key (l_code, 0)
+			assert ("told where the word starts: " + l_start.item.out, l_start.item = 5)
+			assert ("no list yet", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			l_code.add_completions (l_start.item, <<create {GUI_COMPLETION}.make ("feet")>>)
+			assert ("the later answer shows", l_code.completion_count = 1 and driver.are_completions_shown (l_code))
+			l_code.add_completions (1, <<create {GUI_COMPLETION}.make ("fence")>>)
+			assert ("an answer for another word is ignored", l_code.completion_count = 1)
+			l_window.close
+		end
+
+	test_code_editor_folding
+			-- 1v-e-3: the folds of a text by indentation; a closed fold hides its lines after
+			-- the first and an open one shows them, the text the same throughout; a closed
+			-- fold inside a closed fold; going to a line or finding a match in a closed fold
+			-- opens it; an edit above a closed fold moves it; deleting its first line opens
+			-- it; a marker click and the fold keys run `fold_actions', a fold by program
+			-- does not; the arrow keys step over hidden lines.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_text: STRING_32
+			l_told: ARRAYED_LIST [STRING]
+			l_start: INTEGER
+		do
+			create l_told.make (4)
+			create l_window.make ("Folding", 560, 360)
+			create l_code.make
+			l_code.fold_actions.extend (agent (l: INTEGER; f: BOOLEAN; t: ARRAYED_LIST [STRING]) do t.extend (l.out + ":" + f.out) end (?, ?, l_told))
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+				-- 1 class A, 2 feature, 3 do, 4 x, 5 y, 6 end, 7 other, 8 end, 9 tail
+			l_text := "class A%N    feature%N        do%N            x%N            y%N        end%N    other%Nend%Ntail"
+			l_code.set_text (l_text)
+			driver.focus (l_code)
+			assert ("off until set", not l_code.is_folding_shown)
+			assert ("three folds by indentation: " + folds_out (l_code), folds_out (l_code).same_string ("1-7 2-6 3-5"))
+			l_code.set_folding_shown (True)
+			assert ("the same with markers shown: " + folds_out (l_code), folds_out (l_code).same_string ("1-7 2-6 3-5"))
+			assert_shown ("nothing closed", l_code, "1 2 3 4 5 6 7 8 9")
+				-- hide and show
+			l_code.fold (3)
+			assert ("closed", l_code.is_folded (3))
+			assert_shown ("fold 3 closed", l_code, "1 2 3 6 7 8 9")
+			assert ("the text is whole", l_code.text.same_string (l_text) and l_code.line_count = 9)
+			l_code.unfold (3)
+			assert_shown ("fold 3 open", l_code, "1 2 3 4 5 6 7 8 9")
+			assert ("the text is still whole", l_code.text.same_string (l_text))
+				-- a closed fold in a closed fold
+			l_code.fold (3)
+			l_code.fold (1)
+			assert_shown ("the outer closed hides the inner", l_code, "1 8 9")
+			l_code.unfold (1)
+			assert ("the inner stays closed", l_code.is_folded (3))
+			assert_shown ("the outer open, the inner closed", l_code, "1 2 3 6 7 8 9")
+				-- going into a closed fold opens it
+			l_code.go_to_line (4)
+			assert ("going to a hidden line opens its fold", not l_code.is_folded (3) and l_code.caret_line = 4)
+			assert_shown ("after go to line", l_code, "1 2 3 4 5 6 7 8 9")
+			l_code.fold (3)
+			assert ("the caret left the hidden line for the end of the first: " + l_code.caret_line.out + ":" + l_code.caret_column.out,
+				l_code.caret_line = 3 and l_code.caret_column = 11)
+			l_code.go_to_line (1)
+			assert ("a match in a closed fold is found", l_code.find_next ("y", True, False))
+			assert ("and its fold opens", not l_code.is_folded (3) and l_code.caret_line = 5)
+			assert_shown ("after the find", l_code, "1 2 3 4 5 6 7 8 9")
+			assert ("a fold by program tells nothing: " + l_told.count.out, l_told.is_empty)
+				-- an edit above a closed fold moves it
+			l_code.fold (3)
+			l_code.select_range (1, 0)
+			l_code.replace_selection ("top%N")
+			assert ("ten lines: " + l_code.line_count.out, l_code.line_count = 10)
+			assert ("the fold is closed on its new line", l_code.is_folded (4) and not l_code.is_folded (3))
+			assert_shown ("a line put in above by program", l_code, "1 2 3 4 7 8 9 10")
+			driver.move_caret (l_code, 1, 4)
+			driver.type_code (l_code, "%N")
+			assert ("eleven lines: " + l_code.line_count.out, l_code.line_count = 11)
+			assert ("a line typed above moves it too", l_code.is_folded (5))
+			assert_shown ("a line typed above", l_code, "1 2 3 4 5 8 9 10 11")
+				-- deleting its first line opens it (from the end of line 4 through "do":
+				-- the selection touches no hidden line, so the fold is closed until the edit)
+			l_start := l_code.text.substring_index ({STRING_32} "%N        do", 1)
+			l_code.select_range (l_start, l_start + 10)
+			assert ("still closed with its first line selected", l_code.is_folded (5))
+			l_code.replace_selection ("")
+			assert ("ten lines again: " + l_code.line_count.out, l_code.line_count = 10)
+			assert_shown ("the first line of the closed fold deleted", l_code, "1 2 3 4 5 6 7 8 9 10")
+			assert ("and no fold is closed", across 1 |..| l_code.fold_count as ic all not l_code.is_folded (l_code.fold_first_line (ic)) end)
+				-- now: 1 top, 2 blank, 3 class A, 4 feature, 5 x, 6 y, 7 end, 8 other, 9 end, 10 tail
+			assert ("the folds now: " + folds_out (l_code), folds_out (l_code).same_string ("3-8 4-7"))
+				-- a marker click tells
+			driver.press_fold_marker (l_code, 4)
+			assert ("a marker click closes and tells: " + l_told.count.out,
+				l_code.is_folded (4) and l_told.count = 1 and then l_told.last.same_string ("4:True"))
+			assert_shown ("closed by its marker", l_code, "1 2 3 4 8 9 10")
+			driver.press_fold_marker (l_code, 4)
+			assert ("another opens and tells: " + l_told.count.out,
+				not l_code.is_folded (4) and l_told.count = 2 and then l_told.last.same_string ("4:False"))
+			driver.press_fold_marker (l_code, 5)
+			assert ("a line that starts no fold has no marker: " + l_told.count.out, l_told.count = 2)
+				-- the fold keys tell
+			driver.move_caret (l_code, 6, 1)
+			driver.press_fold_key (l_code, False)
+			assert ("the fold key closes the innermost open fold around the caret: " + l_told.count.out,
+				l_code.is_folded (4) and l_told.count = 3 and then l_told.last.same_string ("4:True"))
+			assert ("and the caret leaves the hidden line: " + l_code.caret_line.out + ":" + l_code.caret_column.out,
+				l_code.caret_line = 4 and l_code.caret_column = 12)
+			driver.press_fold_key (l_code, False)
+			assert ("again, the next fold out: " + l_told.count.out,
+				l_code.is_folded (3) and l_told.count = 4 and then l_told.last.same_string ("3:True"))
+			assert ("the caret on its first line: " + l_code.caret_line.out, l_code.caret_line = 3)
+			assert_shown ("both closed", l_code, "1 2 3 9 10")
+			driver.press_fold_key (l_code, True)
+			assert ("the unfold key opens the closed fold on the caret line: " + l_told.count.out,
+				not l_code.is_folded (3) and l_told.count = 5 and then l_told.last.same_string ("3:False"))
+			assert_shown ("the inner one stays closed", l_code, "1 2 3 4 8 9 10")
+			driver.press_fold_key (l_code, True)
+			assert ("the unfold key on a line with no closed fold does nothing: " + l_told.count.out, l_told.count = 5)
+				-- the arrow keys step over the hidden lines 5 to 7, and the fold stays closed
+			driver.move_caret (l_code, 4, 1)
+			driver.press_arrow_key (l_code, 2)
+			assert ("down, over the fold: " + l_code.caret_line.out, l_code.caret_line = 8 and l_code.is_folded (4))
+			driver.press_arrow_key (l_code, 1)
+			assert ("up, over the fold: " + l_code.caret_line.out, l_code.caret_line = 4 and l_code.is_folded (4))
+			driver.move_caret (l_code, 4, 12)
+			driver.press_arrow_key (l_code, 4)
+			assert ("right from the end of the first line: " + l_code.caret_line.out + ":" + l_code.caret_column.out,
+				l_code.caret_line = 8 and l_code.caret_column = 1 and l_code.is_folded (4))
+			driver.press_arrow_key (l_code, 3)
+			assert ("left, back to it: " + l_code.caret_line.out + ":" + l_code.caret_column.out,
+				l_code.caret_line = 4 and l_code.caret_column = 12 and l_code.is_folded (4))
+			assert_shown ("after the arrow keys", l_code, "1 2 3 4 8 9 10")
+			assert ("the arrow keys told no fold: " + l_told.count.out, l_told.count = 5)
+			l_window.close
+		end
+
+	test_code_editor_folds_from_syntax
+			-- 1v-e-3: with a syntax object the folds are those it gave last, whatever the
+			-- indentation; they hide and show as any fold; a closed fold stays closed while
+			-- the next set starts a fold on its line, with that one's reach, and opens when
+			-- none does; without the object the folds are by indentation again.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_folds: GUI_TEST_RANGES
+			l_text: STRING_32
+		do
+			create l_window.make ("Folds from syntax", 560, 320)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_text := "a%N    b%Nc%Nd%Ne%Nf%Ng"
+			l_code.set_text (l_text)
+			l_code.go_to_line (1)
+			l_code.set_folding_shown (True)
+			assert ("by indentation: " + folds_out (l_code), folds_out (l_code).same_string ("1-2"))
+			l_code.fold (1)
+			assert_shown ("closed by indentation", l_code, "1 3 4 5 6 7")
+			create l_syntax.make
+			l_code.set_syntax (l_syntax)
+			assert ("the syntax has given none: " + folds_out (l_code), l_code.fold_count = 0)
+			assert_shown ("so nothing is closed", l_code, "1 2 3 4 5 6 7")
+			create l_folds.make
+			l_folds.put (3, 6)
+			l_folds.put (4, 5)
+			l_folds.put (7, 7)
+			l_code.set_folds (l_folds)
+			assert ("the folds the syntax gave: " + folds_out (l_code), folds_out (l_code).same_string ("3-6 4-5"))
+			l_code.fold (4)
+			assert_shown ("the inner closed", l_code, "1 2 3 4 6 7")
+			l_code.fold (3)
+			assert_shown ("the outer closed", l_code, "1 2 3 7")
+				-- a new set: a fold still starts on line 3, none on line 4
+			create l_folds.make
+			l_folds.put (3, 5)
+			l_code.set_folds (l_folds)
+			assert ("3 stays closed and 4 starts no fold", l_code.is_folded (3) and not l_code.is_foldable (4))
+			assert_shown ("the closed fold has its new reach", l_code, "1 2 3 6 7")
+			l_code.unfold (3)
+			assert_shown ("open, and nothing is left of the old inner fold", l_code, "1 2 3 4 5 6 7")
+			driver.press_fold_marker (l_code, 3)
+			assert ("a marker click closes a fold from the syntax", l_code.is_folded (3))
+			assert_shown ("closed by its marker", l_code, "1 2 3 6 7")
+			create l_folds.make
+			l_code.set_folds (l_folds)
+			assert ("an empty set: no folds", l_code.fold_count = 0)
+			assert_shown ("and nothing hidden", l_code, "1 2 3 4 5 6 7")
+			l_code.set_syntax (Void)
+			assert ("by indentation again: " + folds_out (l_code), folds_out (l_code).same_string ("1-2"))
+			assert ("the text is whole", l_code.text.same_string (l_text))
+			l_window.close
+		end
+
+	test_code_editor_fold_cost
+			-- 1v-e-3: what folding costs on a 10,000-line text, printed: the folds by
+			-- indentation; a text set with and without markers shown; closing and opening
+			-- every fold; a keystroke without markers, with markers, and with every fold
+			-- closed (each with its frame drawn). The measured steps run inside `timed'.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_text: STRING_32
+			i, k, l_lines, l_blocks: INTEGER
+			l_t0, l_plain, l_marked: REAL_64
+		do
+			l_lines := 10_000
+			l_blocks := l_lines // 10
+			create l_window.make ("Fold cost", 720, 480)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+				-- blocks of ten lines: a head, "do", six lines of body, "end", a blank line:
+				-- two folds to a block, one inside the other
+			create l_text.make (300_000)
+			from i := 1 until i > l_blocks loop
+				l_text.append ({STRING_32} "feature_")
+				l_text.append_integer (i)
+				l_text.append ({STRING_32} "%N    do%N")
+				from k := 1 until k > 6 loop
+					l_text.append ({STRING_32} "        call (")
+					l_text.append_integer (k)
+					l_text.append ({STRING_32} ")%N")
+					k := k + 1
+				end
+				l_text.append ({STRING_32} "    end%N%N")
+				i := i + 1
+			end
+			l_text.remove_tail (1)
+				-- the folds alone
+			l_t0 := now_seconds
+			from i := 1 until i > 20 loop
+				timed (agent make_folds_by_indentation (l_text))
+				i := i + 1
+			end
+			print ("    fold cost: folds by indentation of " + l_lines.out + " lines, mean of 20: " + ((now_seconds - l_t0) * 50_000.0).rounded.out + " microseconds%N")
+			io.output.flush
+				-- a text set, markers off and on (after one set that is not measured: the
+				-- first pays for the fonts and the first layout)
+			l_code.set_text (l_text)
+			driver.pump_until_idle (0)
+			l_t0 := now_seconds
+			timed (agent l_code.set_text (l_text))
+			timed (agent driver.pump_until_idle (0))
+			l_plain := now_seconds - l_t0
+			assert ("all the lines: " + l_code.line_count.out, l_code.line_count = l_lines)
+			l_t0 := now_seconds
+			timed (agent read_fold_count (l_code))
+			print ("    fold cost: the first fold count after a new text " + ((now_seconds - l_t0) * 1000.0).rounded.out + " ms%N")
+			assert ("two folds to a block: " + l_code.fold_count.out, l_code.fold_count = 2 * l_blocks)
+			l_t0 := now_seconds
+			timed (agent l_code.set_folding_shown (True))
+			timed (agent driver.pump_until_idle (0))
+			print ("    fold cost: markers shown (" + l_code.fold_count.out + " folds) with the frame " + ((now_seconds - l_t0) * 1000.0).rounded.out + " ms%N")
+			l_t0 := now_seconds
+			timed (agent l_code.set_text (l_text))
+			timed (agent driver.pump_until_idle (0))
+			l_marked := now_seconds - l_t0
+			print ("    fold cost: text set and first frame, markers off " + (l_plain * 1000.0).rounded.out + " ms, markers on " + (l_marked * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+				-- every fold closed, then open
+			l_t0 := now_seconds
+			timed (agent l_code.fold_all)
+			timed (agent driver.pump_until_idle (0))
+			print ("    fold cost: fold all with the frame " + ((now_seconds - l_t0) * 1000.0).rounded.out + " ms%N")
+			assert ("a block shows its head alone", driver.is_line_shown (l_code, 11) and not driver.is_line_shown (l_code, 12)
+				and not driver.is_line_shown (l_code, 19) and driver.is_line_shown (l_code, 20))
+			l_t0 := now_seconds
+			timed (agent l_code.unfold_all)
+			timed (agent driver.pump_until_idle (0))
+			print ("    fold cost: unfold all with the frame " + ((now_seconds - l_t0) * 1000.0).rounded.out + " ms%N")
+			assert ("all shown again", driver.is_line_shown (l_code, 12) and driver.is_line_shown (l_code, 19))
+			io.output.flush
+				-- keystrokes on the head of the middle block
+			driver.focus (l_code)
+			l_code.set_folding_shown (False)
+			driver.move_caret (l_code, l_lines // 2 + 1, 1)
+			print ("    fold cost: keystroke, markers off, mean of 5: " + keystroke_ms (l_code).out + " ms%N")
+			l_code.set_folding_shown (True)
+			print ("    fold cost: keystroke, markers on, nothing closed, mean of 5: " + keystroke_ms (l_code).out + " ms%N")
+			l_code.fold_all
+			driver.pump_until_idle (0)
+			print ("    fold cost: keystroke, markers on, every fold closed, mean of 5: " + keystroke_ms (l_code).out + " ms%N")
+			io.output.flush
+			assert ("typed on the head of the middle block: " + l_code.line_text (l_lines // 2 + 1).out,
+				l_code.line_text (l_lines // 2 + 1).starts_with ({STRING_32} "xxxxxxxxxxxxxxxfeature_"))
+			assert ("its fold is still closed", l_code.is_folded (l_lines // 2 + 1) and not driver.is_line_shown (l_code, l_lines // 2 + 2))
+			assert ("the line count holds", l_code.line_count = l_lines)
+			l_window.close
+		end
+
+	test_line_ranges
+			-- 1v-e-3: GUI_LINE_RANGES. The folds of a text by indentation; the lines that
+			-- ranges hide together; and what an edit does to ranges: one above moves them,
+			-- one in a first line that adds no line leaves them, one that joins or splits a
+			-- first line or touches a hidden line removes the range.
+		local
+			l_folds, l_closed, l_merged: GUI_LINE_RANGES
+			l_text, l_new: STRING_32
+		do
+				-- line 1 "a", 2 tab "b", 3 tab tab "c", 4 blank, 5 tab "d", 6 "e", 7 blank,
+				-- 8 "f", 9 four spaces "g"
+			l_text := {STRING_32} "a%N%Tb%N%T%Tc%N%N%Td%Ne%N%Nf%N    g%N"
+			create l_folds.make_by_indentation (l_text, 4)
+			assert ("three folds", l_folds.count = 3)
+			assert ("a through d, the blank line between in it", l_folds.first_line (1) = 1 and l_folds.last_line (1) = 5)
+			assert ("b through c, the blank line after not in it", l_folds.first_line (2) = 2 and l_folds.last_line (2) = 3)
+			assert ("f through g, spaces as deep as a tab", l_folds.first_line (3) = 8 and l_folds.last_line (3) = 9)
+			assert ("one fold lies in another", not l_folds.is_disjoint)
+			assert ("a fold starts on line 2", l_folds.has_start (2) and l_folds.index_starting_at (2) = 2)
+			assert ("none starts on line 3", not l_folds.has_start (3))
+			create l_folds.make_by_indentation ({STRING_32} "a%N  b%N%Tc%N", 2)
+			assert ("a tab reaches the next stop", l_folds.count = 1 and l_folds.last_line (1) = 3)
+			create l_folds.make_by_indentation ({STRING_32} "", 4)
+			assert ("no text, no fold", l_folds.count = 0)
+
+			create l_folds.make_by_indentation (l_text, 4)
+			l_merged := l_folds.merged
+			assert ("hidden together: two stretches", l_merged.count = 2 and l_merged.is_disjoint)
+			assert ("lines 2 to 5", l_merged.first_line (1) = 1 and l_merged.last_line (1) = 5)
+			assert ("a first line shows", not l_merged.is_hidden (1) and not l_merged.is_hidden (8))
+			assert ("the lines after it do not", l_merged.is_hidden (2) and l_merged.is_hidden (5) and l_merged.is_hidden (9))
+			assert ("line 6 shows", not l_merged.is_hidden (6) and l_merged.index_hiding (6) = 0)
+
+				-- closed: b (2 to 3) and f (8 to 9)
+			create l_closed.make
+			l_closed.put (8, 9)
+			l_closed.put (2, 3)
+			assert ("kept in order", l_closed.first_line (1) = 2 and l_closed.first_line (2) = 8 and l_closed.is_disjoint)
+			l_new := l_text.twin
+			l_new.insert_string ({STRING_32} "x%N", 3)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("a line added above moves both", l_closed.count = 2 and l_closed.first_line (1) = 3 and l_closed.last_line (1) = 4 and l_closed.first_line (2) = 9 and l_closed.last_line (2) = 10)
+			l_closed.follow_texts (l_new, l_text)
+			assert ("and taken away moves them back", l_closed.count = 2 and l_closed.first_line (1) = 2 and l_closed.last_line (2) = 9)
+			l_new := l_text.twin
+			l_new.insert_character ('x', 5)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("typing in a first line leaves them", l_closed.count = 2 and l_closed.first_line (1) = 2 and l_closed.last_line (1) = 3)
+			l_new := l_text.twin
+			l_new.put ('x', l_text.count - 1)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("a change in a hidden line opens that one", l_closed.count = 1 and l_closed.first_line (1) = 2)
+			l_new := l_text.twin
+			l_new.remove (2)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("joining a first line to the line above opens it", l_closed.count = 0)
+			l_closed.put (2, 3)
+			l_closed.put (8, 9)
+			l_new := l_text.twin
+			l_new.insert_character ('%N', 5)
+			l_closed.follow_texts (l_text, l_new)
+			assert ("splitting a first line opens it, and moves the one below", l_closed.count = 1 and l_closed.first_line (1) = 9 and l_closed.last_line (1) = 10)
+			l_closed.follow_texts (l_new, l_new)
+			assert ("no edit, no change", l_closed.count = 1 and l_closed.first_line (1) = 9)
+			l_closed.remove_starting_at (9)
+			assert ("removed", l_closed.count = 0)
 		end
 
 	test_code_editor_bracket_reach
@@ -5087,6 +5696,80 @@ feature {NONE} -- Fixtures
 				a_code.has_bracket_pair and then (a_code.bracket_first = a_first and a_code.bracket_second = a_second))
 			assert (a_tag + ": both are tinted", driver.is_bracket_tinted (a_code, a_first) and driver.is_bracket_tinted (a_code, a_second))
 			assert (a_tag + ": and nothing else: " + tinted_count (a_code).out, tinted_count (a_code) = 2)
+		end
+
+	folds_out (a_code: GUI_CODE_EDITOR): STRING
+			-- The folds of `a_code', each as "first-last", a space between.
+		do
+			create Result.make (32)
+			across 1 |..| a_code.fold_count as ic loop
+				if not Result.is_empty then
+					Result.append_character (' ')
+				end
+				Result.append (a_code.fold_first_line (ic).out + "-" + a_code.fold_last_line (ic).out)
+			end
+		end
+
+	assert_shown (a_tag: STRING; a_code: GUI_CODE_EDITOR; a_lines: STRING)
+			-- The control of `a_code' shows the lines `a_lines' (numbers, a space between)
+			-- and no other, and the editor says the same of every line.
+		local
+			l_shown: STRING
+			i: INTEGER
+		do
+			create l_shown.make (32)
+			from
+				i := 1
+			until
+				i > a_code.line_count
+			loop
+				if driver.is_line_shown (a_code, i) then
+					if not l_shown.is_empty then
+						l_shown.append_character (' ')
+					end
+					l_shown.append_integer (i)
+				end
+				assert (a_tag + ": the editor and its control agree on line " + i.out,
+					driver.is_line_shown (a_code, i) = not a_code.is_line_hidden (i))
+				i := i + 1
+			end
+			assert (a_tag + ": shown " + l_shown + ", wanted " + a_lines, l_shown.same_string (a_lines))
+		end
+
+	read_fold_count (a_code: GUI_CODE_EDITOR)
+			-- Ask `a_code' for its fold count and drop it (a measured step).
+		local
+			n: INTEGER
+		do
+			n := a_code.fold_count
+		end
+
+	make_folds_by_indentation (a_text: STRING_32)
+			-- Find the folds of `a_text' by indentation and drop them (a measured step).
+		local
+			l_folds: GUI_LINE_RANGES
+		do
+			create l_folds.make_by_indentation (a_text, 4)
+		end
+
+	keystroke_ms (a_code: GUI_CODE_EDITOR): INTEGER
+			-- The mean time, in milliseconds, of five keystrokes typed at the caret of
+			-- `a_code', each with its frame drawn (measured steps).
+		local
+			i: INTEGER
+			l_t0: REAL_64
+		do
+			l_t0 := now_seconds
+			from
+				i := 1
+			until
+				i > 5
+			loop
+				timed (agent driver.type_code (a_code, "x"))
+				timed (agent driver.pump_until_idle (0))
+				i := i + 1
+			end
+			Result := ((now_seconds - l_t0) * 200.0).rounded
 		end
 
 	assert_no_bracket_pair (a_tag: STRING; a_code: GUI_CODE_EDITOR)

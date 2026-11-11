@@ -9247,10 +9247,57 @@ void sga_test_field_escape(int a_id)
 	BOOL spaces;
 	/* 1v-e-2: the bracket pair shown, as two UTF-16 ranges, and the areas last drawn for it
 	   (view coordinates), which are what gets redrawn when the pair goes. */
+	/* 1v-e-4: inside a user's edit (from shouldChangeTextInRanges: to didChangeText), the
+	   caret's move is told after the change, as GTK and Windows tell them: the editor then
+	   reads the new caret against the new text. */
+	BOOL editing;
+	BOOL caret_owed;
 	BOOL pair_on;
 	NSRange pair[2];
 	NSRect pair_drawn[2];
+	/* 1v-e-3: folding. `numbers' and `folding' say what the gutter shows; `marks' are the
+	   lines that start a fold (ascending); `hidden' are the closed folds' hidden lines as
+	   UTF-16 ranges, ascending and apart, each from the start of the line after a fold's
+	   first line to the start of the line after its last (or the end of the text). */
+	BOOL numbers_off;
+	BOOL folding;
+	int *marks;
+	int mark_count;
+	NSRange *hidden;
+	int hidden_count;
+	/* 1v-e-4: the completion list, a panel that never takes the focus; `completion_rows'
+	   holds each row as {label, detail, kind}. */
+	NSPanel *completion_panel;
+	NSTableView *completion_table;
+	NSArray<NSArray<NSString *> *> *completion_rows;
+	/* 1v-e-5: the carets after the control's own, as UTF-16 offsets: `extra_at' where each
+	   caret is, `extra_anchor' the other end of its selection. While any are set the editing
+	   keys go to the editor (60). `extra_marks' are their caret lines; `typed' is the text of
+	   the last 60 with a = 1. */
+	NSUInteger *extra_at, *extra_anchor;
+	int extra_count;
+	NSMutableArray<NSView *> *extra_marks;
+	NSString *typed;
 }
+@end
+
+@interface SGACodeView () <NSLayoutManagerDelegate, NSTableViewDataSource, NSTableViewDelegate>
+@end
+
+/* 1v-e-4: the completion list's window: a borderless panel that never becomes key or main,
+   so the editor keeps the focus and the caret while it shows. */
+@interface SGACompletionPanel : NSPanel
+@end
+@implementation SGACompletionPanel
+- (BOOL)canBecomeKeyWindow { return NO; }
+- (BOOL)canBecomeMainWindow { return NO; }
+@end
+
+/* Its rows draw their selection in the accent color although the panel is never key. */
+@interface SGACompletionRowView : NSTableRowView
+@end
+@implementation SGACompletionRowView
+- (BOOL)isEmphasized { return YES; }
 @end
 
 static NSString *sga_code_indent_unit(SGACodeView *v) { return v->spaces ? [@"" stringByPaddingToLength:(NSUInteger)v->tab_width withString:@" " startingAtIndex:0] : @"\t"; }
@@ -9264,6 +9311,36 @@ static void sga_code_line_column(NSString *s, NSUInteger k, int *a_line, int *a_
 	*a_column = (int)sga_code_point_index([s substringWithRange:NSMakeRange(l_start, k - l_start)], k - l_start) + 1;
 }
 
+/* 1v-e-3: the first hidden range of `v' that ends after UTF-16 offset `k' (hidden_count when none). */
+static int sga_code_hidden_after(SGACodeView *v, NSUInteger k)
+{
+	int l_low = 0, l_high = v->hidden_count;
+	while (l_low < l_high) {
+		int l_mid = (l_low + l_high) / 2;
+		if (NSMaxRange(v->hidden[l_mid]) <= k) l_low = l_mid + 1; else l_high = l_mid;
+	}
+	return l_low;
+}
+
+/* The hidden range of `v' that holds offset `k', or -1. */
+static int sga_code_hidden_at(SGACodeView *v, NSUInteger k)
+{
+	int i = sga_code_hidden_after(v, k);
+	return i < v->hidden_count && NSLocationInRange(k, v->hidden[i]) ? i : -1;
+}
+
+/* Does line `n' (from 1) start a fold, by the marks last set? */
+static BOOL sga_code_has_mark(SGACodeView *v, int n)
+{
+	int l_low = 0, l_high = v->mark_count;
+	while (l_low < l_high) {
+		int l_mid = (l_low + l_high) / 2;
+		if (v->marks[l_mid] == n) return YES;
+		if (v->marks[l_mid] < n) l_low = l_mid + 1; else l_high = l_mid;
+	}
+	return NO;
+}
+
 @implementation SGACodeView
 - (void)tellCaret
 {
@@ -9272,11 +9349,107 @@ static void sga_code_line_column(NSString *s, NSUInteger k, int *a_line, int *a_
 	sga_push(52, sga_id_of(self), l, c, 0);
 	sga_wake();
 }
+/* 1v-e-3: an offset in hidden lines goes to the nearest shown place on the side it came
+   from: the end of the fold's first line when moving back, the start of the line after
+   the fold when moving on. AppKit's own arrow keys and clicks already step over hidden
+   lines (no room, no glyphs); this keeps anything else out too. */
+- (NSUInteger)shownOffset:(NSUInteger)k from:(NSUInteger)an_old
+{
+	int i = sga_code_hidden_at(self, k);
+	if (i < 0) return k;
+	return k >= an_old || hidden[i].location == 0 ? NSMaxRange(hidden[i]) : hidden[i].location - 1;
+}
 - (void)setSelectedRanges:(NSArray<NSValue *> *)r affinity:(NSSelectionAffinity)a stillSelecting:(BOOL)s
 {
 	sga_colors_flush();   /* 1v-b: the view takes what it types with from the text at the caret */
+	if (hidden_count) {
+		NSUInteger l_old = [self selectedRange].location;
+		NSMutableArray<NSValue *> *l_shown = [NSMutableArray arrayWithCapacity:[r count]];
+		for (NSValue *v in r) {
+			NSRange x = [v rangeValue];
+			NSUInteger l_start = [self shownOffset:x.location from:l_old];
+			NSUInteger l_end = x.length ? [self shownOffset:NSMaxRange(x) from:l_old] : l_start;
+			[l_shown addObject:[NSValue valueWithRange:NSMakeRange(l_start, l_end >= l_start ? l_end - l_start : 0)]];
+		}
+		r = l_shown;
+	}
 	[super setSelectedRanges:r affinity:a stillSelecting:s];
-	if (!s && !s_suppress && [self window]) [self tellCaret];
+	if (!s && !s_suppress && [self window]) {
+		if (editing) caret_owed = YES;
+		else [self tellCaret];
+	}
+}
+- (BOOL)shouldChangeTextInRanges:(NSArray<NSValue *> *)r replacementStrings:(NSArray<NSString *> *)s
+{
+	BOOL l_yes = [super shouldChangeTextInRanges:r replacementStrings:s];
+	if (l_yes) editing = YES;
+	return l_yes;
+}
+- (void)didChangeText
+{
+	editing = NO;
+	[super didChangeText];   /* the change: event 2, through the delegate */
+	if (caret_owed) {
+		caret_owed = NO;
+		if (!s_suppress && [self window]) [self tellCaret];
+	}
+}
+/* 1v-e-3: the hidden lines get null glyphs, and their line breaks no advance, so they take
+   no room and the text stays whole. */
+- (NSUInteger)layoutManager:(NSLayoutManager *)m shouldGenerateGlyphs:(const CGGlyph *)g properties:(const NSGlyphProperty *)p characterIndexes:(const NSUInteger *)c font:(NSFont *)f forGlyphRange:(NSRange)r
+{
+	if (!hidden_count || !r.length) return 0;
+	int i = sga_code_hidden_after(self, c[0]);
+	if (i >= hidden_count || hidden[i].location >= c[r.length - 1] + 1) return 0;
+	NSGlyphProperty *q = malloc(sizeof(NSGlyphProperty) * r.length);
+	for (NSUInteger j = 0; j < r.length; j++) {
+		while (i < hidden_count && NSMaxRange(hidden[i]) <= c[j]) i++;
+		q[j] = i < hidden_count && NSLocationInRange(c[j], hidden[i]) ? NSGlyphPropertyNull : p[j];
+	}
+	[m setGlyphs:g properties:q characterIndexes:c font:f forGlyphRange:r];
+	free(q);
+	return r.length;
+}
+- (NSControlCharacterAction)layoutManager:(NSLayoutManager *)m shouldUseAction:(NSControlCharacterAction)an_action forControlCharacterAtIndex:(NSUInteger)k
+{
+	(void)m;
+	return hidden_count && sga_code_hidden_at(self, k) >= 0 ? NSControlCharacterActionZeroAdvancement : an_action;
+}
+/* The characters changed: the hidden ranges move with the text, so what was hidden stays
+   hidden until the editor sets the closed folds again. Called from the text storage's edit
+   notification, before the layout manager hears of the edit. */
+- (void)foldsFollowEdit:(NSRange)an_edited change:(NSInteger)a_change
+{
+	if (!hidden_count) return;
+	NSUInteger a = an_edited.location, b = an_edited.location + an_edited.length - a_change, l_new_end = NSMaxRange(an_edited);
+	int n = 0;
+	for (int i = 0; i < hidden_count; i++) {
+		NSUInteger s = hidden[i].location, z = NSMaxRange(hidden[i]);
+		/* text put at a range's start or end stays out of it */
+		s = s < a ? s : (s >= b ? s + a_change : l_new_end);
+		z = z <= a ? z : (z >= b ? z + a_change : l_new_end);
+		if (z > s) hidden[n++] = NSMakeRange(s, z - s);
+	}
+	hidden_count = n;
+}
+/* The "…" after a closed fold's first line. */
+- (void)drawFoldMarksInRect:(NSRect)a_rect
+{
+	NSLayoutManager *m = [self layoutManager];
+	NSRange l_glyphs = [m glyphRangeForBoundingRectWithoutAdditionalLayout:a_rect inTextContainer:[self textContainer]];
+	NSRange l_chars = [m characterRangeForGlyphRange:l_glyphs actualGlyphRange:NULL];
+	NSDictionary *l_attributes = @{NSFontAttributeName: [self font] ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular], NSForegroundColorAttributeName: [NSColor secondaryLabelColor]};
+	NSSize l_size = [@"…" sizeWithAttributes:l_attributes];
+	for (int i = sga_code_hidden_after(self, l_chars.location); i < hidden_count && hidden[i].location <= NSMaxRange(l_chars) + 1; i++) {
+		if (hidden[i].location == 0) continue;
+		NSUInteger g = [m glyphIndexForCharacterAtIndex:hidden[i].location - 1];
+		NSRect l_used = [m lineFragmentUsedRectForGlyphAtIndex:g effectiveRange:NULL];
+		NSRect l_box = NSMakeRect(NSMaxX(l_used) + [self textContainerOrigin].x + 6, NSMinY(l_used) + [self textContainerOrigin].y + 1, l_size.width + 8, NSHeight(l_used) - 2);
+		if (!NSIntersectsRect(l_box, a_rect)) continue;
+		[[NSColor quaternaryLabelColor] setFill];
+		[[NSBezierPath bezierPathWithRoundedRect:l_box xRadius:3 yRadius:3] fill];
+		[@"…" drawAtPoint:NSMakePoint(NSMinX(l_box) + 4, NSMidY(l_box) - l_size.height / 2) withAttributes:l_attributes];
+	}
 }
 /* 1v-e-2: the bracket tint. Drawn here, under the text and the selection, from the kept
    ranges: it is no attribute of the text (no color or trait query sees it), no undo step and
@@ -9297,6 +9470,8 @@ static void sga_code_line_column(NSString *s, NSUInteger k, int *a_line, int *a_
 - (void)drawViewBackgroundInRect:(NSRect)a_rect
 {
 	[super drawViewBackgroundInRect:a_rect];
+	if (extra_count) [self drawExtraSelectionsInRect:a_rect];
+	if (hidden_count) [self drawFoldMarksInRect:a_rect];
 	if (!pair_on) return;
 	NSUInteger n = [[self textStorage] length];
 	[[[NSColor controlAccentColor] colorWithAlphaComponent:0.3] setFill];
@@ -9332,11 +9507,398 @@ static void sga_code_line_column(NSString *s, NSUInteger k, int *a_line, int *a_
 		sga_wake();
 		return YES;
 	}
+	/* 1v-e-5: the caret gestures, with any number of carets: Command+Option+Down and Up add
+	   a caret on the next or the previous line (61, a 2 and 3), Command+D the next occurrence
+	   (61, a 4); b is the caret's position. The control adds no caret itself. */
+	if ([[self window] firstResponder] == self && f == (NSEventModifierFlagCommand | NSEventModifierFlagOption) && ([e keyCode] == 125 || [e keyCode] == 126)) {
+		[self tellGesture:[e keyCode] == 125 ? 2 : 3 at:[self selectedRange].location];
+		return YES;
+	}
+	if ([[self window] firstResponder] == self && f == NSEventModifierFlagCommand && [e keyCode] == 2) {
+		[self tellGesture:4 at:[self selectedRange].location];
+		return YES;
+	}
+	/* 1v-e-3: Command+Option+[ and ], while folding is shown: 57 with the caret's line, b 1
+	   the fold key, 2 the unfold key. By key code: with Option the characters change. */
+	if ([[self window] firstResponder] == self && folding && f == (NSEventModifierFlagCommand | NSEventModifierFlagOption)
+		&& ([e keyCode] == 33 || [e keyCode] == 30)) {
+		int l, k;
+		sga_code_line_column([self string], [self selectedRange].location, &l, &k);
+		sga_push(57, sga_id_of(self), l, [e keyCode] == 30 ? 2 : 1, 0);
+		sga_wake();
+		return YES;
+	}
 	return [super performKeyEquivalent:e];
 }
-/* Return keeps the line's indentation. */
+/* ------------------------------------------------ 1v-e-4: the completion list */
+- (BOOL)completionShown { return completion_panel && [completion_panel isVisible]; }
+- (void)tellCompletion:(int)a_key
+{
+	sga_push(58, sga_id_of(self), a_key, 0, 0);
+	sga_wake();
+}
+/* The list goes, quietly. */
+- (void)hideCompletions
+{
+	if (!completion_panel) return;
+	[[completion_panel parentWindow] removeChildWindow:completion_panel];
+	[completion_panel orderOut:nil];
+	completion_rows = nil;
+}
+/* The list goes because the user moved on (the focus, the window or the view): 58, a = 6. */
+- (void)dropCompletions
+{
+	if (![self completionShown]) return;
+	[self hideCompletions];
+	[self tellCompletion:6];
+}
+- (void)makeCompletionPanel
+{
+	if (completion_panel) return;
+	completion_panel = [[SGACompletionPanel alloc] initWithContentRect:NSMakeRect(0, 0, 240, 160) styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:YES];
+	[completion_panel setReleasedWhenClosed:NO];
+	[completion_panel setHasShadow:YES];
+	[completion_panel setHidesOnDeactivate:YES];
+	[completion_panel setBecomesKeyOnlyIfNeeded:YES];
+	[completion_panel setBackgroundColor:[NSColor clearColor]];
+	[completion_panel setOpaque:NO];
+	NSVisualEffectView *l_back = [[NSVisualEffectView alloc] init];
+	[l_back setMaterial:NSVisualEffectMaterialMenu];
+	[l_back setState:NSVisualEffectStateActive];
+	[l_back setWantsLayer:YES];
+	[[l_back layer] setCornerRadius:6];
+	[[l_back layer] setMasksToBounds:YES];
+	NSScrollView *l_scroll = [[NSScrollView alloc] init];
+	[l_scroll setDrawsBackground:NO];
+	[l_scroll setHasVerticalScroller:YES];
+	[l_scroll setAutohidesScrollers:YES];
+	completion_table = [[NSTableView alloc] init];
+	[completion_table addTableColumn:[[NSTableColumn alloc] initWithIdentifier:@"row"]];
+	[completion_table setHeaderView:nil];
+	[completion_table setBackgroundColor:[NSColor clearColor]];
+	[completion_table setRowHeight:20];
+	[completion_table setIntercellSpacing:NSMakeSize(0, 0)];
+	[completion_table setStyle:NSTableViewStylePlain];
+	[completion_table setRefusesFirstResponder:YES];
+	[completion_table setDataSource:self];
+	[completion_table setDelegate:self];
+	[completion_table setTarget:self];
+	[completion_table setAction:@selector(completionClicked:)];
+	[l_scroll setDocumentView:completion_table];
+	[l_back addSubview:l_scroll];
+	[l_scroll setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[NSLayoutConstraint activateConstraints:@[
+		[l_scroll.leadingAnchor constraintEqualToAnchor:l_back.leadingAnchor], [l_scroll.trailingAnchor constraintEqualToAnchor:l_back.trailingAnchor],
+		[l_scroll.topAnchor constraintEqualToAnchor:l_back.topAnchor constant:4], [l_scroll.bottomAnchor constraintEqualToAnchor:l_back.bottomAnchor constant:-4]]];
+	[completion_panel setContentView:l_back];
+}
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)a_table { (void)a_table; return (NSInteger)[completion_rows count]; }
+- (NSTableRowView *)tableView:(NSTableView *)a_table rowViewForRow:(NSInteger)a_row { (void)a_table; (void)a_row; return [[SGACompletionRowView alloc] init]; }
+/* The kind's small picture: 0 plain, 1 keyword, 2 type, 3 feature, 4 variable, 5 snippet. */
+static NSImage *sga_completion_kind_image(NSString *a_kind)
+{
+	static NSString *l_names[] = {@"textformat.abc", @"k.square", @"t.square", @"f.square", @"v.square", @"curlybraces.square"};
+	int k = [a_kind intValue];
+	if (k < 0 || k > 5) k = 0;
+	return [NSImage imageWithSystemSymbolName:l_names[k] accessibilityDescription:nil];
+}
+- (NSView *)tableView:(NSTableView *)a_table viewForTableColumn:(NSTableColumn *)a_column row:(NSInteger)a_row
+{
+	(void)a_column;
+	NSArray<NSString *> *r = completion_rows[(NSUInteger)a_row];
+	NSTableCellView *c = [a_table makeViewWithIdentifier:@"completion" owner:self];
+	NSTextField *l_detail;
+	if (!c) {
+		c = [[NSTableCellView alloc] init];
+		[c setIdentifier:@"completion"];
+		NSImageView *i = [[NSImageView alloc] init];
+		NSTextField *l = [NSTextField labelWithString:@""];
+		l_detail = [NSTextField labelWithString:@""];
+		[l setFont:[self font] ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]];
+		[l setLineBreakMode:NSLineBreakByTruncatingTail];
+		[l_detail setTextColor:[NSColor secondaryLabelColor]];
+		[l_detail setFont:[NSFont systemFontOfSize:11]];
+		[l_detail setLineBreakMode:NSLineBreakByTruncatingTail];
+		[l_detail setTag:2];
+		[l_detail setAlignment:NSTextAlignmentRight];
+		[i setContentTintColor:[NSColor secondaryLabelColor]];
+		for (NSView *v in @[i, l, l_detail]) { [v setTranslatesAutoresizingMaskIntoConstraints:NO]; [c addSubview:v]; }
+		[c setImageView:i];
+		[c setTextField:l];
+		[l setContentCompressionResistancePriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationHorizontal];
+		[l_detail setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+		[NSLayoutConstraint activateConstraints:@[
+			[i.leadingAnchor constraintEqualToAnchor:c.leadingAnchor constant:6], [i.centerYAnchor constraintEqualToAnchor:c.centerYAnchor],
+			[i.widthAnchor constraintEqualToConstant:14], [i.heightAnchor constraintEqualToConstant:14],
+			[l.leadingAnchor constraintEqualToAnchor:i.trailingAnchor constant:6], [l.centerYAnchor constraintEqualToAnchor:c.centerYAnchor],
+			[l_detail.leadingAnchor constraintGreaterThanOrEqualToAnchor:l.trailingAnchor constant:12],
+			[l_detail.trailingAnchor constraintEqualToAnchor:c.trailingAnchor constant:-8], [l_detail.centerYAnchor constraintEqualToAnchor:c.centerYAnchor]]];
+	}
+	else l_detail = [c viewWithTag:2];
+	[[c textField] setStringValue:r[0]];
+	[l_detail setStringValue:r[1]];
+	[[c imageView] setImage:sga_completion_kind_image(r[2])];
+	return c;
+}
+- (void)completionClicked:(id)sender
+{
+	(void)sender;
+	NSInteger r = [completion_table clickedRow];
+	if (r >= 0 && [self completionShown]) { sga_push(59, sga_id_of(self), (int)r + 1, 0, 0); sga_wake(); }
+}
+- (void)selectCompletion:(NSInteger)a_row
+{
+	if (!completion_table || a_row < 1 || a_row > (NSInteger)[completion_rows count]) return;
+	[completion_table selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)a_row - 1] byExtendingSelection:NO];
+	[completion_table scrollRowToVisible:a_row - 1];
+}
+/* Show `a_rows' under the caret's line (above it when there is no room below), at most 8
+   rows tall, or replace the rows of the list that shows. */
+- (void)showCompletions:(NSArray<NSArray<NSString *> *> *)a_rows selected:(NSInteger)a_selected
+{
+	if (![a_rows count]) { [self hideCompletions]; return; }
+	[self makeCompletionPanel];
+	completion_rows = a_rows;
+	[completion_table reloadData];
+	/* the width: the widest label and detail, within bounds */
+	NSFont *l_font = [self font] ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular];
+	CGFloat l_widest = 0;
+	for (NSArray<NSString *> *r in a_rows) {
+		CGFloat w = [r[0] sizeWithAttributes:@{NSFontAttributeName: l_font}].width + ([r[1] length] ? [r[1] sizeWithAttributes:@{NSFontAttributeName: [NSFont systemFontOfSize:11]}].width + 12 : 0);
+		l_widest = MAX(l_widest, w);
+	}
+	CGFloat l_width = MIN(MAX(ceil(l_widest) + 6 + 14 + 6 + 8 + 16, 180), 520);
+	CGFloat l_height = MIN((NSInteger)[a_rows count], 8) * [completion_table rowHeight] + 8;
+	/* where: the caret's line, on the screen */
+	NSRange l_selection = [self selectedRange];
+	NSRect l_caret = [self firstRectForCharacterRange:NSMakeRange(l_selection.location, 0) actualRange:NULL];
+	NSRect l_screen = [[[self window] screen] ?: [NSScreen mainScreen] visibleFrame];
+	NSRect f = NSMakeRect(NSMinX(l_caret) - 26, NSMinY(l_caret) - l_height - 2, l_width, l_height);
+	if (NSMinY(f) < NSMinY(l_screen)) f.origin.y = NSMaxY(l_caret) + 2;
+	if (NSMaxX(f) > NSMaxX(l_screen)) f.origin.x = NSMaxX(l_screen) - l_width;
+	if (NSMinX(f) < NSMinX(l_screen)) f.origin.x = NSMinX(l_screen);
+	[completion_panel setFrame:f display:NO];
+	if (![completion_panel isVisible] || [completion_panel parentWindow] != [self window]) {
+		[[completion_panel parentWindow] removeChildWindow:completion_panel];
+		[[self window] addChildWindow:completion_panel ordered:NSWindowAbove];
+		[completion_panel orderFront:nil];
+	}
+	[self selectCompletion:a_selected];
+}
+/* ------------------------------------------------ 1v-e-5: the extra carets */
+/* An editing key while extra carets are set: 60, a = the action, b = 1 with Shift. */
+- (void)tellKey:(int)an_action shift:(BOOL)a_shift
+{
+	sga_push(60, sga_id_of(self), an_action, a_shift ? 1 : 0, 0);
+	sga_wake();
+}
+/* A caret gesture: 61, a = the gesture, b = position (from 1, in characters) of UTF-16 offset `k'. */
+- (void)tellGesture:(int)a_gesture at:(NSUInteger)k
+{
+	sga_push(61, sga_id_of(self), a_gesture, (int)sga_text_index([self textStorage], k) + 1, 0);
+	sga_wake();
+}
+/* The caret line at UTF-16 offset `k', in this view's coordinates. */
+- (NSRect)caretRectAt:(NSUInteger)k
+{
+	NSLayoutManager *m = [self layoutManager];
+	NSUInteger n = [[self textStorage] length];
+	NSRect r;
+	if (n == 0) r = [m extraLineFragmentRect];
+	else if (k < n) {
+		NSUInteger g = [m glyphIndexForCharacterAtIndex:k];
+		NSRect l_line = [m lineFragmentRectForGlyphAtIndex:g effectiveRange:NULL];
+		r = NSMakeRect([m locationForGlyphAtIndex:g].x + NSMinX(l_line), NSMinY(l_line), 1, NSHeight(l_line));
+	}
+	else if ([[self string] hasSuffix:@"\n"]) r = [m extraLineFragmentRect];
+	else {
+		NSUInteger g = [m glyphIndexForCharacterAtIndex:n - 1];
+		NSRect l_glyph = [m boundingRectForGlyphRange:NSMakeRange(g, 1) inTextContainer:[self textContainer]];
+		NSRect l_line = [m lineFragmentRectForGlyphAtIndex:g effectiveRange:NULL];
+		r = NSMakeRect(NSMaxX(l_glyph), NSMinY(l_line), 1, NSHeight(l_line));
+	}
+	r.size.width = 1;
+	return NSOffsetRect(r, [self textContainerOrigin].x, [self textContainerOrigin].y);
+}
+- (void)drawExtraSelectionsInRect:(NSRect)a_rect
+{
+	NSLayoutManager *m = [self layoutManager];
+	NSColor *c = [[self window] isKeyWindow] && [[self window] firstResponder] == self ? [NSColor selectedTextBackgroundColor] : [NSColor unemphasizedSelectedTextBackgroundColor];
+	[c setFill];
+	for (int i = 0; i < extra_count; i++) {
+		NSUInteger a = MIN(extra_at[i], extra_anchor[i]), z = MAX(extra_at[i], extra_anchor[i]);
+		if (z == a || z > [[self textStorage] length]) continue;
+		NSRange g = [m glyphRangeForCharacterRange:NSMakeRange(a, z - a) actualCharacterRange:NULL];
+		[m enumerateEnclosingRectsForGlyphRange:g withinSelectedGlyphRange:g inTextContainer:[self textContainer] usingBlock:^(NSRect r, BOOL *a_stop) {
+			(void)a_stop;
+			NSRect x = NSOffsetRect(r, [self textContainerOrigin].x, [self textContainerOrigin].y);
+			if (NSIntersectsRect(x, a_rect)) NSRectFill(x);
+		}];
+	}
+}
+/* The caret lines are the system's own insertion indicator, shown while the editor has the
+   focus (as its own caret is) and hidden otherwise. In the automatic mode an indicator the
+   text system does not manage never shows, so they are set visible or hidden here; they do
+   not blink (the main caret's blink is the text system's own). */
+- (void)syncExtraMarks { [self showExtraMarks:[[self window] isKeyWindow] && [[self window] firstResponder] == self]; }
+/* (Inside becomeFirstResponder and resignFirstResponder the window does not name the new first
+   responder yet, so they say outright which it is.) */
+- (void)showExtraMarks:(BOOL)l_focused
+{
+	for (NSView *v in extra_marks) {
+		if (@available(macOS 14.0, *)) {
+			if ([v isKindOfClass:[NSTextInsertionIndicator class]])
+				[(NSTextInsertionIndicator *)v setDisplayMode:l_focused ? NSTextInsertionIndicatorDisplayModeVisible : NSTextInsertionIndicatorDisplayModeHidden];
+		}
+		else [v setHidden:!l_focused];
+	}
+}
+- (BOOL)becomeFirstResponder
+{
+	BOOL l_became = [super becomeFirstResponder];
+	if (l_became) [self showExtraMarks:[[self window] isKeyWindow]];
+	return l_became;
+}
+- (void)windowBecameKey:(NSNotification *)n { (void)n; [self syncExtraMarks]; }
+- (void)placeExtraMarks
+{
+	for (NSView *v in extra_marks) [v removeFromSuperview];
+	[extra_marks removeAllObjects];
+	if (!extra_marks) extra_marks = [NSMutableArray array];
+	for (int i = 0; i < extra_count; i++) {
+		if (extra_at[i] > [[self textStorage] length]) continue;
+		NSRect r = [self caretRectAt:extra_at[i]];
+		NSView *v;
+		if (@available(macOS 14.0, *)) {
+			NSTextInsertionIndicator *l_mark = [[NSTextInsertionIndicator alloc] initWithFrame:r];
+			v = l_mark;
+		}
+		else {
+			NSBox *l_line = [[NSBox alloc] initWithFrame:NSMakeRect(NSMinX(r), NSMinY(r), 2, NSHeight(r))];
+			[l_line setBoxType:NSBoxCustom];
+			[l_line setBorderWidth:0];
+			[l_line setFillColor:[NSColor textColor]];
+			v = l_line;
+		}
+		[self addSubview:v];
+		[extra_marks addObject:v];
+	}
+	[self syncExtraMarks];
+}
+- (void)setExtraCarets:(const int *)a_pairs count:(int)a_count
+{
+	NSTextStorage *m = [self textStorage];
+	free(extra_at); free(extra_anchor);
+	extra_at = extra_anchor = NULL;
+	extra_count = 0;
+	if (a_pairs && a_count > 0) {
+		extra_at = malloc(sizeof(NSUInteger) * (size_t)a_count);
+		extra_anchor = malloc(sizeof(NSUInteger) * (size_t)a_count);
+		for (int i = 0; i < a_count; i++) {
+			extra_at[i] = sga_text_offset(m, a_pairs[2 * i] - 1);
+			extra_anchor[i] = sga_text_offset(m, a_pairs[2 * i + 1] - 1);
+		}
+		extra_count = a_count;
+	}
+	[self placeExtraMarks];
+	[self setNeedsDisplay:YES];
+}
+/* Option+click: 61 (1) at the click, with any number of carets. Not AppKit's box selection. */
+- (void)mouseDown:(NSEvent *)e
+{
+	NSEventModifierFlags f = [e modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad | NSEventModifierFlagFunction);
+	if (f == NSEventModifierFlagOption && [e clickCount] == 1) {
+		[[self window] makeFirstResponder:self];
+		[self tellGesture:1 at:[self characterIndexForInsertionAtPoint:[self convertPoint:[e locationInWindow] fromView:nil]]];
+		return;
+	}
+	[super mouseDown:e];
+}
+/* While extra carets are set, the editing keys send 60 in place of their usual work. */
+- (void)insertText:(id)a_text replacementRange:(NSRange)r
+{
+	if (extra_count && ![self hasMarkedText]) {
+		typed = [a_text isKindOfClass:[NSAttributedString class]] ? [a_text string] : a_text;
+		[self tellKey:1 shift:NO];
+		return;
+	}
+	[super insertText:a_text replacementRange:r];
+}
+- (void)deleteBackward:(id)sender { if (extra_count) [self tellKey:4 shift:NO]; else [super deleteBackward:sender]; }
+- (void)deleteForward:(id)sender { if (extra_count) [self tellKey:5 shift:NO]; else [super deleteForward:sender]; }
+- (void)moveLeft:(id)sender { if (extra_count) [self tellKey:6 shift:NO]; else [super moveLeft:sender]; }
+- (void)moveRight:(id)sender { if (extra_count) [self tellKey:7 shift:NO]; else [super moveRight:sender]; }
+- (void)moveLeftAndModifySelection:(id)sender { if (extra_count) [self tellKey:6 shift:YES]; else [super moveLeftAndModifySelection:sender]; }
+- (void)moveRightAndModifySelection:(id)sender { if (extra_count) [self tellKey:7 shift:YES]; else [super moveRightAndModifySelection:sender]; }
+- (void)moveUpAndModifySelection:(id)sender { if (extra_count) [self tellKey:8 shift:YES]; else [super moveUpAndModifySelection:sender]; }
+- (void)moveDownAndModifySelection:(id)sender { if (extra_count) [self tellKey:9 shift:YES]; else [super moveDownAndModifySelection:sender]; }
+/* Home and End: the line's start and end (Command+Left and Right on macOS). */
+- (void)moveToLeftEndOfLine:(id)sender { if (extra_count) [self tellKey:10 shift:NO]; else [super moveToLeftEndOfLine:sender]; }
+- (void)moveToBeginningOfLine:(id)sender { if (extra_count) [self tellKey:10 shift:NO]; else [super moveToBeginningOfLine:sender]; }
+- (void)moveToRightEndOfLine:(id)sender { if (extra_count) [self tellKey:11 shift:NO]; else [super moveToRightEndOfLine:sender]; }
+- (void)moveToEndOfLine:(id)sender { if (extra_count) [self tellKey:11 shift:NO]; else [super moveToEndOfLine:sender]; }
+- (void)moveToLeftEndOfLineAndModifySelection:(id)sender { if (extra_count) [self tellKey:10 shift:YES]; else [super moveToLeftEndOfLineAndModifySelection:sender]; }
+- (void)moveToBeginningOfLineAndModifySelection:(id)sender { if (extra_count) [self tellKey:10 shift:YES]; else [super moveToBeginningOfLineAndModifySelection:sender]; }
+- (void)moveToRightEndOfLineAndModifySelection:(id)sender { if (extra_count) [self tellKey:11 shift:YES]; else [super moveToRightEndOfLineAndModifySelection:sender]; }
+- (void)moveToEndOfLineAndModifySelection:(id)sender { if (extra_count) [self tellKey:11 shift:YES]; else [super moveToEndOfLineAndModifySelection:sender]; }
+- (void)cut:(id)sender { if (extra_count) [self tellKey:12 shift:NO]; else [super cut:sender]; }
+- (void)copy:(id)sender { if (extra_count) [self tellKey:13 shift:NO]; else [super copy:sender]; }
+- (void)paste:(id)sender { if (extra_count) [self tellKey:14 shift:NO]; else [super paste:sender]; }
+/* The Edit menu asks before it enables cut, copy and paste: with extra carets each acts on
+   every caret, so they stay enabled whatever the control's own selection is. */
+- (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)an_item
+{
+	SEL a = [an_item action];
+	if (extra_count && (a == @selector(cut:) || a == @selector(copy:) || a == @selector(paste:))) return YES;
+	return [super validateUserInterfaceItem:an_item];
+}
+/* While the list shows, these keys send 58 in place of their usual work; with extra carets
+   (and no list), Up and Down send 60. */
+- (void)moveUp:(id)sender { if ([self completionShown]) [self tellCompletion:1]; else if (extra_count) [self tellKey:8 shift:NO]; else [super moveUp:sender]; }
+- (void)moveDown:(id)sender { if ([self completionShown]) [self tellCompletion:2]; else if (extra_count) [self tellKey:9 shift:NO]; else [super moveDown:sender]; }
+- (void)scrollPageUp:(id)sender { if ([self completionShown]) [self tellCompletion:3]; else [super scrollPageUp:sender]; }
+- (void)scrollPageDown:(id)sender { if ([self completionShown]) [self tellCompletion:4]; else [super scrollPageDown:sender]; }
+- (void)pageUp:(id)sender { if ([self completionShown]) [self tellCompletion:3]; else [super pageUp:sender]; }
+- (void)pageDown:(id)sender { if ([self completionShown]) [self tellCompletion:4]; else [super pageDown:sender]; }
+/* Escape: NSTextView would open the system's own completion list (cancelOperation: calls
+   complete:). Here it closes ours, and does nothing when none shows. */
+- (void)cancelOperation:(id)sender { (void)sender; if ([self completionShown]) [self tellCompletion:6]; else if (extra_count) [self tellKey:15 shift:NO]; }
+/* The text system's completion key (F5, Option+Escape): as Control+Space. */
+- (void)complete:(id)sender { (void)sender; [self tellCompletion:0]; }
+- (void)keyDown:(NSEvent *)e
+{
+	NSEventModifierFlags f = [e modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad | NSEventModifierFlagFunction);
+	if (f == NSEventModifierFlagControl && [e keyCode] == 49) { [self tellCompletion:0]; return; }   /* Control+Space; no space is typed */
+	[super keyDown:e];
+}
+- (BOOL)resignFirstResponder
+{
+	BOOL l_resigned = [super resignFirstResponder];
+	if (l_resigned) { [self dropCompletions]; [self showExtraMarks:NO]; }
+	return l_resigned;
+}
+- (void)viewWillMoveToWindow:(NSWindow *)a_window
+{
+	NSNotificationCenter *c = [NSNotificationCenter defaultCenter];
+	[c removeObserver:self name:NSWindowDidResignKeyNotification object:[self window]];
+	[c removeObserver:self name:NSWindowWillCloseNotification object:[self window]];
+	[c removeObserver:self name:NSWindowDidBecomeKeyNotification object:[self window]];
+	if (a_window) {
+		[c addObserver:self selector:@selector(windowResignedKey:) name:NSWindowDidResignKeyNotification object:a_window];
+		[c addObserver:self selector:@selector(windowBecameKey:) name:NSWindowDidBecomeKeyNotification object:a_window];
+		[c addObserver:self selector:@selector(windowWillClose:) name:NSWindowWillCloseNotification object:a_window];
+	}
+	else [self hideCompletions];
+	[super viewWillMoveToWindow:a_window];
+}
+- (void)windowResignedKey:(NSNotification *)n { (void)n; [self dropCompletions]; [self syncExtraMarks]; }
+/* The editor's window closes: the list goes with it, quietly (the editor is going too). */
+- (void)windowWillClose:(NSNotification *)n { (void)n; [self hideCompletions]; }
+/* Return keeps the line's indentation; with the list up it accepts (58, a = 5). */
 - (void)insertNewline:(id)sender
 {
+	if ([self completionShown]) { [self tellCompletion:5]; return; }
+	if (extra_count) { [self tellKey:2 shift:NO]; return; }
 	NSString *s = [self string];
 	NSRange l_line = [s lineRangeForRange:NSMakeRange([self selectedRange].location, 0)];
 	NSUInteger k = l_line.location;
@@ -9373,57 +9935,121 @@ static void sga_code_line_column(NSString *s, NSUInteger k, int *a_line, int *a_
 - (void)insertTab:(id)sender
 {
 	(void)sender;
+	if ([self completionShown]) { [self tellCompletion:5]; return; }
+	if (extra_count) { [self tellKey:3 shift:NO]; return; }
 	NSRange r = [self selectedRange];
 	if (r.length > 0 && [[[self string] substringWithRange:r] rangeOfString:@"\n"].location != NSNotFound) [self shiftLines:YES];
 	else [self insertText:sga_code_indent_unit(self) replacementRange:r];
 }
-- (void)insertBacktab:(id)sender { (void)sender; [self shiftLines:NO]; }
+- (void)insertBacktab:(id)sender { (void)sender; if (extra_count) [self tellKey:3 shift:YES]; else [self shiftLines:NO]; }
 @end
 
-/* The gutter: each visible line's number, right-aligned, beside its first line fragment. */
+/* The gutter: each shown line's number, right-aligned, beside its first line fragment; and,
+   while folding is shown (1v-e-3), a column of markers at its right: a triangle pointing down
+   beside a line that starts an open fold, to the right beside one whose fold is closed. Lines
+   hidden in a closed fold take no room and get nothing here; the numbers skip them. */
 @interface SGALineRuler : NSRulerView
 @end
+static NSDictionary *sga_ruler_attributes(void) { return @{NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightRegular], NSForegroundColorAttributeName: [NSColor secondaryLabelColor]}; }
+/* The width of the marker column: a line's height, while folding is shown. */
+static CGFloat sga_ruler_marker_width(SGACodeView *v) { return v && v->folding ? ceil([[v layoutManager] defaultLineHeightForFont:[v font] ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]]) : 0; }
+static void sga_ruler_draw_marker(NSRect a_cell, BOOL a_closed)
+{
+	CGFloat s = MIN(NSWidth(a_cell), NSHeight(a_cell)) * 0.3, cx = NSMidX(a_cell), cy = NSMidY(a_cell);
+	NSBezierPath *b = [NSBezierPath bezierPath];
+	/* flipped: y grows downward */
+	if (a_closed) { [b moveToPoint:NSMakePoint(cx - s * 0.6, cy - s)]; [b lineToPoint:NSMakePoint(cx + s * 0.6, cy)]; [b lineToPoint:NSMakePoint(cx - s * 0.6, cy + s)]; }
+	else { [b moveToPoint:NSMakePoint(cx - s, cy - s * 0.6)]; [b lineToPoint:NSMakePoint(cx + s, cy - s * 0.6)]; [b lineToPoint:NSMakePoint(cx, cy + s * 0.6)]; }
+	[b closePath];
+	[[NSColor secondaryLabelColor] setFill];
+	[b fill];
+}
 @implementation SGALineRuler
+- (SGACodeView *)codeView { id t = [self clientView]; return [t isKindOfClass:[SGACodeView class]] ? t : nil; }
 - (CGFloat)requiredThickness
 {
 	NSString *s = [(NSTextView *)[self clientView] string];
+	SGACodeView *v = [self codeView];
+	CGFloat l_marks = sga_ruler_marker_width(v);
+	if (v && v->numbers_off) return 2 + l_marks;
 	NSUInteger n = sga_line_breaks(s, 0, [s length], NULL) + 1;
 	NSString *l_widest = [NSString stringWithFormat:@"%lu", (unsigned long)MAX(n, (NSUInteger)99)];
-	return ceil([l_widest sizeWithAttributes:@{NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightRegular]}].width) + 14;
+	return ceil([l_widest sizeWithAttributes:sga_ruler_attributes()].width) + 14 + l_marks;
 }
-- (void)drawHashMarksAndLabelsInRect:(NSRect)a_rect
+/* Calls `a_block' with each shown line in the visible part: its number, the UTF-16 range of
+   the line, and its row (its first line fragment, in this ruler's coordinates). */
+- (void)eachShownLine:(void (^)(int a_line, NSRange a_range, NSRect a_row, BOOL *a_stop))a_block
 {
-	(void)a_rect;
 	NSTextView *t = (NSTextView *)[self clientView];
+	SGACodeView *v = [self codeView];
 	NSLayoutManager *m = [t layoutManager];
 	NSString *s = [t string];
 	NSRect l_visible = [[t enclosingScrollView] documentVisibleRect];
 	NSRange l_glyphs = [m glyphRangeForBoundingRect:l_visible inTextContainer:[t textContainer]];
 	NSRange l_chars = [m characterRangeForGlyphRange:l_glyphs actualGlyphRange:NULL];
-	NSDictionary *a = @{NSFontAttributeName: [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightRegular], NSForegroundColorAttributeName: [NSColor secondaryLabelColor]};
 	int l_line = (int)sga_line_breaks(s, 0, l_chars.location, NULL) + 1;
 	NSUInteger k = l_chars.location;
-	CGFloat w = [self ruleThickness];
+	BOOL l_stop = NO;
 	for (;;) {
-		NSRange l_line_range = [s lineRangeForRange:NSMakeRange(MIN(k, [s length]), 0)];
-		NSUInteger g = [s length] ? [m glyphIndexForCharacterAtIndex:MIN(l_line_range.location, [s length] - 1)] : 0;
-		NSRect f = k < [s length] ? [m lineFragmentRectForGlyphAtIndex:g effectiveRange:NULL] : [m extraLineFragmentRect];   /* empty text: the extra line */
-		CGFloat y = NSMinY(f) + [t textContainerInset].height - NSMinY(l_visible);
-		NSString *l_label = [NSString stringWithFormat:@"%d", l_line];
-		NSSize z = [l_label sizeWithAttributes:a];
-		[l_label drawAtPoint:NSMakePoint(w - z.width - 6, y + (NSHeight(f) - z.height) / 2) withAttributes:a];
-		if (NSMaxRange(l_line_range) >= NSMaxRange(l_chars) || NSMaxRange(l_line_range) >= [s length] || y > NSHeight([self bounds])) {
-			/* the last line, when the text ends with a line break */
-			if ([s hasSuffix:@"\n"] && NSMaxRange(l_line_range) == [s length] && y <= NSHeight([self bounds])) {
-				NSRect e = [m extraLineFragmentRect];
-				NSString *l_next = [NSString stringWithFormat:@"%d", l_line + 1];
-				[l_next drawAtPoint:NSMakePoint(w - [l_next sizeWithAttributes:a].width - 6, NSMinY(e) + [t textContainerInset].height - NSMinY(l_visible)) withAttributes:a];
-			}
-			break;
+		int i = v && v->hidden_count ? sga_code_hidden_at(v, MIN(k, [s length])) : -1;
+		if (i >= 0) {   /* hidden lines: skip them, counting their line breaks */
+			NSUInteger z = NSMaxRange(v->hidden[i]);
+			l_line += (int)sga_line_breaks(s, k, z, NULL);
+			k = z;
+			if (k >= [s length] && ![s hasSuffix:@"\n"]) break;
+			continue;
 		}
+		NSRange l_line_range = [s lineRangeForRange:NSMakeRange(MIN(k, [s length]), 0)];
+		BOOL l_extra = k >= [s length];   /* the empty last line, after a final line break, or empty text */
+		NSRect f = l_extra ? [m extraLineFragmentRect] : [m lineFragmentRectForGlyphAtIndex:[m glyphIndexForCharacterAtIndex:l_line_range.location] effectiveRange:NULL];
+		CGFloat y = NSMinY(f) + [t textContainerInset].height - NSMinY(l_visible);
+		if (y > NSHeight([self bounds])) break;
+		a_block(l_line, l_line_range, NSMakeRect(0, y, [self ruleThickness], NSHeight(f)), &l_stop);
+		if (l_stop || l_extra) break;
+		if (NSMaxRange(l_line_range) >= [s length]) {
+			if (![s hasSuffix:@"\n"]) break;
+		}
+		else if (NSMaxRange(l_line_range) > NSMaxRange(l_chars)) break;
 		k = NSMaxRange(l_line_range);
 		l_line++;
 	}
+}
+- (void)drawHashMarksAndLabelsInRect:(NSRect)a_rect
+{
+	(void)a_rect;
+	SGACodeView *v = [self codeView];
+	NSDictionary *a = sga_ruler_attributes();
+	CGFloat w = [self ruleThickness], l_marks = sga_ruler_marker_width(v);
+	BOOL l_numbers = !(v && v->numbers_off);
+	[self eachShownLine:^(int a_line, NSRange a_range, NSRect a_row, BOOL *a_stop) {
+		(void)a_stop;
+		if (l_numbers) {
+			NSString *l_label = [NSString stringWithFormat:@"%d", a_line];
+			NSSize z = [l_label sizeWithAttributes:a];
+			[l_label drawAtPoint:NSMakePoint(w - l_marks - z.width - 6, NSMinY(a_row) + (NSHeight(a_row) - z.height) / 2) withAttributes:a];
+		}
+		if (l_marks > 0 && sga_code_has_mark(v, a_line))
+			sga_ruler_draw_marker(NSMakeRect(w - l_marks, NSMinY(a_row), l_marks, NSHeight(a_row)), v->hidden_count && sga_code_hidden_at(v, NSMaxRange(a_range)) >= 0);
+	}];
+}
+/* The line whose marker is at `p' (this ruler's coordinates), or 0. */
+- (int)markerLineAt:(NSPoint)p
+{
+	SGACodeView *v = [self codeView];
+	CGFloat l_marks = sga_ruler_marker_width(v);
+	__block int l_found = 0;
+	if (l_marks <= 0 || p.x < [self ruleThickness] - l_marks) return 0;
+	[self eachShownLine:^(int a_line, NSRange a_range, NSRect a_row, BOOL *a_stop) {
+		(void)a_range;
+		if (p.y >= NSMinY(a_row) && p.y < NSMaxY(a_row)) { if (sga_code_has_mark(v, a_line)) l_found = a_line; *a_stop = YES; }
+	}];
+	return l_found;
+}
+- (void)mouseDown:(NSEvent *)e
+{
+	int n = [self markerLineAt:[self convertPoint:[e locationInWindow] fromView:nil]];
+	if (n > 0) { sga_push(57, sga_id_of([self clientView]), n, 0, 0); sga_wake(); }
+	else [super mouseDown:e];
 }
 @end
 
@@ -9464,13 +10090,21 @@ int sga_code_editor(void)
 	[l_scroll setHasVerticalRuler:YES];
 	[l_scroll setRulersVisible:YES];
 	[[NSNotificationCenter defaultCenter] addObserverForName:NSTextDidChangeNotification object:t queue:nil usingBlock:^(NSNotification *n) { (void)n; [r setRuleThickness:[r requiredThickness]]; [r setNeedsDisplay:YES]; }];
-	[[NSNotificationCenter defaultCenter] addObserverForName:NSViewBoundsDidChangeNotification object:[l_scroll contentView] queue:nil usingBlock:^(NSNotification *n) { (void)n; [r setNeedsDisplay:YES]; }];
+	__weak SGACodeView *l_scrolled = t;
+	[[NSNotificationCenter defaultCenter] addObserverForName:NSViewBoundsDidChangeNotification object:[l_scroll contentView] queue:nil usingBlock:^(NSNotification *n) { (void)n; [r setNeedsDisplay:YES]; [l_scrolled dropCompletions]; }];   /* 1v-e-4: a scroll closes the list */
 	[r setRuleThickness:[r requiredThickness]];
-	/* 1v-e-2: any change of the characters, by the user, by code or by undo, drops the bracket tint */
+	/* 1v-e-2: any change of the characters, by the user, by code or by undo, drops the bracket
+	   tint. 1v-e-3: and moves the hidden lines with the text, before the layout manager hears
+	   of the edit and makes the glyphs again. */
 	__weak SGACodeView *l_view = t;
 	[[NSNotificationCenter defaultCenter] addObserverForName:NSTextStorageDidProcessEditingNotification object:[t textStorage] queue:nil usingBlock:^(NSNotification *n) {
-		if ([(NSTextStorage *)[n object] editedMask] & NSTextStorageEditedCharacters) [l_view hidePair];
+		NSTextStorage *l_storage = [n object];
+		if ([l_storage editedMask] & NSTextStorageEditedCharacters) {
+			[l_view hidePair];
+			[l_view foldsFollowEdit:[l_storage editedRange] change:[l_storage changeInLength]];
+		}
 	}];
+	[[t layoutManager] setDelegate:t];
 	NSLayoutConstraint *k = [l_scroll.heightAnchor constraintGreaterThanOrEqualToConstant:64];
 	[k setPriority:NSLayoutPriorityDefaultHigh];
 	[k setActive:YES];
@@ -9479,7 +10113,16 @@ int sga_code_editor(void)
 	return l_id;
 }
 
-void sga_code_set_line_numbers(int a_id, int a_on) { SGACodeView *t = sga_code_of(a_id); if (t) [[t enclosingScrollView] setRulersVisible:a_on != 0]; }
+/* The gutter shows while it has line numbers or fold markers to show. */
+static void sga_code_gutter_changed(SGACodeView *t)
+{
+	NSRulerView *r = [[t enclosingScrollView] verticalRulerView];
+	[[t enclosingScrollView] setRulersVisible:!t->numbers_off || t->folding];
+	[r setRuleThickness:[r requiredThickness]];
+	[r setNeedsDisplay:YES];
+}
+
+void sga_code_set_line_numbers(int a_id, int a_on) { SGACodeView *t = sga_code_of(a_id); if (t) { t->numbers_off = a_on == 0; sga_code_gutter_changed(t); } }
 
 void sga_code_set_indent(int a_id, int a_tab_width, int a_spaces)
 {
@@ -9573,6 +10216,7 @@ void sga_test_type_into_code(int a_id, const char *a_text)
 		(void)r; (void)e; (void)a_stop;
 		if ([c isEqualToString:@"\n"]) [t insertNewline:nil];
 		else if ([c isEqualToString:@"\t"]) [t insertTab:nil];
+		else if ([c isEqualToString:@"\b"]) [t deleteBackward:nil];   /* 1v-e-4: character 8 as Backspace */
 		else [t insertText:c replacementRange:[t selectedRange]];
 	}];
 }
@@ -9622,3 +10266,244 @@ int sga_test_bracket_tint_at(int a_id, int a_position)
 
 /* As the user pressing Command+Shift+\ in the editor: 56. */
 void sga_test_bracket_key(int a_id) { sga_push(56, a_id, 0, 0, 0); sga_wake(); }
+
+/* ------------------------------------------------------------------ 1v-e-3: folding */
+
+void sga_code_set_folding_shown(int a_id, int a_on)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t) return;
+	t->folding = a_on != 0;
+	sga_code_gutter_changed(t);
+}
+
+void sga_code_set_fold_marks(int a_id, const int *a_lines, int a_count)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t) return;
+	free(t->marks);
+	t->marks = NULL;
+	t->mark_count = 0;
+	if (a_lines && a_count > 0) {
+		t->marks = malloc(sizeof(int) * (size_t)a_count);
+		memcpy(t->marks, a_lines, sizeof(int) * (size_t)a_count);
+		t->mark_count = a_count;
+	}
+	[[[t enclosingScrollView] verticalRulerView] setNeedsDisplay:YES];
+}
+
+/* The glyphs and layout of UTF-16 range `r' are made again (the hidden lines changed there). */
+static void sga_code_relayout(SGACodeView *t, NSRange r)
+{
+	NSLayoutManager *m = [t layoutManager];
+	NSUInteger n = [[t textStorage] length];
+	if (r.location > n) return;
+	r.length = MIN(r.length, n - r.location);
+	/* with the line before, whose "…" mark comes or goes */
+	if (r.location > 0) { r.location--; r.length++; }
+	[m invalidateGlyphsForCharacterRange:r changeInLength:0 actualCharacterRange:NULL];
+	[m invalidateLayoutForCharacterRange:r actualCharacterRange:NULL];
+}
+
+void sga_code_set_folded_lines(int a_id, const int *a_pairs, int a_count)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t) return;
+	NSString *s = [t string];
+	NSUInteger l_length = [s length];
+	NSRange *l_new = a_count > 0 ? malloc(sizeof(NSRange) * (size_t)a_count) : NULL;
+	int n = 0;
+	/* one walk through the text, as the pairs ascend: `k' is where line `l' starts */
+	NSUInteger k = 0;
+	int l = 1;
+	unichar l_buffer[1024];
+	NSUInteger l_have = 0, l_at = 0;   /* the buffer holds units l_at .. l_at + l_have */
+	for (int i = 0; a_pairs && i < a_count; i++) {
+		int l_first = a_pairs[2 * i], l_last = a_pairs[2 * i + 1];
+		NSUInteger l_bounds[2];
+		BOOL l_ok = l_first >= 1 && l_last > l_first && l_first >= l;
+		for (int j = 0; l_ok && j < 2; j++) {
+			int l_target = (j == 0 ? l_first : l_last) + 1;   /* the line whose start is wanted */
+			while (l < l_target && k < l_length) {
+				if (k >= l_at + l_have) { l_at = k; l_have = MIN((NSUInteger)1024, l_length - k); [s getCharacters:l_buffer range:NSMakeRange(l_at, l_have)]; }
+				if (l_buffer[k - l_at] == '\n') l++;
+				k++;
+			}
+			if (l < l_target) { if (j == 0) l_ok = NO; else l_bounds[1] = l_length; }   /* the text ends first */
+			else l_bounds[j] = k;
+		}
+		if (l_ok && l_bounds[1] > l_bounds[0] && (n == 0 || l_bounds[0] >= NSMaxRange(l_new[n - 1]))) l_new[n++] = NSMakeRange(l_bounds[0], l_bounds[1] - l_bounds[0]);
+	}
+	/* what changes: each old range and each new one is laid out again */
+	NSRange *l_old = t->hidden;
+	int l_old_count = t->hidden_count;
+	t->hidden = l_new;
+	t->hidden_count = n;
+	for (int i = 0; i < l_old_count; i++) sga_code_relayout(t, l_old[i]);
+	for (int i = 0; i < n; i++) sga_code_relayout(t, l_new[i]);
+	free(l_old);
+	[t setNeedsDisplay:YES];
+	[[[t enclosingScrollView] verticalRulerView] setNeedsDisplay:YES];
+}
+
+void sga_test_press_fold_marker(int a_id, int a_line)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || !t->folding || !sga_code_has_mark(t, a_line) || !sga_test_line_is_shown(a_id, a_line)) return;
+	sga_push(57, a_id, a_line, 0, 0);
+	sga_wake();
+}
+
+void sga_test_fold_key(int a_id, int an_unfold)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	int l, c;
+	if (!t || !t->folding) return;
+	sga_code_line_column([t string], [t selectedRange].location, &l, &c);
+	sga_push(57, a_id, l, an_unfold ? 2 : 1, 0);
+	sga_wake();
+}
+
+int sga_test_line_is_shown(int a_id, int a_line)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || a_line < 1) return 0;
+	NSRange r = sga_line_range([t string], a_line);
+	return r.location != NSNotFound && sga_code_hidden_at(t, r.location) < 0;
+}
+
+/* As the user pressing an arrow key in the editor, no modifier: AppKit's own moves, which
+   step over hidden lines; 52 when the caret moves. */
+void sga_test_code_arrow_key(int a_id, int a_direction)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	static SEL l_moves[4];
+	if (!t || a_direction < 1 || a_direction > 4) return;
+	if (!l_moves[0]) { l_moves[0] = @selector(moveUp:); l_moves[1] = @selector(moveDown:); l_moves[2] = @selector(moveLeft:); l_moves[3] = @selector(moveRight:); }
+	[[t window] makeFirstResponder:t];
+	[t doCommandBySelector:l_moves[a_direction - 1]];
+}
+
+/* ------------------------------------------------------------------ 1v-e-4: completion */
+
+/* Rows joined by 0x1F; in a row the label, the detail and the kind joined by 0x1E. */
+static NSArray<NSArray<NSString *> *> *sga_completion_rows(const char *a_joined)
+{
+	NSMutableArray<NSArray<NSString *> *> *l_rows = [NSMutableArray array];
+	NSString *s = sga_string(a_joined);
+	if (![s length]) return l_rows;
+	for (NSString *r in [s componentsSeparatedByString:@"\x1F"]) {
+		NSArray<NSString *> *f = [r componentsSeparatedByString:@"\x1E"];
+		[l_rows addObject:@[f[0], [f count] > 1 ? f[1] : @"", [f count] > 2 ? f[2] : @"0"]];
+	}
+	return l_rows;
+}
+
+void sga_code_show_completions(int a_id, const char *a_joined, int a_selected)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (t) [t showCompletions:sga_completion_rows(a_joined) selected:a_selected];
+}
+
+void sga_code_select_completion(int a_id, int a_row) { SGACodeView *t = sga_code_of(a_id); if (t) [t selectCompletion:a_row]; }
+
+void sga_code_hide_completions(int a_id) { SGACodeView *t = sga_code_of(a_id); if (t) [t hideCompletions]; }
+
+/* As the user pressing completion key `a_key': 0 Control+Space, 1 Up, 2 Down, 3 Page Up,
+   4 Page Down, 5 Return, 6 Escape, through the same commands the keys reach. */
+void sga_test_completion_key(int a_id, int a_key)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	static SEL l_keys[6];
+	if (!t || a_key < 0 || a_key > 6) return;
+	if (!l_keys[0]) { l_keys[0] = @selector(moveUp:); l_keys[1] = @selector(moveDown:); l_keys[2] = @selector(scrollPageUp:); l_keys[3] = @selector(scrollPageDown:); l_keys[4] = @selector(insertNewline:); l_keys[5] = @selector(cancelOperation:); }
+	[[t window] makeFirstResponder:t];
+	if (a_key == 0) [t tellCompletion:0];
+	else [t doCommandBySelector:l_keys[a_key - 1]];
+}
+
+void sga_test_press_completion(int a_id, int a_row)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || ![t completionShown] || a_row < 1 || a_row > (int)[t->completion_rows count]) return;
+	sga_push(59, a_id, a_row, 0, 0);
+	sga_wake();
+}
+
+int sga_test_completions_shown(int a_id) { SGACodeView *t = sga_code_of(a_id); return t && [t completionShown]; }
+
+/* ------------------------------------------------------------------ 1v-e-5: multiple carets */
+
+void sga_code_set_extra_carets(int a_id, const int *a_pairs, int a_count)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (t) [t setExtraCarets:a_pairs count:a_count];
+}
+
+/* The text of the last 60 with a = 1, as UTF-8; kept until the next one. */
+const char *sga_code_typed_text(int a_id)
+{
+	static char *l_kept;
+	SGACodeView *t = sga_code_of(a_id);
+	free(l_kept);
+	l_kept = strdup(t && t->typed ? [t->typed UTF8String] : "");
+	return l_kept;
+}
+
+/* The text changes until the matching end are one undo step and one change event (2), sent at
+   the end. (Not the text storage's beginEditing: inside it the kept positions would not
+   follow each change, and the group's changes are made by position.) */
+static int s_edit_group_depth;
+void sga_text_begin_edit_group(int a_id)
+{
+	NSTextView *t = s_inner[a_id];
+	if (![t isKindOfClass:[NSTextView class]]) return;
+	if (s_edit_group_depth++ > 0) return;
+	[t breakUndoCoalescing];
+	[[t undoManager] beginUndoGrouping];
+}
+
+void sga_text_end_edit_group(int a_id)
+{
+	NSTextView *t = s_inner[a_id];
+	if (![t isKindOfClass:[NSTextView class]]) return;
+	if (s_edit_group_depth <= 0 || --s_edit_group_depth > 0) return;
+	[[t undoManager] endUndoGrouping];
+	sga_push(2, a_id, 0, 0, 0);
+	sga_wake();
+}
+
+/* As the user pressing editing key `an_action' (as for 60), through the commands the keys reach. */
+void sga_test_code_key(int a_id, int an_action, int a_shift, const char *a_text)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || an_action < 1 || an_action > 15) return;
+	[[t window] makeFirstResponder:t];
+	switch (an_action) {
+	case 1: [t insertText:sga_string(a_text) replacementRange:[t selectedRange]]; break;
+	case 2: [t doCommandBySelector:@selector(insertNewline:)]; break;
+	case 3: [t doCommandBySelector:a_shift ? @selector(insertBacktab:) : @selector(insertTab:)]; break;
+	case 4: [t doCommandBySelector:@selector(deleteBackward:)]; break;
+	case 5: [t doCommandBySelector:@selector(deleteForward:)]; break;
+	case 6: [t doCommandBySelector:a_shift ? @selector(moveLeftAndModifySelection:) : @selector(moveLeft:)]; break;
+	case 7: [t doCommandBySelector:a_shift ? @selector(moveRightAndModifySelection:) : @selector(moveRight:)]; break;
+	case 8: [t doCommandBySelector:a_shift ? @selector(moveUpAndModifySelection:) : @selector(moveUp:)]; break;
+	case 9: [t doCommandBySelector:a_shift ? @selector(moveDownAndModifySelection:) : @selector(moveDown:)]; break;
+	case 10: [t doCommandBySelector:a_shift ? @selector(moveToLeftEndOfLineAndModifySelection:) : @selector(moveToLeftEndOfLine:)]; break;
+	case 11: [t doCommandBySelector:a_shift ? @selector(moveToRightEndOfLineAndModifySelection:) : @selector(moveToRightEndOfLine:)]; break;
+	case 12: [t cut:nil]; break;
+	case 13: [t copy:nil]; break;
+	case 14: [t paste:nil]; break;
+	case 15: [t doCommandBySelector:@selector(cancelOperation:)]; break;
+	}
+}
+
+/* As the user making caret gesture `a_gesture' (61), b = `a_position' (for 1, the Option+click's
+   character; the editor reads b for that gesture only). */
+void sga_test_caret_gesture(int a_id, int a_gesture, int a_position)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || a_gesture < 1 || a_gesture > 4) return;
+	sga_push(61, a_id, a_gesture, a_position, 0);
+	sga_wake();
+}

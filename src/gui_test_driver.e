@@ -778,6 +778,101 @@ feature -- User actions
 			Result := backend.test_bracket_tint_at (an_editor.id, a_position)
 		end
 
+	press_code_key (an_editor: GUI_CODE_EDITOR; an_action: INTEGER; a_shift: BOOLEAN; a_text: READABLE_STRING_GENERAL)
+			-- Press editing key `an_action' (1 typed `a_text', 2 Return, 3 Tab, 4 Backspace,
+			-- 5 Delete, 6 Left, 7 Right, 8 Up, 9 Down, 10 Home, 11 End, 12 cut, 13 copy,
+			-- 14 paste, 15 Escape) as the user would, Shift held when `a_shift': 60 while
+			-- extra carets are set.
+		require
+			has_application: has_application
+			an_action: 1 <= an_action and an_action <= 15
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_text)
+			backend.test_code_key (an_editor.id, an_action, a_shift, l_c.item)
+			settle
+		end
+
+	make_caret_gesture (an_editor: GUI_CODE_EDITOR; a_gesture, a_position: INTEGER)
+			-- Make caret gesture `a_gesture' as the user would: 1 Alt+click at character
+			-- position `a_position', 2 add below, 3 add above, 4 next occurrence (61).
+		require
+			has_application: has_application
+			a_gesture: 1 <= a_gesture and a_gesture <= 4
+		do
+			backend.test_caret_gesture (an_editor.id, a_gesture, a_position)
+			settle
+		end
+
+	press_completion_key (an_editor: GUI_CODE_EDITOR; a_key: INTEGER)
+			-- Press completion key `a_key' as the user would: 0 Control+Space, 1 Up, 2 Down,
+			-- 3 Page Up, 4 Page Down, 5 Return, 6 Escape (58, for 1 to 6 only while a list
+			-- shows).
+		require
+			has_application: has_application
+			a_key: 0 <= a_key and a_key <= 6
+		do
+			backend.test_completion_key (an_editor.id, a_key)
+			settle
+		end
+
+	press_completion_row (an_editor: GUI_CODE_EDITOR; a_row: INTEGER)
+			-- Click row `a_row' of the completion list, as the user would: 59.
+		require
+			has_application: has_application
+			row_from_one: a_row >= 1
+		do
+			backend.test_press_completion (an_editor.id, a_row)
+			settle
+		end
+
+	are_completions_shown (an_editor: GUI_CODE_EDITOR): BOOLEAN
+			-- Does the control show a completion list?
+		require
+			has_application: has_application
+		do
+			Result := backend.test_completions_shown (an_editor.id)
+		end
+
+	press_fold_marker (an_editor: GUI_CODE_EDITOR; a_line: INTEGER)
+			-- Click the fold marker beside `a_line', as the user would: 57. Nothing when
+			-- the line shows no marker.
+		require
+			has_application: has_application
+		do
+			backend.test_press_fold_marker (an_editor.id, a_line)
+			settle
+		end
+
+	press_fold_key (an_editor: GUI_CODE_EDITOR; a_unfold: BOOLEAN)
+			-- Press the fold key (the unfold key when `a_unfold'), as the user would: 57.
+		require
+			has_application: has_application
+		do
+			backend.test_fold_key (an_editor.id, a_unfold)
+			settle
+		end
+
+	press_arrow_key (an_editor: GUI_CODE_EDITOR; a_direction: INTEGER)
+			-- Press an arrow key in `an_editor', as the user would: `a_direction' 1 up,
+			-- 2 down, 3 left, 4 right.
+		require
+			has_application: has_application
+			a_direction: 1 <= a_direction and a_direction <= 4
+		do
+			backend.test_code_arrow_key (an_editor.id, a_direction)
+			settle
+		end
+
+	is_line_shown (an_editor: GUI_CODE_EDITOR; a_line: INTEGER): BOOLEAN
+			-- Does the control show line `a_line': is it in the text and in no closed fold?
+		require
+			has_application: has_application
+		do
+			Result := backend.test_line_is_shown (an_editor.id, a_line)
+		end
+
 	choose_grid_item (a_grid: GUI_GRID_VIEW; i: INTEGER)
 			-- Click item `i', as the user would: 50.
 		require
