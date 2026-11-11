@@ -675,6 +675,14 @@ const char *sga_pill_tip_shown(int a_id)
 /* ------------------------------------------------------- windows, layout */
 
 static void sga_help_watch(void);   /* 1u: F1 and Command+? */
+/* 1v-c: the NSWindow of window `a_id', for simple_pdf's print panel (a sheet on it); NULL when
+   `a_id' is no window. Not retained: the window lives while simple_gui keeps it. */
+void *sga_window_native_handle(int a_id)
+{
+	id w = sga_get(a_id);
+	return [w isKindOfClass:[NSWindow class]] ? (__bridge void *)w : NULL;
+}
+
 int sga_window(const char *a_title, int a_width, int a_height)
 {
 	sga_help_watch();
