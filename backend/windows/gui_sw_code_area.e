@@ -277,6 +277,128 @@ feature -- Completion (1v-e-4)
 			end
 		end
 
+feature -- Multiple carets (1v-e-5)
+
+	extra_carets: ARRAYED_LIST [TUPLE [caret, anchor: INTEGER]]
+			-- The carets after the control's own, as positions from 1 (a caret before
+			-- character `caret'); `anchor' the other end of its selection.
+		attribute
+			create Result.make (0)
+		end
+
+	typed_text: STRING_32
+			-- The text of the last typed-text key told to `on_code_key'.
+		attribute
+			create Result.make_empty
+		end
+
+	on_code_key: detachable PROCEDURE [INTEGER, BOOLEAN]
+			-- Told an editing key (action, Shift) while extra carets are set: 1 typed text
+			-- (in `typed_text'), 2 Return, 3 Tab, 4 Backspace, 5 Delete, 6 Left, 7 Right,
+			-- 8 Up, 9 Down, 10 Home, 11 End, 12 cut, 13 copy, 14 paste, 15 Escape.
+
+	on_caret_gesture: detachable PROCEDURE [INTEGER, INTEGER]
+			-- Told a caret gesture (which, position): 1 Alt+click at the position, 2 add
+			-- below (Control+Alt+Down), 3 add above (Control+Alt+Up), 4 next occurrence
+			-- (Control+D).
+
+	set_on_code_key (a_action: like on_code_key)
+		do
+			on_code_key := a_action
+		end
+
+	set_on_caret_gesture (a_action: like on_caret_gesture)
+		do
+			on_caret_gesture := a_action
+		end
+
+	set_extra_carets (a_carets: ITERABLE [TUPLE [caret, anchor: INTEGER]])
+			-- Draw these carets and selections beside the control's own, in place of the
+			-- last set; positions out of the text are kept within it.
+		do
+			extra_carets.wipe_out
+			across a_carets as ic loop
+				extra_carets.extend ([ic.caret.max (1).min (text.count + 1), ic.anchor.max (1).min (text.count + 1)])
+			end
+		end
+
+	begin_edit_group
+			-- Changes until `end_edit_group' are one undo step and are reported once.
+		do
+			if edit_group_depth = 0 then
+				remember (Kind_block)
+			end
+			edit_group_depth := edit_group_depth + 1
+		ensure
+			deeper: edit_group_depth = old edit_group_depth + 1
+		end
+
+	end_edit_group
+			-- Close the group; the last close reports the change (`on_change').
+		do
+			if edit_group_depth > 0 then
+				edit_group_depth := edit_group_depth - 1
+				if edit_group_depth = 0 and then attached on_change as al_told then
+					al_told.call (Void)
+				end
+			end
+		end
+
+	edit_group_depth: INTEGER
+			-- Open edit groups.
+
+	press_code_key (an_action: INTEGER; a_shift: BOOLEAN; a_text: READABLE_STRING_GENERAL)
+			-- As the user pressing editing key `an_action' (Shift held when `a_shift'): told
+			-- to `on_code_key' while extra carets are set, else the key's usual work.
+		require
+			an_action: 1 <= an_action and an_action <= 15
+		do
+			if not extra_carets.is_empty then
+				tell_code_key (an_action, a_shift, a_text)
+			else
+				inspect an_action
+				when 1 then
+					type_code (a_text)
+				when 2 then
+					handle_char (13)
+				when 3 then
+					press_tab (a_shift)
+				when 4 then
+					handle_char (8)
+				when 5 then
+					handle_key (46, a_shift)
+				when 6 then
+					handle_key (37, a_shift)
+				when 7 then
+					handle_key (39, a_shift)
+				when 8 then
+					handle_key (38, a_shift)
+				when 9 then
+					handle_key (40, a_shift)
+				when 10 then
+					handle_key (36, a_shift)
+				when 11 then
+					handle_key (35, a_shift)
+				when 12 then
+					handle_char (24)
+				when 13 then
+					handle_char (3)
+				when 14 then
+					handle_char (22)
+				else
+						-- Escape does nothing here
+				end
+			end
+		end
+
+	tell_caret_gesture (a_gesture, a_position: INTEGER)
+			-- As the user making caret gesture `a_gesture' (at `a_position' for 1).
+		do
+			if attached on_caret_gesture as al_told then
+				al_told.call (a_gesture, a_position)
+			end
+		end
+
 feature -- Folding (1v-e-3)
 
 	is_folding_shown: BOOLEAN
@@ -429,7 +551,9 @@ feature -- Element change
 		do
 			create l_new.make_from_string_general (a_text)
 			hide_bracket_pair
-			remember (Kind_block)
+			if edit_group_depth = 0 then
+				remember (Kind_block)
+			end
 			if an_end >= a_start then
 				text.remove_substring (a_start, an_end)
 				marks.text_removed (a_start - 1, an_end)
@@ -601,9 +725,15 @@ feature -- Typing
 				-- the character that trails a key the completion list took (Return, Tab,
 				-- Escape, or the space of Control+Space)
 			l_eaten := is_completion_char_pending and (a_code = 13 or a_code = 9 or a_code = 27 or a_code = 32)
+				or is_code_char_pending and (a_code = 13 or a_code = 9 or a_code = 8 or a_code = 27
+					or a_code = 24 or a_code = 3 or a_code = 22 or a_code = 4)
 			is_completion_char_pending := False
+			is_code_char_pending := False
 			if l_eaten then
 				do_nothing
+			elseif not extra_carets.is_empty and then a_code >= 32 and then not is_read_only then
+					-- typed at every caret: the editor does it
+				tell_code_key (1, False, (create {STRING_32}.make_filled (a_code.to_character_32, 1)))
 			elseif is_read_only then
 				Precursor {GUI_SW_RICH_TEXT_AREA} (a_code)
 			elseif a_code = 13 then
@@ -648,6 +778,20 @@ feature -- Typing
 			elseif is_completion_shown and then completion_key_of (a_vk) > 0 then
 				is_completion_char_pending := True
 				tell_completion_key (completion_key_of (a_vk))
+			elseif a_vk = 68 and then l_keys.control_down and then not l_keys.alt_down then
+					-- Control+D: the next occurrence
+				is_code_char_pending := True
+				tell_caret_gesture (4, caret + 1)
+			elseif (a_vk = 38 or a_vk = 40) and then l_keys.control_down and then l_keys.alt_down then
+					-- Control+Alt+Down and Up: a caret on the next or the previous line
+				if a_vk = 40 then
+					tell_caret_gesture (2, caret + 1)
+				else
+					tell_caret_gesture (3, caret + 1)
+				end
+			elseif not extra_carets.is_empty and then code_key_of (a_vk, l_keys.control_down) > 0 then
+				is_code_char_pending := True
+				tell_code_key (code_key_of (a_vk, l_keys.control_down), a_shift, {STRING_32} "")
 			elseif (a_vk = 33 or a_vk = 34) and then is_laid_out then
 				l_line := caret_line
 				l_x := caret_x
@@ -688,12 +832,20 @@ feature -- Pointer
 			-- scrolls; on a fold marker it tells `on_fold'; anywhere else it places the caret.
 		local
 			l_line, l_row: INTEGER
+			l_keys: SW_KEYS
 		do
 			is_marker_pressed := False
+			create l_keys
 			if is_completion_shown then
 				l_row := completion_row_at (a_px, a_py)
 			end
-			if l_row > 0 then
+			if l_keys.alt_down and then not bar.contains (a_px, a_py) and then not h_bar.contains (a_px, a_py)
+				and then a_px >= x + gutter_width
+			then
+					-- Alt+click: add a caret there, or remove the one there
+				tell_caret_gesture (1, offset_at (a_px, a_py) + 1)
+				Result := True
+			elseif l_row > 0 then
 				press_completion_row (l_row)
 				Result := True
 			elseif press_bar (a_px, a_py) then
@@ -955,7 +1107,13 @@ feature -- Drawing
 						draw_bracket_tint (a_p, pair_first_start, pair_first_count)
 						draw_bracket_tint (a_p, pair_second_start, pair_second_count)
 					end
+					if not extra_carets.is_empty then
+						draw_extra_selections (a_p)
+					end
 					draw_content (a_p)
+					if not extra_carets.is_empty then
+						draw_extra_carets (a_p)
+					end
 					if band_lasts [k] < l_geometry.line_count - 1 then
 						draw_hidden_mark (a_p, band_lasts [k])
 					end
@@ -1155,6 +1313,106 @@ feature {NONE} -- Completion
 			when 4 then Result := {STRING_32} "v"
 			when 5 then Result := {STRING_32} "s"
 			else Result := {STRING_32} ""
+			end
+		end
+
+feature {NONE} -- Multiple carets
+
+	is_code_char_pending: BOOLEAN
+			-- Did an editing key go to `on_code_key' whose character is still to come?
+
+	code_key_of (a_vk: INTEGER; a_control: BOOLEAN): INTEGER
+			-- The editing key for virtual key `a_vk' while extra carets are set; 0 for none.
+		do
+			if a_control then
+				inspect a_vk
+				when 88 then Result := 12
+				when 67 then Result := 13
+				when 86 then Result := 14
+				else
+				end
+			else
+				inspect a_vk
+				when 13 then Result := 2
+				when 9 then Result := 3
+				when 8 then Result := 4
+				when 46 then Result := 5
+				when 37 then Result := 6
+				when 39 then Result := 7
+				when 38 then Result := 8
+				when 40 then Result := 9
+				when 36 then Result := 10
+				when 35 then Result := 11
+				when 27 then Result := 15
+				else
+				end
+			end
+		ensure
+			an_action: 0 <= Result and Result <= 15
+		end
+
+	tell_code_key (an_action: INTEGER; a_shift: BOOLEAN; a_text: READABLE_STRING_GENERAL)
+		do
+			create typed_text.make_from_string_general (a_text)
+			if attached on_code_key as al_told then
+				al_told.call (an_action, a_shift)
+			end
+		end
+
+	draw_extra_selections (a_p: SW_PAINTER)
+			-- The accent wash under each extra caret's selection, before the glyphs.
+		require
+			laid_out: is_laid_out
+		local
+			l_lo, l_hi: INTEGER
+		do
+			a_p.set_color (a_p.theme.wash_accent)
+			across extra_carets as ic loop
+				l_lo := ic.caret.min (ic.anchor)
+				l_hi := ic.caret.max (ic.anchor)
+				if l_hi > l_lo and then is_range_in_text (l_lo, l_hi - l_lo) then
+					draw_range_wash (a_p, l_lo, l_hi - l_lo)
+				end
+			end
+		end
+
+	draw_range_wash (a_p: SW_PAINTER; a_start, a_count: INTEGER)
+			-- Fill under the `a_count' characters from `a_start' in the current color.
+		require
+			laid_out: is_laid_out
+			in_text: is_range_in_text (a_start, a_count)
+		local
+			i, l_line: INTEGER
+			l_geometry: SW_TEXT_GEOMETRY
+		do
+			l_geometry := geometry
+			from i := a_start until i >= a_start + a_count loop
+				if l_geometry.width_of (i) > 0.0 then
+					l_line := l_geometry.line_of (i)
+					a_p.fill_rect (text_left + l_geometry.x_of (i), text_top + l_geometry.top_of_line (l_line),
+						l_geometry.width_of (i), l_geometry.height_of_line (l_line))
+				end
+				i := i + 1
+			end
+		end
+
+	draw_extra_carets (a_p: SW_PAINTER)
+			-- A caret bar at each extra caret, as the box draws its own, while focused.
+		require
+			laid_out: is_laid_out
+		local
+			l_geometry: SW_TEXT_GEOMETRY
+			l_offset, l_line: INTEGER
+		do
+			if is_focused then
+				l_geometry := geometry
+				a_p.set_color (a_p.theme.danger)
+				across extra_carets as ic loop
+					l_offset := (ic.caret - 1).max (0).min (text.count)
+					l_line := l_geometry.line_at_offset (l_offset)
+					a_p.fill_rect (text_left + l_geometry.x_at_offset (l_offset), text_top + l_geometry.top_of_line (l_line),
+						2.0, l_geometry.height_of_line (l_line))
+				end
 			end
 		end
 

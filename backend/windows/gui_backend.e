@@ -2948,6 +2948,55 @@ feature -- Path controls, continued
 			l_c.set_on_fold (agent push (57, Result, ?, ?, 0))
 			l_c.set_on_completion_key (agent push (58, Result, ?, 0, 0))
 			l_c.set_on_completion_press (agent push (59, Result, ?, 0, 0))
+			l_c.set_on_code_key (agent (an_action: INTEGER; a_shift: BOOLEAN; an_id: INTEGER)
+				do
+					push (60, an_id, an_action, a_shift.to_integer, 0)
+				end (?, ?, Result))
+			l_c.set_on_caret_gesture (agent push (61, Result, ?, ?, 0))
+		end
+
+	code_set_extra_carets (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+		local
+			l_data: MANAGED_POINTER
+			l_carets: ARRAYED_LIST [TUPLE [caret, anchor: INTEGER]]
+			i: INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				create l_carets.make (a_count.max (0))
+				if a_count > 0 and then a_pairs /= default_pointer then
+					create l_data.share_from_pointer (a_pairs, a_count * 8)
+					from i := 0 until i >= a_count loop
+						l_carets.extend ([l_data.read_integer_32 (i * 8), l_data.read_integer_32 (i * 8 + 4)])
+						i := i + 1
+					end
+				end
+				al_c.set_extra_carets (l_carets)
+				style_changed
+			end
+		end
+
+	code_typed_text (an_id: INTEGER): POINTER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := c_text (al_c.typed_text)
+			else
+				Result := c_text ({STRING_32} "")
+			end
+		end
+
+	text_begin_edit_group (an_id: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.begin_edit_group
+			end
+		end
+
+	text_end_edit_group (an_id: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.end_edit_group
+				changed
+			end
 		end
 
 	code_show_completions (an_id: INTEGER; a_joined: POINTER; a_selected: INTEGER)
@@ -4855,6 +4904,20 @@ feature -- Test doors (act on the widget as a user would)
 		do
 			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
 				al_c.press_bracket_key
+			end
+		end
+
+	test_code_key (an_id, an_action: INTEGER; a_shift: BOOLEAN; a_text: POINTER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.press_code_key (an_action, a_shift, from_c (a_text))
+			end
+		end
+
+	test_caret_gesture (an_id, a_gesture, a_position: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.tell_caret_gesture (a_gesture, a_position)
 			end
 		end
 
