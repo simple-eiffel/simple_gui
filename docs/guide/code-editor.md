@@ -70,11 +70,14 @@ The window shows a short class with line numbers in the gutter. `class`, `featur
 | `set_syntax (a_syntax)`, `syntax` | Color by a `GUI_EDITOR_SYNTAX` object, which hears every edit and answers with spans and folds. Void returns to the rules or the agent. |
 | `Style_plain` … `Style_operator`, `style_color (a_style)` | The styles (plain, keyword, type, string, comment, number, operator; 7 to 10 add function, constant, variable and tag) and the theme's color for each, light or dark. |
 | `set_line_numbers_shown (a_on)`, `is_line_numbers_shown` | The gutter of line numbers; shown by default. |
-| `set_tab_width (a_width)`, `tab_width` | The tab stop, in characters. |
+| `set_tab_width (a_width)`, `tab_width` | The tab stop, in characters, from 1 to 16; four until set. |
 | `set_indent_with_spaces (a_on)`, `is_indent_with_spaces` | Whether Tab inserts spaces to the next stop instead of a tab. |
 | `line_count`, `line_text (n)` | How many lines; line `n`'s text without its line break. |
 | `caret_line`, `caret_column` | The caret's place, lines and columns from 1. |
-| `go_to_line (n)` | The caret at the start of line `n`, scrolled into view. Fires nothing. |
+| `go_to_line (n)` | The caret at the start of line `n` (`1 <= n <= line_count`), scrolled into view. Fires nothing. |
+| `set_bracket_matching (a_on)`, `is_bracket_matching` | Show the bracket at the caret with its partner, tinted; on by default. Brackets in strings and comments are passed over. |
+| `has_bracket_pair`, `bracket_first`, `bracket_second` | Is a pair shown, and where its two brackets start. |
+| `go_to_matching_bracket` | The caret to the partner of the bracket it is at; again, back. The key is Control+Shift+\ (Command+Shift+\ on macOS). The tint is a decoration: no change, no undo step. |
 | `find_next (a_text, a_case_sensitive, a_whole_word)`, `find_previous (…)` | Select the next match after the selection (or the previous one before it), wrapping round; False when there is none. |
 | `replace_selection (a_text)` | Replace the selected text. |
 | `replace_all (a_text, a_with, a_case_sensitive, a_whole_word)` | Replace every match; answers how many. One undo step. |
@@ -91,7 +94,7 @@ Everything a [rich text area](rich-text-area.md) has works here too (`change_act
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
 | Native control | `GtkTextView`, monospace and unwrapped, with a `GtkDrawingArea` gutter | `SGACodeView`, an `NSTextView` in a scroll view, with an `NSRulerView` gutter | `GUI_SW_CODE_AREA`, an `SW_TEXT_BOX` in the fixed-pitch role that lays out and colors only the lines in view |
-| Looks or behaves differently | — | — | Colors are drawn as marks over the lines in view, so very large texts load and scroll quickly. |
+| Looks or behaves differently | — | Smart quotes, smart dashes, text replacement and spelling correction are off, as code needs (a text view has them on). | Colors are drawn as marks over the lines in view, so very large texts load and scroll quickly. |
 
 ## Design guidance
 
