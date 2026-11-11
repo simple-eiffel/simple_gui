@@ -475,6 +475,65 @@ feature -- Windows and containers
 		deferred
 		end
 
+	code_set_folding_shown (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1v-e-3: the gutter shows a marker beside each line that starts a fold (see
+			-- `code_set_fold_marks'), and the fold keys work. Off until set.
+			-- A click on a marker sends event 57 with a = its line and b = 0. The fold key,
+			-- Control+Shift+[ (Command+Option+[ on macOS), sends 57 with a = the caret's
+			-- line and b = 1; the unfold key, Control+Shift+] (Command+Option+]), sends it
+			-- with b = 2. The control folds nothing by itself.
+		deferred
+		end
+
+	code_set_fold_marks (an_id: INTEGER; a_lines: POINTER; a_count: INTEGER)
+			-- The lines that start a fold: `a_count' 32-bit integers at `a_lines', ascending,
+			-- in place of the last set. Read during the call. Shown while folding is shown.
+		require
+			count_not_negative: a_count >= 0
+		deferred
+		end
+
+	code_set_folded_lines (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- The closed folds, as the lines they hide together: `a_count' pairs of 32-bit
+			-- integers at `a_pairs', each a fold's first line and its last, ascending, no
+			-- pair reaching the next; in place of the last set. Read during the call.
+			-- A pair's first line stays shown, with a mark after it that lines are hidden,
+			-- and its marker shows the fold closed. The lines after it through its last are
+			-- not shown, take no room, and the caret does not enter them by the keys or the
+			-- pointer. The text is whole for every query. A decoration: no change event, no
+			-- undo step.
+			-- From a change of its text to the next call the control keeps what was hidden
+			-- hidden, moved by the lines the edit added or took above it.
+		require
+			count_not_negative: a_count >= 0
+		deferred
+		end
+
+	test_press_fold_marker (an_id, a_line: INTEGER)
+			-- As the user clicking the marker beside `a_line': 57 with b = 0. Nothing when
+			-- the line has no marker.
+		deferred
+		end
+
+	test_fold_key (an_id: INTEGER; a_unfold: BOOLEAN)
+			-- As the user pressing the fold key, or the unfold key when `a_unfold': 57 with
+			-- a = the caret's line and b = 1 or 2. Nothing while folding is not shown.
+		deferred
+		end
+
+	test_line_is_shown (an_id, a_line: INTEGER): BOOLEAN
+			-- Is line `a_line' shown: in the text, and not hidden in a closed fold?
+		deferred
+		end
+
+	test_code_arrow_key (an_id, a_direction: INTEGER)
+			-- As the user pressing an arrow key in a code editor, no modifier held:
+			-- `a_direction' 1 up, 2 down, 3 left, 4 right. Event 52 when the caret moves.
+		require
+			a_direction: 1 <= a_direction and a_direction <= 4
+		deferred
+		end
+
 	test_fill_event_queue (a_count: INTEGER)
 			-- Queue `a_count' events that no widget answers (type 0, id 0), as a flood would:
 			-- for the tests of a full event queue. They are queued by the time the loop next

@@ -2945,6 +2945,7 @@ feature -- Path controls, continued
 			l_c.set_on_change (agent push (2, Result, 0, 0, 0))
 			l_c.set_on_caret_move (agent push (52, Result, ?, ?, 0))
 			l_c.set_on_bracket_key (agent push (56, Result, 0, 0, 0))
+			l_c.set_on_fold (agent push (57, Result, ?, ?, 0))
 		end
 
 	code_show_bracket_pair (an_id, a_first_start, a_first_count, a_second_start, a_second_count: INTEGER)
@@ -2961,6 +2962,74 @@ feature -- Path controls, continued
 		do
 			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then al_c.has_bracket_pair then
 				al_c.hide_bracket_pair
+				style_changed
+			end
+		end
+
+	code_set_folding_shown (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c and then al_c.is_folding_shown /= a_on then
+				al_c.set_folding_shown (a_on)
+				changed
+			end
+		end
+
+	code_set_fold_marks (an_id: INTEGER; a_lines: POINTER; a_count: INTEGER)
+		local
+			l_marks: GUI_LINE_RANGES
+			l_data: MANAGED_POINTER
+			i, l_line: INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				create l_marks.make
+				if a_count > 0 and then a_lines /= default_pointer then
+					create l_data.share_from_pointer (a_lines, a_count * 4)
+					from
+						i := 0
+					until
+						i >= a_count
+					loop
+						l_line := l_data.read_integer_32 (i * 4)
+						if l_line >= 1 then
+							l_marks.put (l_line, l_line)
+						end
+						i := i + 1
+					end
+				end
+				al_c.set_fold_marks (l_marks)
+				style_changed
+			end
+		end
+
+	code_set_folded_lines (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- (A pair that hides nothing is left out; pairs that reach one another, which
+			-- the caller promised not to send, hide what they hide together.)
+		local
+			l_ranges: GUI_LINE_RANGES
+			l_data: MANAGED_POINTER
+			i, l_first, l_last: INTEGER
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				create l_ranges.make
+				if a_count > 0 and then a_pairs /= default_pointer then
+					create l_data.share_from_pointer (a_pairs, a_count * 8)
+					from
+						i := 0
+					until
+						i >= a_count
+					loop
+						l_first := l_data.read_integer_32 (i * 8)
+						l_last := l_data.read_integer_32 (i * 8 + 4)
+						if l_first >= 1 and l_last > l_first then
+							l_ranges.put (l_first, l_last)
+						end
+						i := i + 1
+					end
+				end
+				if not l_ranges.is_disjoint then
+					l_ranges := l_ranges.merged
+				end
+				al_c.set_hidden_lines (l_ranges)
 				style_changed
 			end
 		end
@@ -4756,6 +4825,44 @@ feature -- Test doors (act on the widget as a user would)
 		do
 			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
 				al_c.press_bracket_key
+			end
+		end
+
+	test_press_fold_marker (an_id, a_line: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.press_fold_marker (a_line)
+			end
+		end
+
+	test_fold_key (an_id: INTEGER; a_unfold: BOOLEAN)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				al_c.press_fold_key (a_unfold)
+			end
+		end
+
+	test_line_is_shown (an_id, a_line: INTEGER): BOOLEAN
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				Result := al_c.is_line_shown (a_line)
+			end
+		end
+
+	test_code_arrow_key (an_id, a_direction: INTEGER)
+		do
+			if attached {GUI_SW_CODE_AREA} widget (an_id) as al_c then
+				inspect a_direction
+				when 1 then
+					al_c.handle_key (38, False)
+				when 2 then
+					al_c.handle_key (40, False)
+				when 3 then
+					al_c.handle_key (37, False)
+				else
+					al_c.handle_key (39, False)
+				end
+				changed
 			end
 		end
 
