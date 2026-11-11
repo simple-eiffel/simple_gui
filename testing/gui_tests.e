@@ -2805,6 +2805,264 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_code_carets_type_and_undo
+			-- 1v-e-5: text typed at three carets, two of them on one line, goes in at each;
+			-- one undo takes all three back; the syntax object hears one true edit.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_menu: GUI_MENU
+			l_undo, l_edits: INTEGER
+		do
+			l_menu := app.menu.add_menu ("Edit")
+			l_menu.add_edit_item (l_menu.Role_undo, "Undo")
+			l_undo := l_menu.last_item_id
+			create l_window.make ("Carets", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_syntax.make
+			l_code.set_syntax (l_syntax)
+			l_code.set_text ("abc%Nabc%N")
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 1)
+			l_code.add_caret (1, 3)
+			l_code.add_caret (2, 1)
+			assert ("three carets: " + l_code.caret_count.out, l_code.caret_count = 3)
+			l_edits := l_syntax.edit_count
+			driver.press_code_key (l_code, 1, False, "X")
+			assert ("typed at all three: " + l_code.text.to_string_8, l_code.text.same_string ("XabXc%NXabc%N"))
+			assert ("still three", l_code.caret_count = 3)
+			assert ("one edit heard: " + (l_syntax.edit_count - l_edits).out, l_syntax.edit_count = l_edits + 1)
+			assert_copy_holds ("the syntax copy holds", l_code, l_syntax)
+			driver.invoke_menu (l_undo)
+			assert ("one undo takes all three back: " + l_code.text.to_string_8, l_code.text.same_string ("abc%Nabc%N"))
+			driver.press_code_key (l_code, 15, False, "")
+			assert ("Escape: back to one", l_code.caret_count = 1)
+			l_window.close
+		end
+
+	test_code_carets_meet_and_occurrences
+			-- 1v-e-5: Backspace at two carets until they meet makes one; Control+D selects
+			-- the word, then adds each next occurrence; typing replaces all of them.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+		do
+			create l_window.make ("Carets meet", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("ab")
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 2)
+			l_code.add_caret (1, 3)
+			assert ("two carets", l_code.caret_count = 2)
+			driver.press_code_key (l_code, 4, False, "")
+			assert ("both gone: " + l_code.text.to_string_8, l_code.text.is_empty)
+			assert ("they met: one caret", l_code.caret_count = 1)
+			l_code.set_text ("foo bar foo baz foo")
+			driver.move_caret (l_code, 1, 2)
+			driver.make_caret_gesture (l_code, 4, 0)
+			assert ("the word selected", l_code.caret_count = 1 and l_code.selection_start = 1 and l_code.selection_end = 3)
+			driver.make_caret_gesture (l_code, 4, 0)
+			driver.make_caret_gesture (l_code, 4, 0)
+			assert ("three occurrences: " + l_code.caret_count.out, l_code.caret_count = 3)
+			assert ("the last one", l_code.caret_start (3) = 17 and l_code.caret_end (3) = 19)
+			driver.press_code_key (l_code, 1, False, "x")
+			assert ("each replaced: " + l_code.text.to_string_8, l_code.text.same_string ("x bar x baz x"))
+			driver.press_code_key (l_code, 15, False, "")
+			assert ("Escape", l_code.caret_count = 1)
+			l_window.close
+		end
+
+	test_code_carets_paste_copy_and_shift
+			-- 1v-e-5: a paste of as many lines as there are carets gives each its line; any
+			-- other text goes whole to each; Shift+Left grows each selection; copy joins the
+			-- selections top to bottom.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_theirs: STRING_32
+		do
+				-- the person's own clipboard text is put back at the end
+			l_theirs := app.clipboard.text
+			create l_window.make ("Carets paste", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("a%Nb%Nc")
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 2)
+			l_code.add_caret (2, 2)
+			l_code.add_caret (3, 2)
+			assert ("three carets", l_code.caret_count = 3)
+			app.clipboard.set_text ("1%N2%N3")
+			driver.press_code_key (l_code, 14, False, "")
+			assert ("a line each: " + l_code.text.to_string_8, l_code.text.same_string ("a1%Nb2%Nc3"))
+			app.clipboard.set_text ("Z")
+			driver.press_code_key (l_code, 14, False, "")
+			assert ("whole to each: " + l_code.text.to_string_8, l_code.text.same_string ("a1Z%Nb2Z%Nc3Z"))
+			driver.press_code_key (l_code, 6, True, "")
+			assert ("Shift+Left grew the second", l_code.caret_end (2) - l_code.caret_start (2) = 0
+				and l_code.caret_start (2) = 7)
+			driver.press_code_key (l_code, 13, False, "")
+			assert ("copy joins them: " + app.clipboard.text.to_string_8, app.clipboard.text.same_string ("Z%NZ%NZ"))
+			app.clipboard.set_text (l_theirs)
+			l_window.close
+		end
+
+	test_code_completion_lists_and_narrows
+			-- 1v-e-4: a list opens by itself at the second word character typed and not the
+			-- first; labels that start with the word come first, then those that hold it,
+			-- each in the source's order, case ignored; typing narrows, Backspace widens and
+			-- closes the list when the word is gone; no list shows without offers;
+			-- Control+Space on no word offers everything.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+		do
+			create l_window.make ("Completion lists", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_completion_words (<<"print", "Precursor", "sprint", "deferred", "do">>)
+			driver.focus (l_code)
+			driver.type_code (l_code, "p")
+			assert ("not after one character", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			driver.type_code (l_code, "r")
+			assert ("after two: " + l_code.completion_count.out, l_code.is_completing and driver.are_completions_shown (l_code))
+			assert ("three rows: " + l_code.completion_count.out, l_code.completion_count = 3)
+			assert ("starting with it first, in order", l_code.completion_label (1).same_string ("print")
+				and l_code.completion_label (2).same_string ("Precursor"))
+			assert ("then holding it", l_code.completion_label (3).same_string ("sprint"))
+			assert ("the first highlighted", l_code.completion_selected = 1)
+			driver.type_code (l_code, "e")
+			assert ("narrowed: " + l_code.completion_count.out, l_code.completion_count = 1
+				and l_code.completion_label (1).same_string ("Precursor"))
+			driver.type_code (l_code, {STRING_32} "%/8/")
+			assert ("widened: " + l_code.completion_count.out, l_code.completion_count = 3)
+			driver.type_code (l_code, {STRING_32} "%/8/%/8/")
+			assert ("closed with the word gone", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			assert ("the text is empty again", l_code.text.is_empty)
+			driver.type_code (l_code, "zz")
+			assert ("no list without offers", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			l_code.set_text ("")
+			driver.press_completion_key (l_code, 0)
+			assert ("Control+Space on no word offers all five: " + l_code.completion_count.out,
+				l_code.completion_count = 5 and driver.are_completions_shown (l_code))
+			l_window.close
+		end
+
+	test_code_completion_keys_and_accepting
+			-- 1v-e-4: Up, Down, Page Up and Page Down move within the list; Return puts the
+			-- highlighted offer in place of the word as one undo step, with the caret after
+			-- it, and runs `completion_accepted_actions'; a click on a row accepts it; Escape
+			-- closes the list and types nothing; "(" closes it and is typed.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_menu: GUI_MENU
+			l_undo: INTEGER
+			l_accepted: ARRAYED_LIST [STRING_32]
+		do
+			create l_accepted.make (2)
+			l_menu := app.menu.add_menu ("Edit")
+			l_menu.add_edit_item (l_menu.Role_undo, "Undo")
+			l_undo := l_menu.last_item_id
+			create l_window.make ("Completion keys", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_completion_words (<<"print", "Precursor", "sprint">>)
+			l_code.completion_accepted_actions.extend (agent (a_text: STRING_32; a_list: ARRAYED_LIST [STRING_32])
+				do
+					a_list.extend (a_text)
+				end (?, l_accepted))
+			driver.focus (l_code)
+			driver.type_code (l_code, "pr")
+			driver.press_completion_key (l_code, 2)
+			assert ("Down: selected " + l_code.completion_selected.out + " of " + l_code.completion_count.out + ", shown " + driver.are_completions_shown (l_code).out, l_code.completion_selected = 2)
+			driver.press_completion_key (l_code, 4)
+			assert ("Page Down stops at the last", l_code.completion_selected = 3)
+			driver.press_completion_key (l_code, 3)
+			assert ("Page Up stops at the first", l_code.completion_selected = 1)
+			driver.press_completion_key (l_code, 1)
+			assert ("Up stops at the first", l_code.completion_selected = 1)
+			driver.press_completion_key (l_code, 2)
+			driver.press_completion_key (l_code, 5)
+			assert ("Return accepted Precursor: " + l_code.text.to_string_8, l_code.text.same_string ("Precursor"))
+			assert ("closed", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			assert ("the caret after it", l_code.caret_line = 1 and l_code.caret_column = 10)
+			assert ("told once", l_accepted.count = 1 and l_accepted [1].same_string ("Precursor"))
+			driver.invoke_menu (l_undo)
+			assert ("one undo step back to the word: " + l_code.text.to_string_8, l_code.text.same_string ("pr"))
+			l_code.set_text ("")
+			driver.type_code (l_code, "pr")
+			driver.press_completion_row (l_code, 3)
+			assert ("a click accepted sprint: " + l_code.text.to_string_8, l_code.text.same_string ("sprint"))
+			assert ("told again", l_accepted.count = 2 and l_accepted [2].same_string ("sprint"))
+			l_code.set_text ("")
+			driver.type_code (l_code, "sp")
+			assert ("open for sp", l_code.is_completing)
+			driver.press_completion_key (l_code, 6)
+			assert ("Escape closed it", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			assert ("and typed nothing: " + l_code.text.to_string_8, l_code.text.same_string ("sp"))
+			driver.type_code (l_code, "r")
+			assert ("open again for spr", l_code.is_completing)
+			driver.type_code (l_code, "(")
+			assert ("( closed it", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			assert ("and was typed: " + l_code.text.to_string_8, l_code.text.same_string ("spr("))
+			l_window.close
+		end
+
+	test_code_completion_sources
+			-- 1v-e-4: the completer hears the word, the line and the column; a slow source is
+			-- told where the word starts and adds to that list later; an answer for another
+			-- word is ignored.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_heard: STRING_32
+			l_start: CELL [INTEGER]
+		do
+			create l_heard.make_empty
+			create l_start.put (0)
+			create l_window.make ("Completion sources", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_completer (agent (a_word: STRING_32; a_line, a_column: INTEGER; a_log: STRING_32): ITERABLE [GUI_COMPLETION]
+				do
+					a_log.wipe_out
+					a_log.append (a_word + " " + a_line.out + " " + a_column.out)
+					Result := <<create {GUI_COMPLETION}.make_with ("feature_one", "", "INTEGER", {GUI_COMPLETION}.Kind_feature)>>
+				end (?, ?, ?, l_heard))
+			l_code.set_text ("x%N  fe")
+			driver.move_caret (l_code, 2, 5)
+			driver.press_completion_key (l_code, 0)
+			assert ("the completer heard the word, line and column: " + l_heard.to_string_8, l_heard.same_string ("fe 2 5"))
+			assert ("its offer shows", l_code.completion_count = 1 and l_code.completion_label (1).same_string ("feature_one"))
+			driver.press_completion_key (l_code, 6)
+			l_code.set_completer (Void)
+			l_code.completion_opened_actions.extend (agent (a_at: INTEGER; a_cell: CELL [INTEGER]) do a_cell.put (a_at) end (?, l_start))
+			driver.press_completion_key (l_code, 0)
+			assert ("told where the word starts: " + l_start.item.out, l_start.item = 5)
+			assert ("no list yet", not l_code.is_completing and not driver.are_completions_shown (l_code))
+			l_code.add_completions (l_start.item, <<create {GUI_COMPLETION}.make ("feet")>>)
+			assert ("the later answer shows", l_code.completion_count = 1 and driver.are_completions_shown (l_code))
+			l_code.add_completions (1, <<create {GUI_COMPLETION}.make ("fence")>>)
+			assert ("an answer for another word is ignored", l_code.completion_count = 1)
+			l_window.close
+		end
+
 	test_code_editor_folding
 			-- 1v-e-3: the folds of a text by indentation; a closed fold hides its lines after
 			-- the first and an open one shows them, the text the same throughout; a closed

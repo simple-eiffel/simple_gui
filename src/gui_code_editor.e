@@ -55,6 +55,14 @@ feature {NONE} -- Initialization
 			is_fold_lines_stale := True
 			is_case_sensitive := True
 			is_bracket_matching := True
+			create extra_carets.make (2)
+			create completion_words.make (8)
+			create completion_offers.make (8)
+			create completion_shown.make (8)
+			create completion_word.make_empty
+			create completion_opened_actions.make
+			create completion_accepted_actions.make
+			completion_auto_count := 2
 			tab_width := 4
 			register (backend.code_editor)
 			change_actions.extend (agent text_changed)
@@ -673,6 +681,214 @@ feature -- Bracket matching (1v-e-2)
 				and then a_second_count <= highlighted.count - a_second_start + 1
 		end
 
+feature -- Completion (1v-e-4)
+
+	completion_auto_count: INTEGER
+			-- How many word characters, typed, open a list by itself (2 until set); 0: a list
+			-- opens only on request (Control+Space, or `complete').
+
+	set_completion_auto_count (a_count: INTEGER)
+		require
+			not_negative: a_count >= 0
+		do
+			completion_auto_count := a_count
+		ensure
+			set: completion_auto_count = a_count
+		end
+
+	set_completion_words (a_words: ITERABLE [READABLE_STRING_GENERAL])
+			-- Offer each of `a_words' that is not empty, as plain offers, in place of the
+			-- words set before. A list already open keeps what it has.
+		do
+			completion_words.wipe_out
+			across a_words as ic loop
+				if not ic.is_empty then
+					completion_words.extend (create {GUI_COMPLETION}.make (ic))
+				end
+			end
+		end
+
+	completer: detachable FUNCTION [STRING_32, INTEGER, INTEGER, ITERABLE [GUI_COMPLETION]]
+			-- Given the word so far, the caret's line and its column, the offers.
+
+	set_completer (a_function: like completer)
+			-- `a_function' answers offers when a list opens. It runs on the GUI processor, so
+			-- it must be quick; a slow source answers through `completion_opened_actions' and
+			-- `add_completions' instead. Void: none.
+		do
+			completer := a_function
+		ensure
+			set: completer = a_function
+		end
+
+	completion_opened_actions: GUI_ACTIONS [TUPLE [start: INTEGER]]
+			-- Run when a list is wanted for the word that starts at position `start' (the
+			-- caret's position when the word is empty): a slow source answers later with
+			-- `add_completions'.
+
+	completion_accepted_actions: GUI_ACTIONS [TUPLE [text: STRING_32]]
+			-- Run after an offer's `text' is put in place of the word.
+
+	complete
+			-- Open a list for the word before the caret, as Control+Space does. No list shows
+			-- while there are no offers.
+		require
+			gui_thread: is_gui_thread
+		do
+			open_completion
+		end
+
+	add_completions (a_start: INTEGER; an_offers: ITERABLE [GUI_COMPLETION])
+			-- Add `an_offers' to the list opened for the word that starts at `a_start'.
+			-- Nothing when that list has closed or a list belongs to another word.
+		require
+			gui_thread: is_gui_thread
+		do
+			if a_start > 0 and a_start = completion_start then
+				across an_offers as ic loop
+					completion_offers.extend (ic)
+				end
+				filter_completions
+			end
+		end
+
+	is_completing: BOOLEAN
+			-- Does a list show?
+		do
+			Result := completion_start > 0 and completion_shown.count > 0
+		end
+
+	completion_count: INTEGER
+			-- How many rows the list has; 0 when none shows.
+		do
+			if completion_start > 0 then
+				Result := completion_shown.count
+			end
+		ensure
+			none_when_closed: not is_completing implies Result = 0
+		end
+
+	completion_label (i: INTEGER): STRING_32
+			-- Row `i''s label.
+		require
+			valid: 1 <= i and i <= completion_count
+		do
+			Result := completion_shown [i].label
+		end
+
+	completion_selected: INTEGER
+			-- The highlighted row; 0 when no list shows.
+
+feature -- Multiple carets (1v-e-5)
+
+	caret_count: INTEGER
+			-- The carets: the control's own (1) and the extra ones.
+		do
+			Result := 1 + extra_carets.count
+		ensure
+			at_least_one: Result >= 1
+		end
+
+	caret_start (i: INTEGER): INTEGER
+			-- Where caret `i''s selection starts, or its place when nothing is selected
+			-- (1 is the control's own).
+		require
+			valid: 1 <= i and i <= caret_count
+		do
+			if i = 1 then
+				Result := selection_start
+			else
+				Result := extra_carets [i - 1].caret.min (extra_carets [i - 1].anchor)
+			end
+		end
+
+	caret_end (i: INTEGER): INTEGER
+			-- The last character caret `i' selects; `caret_start (i)' - 1 when none.
+		require
+			valid: 1 <= i and i <= caret_count
+		do
+			if i = 1 then
+				Result := selection_end
+			else
+				Result := extra_carets [i - 1].caret.max (extra_carets [i - 1].anchor) - 1
+			end
+		end
+
+	add_caret (a_line, a_column: INTEGER)
+			-- Another caret on line `a_line' at column `a_column' (the line's end when the
+			-- line is shorter). Nothing when a caret is there already.
+		require
+			gui_thread: is_gui_thread
+			valid_line: 1 <= a_line and a_line <= line_count
+			valid_column: a_column >= 1
+		local
+			l_start, l_at: INTEGER
+		do
+			l_start := highlighted_line_start (a_line)
+			if l_start > 0 then
+				l_at := (l_start + a_column - 1).min (line_end_of (highlighted, l_start))
+				add_extra (l_at, l_at)
+			end
+		end
+
+	add_selection (a_start, an_end: INTEGER)
+			-- Another caret selecting characters `a_start' to `an_end', its caret after them.
+			-- Nothing when it meets a caret there already.
+		require
+			gui_thread: is_gui_thread
+			valid: is_valid_range (a_start, an_end)
+		do
+			add_extra (an_end + 1, a_start)
+		end
+
+	add_next_occurrence
+			-- As Control+D (Command+D): with nothing selected, select the word at the caret;
+			-- else add the next occurrence of the first caret's selection after the last
+			-- caret, wrapping round. Nothing when there is none.
+		require
+			gui_thread: is_gui_thread
+		local
+			l_text, l_find: STRING_32
+			l_at, l_lo, l_hi: INTEGER
+		do
+			l_text := highlighted
+			if selection_start > selection_end then
+				l_lo := selection_start.min (l_text.count + 1)
+				l_hi := l_lo
+				from until l_lo <= 1 or else not is_word_character (l_text [l_lo - 1]) loop
+					l_lo := l_lo - 1
+				end
+				from until l_hi > l_text.count or else not is_word_character (l_text [l_hi]) loop
+					l_hi := l_hi + 1
+				end
+				if l_hi > l_lo then
+					backend.rich_text_select (id, l_lo, l_hi - 1)
+				end
+			elseif selection_end <= l_text.count then
+				l_find := l_text.substring (selection_start, selection_end)
+				l_at := l_text.substring_index (l_find, last_caret_end.min (l_text.count + 1))
+				if l_at = 0 then
+					l_at := l_text.substring_index (l_find, 1)
+				end
+				if l_at > 0 then
+					add_extra (l_at + l_find.count, l_at)
+				end
+			end
+		end
+
+	clear_extra_carets
+			-- Back to the control's own caret.
+		require
+			gui_thread: is_gui_thread
+		do
+			if not extra_carets.is_empty then
+				extra_carets.wipe_out
+				send_extra_carets
+			end
+		ensure
+			one: caret_count = 1
+		end
+
 feature -- Find and replace
 
 	find_next (a_text: READABLE_STRING_GENERAL; a_case_sensitive, a_whole_word: BOOLEAN): BOOLEAN
@@ -740,12 +956,35 @@ feature {GUI_APPLICATION} -- Events
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)
 			-- 52: the user moved the caret (line, column); 56: the user pressed the key that
 			-- goes to the matching bracket; 57: the user clicked a fold marker or pressed a
-			-- fold key (line, which); else as a text area.
+			-- fold key (line, which); 58: a completion key (which); 59: a click on a
+			-- completion row (row); 60: an editing key with extra carets (action, Shift);
+			-- 61: a caret gesture (which, position); else as a text area.
 		do
 			if a_type = 52 then
+				if not extra_carets.is_empty then
+						-- the user placed the caret (a click): back to one
+					clear_extra_carets
+				end
 				show_lines (a_a, a_a)
 				look_for_bracket
+				completion_caret_moved
 				caret_actions.call ([a_a, a_b])
+			elseif a_type = 60 then
+				if not extra_carets.is_empty and then 1 <= a_a and then a_a <= 15 then
+					if a_a = 1 then
+						act_at_carets (1, a_b = 1, backend.from_c (backend.code_typed_text (id)))
+					else
+						act_at_carets (a_a, a_b = 1, create {STRING_32}.make_empty)
+					end
+				end
+			elseif a_type = 61 then
+				caret_gesture (a_a, a_b)
+			elseif a_type = 58 then
+				completion_key (a_a)
+			elseif a_type = 59 then
+				if 1 <= a_a and a_a <= completion_count then
+					accept_completion (a_a)
+				end
 			elseif a_type = 57 then
 				fold_by_user (a_a, a_b)
 			elseif a_type = 56 then
@@ -761,8 +1000,12 @@ feature {GUI_APPLICATION} -- Events
 feature -- Element change
 
 	set_text (a_text: READABLE_STRING_GENERAL)
-			-- Also: every fold opens, and the folds are found again.
+			-- Also: every fold opens, and the folds are found again; a completion list closes.
 		do
+			close_completion
+			if not extra_carets.is_empty then
+				clear_extra_carets
+			end
 			Precursor (a_text)
 			open_every_fold
 			if syntax = Void then
@@ -830,6 +1073,12 @@ feature {NONE} -- The application's calls
 			if enclosing_window = a_window then
 				has_bracket_pair := False
 				bracket_asked := 0
+					-- the list and the extra carets went with the control
+				extra_carets.wipe_out
+				completion_start := 0
+				completion_selected := 0
+				completion_offers.wipe_out
+				completion_shown.wipe_out
 				if attached syntax as al_syntax then
 					al_syntax.detach
 					syntax := Void
@@ -865,8 +1114,10 @@ feature {NONE} -- Highlighting
 			-- hears what changed, or the rules color the changed lines.
 		local
 			l_text: STRING_32
+			l_before: INTEGER
 		do
 			l_text := text
+			l_before := highlighted.count
 				-- before the syntax object hears: it may answer with `set_folds' at once
 			folds_follow (highlighted, l_text)
 			if attached syntax as al_syntax then
@@ -875,6 +1126,7 @@ feature {NONE} -- Highlighting
 				rehighlight (l_text)
 			end
 			look_for_bracket
+			completion_follow_edit (l_text.count - l_before)
 		end
 
 	rules_changed
@@ -1717,6 +1969,687 @@ feature {NONE} -- Folding
 			end
 		ensure
 			in_or_just_past: 1 <= Result and Result <= a_text.count + 1
+		end
+
+feature {NONE} -- Multiple carets
+
+	extra_carets: ARRAYED_LIST [TUPLE [caret, anchor: INTEGER]]
+			-- The carets after the control's own: each a caret's position and its anchor (the
+			-- other end of its selection), from 1 to the text's count + 1.
+
+	add_extra (a_caret, an_anchor: INTEGER)
+			-- Another caret at `a_caret' selecting back to `an_anchor', unless it meets one.
+		do
+			if not caret_meets (a_caret.min (an_anchor), a_caret.max (an_anchor)) then
+				extra_carets.extend ([a_caret, an_anchor])
+				show_lines (line_at (highlighted, a_caret.min (an_anchor)), line_at (highlighted, a_caret.max (an_anchor)))
+				close_completion
+				send_extra_carets
+			end
+		end
+
+	caret_meets (a_lo, a_hi: INTEGER): BOOLEAN
+			-- Does the span `a_lo' .. `a_hi' (positions) meet a caret or a selection?
+		do
+			Result := spans_meet (a_lo, a_hi, selection_start, selection_end + 1)
+			across extra_carets as ic until Result loop
+				Result := spans_meet (a_lo, a_hi, ic.caret.min (ic.anchor), ic.caret.max (ic.anchor))
+			end
+		end
+
+	spans_meet (a_lo, a_hi, b_lo, b_hi: INTEGER): BOOLEAN
+			-- Do two spans of positions share more than an end, or are they one place?
+		do
+			Result := (a_lo = b_lo and a_hi = b_hi) or (a_lo < b_hi and b_lo < a_hi)
+		end
+
+	last_caret_end: INTEGER
+			-- The furthest position any caret reaches.
+		do
+			Result := selection_end + 1
+			across extra_carets as ic loop
+				Result := Result.max (ic.caret.max (ic.anchor))
+			end
+		end
+
+	send_extra_carets
+			-- Tell the control where the extra carets are.
+		local
+			l_pairs: MANAGED_POINTER
+			i: INTEGER
+		do
+			create l_pairs.make ((extra_carets.count * 8).max (8))
+			from i := 1 until i > extra_carets.count loop
+				l_pairs.put_integer_32 (extra_carets [i].caret, (i - 1) * 8)
+				l_pairs.put_integer_32 (extra_carets [i].anchor, (i - 1) * 8 + 4)
+				i := i + 1
+			end
+			backend.code_set_extra_carets (id, l_pairs.item, extra_carets.count)
+		end
+
+	all_carets: ARRAYED_LIST [TUPLE [caret, anchor: INTEGER; own: BOOLEAN]]
+			-- Every caret in order of place, the control's own marked.
+		local
+			l_new: TUPLE [caret, anchor: INTEGER; own: BOOLEAN]
+			i: INTEGER
+		do
+			create Result.make (caret_count)
+			if selection_start > selection_end then
+				Result.extend ([selection_start, selection_start, True])
+			else
+				Result.extend ([selection_end + 1, selection_start, True])
+			end
+			across extra_carets as ic loop
+				l_new := [ic.caret, ic.anchor, False]
+				from
+					i := 1
+				until
+					i > Result.count or else Result [i].caret.min (Result [i].anchor) > l_new.caret.min (l_new.anchor)
+				loop
+					i := i + 1
+				end
+				Result.go_i_th (i)
+				Result.put_left (l_new)
+			end
+		end
+
+	set_carets (a_carets: ARRAYED_LIST [TUPLE [caret, anchor: INTEGER; own: BOOLEAN]])
+			-- Carets in order of place: those that meet become one; the control's own (or,
+			-- when it merged away, the first) goes to the control, the rest are extra.
+		local
+			l_kept: ARRAYED_LIST [TUPLE [caret, anchor: INTEGER; own: BOOLEAN]]
+			l_last: TUPLE [caret, anchor: INTEGER; own: BOOLEAN]
+			l_own: detachable TUPLE [caret, anchor: INTEGER; own: BOOLEAN]
+			l_lo, l_hi: INTEGER
+			l_merged: BOOLEAN
+		do
+			create l_kept.make (a_carets.count)
+			across a_carets as ic loop
+				l_merged := False
+				if not l_kept.is_empty then
+					l_last := l_kept.last
+					l_lo := l_last.caret.min (l_last.anchor)
+					l_hi := l_last.caret.max (l_last.anchor)
+					if spans_meet (l_lo, l_hi, ic.caret.min (ic.anchor), ic.caret.max (ic.anchor)) then
+							-- they meet: one caret over both
+						l_last.anchor := l_lo.min (ic.caret.min (ic.anchor))
+						l_last.caret := l_hi.max (ic.caret.max (ic.anchor))
+						l_last.own := l_last.own or ic.own
+						l_merged := True
+					end
+				end
+				if not l_merged then
+					l_kept.extend ([ic.caret, ic.anchor, ic.own])
+				end
+			end
+			extra_carets.wipe_out
+			across l_kept as ic loop
+				if ic.own and l_own = Void then
+					l_own := ic
+				else
+					extra_carets.extend ([ic.caret, ic.anchor])
+				end
+			end
+			if l_own = Void and then not extra_carets.is_empty then
+				l_own := [extra_carets.first.caret, extra_carets.first.anchor, True]
+				extra_carets.start
+				extra_carets.remove
+			end
+			if attached l_own as al_own then
+				backend.rich_text_select (id, al_own.caret.min (al_own.anchor), al_own.caret.max (al_own.anchor) - 1)
+			end
+			send_extra_carets
+		end
+
+	act_at_carets (a_action: INTEGER; a_shift: BOOLEAN; a_typed: STRING_32)
+			-- Event 60 with extra carets: the same action at every caret. Edits are worked
+			-- out on the text as it is, then applied from the last to the first as one group:
+			-- one undo step, one change event.
+		require
+			an_action: 1 <= a_action and a_action <= 15
+		local
+			l_text, l_insert: STRING_32
+			l_clip: detachable STRING_32
+			l_carets: like all_carets
+			l_new: like all_carets
+			l_lines: detachable LIST [STRING_32]
+			l_edits: ARRAYED_LIST [TUPLE [start, stop: INTEGER; insert: STRING_32; offset: INTEGER]]
+			l_lo, l_hi, l_start, l_stop, l_offset, l_prev_stop, l_delta, l_moved, i, n: INTEGER
+			l_c: C_STRING
+		do
+			if a_action = 15 then
+				clear_extra_carets
+			else
+				l_text := text
+				l_carets := all_carets
+				if 6 <= a_action and a_action <= 11 then
+					across l_carets as ic loop
+						l_moved := moved_caret (l_text, ic.caret, ic.anchor, a_action, a_shift)
+						if not a_shift then
+							ic.anchor := l_moved
+						end
+						ic.caret := l_moved
+					end
+					set_carets (l_carets)
+				else
+					if a_action = 12 or a_action = 13 then
+						copy_selections (l_carets, l_text)
+					end
+					if a_action /= 13 then
+						if a_action = 14 then
+							l_clip := application.clipboard.text
+							l_lines := l_clip.split ('%N')
+						end
+						create l_edits.make (l_carets.count)
+						l_prev_stop := 0
+						i := 0
+						across l_carets as ic loop
+							i := i + 1
+							l_lo := ic.caret.min (ic.anchor)
+							l_hi := ic.caret.max (ic.anchor)
+							l_start := l_lo
+							l_stop := l_hi - 1
+							create l_insert.make_empty
+							l_offset := 0
+							inspect a_action
+							when 1 then
+								l_insert := a_typed.twin
+								l_offset := l_insert.count
+							when 2 then
+								l_insert := {STRING_32} "%N" + leading_space (l_text, l_lo)
+								l_offset := l_insert.count
+							when 3 then
+								if a_shift then
+									l_start := line_start_of (l_text, l_lo)
+									n := unindent_count (l_text, l_start)
+									l_stop := l_start + n - 1
+									l_offset := (l_lo - n - l_start).max (0)
+								else
+									l_insert := indent_unit (l_lo - line_start_of (l_text, l_lo))
+									l_offset := l_insert.count
+								end
+							when 4 then
+								if l_hi = l_lo and l_lo > 1 then
+									l_start := l_lo - 1
+									l_stop := l_lo - 1
+								end
+							when 5 then
+								if l_hi = l_lo and l_lo <= l_text.count then
+									l_stop := l_lo
+								end
+							when 14 then
+								if attached l_lines as al_lines and then al_lines.count = l_carets.count and then l_carets.count > 1 then
+									l_insert := al_lines [i]
+								elseif attached l_clip as al_clip then
+									l_insert := al_clip.twin
+								end
+								l_offset := l_insert.count
+							else
+									-- 12, cut: the selection goes
+							end
+								-- never twice over one character
+							if l_start <= l_prev_stop then
+								l_start := l_prev_stop + 1
+								l_stop := l_stop.max (l_start - 1)
+							end
+							l_prev_stop := l_stop.max (l_prev_stop)
+							l_edits.extend ([l_start, l_stop, l_insert, l_offset])
+						end
+						backend.text_begin_edit_group (id)
+						from i := l_edits.count until i < 1 loop
+							if l_edits [i].stop >= l_edits [i].start or not l_edits [i].insert.is_empty then
+								l_c := backend.to_c (l_edits [i].insert)
+								backend.text_replace_range (id, l_edits [i].start, l_edits [i].stop, l_c.item)
+							end
+							i := i - 1
+						end
+						backend.text_end_edit_group (id)
+						create l_new.make (l_carets.count)
+						l_delta := 0
+						from i := 1 until i > l_edits.count loop
+							l_moved := l_edits [i].start + l_delta + l_edits [i].offset
+							l_new.extend ([l_moved, l_moved, l_carets [i].own])
+							l_delta := l_delta + l_edits [i].insert.count - (l_edits [i].stop - l_edits [i].start + 1)
+							i := i + 1
+						end
+						set_carets (l_new)
+					end
+				end
+			end
+		end
+
+	moved_caret (a_text: STRING_32; a_caret, an_anchor, a_action: INTEGER; a_shift: BOOLEAN): INTEGER
+			-- Where a caret at `a_caret' (anchor `an_anchor') goes for movement `a_action':
+			-- 6 Left, 7 Right, 8 Up, 9 Down, 10 Home, 11 End. Without Shift a selection
+			-- collapses to its near end first for Left and Right.
+		local
+			l_start, l_end, l_column: INTEGER
+		do
+			Result := a_caret
+			inspect a_action
+			when 6 then
+				if not a_shift and a_caret /= an_anchor then
+					Result := a_caret.min (an_anchor)
+				else
+					Result := (a_caret - 1).max (1)
+				end
+			when 7 then
+				if not a_shift and a_caret /= an_anchor then
+					Result := a_caret.max (an_anchor)
+				else
+					Result := (a_caret + 1).min (a_text.count + 1)
+				end
+			when 8 then
+				l_start := line_start_of (a_text, a_caret)
+				if l_start > 1 then
+					l_column := a_caret - l_start
+					l_start := line_start_of (a_text, l_start - 1)
+					Result := (l_start + l_column).min (line_end_of (a_text, l_start))
+				end
+			when 9 then
+				l_end := line_end_of (a_text, a_caret)
+				if l_end <= a_text.count then
+					l_column := a_caret - line_start_of (a_text, a_caret)
+					Result := (l_end + 1 + l_column).min (line_end_of (a_text, l_end + 1))
+				end
+			when 10 then
+				Result := line_start_of (a_text, a_caret)
+			when 11 then
+				Result := line_end_of (a_text, a_caret)
+			else
+			end
+		ensure
+			in_text: 1 <= Result and Result <= a_text.count + 1
+		end
+
+	line_start_of (a_text: STRING_32; a_position: INTEGER): INTEGER
+			-- Where the line holding position `a_position' starts.
+		do
+			from
+				Result := a_position.min (a_text.count + 1).max (1)
+			until
+				Result <= 1 or else a_text [Result - 1] = '%N'
+			loop
+				Result := Result - 1
+			end
+		end
+
+	line_end_of (a_text: STRING_32; a_position: INTEGER): INTEGER
+			-- The position at the end of the line holding `a_position' (before its break).
+		do
+			from
+				Result := a_position.min (a_text.count + 1).max (1)
+			until
+				Result > a_text.count or else a_text [Result] = '%N'
+			loop
+				Result := Result + 1
+			end
+		end
+
+	leading_space (a_text: STRING_32; a_position: INTEGER): STRING_32
+			-- The spaces and tabs that start the line of `a_position', up to it.
+		local
+			i: INTEGER
+		do
+			create Result.make (8)
+			from
+				i := line_start_of (a_text, a_position)
+			until
+				i >= a_position or else i > a_text.count or else (a_text [i] /= ' ' and a_text [i] /= '%T')
+			loop
+				Result.append_character (a_text [i])
+				i := i + 1
+			end
+		end
+
+	indent_unit (a_column: INTEGER): STRING_32
+			-- What Tab inserts at column `a_column' (from 0): a tab, or spaces to the next stop.
+		do
+			if is_indent_with_spaces then
+				create Result.make_filled (' ', tab_width - (a_column \\ tab_width))
+			else
+				Result := "%T"
+			end
+		end
+
+	unindent_count (a_text: STRING_32; a_line_start: INTEGER): INTEGER
+			-- How many characters Shift+Tab takes from the start of the line at `a_line_start':
+			-- one tab, or up to `tab_width' spaces.
+		do
+			if a_line_start <= a_text.count and then a_text [a_line_start] = '%T' then
+				Result := 1
+			else
+				from until
+					Result >= tab_width or else a_line_start + Result > a_text.count or else a_text [a_line_start + Result] /= ' '
+				loop
+					Result := Result + 1
+				end
+			end
+		end
+
+	copy_selections (a_carets: like all_carets; a_text: STRING_32)
+			-- The clipboard: each caret's selection, top to bottom, joined by line breaks.
+		local
+			l_joined: STRING_32
+			l_lo, l_hi: INTEGER
+		do
+			create l_joined.make (64)
+			across a_carets as ic loop
+				l_lo := ic.caret.min (ic.anchor)
+				l_hi := ic.caret.max (ic.anchor)
+				if l_hi > l_lo then
+					if not l_joined.is_empty then
+						l_joined.append_character ('%N')
+					end
+					l_joined.append (a_text.substring (l_lo, l_hi - 1))
+				end
+			end
+			if not l_joined.is_empty then
+				application.clipboard.set_text (l_joined)
+			end
+		end
+
+	caret_gesture (a_gesture, a_position: INTEGER)
+			-- Event 61: 1 Alt+click at `a_position' (add a caret, or remove the one there),
+			-- 2 add one below the last caret, 3 above the first, 4 the next occurrence.
+		local
+			l_carets: like all_carets
+			l_at, l_moved, i: INTEGER
+			l_found: BOOLEAN
+		do
+			inspect a_gesture
+			when 1 then
+				l_at := a_position.max (1).min (highlighted.count + 1)
+				from i := 1 until i > extra_carets.count or l_found loop
+					if extra_carets [i].caret = l_at and extra_carets [i].anchor = l_at then
+						l_found := True
+						extra_carets.go_i_th (i)
+						extra_carets.remove
+						send_extra_carets
+					end
+					i := i + 1
+				end
+				if not l_found then
+					if selection_start > selection_end and selection_start = l_at then
+						if not extra_carets.is_empty then
+								-- the control's own goes: the first extra one takes its place
+							set_carets (without_own (all_carets))
+						end
+					else
+						add_extra (l_at, l_at)
+					end
+				end
+			when 2, 3 then
+				l_carets := all_carets
+				if a_gesture = 2 then
+					l_at := l_carets.last.caret
+					l_moved := moved_caret (highlighted, l_at, l_at, 9, False)
+				else
+					l_at := l_carets.first.caret
+					l_moved := moved_caret (highlighted, l_at, l_at, 8, False)
+				end
+				if l_moved /= l_at then
+					add_extra (l_moved, l_moved)
+				end
+			when 4 then
+				add_next_occurrence
+			else
+			end
+		end
+
+	without_own (a_carets: like all_carets): like all_carets
+			-- `a_carets' less the control's own, the first of the rest made the own.
+		do
+			create Result.make (a_carets.count)
+			across a_carets as ic loop
+				if not ic.own then
+					Result.extend ([ic.caret, ic.anchor, Result.is_empty])
+				end
+			end
+		end
+
+feature {NONE} -- Completion
+
+	completion_words: ARRAYED_LIST [GUI_COMPLETION]
+			-- The fixed list (`set_completion_words').
+
+	completion_offers: ARRAYED_LIST [GUI_COMPLETION]
+			-- Every offer for the word with a list, in the sources' order: the fixed list,
+			-- the completer's, then what `add_completions' added.
+
+	completion_shown: ARRAYED_LIST [GUI_COMPLETION]
+			-- The rows: the offers that match `completion_word'.
+
+	completion_start: INTEGER
+			-- Where the word with a list starts; 0 when there is none. A list with no rows
+			-- yet (a slow source has not answered) keeps its word here.
+
+	completion_word: STRING_32
+			-- The word the rows were matched against.
+
+	Completion_page: INTEGER = 8
+			-- Rows Page Up and Page Down move: the list's height.
+
+	open_completion
+			-- A list for the word before the caret: gather the offers, tell
+			-- `completion_opened_actions', and show the rows that match.
+		local
+			l_caret, l_start: INTEGER
+		do
+			close_completion
+			l_caret := selection_start.min (highlighted.count + 1)
+			l_start := word_start_before (l_caret)
+			completion_start := l_start
+			completion_word := highlighted.substring (l_start, l_caret - 1)
+			completion_offers.append (completion_words)
+			if attached completer as al_completer then
+				across al_completer.item ([completion_word.twin, caret_line, caret_column]) as ic loop
+					completion_offers.extend (ic)
+				end
+			end
+			completion_opened_actions.call ([l_start])
+			filter_completions
+		ensure
+			for_the_word: completion_start > 0
+		end
+
+	filter_completions
+			-- The rows again: offers whose label starts with `completion_word', then those
+			-- whose label holds it elsewhere, each group in the sources' order, case ignored.
+			-- Shown (the first row highlighted), or hidden when none match.
+		local
+			l_word: STRING_32
+			l_later: ARRAYED_LIST [GUI_COMPLETION]
+			l_at: INTEGER
+		do
+			l_word := completion_word.as_lower
+			completion_shown.wipe_out
+			create l_later.make (4)
+			across completion_offers as ic loop
+				if l_word.is_empty then
+					completion_shown.extend (ic)
+				else
+					l_at := ic.label.as_lower.substring_index (l_word, 1)
+					if l_at = 1 then
+						completion_shown.extend (ic)
+					elseif l_at > 1 then
+						l_later.extend (ic)
+					end
+				end
+			end
+			completion_shown.append (l_later)
+			if completion_shown.is_empty then
+				completion_selected := 0
+				backend.code_hide_completions (id)
+			else
+				completion_selected := 1
+				show_completion_rows
+			end
+		ensure
+			first_highlighted: completion_selected = completion_shown.count.min (1)
+		end
+
+	show_completion_rows
+			-- Hand the rows to the control: rows joined by 0x1F, and in a row the label, the
+			-- detail and the kind joined by 0x1E.
+		require
+			has_rows: completion_shown.count > 0
+			highlighted_row: 1 <= completion_selected and completion_selected <= completion_shown.count
+		local
+			l_joined: STRING_32
+			l_c: C_STRING
+			l_first: BOOLEAN
+		do
+			create l_joined.make (32 * completion_shown.count)
+			l_first := True
+			across completion_shown as ic loop
+				if not l_first then
+					l_joined.append_character ((0x1F).to_character_32)
+				end
+				l_first := False
+				l_joined.append (ic.label)
+				l_joined.append_character ((0x1E).to_character_32)
+				l_joined.append (ic.detail)
+				l_joined.append_character ((0x1E).to_character_32)
+				l_joined.append_integer (ic.kind)
+			end
+			l_c := backend.to_c (l_joined)
+			backend.code_show_completions (id, l_c.item, completion_selected)
+		end
+
+	close_completion
+			-- No list, and no word waiting for one.
+		do
+			if completion_start > 0 then
+				backend.code_hide_completions (id)
+				completion_start := 0
+				completion_selected := 0
+				completion_offers.wipe_out
+				completion_shown.wipe_out
+			end
+		ensure
+			closed: completion_start = 0 and not is_completing
+		end
+
+	completion_key (a_key: INTEGER)
+			-- Event 58: 0 open a list; with one showing, 1 Up, 2 Down, 3 Page Up, 4 Page Down
+			-- move, 5 accepts, 6 closes (Escape, or the control hid it).
+		do
+			inspect a_key
+			when 0 then
+				if extra_carets.is_empty then
+					open_completion
+				end
+			when 1 then
+				move_completion (-1)
+			when 2 then
+				move_completion (1)
+			when 3 then
+				move_completion (- Completion_page)
+			when 4 then
+				move_completion (Completion_page)
+			when 5 then
+				if is_completing then
+					accept_completion (completion_selected)
+				end
+			when 6 then
+				close_completion
+			else
+			end
+		end
+
+	move_completion (a_by: INTEGER)
+			-- Highlight the row `a_by' rows on, kept within the list.
+		do
+			if is_completing then
+				completion_selected := (completion_selected + a_by).max (1).min (completion_shown.count)
+				backend.code_select_completion (id, completion_selected)
+			end
+		ensure
+			in_list: is_completing implies (1 <= completion_selected and completion_selected <= completion_count)
+		end
+
+	accept_completion (a_row: INTEGER)
+			-- Put row `a_row''s text in place of the word, as one undo step, with the caret
+			-- after it; then `completion_accepted_actions'.
+		require
+			valid: 1 <= a_row and a_row <= completion_count
+		local
+			l_text: STRING_32
+			l_start, l_end, l_after: INTEGER
+			l_c: C_STRING
+		do
+			l_text := completion_shown [a_row].text.twin
+			l_start := completion_start
+			l_end := (selection_start - 1).max (l_start - 1)
+			close_completion
+			l_c := backend.to_c (l_text)
+			backend.text_replace_range (id, l_start, l_end, l_c.item)
+			l_after := l_start + l_text.count
+			backend.rich_text_select (id, l_after, l_after - 1)
+			program_edited
+			completion_accepted_actions.call ([l_text])
+		ensure
+			closed: not is_completing
+		end
+
+	completion_follow_edit (a_grown: INTEGER)
+			-- The user edited the text, which grew by `a_grown' characters: an open list
+			-- narrows or widens to the word before the caret, and closes when the caret has
+			-- left the word or the word is gone. With none open, typing that brings the word
+			-- before the caret to `completion_auto_count' characters or more opens one.
+		local
+			l_caret, l_start: INTEGER
+		do
+			l_caret := selection_start.min (highlighted.count + 1)
+			l_start := word_start_before (l_caret)
+			if completion_start > 0 then
+				if l_start = completion_start and l_caret > l_start then
+					completion_word := highlighted.substring (l_start, l_caret - 1)
+					filter_completions
+				else
+					close_completion
+				end
+			elseif extra_carets.is_empty and then completion_auto_count > 0 and then a_grown >= 1 and then a_grown <= l_caret - l_start
+				and then l_caret - l_start >= completion_auto_count
+			then
+					-- what the edit added is all word, before the caret: typed (two keys can
+					-- land before one change event), not pasted with other text
+				open_completion
+			end
+		end
+
+	completion_caret_moved
+			-- The user moved the caret (52): an open list closes unless the caret is still at
+			-- the end of its word (typing moves the caret there too).
+		local
+			l_caret: INTEGER
+		do
+			if completion_start > 0 then
+				l_caret := selection_start.min (highlighted.count + 1)
+				if word_start_before (l_caret) /= completion_start
+					or else (l_caret <= highlighted.count and then is_word_character (highlighted [l_caret]))
+				then
+					close_completion
+				end
+			end
+		end
+
+	word_start_before (a_caret: INTEGER): INTEGER
+			-- Where the run of word characters that ends just before position `a_caret'
+			-- starts in `highlighted'; `a_caret' itself when there is none.
+		require
+			in_text: 1 <= a_caret and a_caret <= highlighted.count + 1
+		do
+			from
+				Result := a_caret
+			until
+				Result <= 1 or else not is_word_character (highlighted [Result - 1])
+			loop
+				Result := Result - 1
+			end
+		ensure
+			at_or_before: 1 <= Result and Result <= a_caret
 		end
 
 feature {NONE} -- Finding
