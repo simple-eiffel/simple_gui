@@ -23,17 +23,27 @@ create
 feature {NONE} -- Initialization
 
 	make (a_title: READABLE_STRING_GENERAL)
-			-- A job called `a_title', on Letter paper, portrait, with nothing rendered yet.
+			-- A job called `a_title', portrait, with nothing rendered yet: on A4 where the system's
+			-- default paper is A4, else on Letter.
 		require
 			has_title: not a_title.is_empty
+		local
+			l_printer: SIMPLE_PDF_PRINTER
 		do
 			create title.make_from_string_general (a_title)
-			paper_width := Letter_width
-			paper_height := Letter_height
+			create l_printer.make
+			if (l_printer.default_paper_width - A4_width).abs < 2.0 and (l_printer.default_paper_height - A4_height).abs < 2.0 then
+				paper_width := A4_width
+				paper_height := A4_height
+			else
+				paper_width := Letter_width
+				paper_height := Letter_height
+			end
 			create pdf_path.make_empty
 		ensure
 			titled: title.same_string_general (a_title)
-			letter: paper_width = Letter_width and paper_height = Letter_height
+			letter_or_a4: (paper_width = Letter_width and paper_height = Letter_height)
+				or (paper_width = A4_width and paper_height = A4_height)
 			portrait: not is_landscape
 			nothing_rendered: page_count = 0
 		end
@@ -171,6 +181,45 @@ feature -- Output
 			l_done := True
 			retry
 		end
+
+	run_dialog (a_parent: GUI_WINDOW)
+			-- The system's print dialog over `a_parent', and the rendered pages printed as the user
+			-- chose (simple_pdf's SIMPLE_PDF_PRINTER); then `last_outcome' and `last_error'. The
+			-- rendering is removed on every path: render again to print or save again.
+		require
+			rendered: page_count >= 1
+		local
+			l_printer: SIMPLE_PDF_PRINTER
+		do
+			create l_printer.make
+			l_printer.print_file (pdf_path, title, a_parent.native_handle)
+			last_outcome := l_printer.last_outcome
+			if last_outcome = Outcome_failed then
+				last_error := l_printer.last_error.twin
+			else
+				last_error := Void
+			end
+			delete_if_there (pdf_path)
+			create pdf_path.make_empty
+			page_count := 0
+		ensure
+			known_outcome: last_outcome >= Outcome_no_printer and last_outcome <= Outcome_printed
+			failure_explained: last_outcome = Outcome_failed implies attached last_error
+			rendering_removed: page_count = 0
+		end
+
+	last_outcome: INTEGER
+			-- How the last `run_dialog' ended: `Outcome_printed', `Outcome_cancelled',
+			-- `Outcome_failed' or `Outcome_no_printer' (the same values on every platform).
+
+	Outcome_printed: INTEGER = 1
+			-- The job was handed to the system's print queue.
+	Outcome_cancelled: INTEGER = 0
+			-- The user cancelled the dialog.
+	Outcome_failed: INTEGER = -1
+			-- Printing failed; `last_error' says why.
+	Outcome_no_printer: INTEGER = -2
+			-- The system has no printer; no dialog was shown.
 
 	rendered_path: STRING_32
 			-- Where the rendered pages are kept, as a PDF.

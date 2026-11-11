@@ -2573,7 +2573,8 @@ feature -- The remaining controls (1j)
 			i: INTEGER
 		do
 			create l_job.make ("Print test")
-			assert ("Letter, portrait", l_job.page_width = 612.0 and l_job.page_height = 792.0)
+			assert ("Letter or A4, as the system's paper says, portrait", (l_job.page_width = l_job.Letter_width and l_job.page_height = l_job.Letter_height)
+				or (l_job.page_width = l_job.A4_width and l_job.page_height = l_job.A4_height))
 			create l_text.make (8_000)
 			from i := 1 until i > 200 loop
 				l_text.append ({STRING_32} "Line ")
@@ -2587,14 +2588,14 @@ feature -- The remaining controls (1j)
 			assert ("saved", l_job.save_pdf (l_path))
 			l_pdf := file_bytes (l_path)
 			assert ("a whole PDF", l_pdf.starts_with ("%%PDF") and l_pdf.has_substring ("%%%%EOF"))
-			assert ("its pages: " + pdf_page_count (l_pdf).out + " of " + l_job.page_count.out, pdf_page_count (l_pdf) = l_job.page_count)
+			assert ("its pages: " + pdf_pages (l_path).out + " of " + l_job.page_count.out, pdf_pages (l_path) = l_job.page_count)
 			l_job.print_pages (3, agent (a_page: INTEGER; a_context: CAIRO_CONTEXT)
 				do
 					a_context.set_color_rgb (0.2, 0.4, 0.8).rectangle (72.0, 72.0, 100.0 * a_page, 50.0).fill.do_nothing
 				end)
 			assert ("three pages", l_job.page_count = 3)
 			assert ("saved again", l_job.save_pdf (l_path))
-			assert ("three in the file", pdf_page_count (file_bytes (l_path)) = 3)
+			assert ("three in the file", pdf_pages (l_path) = 3)
 			l_job.set_orientation (True)
 			assert ("landscape", l_job.page_width = 792.0 and l_job.page_height = 612.0)
 			l_job.set_page_size (l_job.A4_width, l_job.A4_height)
@@ -2641,21 +2642,20 @@ feature -- The remaining controls (1j)
 			end
 		end
 
-	pdf_page_count (a_pdf: STRING_8): INTEGER
-			-- How many page objects `a_pdf' holds: each "/Type /Page" that is not "/Type /Pages".
+	pdf_pages (a_path: READABLE_STRING_GENERAL): INTEGER
+			-- The pages of the PDF at `a_path', counted by Poppler's pdftotext through simple_pdf's
+			-- reader (cairo 1.18 writes PDF 1.7 object streams, so the file's text does not show its
+			-- pages). On Windows the reader uses simple_pdf's bin/pdftotext.exe.
 		local
-			i: INTEGER
+			l_reader: SIMPLE_PDF_READER
 		do
-			from
-				i := a_pdf.substring_index ("/Type /Page", 1)
-			until
-				i = 0
-			loop
-				if i + 11 > a_pdf.count or else a_pdf [i + 11] /= 's' then
-					Result := Result + 1
-				end
-				i := a_pdf.substring_index ("/Type /Page", i + 1)
+			if {PLATFORM}.is_windows and then attached (create {EXECUTION_ENVIRONMENT}).item ("SIMPLE_EIFFEL") as al_root then
+				create l_reader.make_with_path ({UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (al_root) + "/simple_pdf/bin/pdftotext.exe")
+			else
+				create l_reader.make
 			end
+			assert ("pdftotext is there to count pages", l_reader.is_available)
+			Result := l_reader.page_count ({UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (a_path.to_string_32))
 		end
 
 	delete_file (a_path: READABLE_STRING_GENERAL)

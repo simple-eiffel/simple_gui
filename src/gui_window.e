@@ -239,6 +239,14 @@ feature -- Basic operations
 			closed: is_closed
 		end
 
+feature {GUI_PRINT_JOB} -- Printing (1v-c)
+
+	native_handle: POINTER
+			-- The platform's own window (HWND, GtkWindow or NSWindow), for the print dialog.
+		do
+			Result := backend.window_native_handle (id)
+		end
+
 feature {GUI_APPLICATION} -- Events
 
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)

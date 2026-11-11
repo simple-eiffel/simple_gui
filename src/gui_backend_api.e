@@ -1875,6 +1875,13 @@ feature -- Common widget state
 		deferred
 		end
 
+	window_native_handle (a_window: INTEGER): POINTER
+			-- 1v-c: the platform's own window for `a_window', for a system dialog a library outside
+			-- simple_gui shows over it (simple_pdf's print dialog): the HWND, the GtkWindow or the
+			-- NSWindow; default_pointer when the window is gone.
+		deferred
+		end
+
 	follow_system_appearance
 			-- Undo `set_dark': follow the system's light or dark again (event 10 if it changes).
 		deferred
