@@ -2030,6 +2030,248 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_code_editor_highlighting
+			-- 1v-b: keywords, comments, strings and numbers take their styles' colors; a block
+			-- comment opened on one line colors the lines after it until it closes, and closing
+			-- or removing it puts them back.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+		do
+			create l_window.make ("Code", 560, 360)
+			create l_code.make
+			l_code.add_keywords (<<"class", "feature", "do", "end">>, l_code.Style_keyword)
+			l_code.add_line_comment ("--", l_code.Style_comment)
+			l_code.add_delimited ("%"", "%"", l_code.Style_string)
+			l_code.add_delimited ("/*", "*/", l_code.Style_comment)
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("class A%N-- a note%Nfeature x: INTEGER = 42%Ndo print (%"hi%") end%Nplain line")
+			assert ("keyword", l_code.text_color_at (1) = l_code.style_color (l_code.Style_keyword))
+			assert ("comment", l_code.text_color_at (9) = l_code.style_color (l_code.Style_comment))
+			assert ("plain identifier", l_code.text_color_at (7) = l_code.style_color (l_code.Style_plain))
+			assert ("number", l_code.text_color_at (l_code.text.substring_index ("42", 1)) = l_code.style_color (l_code.Style_number))
+			assert ("string", l_code.text_color_at (l_code.text.substring_index ("%"hi", 1) + 1) = l_code.style_color (l_code.Style_string))
+			l_code.go_to_line (2)
+			driver.type_code (l_code, "/*")
+			assert ("the block runs on: " + l_code.text_color_at (l_code.text.substring_index ("plain", 1)).to_hex_string,
+				l_code.text_color_at (l_code.text.substring_index ("plain", 1)) = l_code.style_color (l_code.Style_comment))
+			l_code.go_to_line (4)
+			driver.type_code (l_code, "*/")
+			assert ("closed: the last line is plain again", l_code.text_color_at (l_code.text.substring_index ("plain", 1)) = l_code.style_color (l_code.Style_plain))
+			assert ("and line 3 is still inside", l_code.text_color_at (l_code.text.substring_index ("x:", 1)) = l_code.style_color (l_code.Style_comment))
+			l_window.close
+		end
+
+	test_code_editor_lines_and_indent
+			-- 1v-b: lines, the caret and go_to_line; Return keeps the indentation; Tab inserts
+			-- spaces when asked; the user's caret moves fire caret_actions.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_told: ARRAYED_LIST [STRING]
+		do
+			create l_told.make (2)
+			create l_window.make ("Code", 560, 360)
+			create l_code.make
+			l_code.set_indent_with_spaces (True)
+			l_code.caret_actions.extend (agent (l, c: INTEGER; t: ARRAYED_LIST [STRING]) do t.extend (l.out + ":" + c.out) end (?, ?, l_told))
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("feature%N    make%N")
+			assert ("three lines: " + l_code.line_count.out, l_code.line_count = 3)
+			assert ("line text", l_code.line_text (2).same_string ("    make"))
+			l_code.go_to_line (2)
+			assert ("caret at 2:1", l_code.caret_line = 2 and l_code.caret_column = 1 and l_told.is_empty)
+			driver.move_caret (l_code, 2, 9)
+			assert ("the user's caret told: " + l_told.count.out, not l_told.is_empty and l_told.last.same_string ("2:9"))
+			driver.type_code (l_code, "%Ndo")
+			assert ("auto-indent: " + l_code.line_text (3).out, l_code.line_text (3).same_string ("    do"))
+			driver.type_code (l_code, "%N%T")
+			assert ("Tab as four more spaces: [" + l_code.line_text (4).out + "]", l_code.line_text (4).same_string ("        "))
+			assert ("line numbers by default", l_code.is_line_numbers_shown)
+			l_code.set_line_numbers_shown (False)
+			assert ("hidden", not l_code.is_line_numbers_shown)
+			l_window.close
+		end
+
+	test_code_editor_find_replace
+			-- 1v-b: find selects the next match and wraps; whole words skip parts; replace_all
+			-- counts; the find bar drives the editor.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_code: GUI_CODE_EDITOR
+			l_bar: GUI_FIND_BAR
+		do
+			create l_window.make ("Find", 560, 360)
+			create l_stack.make_vertical
+			create l_code.make
+			create l_bar.make (l_code)
+			l_stack.extend (l_bar)
+			l_stack.extend_stretching (l_code)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_code.set_text ("make makes make; remake")
+			l_code.select_range (1, 0)
+			assert ("first", l_code.find_next ("make", True, False) and l_code.selection_start = 1 and l_code.selection_end = 4)
+			assert ("second, inside makes", l_code.find_next ("make", True, False) and l_code.selection_start = 6)
+			assert ("whole word skips to the third", l_code.find_next ("make", True, True) and l_code.selection_start = 12)
+			assert ("wraps to the first", l_code.find_next ("make", True, True) and l_code.selection_start = 1)
+			assert ("none", not l_code.find_next ("absent", True, False))
+			assert ("replace_all counts 2 whole words", l_code.replace_all ("make", "build", True, True) = 2)
+			assert ("replaced: " + l_code.text.out, l_code.text.same_string ("build makes build; remake"))
+			driver.type_text (l_bar.find_field, "makes")
+			driver.type_text (l_bar.replace_field, "builds")
+			driver.perform_click (l_bar.replace_all_button)
+			assert ("the bar replaced: " + l_code.text.out, l_code.text.same_string ("build builds build; remake"))
+			l_window.close
+		end
+
+	test_code_editor_large_text
+			-- 1v-b: a 10,000-line text. Reports the time to load it, to go to a line and to type
+			-- in the middle of it (each with its frame drawn), as a shipped program would
+			-- spend it: the measured steps run inside `timed'.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_text: STRING_32
+			i, l_lines: INTEGER
+			l_t0, l_load, l_go, l_key, l_worst, l_sum: REAL_64
+		do
+			l_lines := 10_000
+			if attached (create {EXECUTION_ENVIRONMENT}).item ("GUI_LARGE_LINES") as al_n and then al_n.is_integer then
+				l_lines := al_n.to_integer
+			end
+			create l_window.make ("Large code", 720, 480)
+			create l_code.make
+			l_code.add_keywords (<<"class", "feature", "do", "end">>, l_code.Style_keyword)
+			l_code.add_line_comment ("--", l_code.Style_comment)
+			l_code.add_delimited ("%"", "%"", l_code.Style_string)
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_text.make (400_000)
+			from i := 1 until i > l_lines loop
+				l_text.append ({STRING_32} "    do print (%"line ")
+				l_text.append_integer (i)
+				l_text.append ({STRING_32} "%") end -- note%N")
+				i := i + 1
+			end
+			l_text.remove_tail (1)
+			l_t0 := now_seconds
+			timed (agent l_code.set_text (l_text))
+			print ("    large text: " + l_lines.out + " lines set and colored in " + ((now_seconds - l_t0) * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+			timed (agent driver.pump_until_idle (0))
+			l_load := now_seconds - l_t0
+			print ("    large text: first frame at " + (l_load * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+			assert ("all the lines: " + l_code.line_count.out, l_code.line_count = l_lines)
+			l_t0 := now_seconds
+			timed (agent l_code.go_to_line (l_lines // 2))
+			timed (agent driver.pump_until_idle (0))
+			l_go := now_seconds - l_t0
+			print ("    large text: go to line " + (l_go * 1000.0).rounded.out + " ms%N")
+			io.output.flush
+			assert ("caret on the middle line: " + l_code.caret_line.out, l_code.caret_line = l_lines // 2 and l_code.caret_column = 1)
+			from i := 1 until i > 5 loop
+				l_t0 := now_seconds
+				timed (agent driver.type_code (l_code, "x"))
+				timed (agent driver.pump_until_idle (0))
+				l_key := now_seconds - l_t0
+				print ("    large text: keystroke " + (l_key * 1000.0).rounded.out + " ms%N")
+				io.output.flush
+				l_sum := l_sum + l_key
+				l_worst := l_worst.max (l_key)
+				i := i + 1
+			end
+			print ("    large text: " + l_text.count.out + " characters; load " + (l_load * 1000.0).rounded.out
+				+ " ms, go to line " + (l_go * 1000.0).rounded.out + " ms, keystroke mean " + (l_sum * 200.0).rounded.out
+				+ " ms, worst " + (l_worst * 1000.0).rounded.out + " ms%N")
+			assert ("typed on the middle line: " + l_code.line_text (l_lines // 2).out, l_code.line_text (l_lines // 2).starts_with ({STRING_32} "xxxxx    do print"))
+			assert ("the line count holds", l_code.line_count = l_lines)
+			assert ("the keyword after the typing keeps its color",
+				l_code.text_color_at (l_code.text.substring_index ("xxxxx", 1) + 9) = l_code.style_color (l_code.Style_keyword))
+			l_window.close
+		end
+
+	test_code_editor_edits_color_as_a_fresh_text
+			-- 1v-b: after an edit the editor highlights only the lines that changed and the
+			-- lines whose starting state changed, found from what the new text shares with
+			-- the old. Whatever the edit, the colors must be those a fresh editor gives the
+			-- same text: a block opened, closed and removed, a line added at the top and at
+			-- the end, a line split, lines joined, the last and the first line removed, and
+			-- lines that repeat (where the shared start and the shared end overlap).
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_code, l_fresh: GUI_CODE_EDITOR
+			l_text: STRING_32
+			l_a, l_b: INTEGER
+		do
+			create l_window.make ("Edits", 560, 480)
+			create l_stack.make_vertical
+			l_code := new_ruled_editor
+			l_fresh := new_ruled_editor
+			l_stack.extend_stretching (l_code)
+			l_stack.extend_stretching (l_fresh)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_code.set_text ("class A%Nfeature%N    x: INTEGER = 42%N    do print (%"hi%") end%Nend")
+			assert_colored_as_fresh ("as set", l_code, l_fresh)
+			l_code.go_to_line (2)
+			driver.type_code (l_code, "/*")
+			assert_colored_as_fresh ("a block opened", l_code, l_fresh)
+			l_code.go_to_line (4)
+			driver.type_code (l_code, "*/")
+			assert_colored_as_fresh ("the block closed", l_code, l_fresh)
+			l_code.go_to_line (1)
+			driver.type_code (l_code, "do%N")
+			assert_colored_as_fresh ("a line added at the top", l_code, l_fresh)
+			driver.move_caret (l_code, l_code.line_count, l_code.line_text (l_code.line_count).count + 1)
+			driver.type_code (l_code, "%Nfeature")
+			assert_colored_as_fresh ("a line added at the end", l_code, l_fresh)
+			driver.move_caret (l_code, 3, 4)
+			driver.type_code (l_code, "%N")
+			assert_colored_as_fresh ("a line split", l_code, l_fresh)
+				-- from inside line 2 to inside line 4, the block's opening with it
+			l_text := l_code.text
+			l_a := l_text.index_of ('%N', 1)
+			l_b := l_text.index_of ('%N', l_text.index_of ('%N', l_a + 1) + 1)
+			l_code.select_range (l_a + 2, l_b + 2)
+			driver.type_code (l_code, "end")
+			assert_colored_as_fresh ("lines joined and the block's opening removed", l_code, l_fresh)
+			assert ("the lines were joined: " + l_code.line_count.out, l_code.line_count < l_text.occurrences ('%N') + 1)
+			l_text := l_code.text
+			l_code.select_range (l_text.last_index_of ('%N', l_text.count), l_text.count)
+			driver.type_code (l_code, "x")
+			assert_colored_as_fresh ("the last line removed", l_code, l_fresh)
+			l_text := l_code.text
+			l_code.select_range (1, l_text.index_of ('%N', 1))
+			driver.type_code (l_code, "end ")
+			assert_colored_as_fresh ("the first line removed", l_code, l_fresh)
+			l_code.set_text ("do%Ndo%Ndo")
+			driver.move_caret (l_code, 2, 3)
+			driver.type_code (l_code, "%Ndo")
+			assert_colored_as_fresh ("a repeated line added in the middle", l_code, l_fresh)
+			assert ("four lines: " + l_code.line_count.out, l_code.line_count = 4)
+			l_code.go_to_line (1)
+			driver.type_code (l_code, "do%N")
+			assert_colored_as_fresh ("a repeated line added at the top", l_code, l_fresh)
+			driver.move_caret (l_code, 5, 3)
+			driver.type_code (l_code, " /*")
+			assert_colored_as_fresh ("a block opened on the last line", l_code, l_fresh)
+			l_code.go_to_line (2)
+			driver.type_code (l_code, "/*")
+			assert_colored_as_fresh ("and another above it", l_code, l_fresh)
+			l_window.close
+		end
+
 	test_preferences_values_and_file
 			-- 1v-d: typed values with defaults; integers clamp; a file round-trips, keeps keys it
 			-- doesn't know, and a bad value falls back to its default; changes are told.
@@ -4026,6 +4268,63 @@ feature -- Lazy tables (1f)
 		end
 
 feature {NONE} -- Fixtures
+
+	new_ruled_editor: GUI_CODE_EDITOR
+			-- A code editor with keywords, a line comment, strings and a block comment.
+		do
+			create Result.make
+			Result.add_keywords (<<"class", "feature", "do", "end">>, Result.Style_keyword)
+			Result.add_line_comment ("--", Result.Style_comment)
+			Result.add_delimited ("%"", "%"", Result.Style_string)
+			Result.add_delimited ("/*", "*/", Result.Style_comment)
+		end
+
+	assert_colored_as_fresh (a_tag: STRING; a_code, a_fresh: GUI_CODE_EDITOR)
+			-- Give `a_fresh' the text of `a_code' and check that every character outside
+			-- the line breaks (which show no color) is colored alike in both.
+		local
+			l_text: STRING_32
+			i, l_differing: INTEGER
+		do
+			l_text := a_code.text
+			a_fresh.set_text (l_text)
+			from i := 1 until i > l_text.count loop
+				if l_text [i] /= '%N' and l_differing = 0 then
+					if a_code.has_text_color_at (i) /= a_fresh.has_text_color_at (i)
+						or else (a_code.has_text_color_at (i) and then a_code.text_color_at (i) /= a_fresh.text_color_at (i))
+					then
+						l_differing := i
+					end
+				end
+				i := i + 1
+			end
+			assert (a_tag + ": colored as a fresh text (first difference at character " + l_differing.out
+				+ " of [" + l_text.out + "])", l_differing = 0)
+		end
+
+	timed (a_work: PROCEDURE)
+			-- Run `a_work' as a shipped program would: contract checking off, then back as it
+			-- was, also when `a_work' raises. For the measured steps of a timing test only (a
+			-- time budget is the lean build's; Larry, 2026-10-25: "Timing needs trump
+			-- contracts"). GUI_TIMED_CONTRACTS in the environment keeps checking on, to
+			-- show what the contracts cost.
+		local
+			l_was, l_is_off, l_ignored: BOOLEAN
+		do
+			if attached (create {EXECUTION_ENVIRONMENT}).item ("GUI_TIMED_CONTRACTS") then
+				a_work.call (Void)
+			else
+				l_was := {ISE_RUNTIME}.check_assert (False)
+				l_is_off := True
+				a_work.call (Void)
+				l_ignored := {ISE_RUNTIME}.check_assert (l_was)
+				l_is_off := False
+			end
+		rescue
+			if l_is_off then
+				l_ignored := {ISE_RUNTIME}.check_assert (l_was)
+			end
+		end
 
 	source_calls: INTEGER
 			-- How many rows `counted_row' was asked for.

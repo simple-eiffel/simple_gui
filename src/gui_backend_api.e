@@ -392,6 +392,61 @@ feature -- Windows and containers
 		deferred
 		end
 
+	code_editor: INTEGER
+			-- 1v-b: a rich text area with a line-number gutter, monospace, no wrapping,
+			-- auto-indent on Return, Tab and Shift+Tab indenting the selected lines.
+		deferred
+		end
+
+	code_set_line_numbers (an_id: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	code_set_indent (an_id, a_tab_width: INTEGER; a_spaces: BOOLEAN)
+			-- Tab stops every `a_tab_width' spaces; Tab inserts spaces when `a_spaces'.
+		deferred
+		end
+
+	text_line_count (an_id: INTEGER): INTEGER
+		deferred
+		end
+
+	text_caret_line (an_id: INTEGER): INTEGER
+			-- From 1.
+		deferred
+		end
+
+	text_caret_column (an_id: INTEGER): INTEGER
+			-- From 1, in characters.
+		deferred
+		end
+
+	text_line_text (an_id, n: INTEGER): POINTER
+			-- Line `n' without its line break.
+		deferred
+		end
+
+	text_go_to_line (an_id, n: INTEGER)
+			-- The caret at line `n''s start, scrolled into view, quietly.
+		deferred
+		end
+
+	text_replace_range (an_id, a_start, an_end: INTEGER; a_text: POINTER)
+			-- Characters `a_start' .. `an_end' (1-based, inclusive; an empty range inserts)
+			-- become `a_text', selected; quiet.
+		deferred
+		end
+
+	test_type_into_code (an_id: INTEGER; a_text: POINTER)
+			-- As the user typing `a_text' at the caret, %N as Return and %T as Tab included.
+		deferred
+		end
+
+	test_caret_to (an_id, a_line, a_column: INTEGER)
+			-- As the user moving the caret: 52.
+		deferred
+		end
+
 	grid_view: INTEGER
 			-- 1v-a: items in a flowing grid of cells (120 by 120 until set).
 		deferred
@@ -777,6 +832,17 @@ feature -- Controls
 
 	text_area_get (an_id: INTEGER): POINTER
 		deferred
+		end
+
+	text_area_string (an_id: INTEGER): STRING_32
+			-- The text area's text: a string of the caller's own, never one the control
+			-- keeps. Read here from `text_area_get'. A backend whose control holds its text
+			-- as an Eiffel string answers with a copy of it and spares the two conversions:
+			-- on Windows they were 65 to 74 ms of every keystroke in a text of 389,000
+			-- characters (measured 2026-11-10), since the code editor reads the text after
+			-- each edit.
+		do
+			Result := from_c (text_area_get (an_id))
 		end
 
 	text_area_set_read_only (an_id: INTEGER; a_on: BOOLEAN)

@@ -732,6 +732,26 @@ feature -- User actions
 			settle
 		end
 
+	type_code (an_editor: GUI_CODE_EDITOR; a_text: READABLE_STRING_GENERAL)
+			-- Type `a_text' at the caret, as the user would (%N is Return, %T is Tab).
+		require
+			has_application: has_application
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_text)
+			backend.test_type_into_code (an_editor.id, l_c.item)
+			settle
+		end
+
+	move_caret (an_editor: GUI_CODE_EDITOR; a_line, a_column: INTEGER)
+		require
+			has_application: has_application
+		do
+			backend.test_caret_to (an_editor.id, a_line, a_column)
+			settle
+		end
+
 	choose_grid_item (a_grid: GUI_GRID_VIEW; i: INTEGER)
 			-- Click item `i', as the user would: 50.
 		require

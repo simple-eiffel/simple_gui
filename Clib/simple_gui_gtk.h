@@ -5656,6 +5656,243 @@ static void sg_help_show_tip(int widget, const char *text) {
 static const char *sg_test_help_tip_shown(void) {
     return sg_help_note && gtk_widget_get_visible(sg_help_note) ? gtk_label_get_text(GTK_LABEL(sg_help_note)) : "";
 }
+
+/* ---------- 1v-b: code editor (kind 59). The rich text area's GtkTextView, monospace and not
+   wrapping, with a GtkDrawingArea as its left gutter numbering the visible lines. Return
+   keeps the line's leading white space; Tab and Shift+Tab indent and unindent the selected
+   lines (Tab with no selection inserts spaces to the next stop when asked). Moving the
+   insert mark, by the user, sends 52 (line, column). ---------- */
+static GtkTextBuffer *sg_code_buffer(int id) { return gtk_text_view_get_buffer(sg_view_of(id)); }
+static void sg_code_gutter_draw(GtkDrawingArea *a, cairo_t *cr, int w, int h, gpointer d) {
+    GtkTextView *v = GTK_TEXT_VIEW(d);
+    GdkRectangle vis;
+    GtkTextIter it;
+    PangoLayout *pl = gtk_widget_create_pango_layout(GTK_WIDGET(a), NULL);
+    GdkRGBA fg;
+    int y, line_h, wy, n;
+    char num[16];
+    (void) h;
+    gtk_widget_get_color(GTK_WIDGET(a), &fg);
+    fg.alpha = 0.55;
+    gdk_cairo_set_source_rgba(cr, &fg);
+    gtk_text_view_get_visible_rect(v, &vis);
+    gtk_text_view_get_line_at_y(v, &it, vis.y, NULL);
+    while (1) {
+        gtk_text_view_get_line_yrange(v, &it, &y, &line_h);
+        if (y > vis.y + vis.height) break;
+        gtk_text_view_buffer_to_window_coords(v, GTK_TEXT_WINDOW_LEFT, 0, y, NULL, &wy);
+        n = gtk_text_iter_get_line(&it) + 1;
+        g_snprintf(num, sizeof num, "%d", n);
+        pango_layout_set_text(pl, num, -1);
+        {
+            int tw, th;
+            pango_layout_get_pixel_size(pl, &tw, &th);
+            cairo_move_to(cr, w - tw - 6, wy);
+        }
+        pango_cairo_show_layout(cr, pl);
+        if (!gtk_text_iter_forward_line(&it)) break;
+    }
+    g_object_unref(pl);
+}
+static void sg_code_gutter_width(int id) {
+    GtkWidget *g = g_object_get_data(G_OBJECT(sg_w[id]), "sg-gutter");
+    PangoLayout *pl;
+    char num[16];
+    int tw, th;
+    if (!g) return;
+    g_snprintf(num, sizeof num, "%d", gtk_text_buffer_get_line_count(sg_code_buffer(id)) * 10 + 9);
+    pl = gtk_widget_create_pango_layout(g, num);
+    pango_layout_get_pixel_size(pl, &tw, &th);
+    g_object_unref(pl);
+    gtk_drawing_area_set_content_width(GTK_DRAWING_AREA(g), tw + 10);
+    gtk_widget_queue_draw(g);
+}
+static void sg_code_redraw_gutter(gpointer o, gpointer d) { (void) o; sg_code_gutter_width(GPOINTER_TO_INT(d)); }
+static void sg_code_caret(GtkTextBuffer *b, int *line, int *col) {
+    GtkTextIter it;
+    gtk_text_buffer_get_iter_at_mark(b, &it, gtk_text_buffer_get_insert(b));
+    *line = gtk_text_iter_get_line(&it) + 1;
+    *col = gtk_text_iter_get_line_offset(&it) + 1;
+}
+static void sg_on_code_mark(GtkTextBuffer *b, GtkTextIter *at, GtkTextMark *m, gpointer d) {
+    int id = GPOINTER_TO_INT(d), line, col;
+    (void) at;
+    if (m != gtk_text_buffer_get_insert(b) || sg_quiet) return;
+    sg_code_caret(b, &line, &col);
+    if (line == GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-caret-line"))
+        && col == GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-caret-col"))) return;
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-caret-line", GINT_TO_POINTER(line));
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-caret-col", GINT_TO_POINTER(col));
+    sg_push(52, id, line, col);
+}
+static char *sg_code_indent_of_caret_line(GtkTextBuffer *b) {
+    GtkTextIter s, e;
+    gtk_text_buffer_get_iter_at_mark(b, &e, gtk_text_buffer_get_insert(b));
+    s = e;
+    gtk_text_iter_set_line_offset(&s, 0);
+    e = s;
+    while (!gtk_text_iter_ends_line(&e) && (gtk_text_iter_get_char(&e) == ' ' || gtk_text_iter_get_char(&e) == '\t')) gtk_text_iter_forward_char(&e);
+    return gtk_text_buffer_get_text(b, &s, &e, FALSE);
+}
+static void sg_code_return(int id) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    char *ind = sg_code_indent_of_caret_line(b), *ins = g_strconcat("\n", ind, NULL);
+    gtk_text_buffer_delete_selection(b, TRUE, TRUE);
+    gtk_text_buffer_insert_at_cursor(b, ins, -1);
+    g_free(ins); g_free(ind);
+}
+static void sg_code_indent_lines(int id, int out) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextIter s, e;
+    int w = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-tab-width")), spaces = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-spaces"));
+    int first, last, l;
+    if (w <= 0) w = 4;
+    gtk_text_buffer_get_selection_bounds(b, &s, &e);
+    first = gtk_text_iter_get_line(&s);
+    last = gtk_text_iter_get_line(&e);
+    if (last > first && gtk_text_iter_get_line_offset(&e) == 0) last--;
+    gtk_text_buffer_begin_user_action(b);
+    for (l = first; l <= last; l++) {
+        GtkTextIter at;
+        gtk_text_buffer_get_iter_at_line(b, &at, l);
+        if (!out) {
+            char *pad = spaces ? g_strnfill(w, ' ') : g_strdup("\t");
+            gtk_text_buffer_insert(b, &at, pad, -1);
+            g_free(pad);
+        } else {
+            GtkTextIter end = at;
+            int k = 0;
+            if (gtk_text_iter_get_char(&end) == '\t') gtk_text_iter_forward_char(&end);
+            else while (k < w && gtk_text_iter_get_char(&end) == ' ') { gtk_text_iter_forward_char(&end); k++; }
+            gtk_text_buffer_delete(b, &at, &end);
+        }
+    }
+    gtk_text_buffer_end_user_action(b);
+}
+static void sg_code_tab(int id) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextIter s, e;
+    int w = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-tab-width")), spaces = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sg_w[id]), "sg-spaces"));
+    if (w <= 0) w = 4;
+    if (gtk_text_buffer_get_selection_bounds(b, &s, &e) && gtk_text_iter_get_line(&s) != gtk_text_iter_get_line(&e)) { sg_code_indent_lines(id, 0); return; }
+    if (spaces) {
+        int col = gtk_text_iter_get_line_offset(&s), n = w - col % w;
+        char *pad = g_strnfill(n, ' ');
+        gtk_text_buffer_delete_selection(b, TRUE, TRUE);
+        gtk_text_buffer_insert_at_cursor(b, pad, -1);
+        g_free(pad);
+    } else {
+        gtk_text_buffer_delete_selection(b, TRUE, TRUE);
+        gtk_text_buffer_insert_at_cursor(b, "\t", -1);
+    }
+}
+static gboolean sg_on_code_key(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    (void) k; (void) code;
+    if (m & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)) return FALSE;
+    if (key == GDK_KEY_Return || key == GDK_KEY_KP_Enter) { if (m & GDK_SHIFT_MASK) return FALSE; sg_code_return(id); return TRUE; }
+    if (key == GDK_KEY_ISO_Left_Tab || (key == GDK_KEY_Tab && (m & GDK_SHIFT_MASK))) { sg_code_indent_lines(id, 1); return TRUE; }
+    if (key == GDK_KEY_Tab) { sg_code_tab(id); return TRUE; }
+    return FALSE;
+}
+static int sg_code_editor(void) {
+    int id = sg_rich_text_area();
+    GtkTextView *v = sg_view_of(id);
+    GtkWidget *g = gtk_drawing_area_new();
+    GtkEventController *k = gtk_event_controller_key_new();
+    sg_kind[id] = 59;
+    gtk_text_view_set_monospace(v, TRUE);
+    gtk_text_view_set_wrap_mode(v, GTK_WRAP_NONE);
+    gtk_text_view_set_left_margin(v, 6);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(g), sg_code_gutter_draw, v, NULL);
+    gtk_widget_add_css_class(g, "dim-label");
+    gtk_text_view_set_gutter(v, GTK_TEXT_WINDOW_LEFT, g);
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-gutter", g);
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-tab-width", GINT_TO_POINTER(4));
+    g_signal_connect(gtk_text_view_get_buffer(v), "changed", G_CALLBACK(sg_code_redraw_gutter), GINT_TO_POINTER(id));
+    g_signal_connect_swapped(gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(v)), "value-changed", G_CALLBACK(gtk_widget_queue_draw), g);
+    g_signal_connect(gtk_text_view_get_buffer(v), "mark-set", G_CALLBACK(sg_on_code_mark), GINT_TO_POINTER(id));
+    gtk_event_controller_set_propagation_phase(k, GTK_PHASE_CAPTURE);
+    g_signal_connect(k, "key-pressed", G_CALLBACK(sg_on_code_key), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(GTK_WIDGET(v), k);
+    sg_code_gutter_width(id);
+    return id;
+}
+static void sg_code_set_line_numbers(int id, int on) {
+    GtkWidget *g = g_object_get_data(G_OBJECT(sg_w[id]), "sg-gutter");
+    if (g) gtk_widget_set_visible(g, on);
+}
+static void sg_code_set_indent(int id, int width, int spaces) {
+    GtkTextView *v = sg_view_of(id);
+    PangoLayout *pl = gtk_widget_create_pango_layout(GTK_WIDGET(v), " ");
+    PangoTabArray *tabs;
+    int sw, sh;
+    pango_layout_get_pixel_size(pl, &sw, &sh);
+    g_object_unref(pl);
+    tabs = pango_tab_array_new_with_positions(1, TRUE, PANGO_TAB_LEFT, sw * width);
+    gtk_text_view_set_tabs(v, tabs);
+    pango_tab_array_free(tabs);
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-tab-width", GINT_TO_POINTER(width));
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-spaces", GINT_TO_POINTER(spaces));
+}
+static int sg_text_line_count(int id) { return gtk_text_buffer_get_line_count(sg_code_buffer(id)); }
+static int sg_text_caret_line(int id) { int l, c; sg_code_caret(sg_code_buffer(id), &l, &c); return l; }
+static int sg_text_caret_column(int id) { int l, c; sg_code_caret(sg_code_buffer(id), &l, &c); return c; }
+static const char *sg_text_line_text(int id, int n) {
+    static char *last = NULL;
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextIter s, e;
+    g_free(last);
+    gtk_text_buffer_get_iter_at_line(b, &s, n - 1);
+    e = s;
+    if (!gtk_text_iter_ends_line(&e)) gtk_text_iter_forward_to_line_end(&e);
+    last = gtk_text_buffer_get_text(b, &s, &e, FALSE);
+    return last;
+}
+static void sg_text_go_to_line(int id, int n) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextIter it;
+    gtk_text_buffer_get_iter_at_line(b, &it, n - 1);
+    sg_quiet++;
+    gtk_text_buffer_place_cursor(b, &it);
+    sg_quiet--;
+    gtk_text_view_scroll_to_mark(sg_view_of(id), gtk_text_buffer_get_insert(b), 0.1, FALSE, 0, 0);
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-caret-line", GINT_TO_POINTER(n));
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-caret-col", GINT_TO_POINTER(1));
+}
+static void sg_text_replace_range(int id, int s, int e, const char *text) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextIter a, z;
+    GtkTextMark *start;
+    sg_quiet++;
+    gtk_text_buffer_get_iter_at_offset(b, &a, s - 1);
+    gtk_text_buffer_get_iter_at_offset(b, &z, e);
+    gtk_text_buffer_begin_user_action(b);
+    if (e >= s) gtk_text_buffer_delete(b, &a, &z);
+    start = gtk_text_buffer_create_mark(b, NULL, &a, TRUE);
+    gtk_text_buffer_insert(b, &a, text, -1);
+    gtk_text_buffer_get_iter_at_mark(b, &z, start);
+    gtk_text_buffer_select_range(b, &z, &a);
+    gtk_text_buffer_delete_mark(b, start);
+    gtk_text_buffer_end_user_action(b);
+    sg_quiet--;
+}
+static void sg_test_type_into_code(int id, const char *text) {
+    const char *p;
+    GtkTextBuffer *b = sg_code_buffer(id);
+    for (p = text; *p; p = g_utf8_next_char(p)) {
+        gunichar c = g_utf8_get_char(p);
+        if (c == '\n') sg_code_return(id);
+        else if (c == '\t') sg_code_tab(id);
+        else { char buf[8]; int n = g_unichar_to_utf8(c, buf); gtk_text_buffer_delete_selection(b, TRUE, TRUE); gtk_text_buffer_insert_at_cursor(b, buf, n); }
+    }
+}
+static void sg_test_caret_to(int id, int line, int col) {
+    GtkTextBuffer *b = sg_code_buffer(id);
+    GtkTextIter it;
+    gtk_text_buffer_get_iter_at_line_offset(b, &it, line - 1, col - 1);
+    gtk_text_buffer_place_cursor(b, &it);
+}
 static int sg_int_compare(const int *a, const int *b);
 
 /* ---------- 1v-a: grid view (kind 58). A GtkGridView in a scrolled window over a selection

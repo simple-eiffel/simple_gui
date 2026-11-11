@@ -620,6 +620,72 @@ feature -- Windows and containers
 		alias "return (EIF_POINTER) sg_test_help_tip_shown();"
 		end
 
+	code_editor: INTEGER
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_code_editor();"
+		end
+
+	code_set_line_numbers (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_set_line_numbers($an_id, $a_on);"
+		end
+
+	code_set_indent (an_id, a_tab_width: INTEGER; a_spaces: BOOLEAN)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_set_indent($an_id, $a_tab_width, $a_spaces);"
+		end
+
+	text_line_count (an_id: INTEGER): INTEGER
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_text_line_count($an_id);"
+		end
+
+	text_caret_line (an_id: INTEGER): INTEGER
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_text_caret_line($an_id);"
+		end
+
+	text_caret_column (an_id: INTEGER): INTEGER
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_text_caret_column($an_id);"
+		end
+
+	text_line_text (an_id, n: INTEGER): POINTER
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_text_line_text($an_id, $n);"
+		end
+
+	text_go_to_line (an_id, n: INTEGER)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_text_go_to_line($an_id, $n);"
+		end
+
+	text_replace_range (an_id, a_start, an_end: INTEGER; a_text: POINTER)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_text_replace_range($an_id, $a_start, $an_end, (const char *) $a_text);"
+		end
+
+	test_type_into_code (an_id: INTEGER; a_text: POINTER)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_type_into_code($an_id, (const char *) $a_text);"
+		end
+
+	test_caret_to (an_id, a_line, a_column: INTEGER)
+			-- 1v-b.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_caret_to($an_id, $a_line, $a_column);"
+		end
+
 	grid_view: INTEGER
 			-- 1v-a.
 		external "C inline use %"simple_gui_gtk.h%""
