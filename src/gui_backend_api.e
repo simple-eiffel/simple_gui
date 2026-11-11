@@ -607,6 +607,15 @@ feature -- Windows and containers
 		deferred
 		end
 
+	test_fill_event_queue (a_count: INTEGER)
+			-- Queue `a_count' events that no widget answers (type 0, id 0), as a flood would:
+			-- for the tests of a full event queue. They are queued by the time the loop next
+			-- turns, ahead of a wake sent after this call. A bounded queue keeps what fits.
+		require
+			count_not_negative: a_count >= 0
+		deferred
+		end
+
 	code_typed_text (an_id: INTEGER): POINTER
 			-- The text of the last event 60 with a = 1, UTF-8 ending in NUL; valid until the
 			-- next event from this control.

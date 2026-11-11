@@ -24,7 +24,14 @@ feature -- Basic operations
 			put_message (mailbox)
 			create l_wake
 			l_wake.wake
+			has_started := True
 		end
+
+feature -- Status
+
+	has_started: BOOLEAN
+			-- Has `start' put its message and woken the GUI? A query on this worker waits
+			-- until its earlier calls are done.
 
 feature {NONE} -- Implementation
 
