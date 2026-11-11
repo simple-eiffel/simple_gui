@@ -46,6 +46,7 @@ feature {NONE} -- Initialization
 				shoot_navigation
 				shoot_dialog_and_help
 				shoot_collections_and_preferences
+				shoot_code_editor
 				print ("guide gallery: " + saved.out + " pictures in " + folder.name.to_string_8 + "%N")
 			else
 				print ("guide gallery: no display%N")
@@ -888,6 +889,47 @@ feature {NONE} -- Collections and preferences (1v)
 			end
 			if l_f.exists then l_f.delete end
 		end
+
+feature {NONE} -- Code editor (1v-b)
+
+	shoot_code_editor
+			-- 1v-b: a code editor holding a short Eiffel class, colored by rules,
+			-- with line numbers shown and the caret on line 6.
+		local
+			l_editor: GUI_CODE_EDITOR
+			l_window: GUI_WINDOW
+		do
+			create l_editor.make
+			l_editor.add_keywords (<<"class", "create", "feature", "do", "end", "local", "if", "then", "else", "require", "ensure">>, {GUI_CODE_EDITOR}.Style_keyword)
+			l_editor.add_keywords (<<"STRING", "INTEGER", "BOOLEAN">>, {GUI_CODE_EDITOR}.Style_type)
+			l_editor.add_line_comment ("--", {GUI_CODE_EDITOR}.Style_comment)
+			l_editor.add_delimited ("%"", "%"", {GUI_CODE_EDITOR}.Style_string)
+			l_editor.set_text (Greeter_text)
+			l_editor.go_to_line (6)
+				-- the editor is the window's content, as a program would make it: it fills the
+				-- window, and every line of the class shows
+			create l_window.make ("greeter.e", 560, 400)
+			l_window.set_content (l_editor)
+			save ("code-editor", l_window)
+		end
+
+	Greeter_text: STRING = "[
+class GREETER
+create make
+feature
+	make (a_name: STRING)
+			-- Greet `a_name', or the world when it is empty.
+		require
+			name_exists: a_name /= Void
+		do
+			if a_name.is_empty then
+				print ("Hello, world%N")
+			else
+				print ("Hello, " + a_name + "%N")
+			end
+		end
+end
+]"
 
 feature {NONE} -- Implementation
 

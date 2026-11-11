@@ -284,6 +284,16 @@ void sga_widget_set_pick(int a_id, int a_mode, int a_is_source, int a_by_row);  
 void sga_widget_set_drop_target(int a_id, int an_internal, int a_files, int a_text);
 void sga_pick_targets(int a_source, const int *a_ids, int a_count, const char *a_labels);   /* labels newline-separated */
 void sga_pick_cancel(void);
+/* 1w: styles and the theme. A style is `key=value' pairs separated by 0x1F (GUI_STYLE.flat);
+   an empty one takes the widget back to its native look. */
+void sga_widget_set_style(int a_id, const char *a_spec);
+int sga_widget_style_supported(int a_id, const char *a_key);
+void sga_set_theme_color(int a_role, int a_rgb);   /* -1: the system's again */
+const char *sga_font_load(const char *a_path);     /* the families added, separated by 0x1F */
+int sga_font_family_available(const char *a_name);
+int sga_is_high_contrast(void);
+const char *sga_test_style_value(int a_id, const char *a_key);
+void sga_test_set_high_contrast(int a_on);
 void sga_test_pick(int a_source, int a_row);
 void sga_test_drop(int a_target, int a_row);
 const char *sga_take_dropped_paths(int a_id);

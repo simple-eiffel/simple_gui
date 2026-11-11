@@ -567,6 +567,146 @@ feature {NONE} -- Pick and drop
 			backend.widget_set_pick (id, pick_mode, is_pebble_source, has_row_pebbles)
 		end
 
+feature -- Style (1w)
+
+	own_style: GUI_STYLE
+			-- This widget's own style. Change it in place and call `restyle', or give a new
+			-- one with `set_own_style'. (Not `style': a button's `style' is its 1n look.)
+		do
+			if attached stored_style as al_style then
+				Result := al_style
+			else
+				create Result.make
+				stored_style := Result
+			end
+		end
+
+	set_own_style (a_style: GUI_STYLE)
+			-- Make `a_style' this widget's own style and show it. An empty style takes the
+			-- widget back to what its classes say, or to its native look.
+		require
+			gui_thread: is_gui_thread
+		do
+			stored_style := a_style
+			restyle
+		ensure
+			set: own_style = a_style
+		end
+
+	restyle
+			-- Show `effective_style' (after changing `own_style' in place).
+		require
+			gui_thread: is_gui_thread
+		local
+			l_style: GUI_STYLE
+			l_flat: STRING_32
+			l_c: C_STRING
+		do
+			if application.is_available then
+				l_style := effective_style
+				l_flat := l_style.flat (application.is_dark, not backend.is_high_contrast, agent application.system_color)
+				if has_native_style or not l_flat.is_empty then
+						-- A widget never styled makes no call at all, so it stays as the toolkit made it.
+					l_c := backend.to_c (l_flat)
+					backend.widget_set_style (id, l_c.item)
+					has_native_style := not l_flat.is_empty
+				end
+				application.check_contrast (l_style)
+			end
+		end
+
+	style_classes: ARRAYED_LIST [STRING_32]
+			-- The names of this widget's style classes, in the order they were added.
+		do
+			if attached own_classes as al_classes then
+				Result := al_classes
+			else
+				create Result.make (2)
+				Result.compare_objects
+				own_classes := Result
+			end
+		end
+
+	has_style_class (a_name: READABLE_STRING_GENERAL): BOOLEAN
+		do
+			Result := attached own_classes as al_classes and then al_classes.has (a_name.to_string_32)
+		end
+
+	add_style_class (a_name: READABLE_STRING_GENERAL)
+			-- Give this widget style class `a_name' (GUI_APPLICATION.define_style_class),
+			-- over the classes it already has. A class not defined yet shows once it is.
+		require
+			gui_thread: is_gui_thread
+			named: not a_name.is_empty
+		do
+			if not has_style_class (a_name) then
+				style_classes.extend (a_name.to_string_32)
+				restyle
+			end
+		ensure
+			has: has_style_class (a_name)
+			last_if_new: not old has_style_class (a_name) implies style_classes.last.same_string_general (a_name)
+		end
+
+	remove_style_class (a_name: READABLE_STRING_GENERAL)
+		require
+			gui_thread: is_gui_thread
+		do
+			if has_style_class (a_name) then
+				style_classes.prune_all (a_name.to_string_32)
+				restyle
+			end
+		ensure
+			gone: not has_style_class (a_name)
+		end
+
+	effective_style: GUI_STYLE
+			-- What this widget shows: its classes in the order they were added, then its own
+			-- style. Later ones win, property by property.
+		do
+			create Result.make
+			if attached own_classes as al_classes then
+				across al_classes as ic loop
+					if attached application.style_class (ic) as al_class then
+						Result := Result.merged (al_class)
+					end
+				end
+			end
+			if attached stored_style as al_style then
+				Result := Result.merged (al_style)
+			end
+		end
+
+	is_styled: BOOLEAN
+			-- Does this widget have a style of its own or a style class?
+		do
+			Result := (attached stored_style as al_style and then not al_style.is_empty)
+				or (attached own_classes as al_classes and then not al_classes.is_empty)
+		end
+
+	supports_style (a_property: INTEGER): BOOLEAN
+			-- Can this widget show `a_property' ({GUI_STYLE_PROPERTIES}.Property_foreground...)? A property
+			-- it cannot show may still be set; it has no effect here.
+		require
+			known: (create {GUI_STYLE_PROPERTIES}).is_style_property (a_property)
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c ((create {GUI_STYLE_PROPERTIES}).style_key (a_property))
+			Result := backend.widget_style_supported (id, l_c.item)
+		end
+
+feature {GUI_APPLICATION} -- Style
+
+	has_native_style: BOOLEAN
+			-- Did the backend last get a style that was not empty for this widget?
+
+feature {NONE} -- Style
+
+	stored_style: detachable GUI_STYLE
+
+	own_classes: detachable ARRAYED_LIST [STRING_32]
+
 feature -- Text direction
 
 	base_direction: INTEGER
