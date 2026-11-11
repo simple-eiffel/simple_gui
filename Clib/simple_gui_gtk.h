@@ -6005,9 +6005,176 @@ static void sg_test_code_arrow_key(int id, int dir) {
     if (dir == 1 || dir == 2) g_signal_emit_by_name(v, "move-cursor", GTK_MOVEMENT_DISPLAY_LINES, dir == 1 ? -1 : 1, FALSE);
     else g_signal_emit_by_name(v, "move-cursor", GTK_MOVEMENT_VISUAL_POSITIONS, dir == 3 ? -1 : 1, FALSE);
 }
+/* ---------- 1v-e-4: completion. An overlay of the text view (gtk_text_view_add_overlay): a
+   frame placed in the text's own coordinates under the caret's line, or above it when the rows
+   do not fit below in view; it never takes the focus (nothing in it is focusable). In it a
+   GtkListBox in a scrolled window at most 8 rows tall; a row is the kind's mark, the label and
+   the detail (dim). (A GtkPopover parented to the text view is not one of its children: GTK
+   warned at every allocation.)
+   58: 0 Control+Space at any time; with the list up, 1 Up, 2 Down, 3 Page Up, 4 Page Down,
+   5 Return or Tab, 6 Escape, in place of the key's work. 59: a click on a row (a = the row,
+   from 1). Losing the focus or scrolling the lines hides it and sends 58 (6).
+   Completion keeps its own record of each editor's text view, set when the list is first made
+   and emptied when the view is destroyed: an editor's slot in sg_w is not cleared when its
+   window closes, and the focus and scroll handlers run during that teardown. */
+static GtkTextView *sg_compl_view[SG_MAX];
+static gulong sg_compl_scroll_handler[SG_MAX];
+static GtkWidget *sg_compl_frame(int id) { return (id > 0 && id < SG_MAX && sg_compl_view[id]) ? g_object_get_data(G_OBJECT(sg_compl_view[id]), "sg-compl-frame") : NULL; }
+static GtkListBox *sg_compl_list(int id) { return (id > 0 && id < SG_MAX && sg_compl_view[id]) ? g_object_get_data(G_OBJECT(sg_compl_view[id]), "sg-compl-list") : NULL; }
+static int sg_compl_shown(int id) { GtkWidget *f = sg_compl_frame(id); return f && gtk_widget_get_visible(f); }
+static void sg_compl_hide(int id) { if (sg_compl_shown(id)) gtk_widget_set_visible(sg_compl_frame(id), FALSE); }
+static void sg_compl_hides_itself(int id) { if (sg_compl_shown(id)) { sg_compl_hide(id); sg_push(58, id, 6, 0); } }
+static void sg_on_compl_row(GtkListBox *l, GtkListBoxRow *r, gpointer d) { (void) l; sg_push(59, GPOINTER_TO_INT(d), gtk_list_box_row_get_index(r) + 1, 0); }
+static void sg_on_compl_focus_leave(GtkEventControllerFocus *f, gpointer d) { (void) f; sg_compl_hides_itself(GPOINTER_TO_INT(d)); }
+static void sg_on_compl_scrolled(GtkAdjustment *a, gpointer d) { (void) a; sg_compl_hides_itself(GPOINTER_TO_INT(d)); }
+static void sg_on_compl_view_destroy(GtkWidget *v, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    GtkAdjustment *a = gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(v));
+    if (a && sg_compl_scroll_handler[id]) g_signal_handler_disconnect(a, sg_compl_scroll_handler[id]);
+    sg_compl_scroll_handler[id] = 0;
+    sg_compl_view[id] = NULL;
+    g_object_set_data(G_OBJECT(v), "sg-compl-frame", NULL);
+    g_object_set_data(G_OBJECT(v), "sg-compl-list", NULL);
+}
+static GtkWidget *sg_compl_make(int id) {
+    GtkWidget *frame = sg_compl_frame(id);
+    GtkTextView *v;
+    GtkWidget *sw, *l;
+    GtkEventController *f;
+    if (frame) return frame;
+    v = sg_view_of(id);
+    frame = gtk_frame_new(NULL);
+    sw = gtk_scrolled_window_new();
+    l = gtk_list_box_new();
+    gtk_widget_add_css_class(frame, "view");
+    gtk_widget_set_focusable(frame, FALSE);
+    gtk_widget_set_can_focus(frame, FALSE);
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(l), GTK_SELECTION_SINGLE);
+    gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(l), TRUE);
+    gtk_widget_set_focusable(l, FALSE);
+    gtk_widget_set_can_focus(l, FALSE);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(sw), TRUE);
+    gtk_scrolled_window_set_propagate_natural_width(GTK_SCROLLED_WINDOW(sw), TRUE);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(sw), 8 * 28);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sw), l);
+    gtk_frame_set_child(GTK_FRAME(frame), sw);
+    gtk_widget_set_visible(frame, FALSE);
+    gtk_text_view_add_overlay(v, frame, 0, 0);
+    g_signal_connect(l, "row-activated", G_CALLBACK(sg_on_compl_row), GINT_TO_POINTER(id));
+    g_signal_connect(v, "destroy", G_CALLBACK(sg_on_compl_view_destroy), GINT_TO_POINTER(id));
+    f = gtk_event_controller_focus_new();
+    g_signal_connect(f, "leave", G_CALLBACK(sg_on_compl_focus_leave), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(GTK_WIDGET(v), f);
+    sg_compl_scroll_handler[id] = g_signal_connect(gtk_scrollable_get_vadjustment(GTK_SCROLLABLE(v)), "value-changed", G_CALLBACK(sg_on_compl_scrolled), GINT_TO_POINTER(id));
+    g_object_set_data(G_OBJECT(v), "sg-compl-frame", frame);
+    g_object_set_data(G_OBJECT(v), "sg-compl-list", l);
+    sg_compl_view[id] = v;
+    return frame;
+}
+static void sg_code_select_completion(int id, int row) {
+    GtkListBox *l = sg_compl_list(id);
+    GtkListBoxRow *r;
+    GtkWidget *sw;
+    graphene_point_t at;
+    if (!l) return;
+    r = gtk_list_box_get_row_at_index(l, row - 1);
+    if (!r) return;
+    gtk_list_box_select_row(l, r);
+    /* into view: the scrolled window's page clamped round the row, once rows are placed */
+    sw = gtk_widget_get_ancestor(GTK_WIDGET(l), GTK_TYPE_SCROLLED_WINDOW);
+    if (sw && gtk_widget_compute_point(GTK_WIDGET(r), GTK_WIDGET(l), &GRAPHENE_POINT_INIT(0, 0), &at)) {
+        GtkAdjustment *a = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sw));
+        gtk_adjustment_clamp_page(a, at.y, at.y + gtk_widget_get_height(GTK_WIDGET(r)));
+    }
+}
+static const char *sg_compl_marks[] = { "", "k", "T", "f", "v", "s" };
+static void sg_code_show_completions(int id, const char *joined, int selected) {
+    GtkWidget *frame = sg_compl_make(id);
+    GtkListBox *l = sg_compl_list(id);
+    GtkTextView *v = sg_view_of(id);
+    GtkTextBuffer *b = gtk_text_view_get_buffer(v);
+    GtkTextIter it;
+    GdkRectangle r, seen;
+    GtkWidget *c;
+    gchar **rows, **row;
+    int n = 0, h, y;
+    while ((c = gtk_widget_get_first_child(GTK_WIDGET(l))) != NULL) gtk_list_box_remove(l, c);
+    rows = g_strsplit(joined, "\x1f", -1);
+    for (row = rows; *row; row++) {
+        gchar **f = g_strsplit(*row, "\x1e", 3);
+        if (f[0] && f[1] && f[2] && f[0][0]) {
+            GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+            int kind = (f[2][0] >= '0' && f[2][0] <= '5') ? f[2][0] - '0' : 0;
+            GtkWidget *mark = gtk_label_new(sg_compl_marks[kind]);
+            GtkWidget *lab = gtk_label_new(f[0]);
+            GtkWidget *det = gtk_label_new(f[1]);
+            GtkListBoxRow *added;
+            gtk_widget_set_size_request(mark, 14, -1);
+            gtk_widget_add_css_class(mark, "accent");
+            gtk_label_set_xalign(GTK_LABEL(lab), 0.0f);
+            gtk_widget_set_hexpand(lab, TRUE);
+            gtk_widget_add_css_class(det, "dim-label");
+            gtk_box_append(GTK_BOX(box), mark);
+            gtk_box_append(GTK_BOX(box), lab);
+            gtk_box_append(GTK_BOX(box), det);
+            gtk_list_box_append(l, box);
+            added = gtk_list_box_get_row_at_index(l, n);
+            if (added) gtk_widget_set_focusable(GTK_WIDGET(added), FALSE);
+            n++;
+        }
+        g_strfreev(f);
+    }
+    g_strfreev(rows);
+    if (n == 0) { sg_compl_hide(id); return; }
+    /* under the caret's line, in buffer coordinates; above it when the rows would pass the
+       bottom of the view and fit above */
+    gtk_text_buffer_get_iter_at_mark(b, &it, gtk_text_buffer_get_insert(b));
+    gtk_text_view_get_iter_location(v, &it, &r);
+    gtk_text_view_get_visible_rect(v, &seen);
+    gtk_widget_measure(frame, GTK_ORIENTATION_VERTICAL, -1, NULL, &h, NULL, NULL);
+    y = r.y + r.height;
+    if (y + h > seen.y + seen.height && r.y - h >= seen.y) y = r.y - h;
+    gtk_text_view_move_overlay(v, frame, r.x, y);
+    gtk_widget_set_visible(frame, TRUE);
+    sg_code_select_completion(id, selected < 1 ? 1 : (selected > n ? n : selected));
+}
+static void sg_test_completion_key(int id, int key) {
+    if (key == 0 || sg_compl_shown(id)) { sg_push(58, id, key, 0); return; }
+    switch (key) {   /* with no list, the key's usual work */
+    case 1: sg_test_code_arrow_key(id, 1); break;
+    case 2: sg_test_code_arrow_key(id, 2); break;
+    case 3: g_signal_emit_by_name(sg_view_of(id), "move-cursor", GTK_MOVEMENT_PAGES, -1, FALSE); break;
+    case 4: g_signal_emit_by_name(sg_view_of(id), "move-cursor", GTK_MOVEMENT_PAGES, 1, FALSE); break;
+    case 5: sg_code_return(id); break;
+    default: break;
+    }
+}
+static void sg_test_press_completion(int id, int row) {
+    GtkListBox *l = sg_compl_list(id);
+    GtkListBoxRow *r;
+    if (!sg_compl_shown(id) || !l || row < 1) return;
+    r = gtk_list_box_get_row_at_index(l, row - 1);
+    if (r) g_signal_emit_by_name(l, "row-activated", r);
+}
 static gboolean sg_on_code_key(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d) {
     int id = GPOINTER_TO_INT(d);
     (void) k; (void) code;
+    /* 1v-e-4: Control+Space asks for completions; the list's keys while it shows. */
+    if ((m & GDK_CONTROL_MASK) && !(m & (GDK_SHIFT_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)) && key == GDK_KEY_space) {
+        sg_push(58, id, 0, 0);
+        return TRUE;
+    }
+    if (sg_compl_shown(id) && !(m & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK))) {
+        int a = 0;
+        if (key == GDK_KEY_Up || key == GDK_KEY_KP_Up) a = 1;
+        else if (key == GDK_KEY_Down || key == GDK_KEY_KP_Down) a = 2;
+        else if (key == GDK_KEY_Page_Up || key == GDK_KEY_KP_Page_Up) a = 3;
+        else if (key == GDK_KEY_Page_Down || key == GDK_KEY_KP_Page_Down) a = 4;
+        else if (key == GDK_KEY_Return || key == GDK_KEY_KP_Enter || key == GDK_KEY_Tab || key == GDK_KEY_ISO_Left_Tab) a = 5;
+        else if (key == GDK_KEY_Escape) a = 6;
+        if (a) { sg_push(58, id, a, 0); return TRUE; }
+    }
     /* Control+Shift+\ (with Shift the key arrives as the bar on a US keyboard): event 56,
        the editor goes to the matching bracket. */
     if ((m & GDK_CONTROL_MASK) && (m & GDK_SHIFT_MASK) && !(m & (GDK_ALT_MASK | GDK_SUPER_MASK))
@@ -6124,6 +6291,14 @@ static void sg_test_type_into_code(int id, const char *text) {
         gunichar c = g_utf8_get_char(p);
         if (c == '\n') sg_code_return(id);
         else if (c == '\t') sg_code_tab(id);
+        else if (c == 8) {
+            /* Backspace (1v-e-4): the selection, or the character before the caret */
+            if (!gtk_text_buffer_delete_selection(b, TRUE, TRUE)) {
+                GtkTextIter it;
+                gtk_text_buffer_get_iter_at_mark(b, &it, gtk_text_buffer_get_insert(b));
+                gtk_text_buffer_backspace(b, &it, TRUE, TRUE);
+            }
+        }
         else { char buf[8]; int n = g_unichar_to_utf8(c, buf); gtk_text_buffer_delete_selection(b, TRUE, TRUE); gtk_text_buffer_insert_at_cursor(b, buf, n); }
     }
 }

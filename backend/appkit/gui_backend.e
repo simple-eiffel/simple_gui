@@ -1712,6 +1712,42 @@ feature -- Common widget state
 		alias "sga_test_code_arrow_key($an_id, $a_direction);"
 		end
 
+	code_show_completions (an_id: INTEGER; a_joined: POINTER; a_selected: INTEGER)
+			-- 1v-e-4.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_show_completions($an_id, (const char *) $a_joined, $a_selected);"
+		end
+
+	code_select_completion (an_id, a_row: INTEGER)
+			-- 1v-e-4.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_select_completion($an_id, $a_row);"
+		end
+
+	code_hide_completions (an_id: INTEGER)
+			-- 1v-e-4.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_code_hide_completions($an_id);"
+		end
+
+	test_completion_key (an_id, a_key: INTEGER)
+			-- 1v-e-4.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_completion_key($an_id, $a_key);"
+		end
+
+	test_press_completion (an_id, a_row: INTEGER)
+			-- 1v-e-4.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_press_completion($an_id, $a_row);"
+		end
+
+	test_completions_shown (an_id: INTEGER): BOOLEAN
+			-- 1v-e-4.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_completions_shown($an_id) ? EIF_TRUE : EIF_FALSE;"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

@@ -759,6 +759,42 @@ feature -- Windows and containers
 		alias "sg_test_code_arrow_key($an_id, $a_direction);"
 		end
 
+	code_show_completions (an_id: INTEGER; a_joined: POINTER; a_selected: INTEGER)
+			-- 1v-e-4: a GtkPopover on the text view that never takes the focus.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_show_completions($an_id, (const char *) $a_joined, $a_selected);"
+		end
+
+	code_select_completion (an_id, a_row: INTEGER)
+			-- 1v-e-4.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_code_select_completion($an_id, $a_row);"
+		end
+
+	code_hide_completions (an_id: INTEGER)
+			-- 1v-e-4.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_compl_hide($an_id);"
+		end
+
+	test_completion_key (an_id, a_key: INTEGER)
+			-- 1v-e-4.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_completion_key($an_id, $a_key);"
+		end
+
+	test_press_completion (an_id, a_row: INTEGER)
+			-- 1v-e-4. As a click on the row: the list box's row-activated.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_press_completion($an_id, $a_row);"
+		end
+
+	test_completions_shown (an_id: INTEGER): BOOLEAN
+			-- 1v-e-4.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_compl_shown($an_id) ? EIF_TRUE : EIF_FALSE;"
+		end
+
 	grid_view: INTEGER
 			-- 1v-a.
 		external "C inline use %"simple_gui_gtk.h%""

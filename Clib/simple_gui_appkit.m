@@ -9247,6 +9247,11 @@ void sga_test_field_escape(int a_id)
 	BOOL spaces;
 	/* 1v-e-2: the bracket pair shown, as two UTF-16 ranges, and the areas last drawn for it
 	   (view coordinates), which are what gets redrawn when the pair goes. */
+	/* 1v-e-4: inside a user's edit (from shouldChangeTextInRanges: to didChangeText), the
+	   caret's move is told after the change, as GTK and Windows tell them: the editor then
+	   reads the new caret against the new text. */
+	BOOL editing;
+	BOOL caret_owed;
 	BOOL pair_on;
 	NSRange pair[2];
 	NSRect pair_drawn[2];
@@ -9260,10 +9265,31 @@ void sga_test_field_escape(int a_id)
 	int mark_count;
 	NSRange *hidden;
 	int hidden_count;
+	/* 1v-e-4: the completion list, a panel that never takes the focus; `completion_rows'
+	   holds each row as {label, detail, kind}. */
+	NSPanel *completion_panel;
+	NSTableView *completion_table;
+	NSArray<NSArray<NSString *> *> *completion_rows;
 }
 @end
 
-@interface SGACodeView () <NSLayoutManagerDelegate>
+@interface SGACodeView () <NSLayoutManagerDelegate, NSTableViewDataSource, NSTableViewDelegate>
+@end
+
+/* 1v-e-4: the completion list's window: a borderless panel that never becomes key or main,
+   so the editor keeps the focus and the caret while it shows. */
+@interface SGACompletionPanel : NSPanel
+@end
+@implementation SGACompletionPanel
+- (BOOL)canBecomeKeyWindow { return NO; }
+- (BOOL)canBecomeMainWindow { return NO; }
+@end
+
+/* Its rows draw their selection in the accent color although the panel is never key. */
+@interface SGACompletionRowView : NSTableRowView
+@end
+@implementation SGACompletionRowView
+- (BOOL)isEmphasized { return YES; }
 @end
 
 static NSString *sga_code_indent_unit(SGACodeView *v) { return v->spaces ? [@"" stringByPaddingToLength:(NSUInteger)v->tab_width withString:@" " startingAtIndex:0] : @"\t"; }
@@ -9340,7 +9366,25 @@ static BOOL sga_code_has_mark(SGACodeView *v, int n)
 		r = l_shown;
 	}
 	[super setSelectedRanges:r affinity:a stillSelecting:s];
-	if (!s && !s_suppress && [self window]) [self tellCaret];
+	if (!s && !s_suppress && [self window]) {
+		if (editing) caret_owed = YES;
+		else [self tellCaret];
+	}
+}
+- (BOOL)shouldChangeTextInRanges:(NSArray<NSValue *> *)r replacementStrings:(NSArray<NSString *> *)s
+{
+	BOOL l_yes = [super shouldChangeTextInRanges:r replacementStrings:s];
+	if (l_yes) editing = YES;
+	return l_yes;
+}
+- (void)didChangeText
+{
+	editing = NO;
+	[super didChangeText];   /* the change: event 2, through the delegate */
+	if (caret_owed) {
+		caret_owed = NO;
+		if (!s_suppress && [self window]) [self tellCaret];
+	}
 }
 /* 1v-e-3: the hidden lines get null glyphs, and their line breaks no advance, so they take
    no room and the text stays whole. */
@@ -9466,9 +9510,204 @@ static BOOL sga_code_has_mark(SGACodeView *v, int n)
 	}
 	return [super performKeyEquivalent:e];
 }
-/* Return keeps the line's indentation. */
+/* ------------------------------------------------ 1v-e-4: the completion list */
+- (BOOL)completionShown { return completion_panel && [completion_panel isVisible]; }
+- (void)tellCompletion:(int)a_key
+{
+	sga_push(58, sga_id_of(self), a_key, 0, 0);
+	sga_wake();
+}
+/* The list goes, quietly. */
+- (void)hideCompletions
+{
+	if (!completion_panel) return;
+	[[completion_panel parentWindow] removeChildWindow:completion_panel];
+	[completion_panel orderOut:nil];
+	completion_rows = nil;
+}
+/* The list goes because the user moved on (the focus, the window or the view): 58, a = 6. */
+- (void)dropCompletions
+{
+	if (![self completionShown]) return;
+	[self hideCompletions];
+	[self tellCompletion:6];
+}
+- (void)makeCompletionPanel
+{
+	if (completion_panel) return;
+	completion_panel = [[SGACompletionPanel alloc] initWithContentRect:NSMakeRect(0, 0, 240, 160) styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:YES];
+	[completion_panel setReleasedWhenClosed:NO];
+	[completion_panel setHasShadow:YES];
+	[completion_panel setHidesOnDeactivate:YES];
+	[completion_panel setBecomesKeyOnlyIfNeeded:YES];
+	[completion_panel setBackgroundColor:[NSColor clearColor]];
+	[completion_panel setOpaque:NO];
+	NSVisualEffectView *l_back = [[NSVisualEffectView alloc] init];
+	[l_back setMaterial:NSVisualEffectMaterialMenu];
+	[l_back setState:NSVisualEffectStateActive];
+	[l_back setWantsLayer:YES];
+	[[l_back layer] setCornerRadius:6];
+	[[l_back layer] setMasksToBounds:YES];
+	NSScrollView *l_scroll = [[NSScrollView alloc] init];
+	[l_scroll setDrawsBackground:NO];
+	[l_scroll setHasVerticalScroller:YES];
+	[l_scroll setAutohidesScrollers:YES];
+	completion_table = [[NSTableView alloc] init];
+	[completion_table addTableColumn:[[NSTableColumn alloc] initWithIdentifier:@"row"]];
+	[completion_table setHeaderView:nil];
+	[completion_table setBackgroundColor:[NSColor clearColor]];
+	[completion_table setRowHeight:20];
+	[completion_table setIntercellSpacing:NSMakeSize(0, 0)];
+	[completion_table setStyle:NSTableViewStylePlain];
+	[completion_table setRefusesFirstResponder:YES];
+	[completion_table setDataSource:self];
+	[completion_table setDelegate:self];
+	[completion_table setTarget:self];
+	[completion_table setAction:@selector(completionClicked:)];
+	[l_scroll setDocumentView:completion_table];
+	[l_back addSubview:l_scroll];
+	[l_scroll setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[NSLayoutConstraint activateConstraints:@[
+		[l_scroll.leadingAnchor constraintEqualToAnchor:l_back.leadingAnchor], [l_scroll.trailingAnchor constraintEqualToAnchor:l_back.trailingAnchor],
+		[l_scroll.topAnchor constraintEqualToAnchor:l_back.topAnchor constant:4], [l_scroll.bottomAnchor constraintEqualToAnchor:l_back.bottomAnchor constant:-4]]];
+	[completion_panel setContentView:l_back];
+}
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)a_table { (void)a_table; return (NSInteger)[completion_rows count]; }
+- (NSTableRowView *)tableView:(NSTableView *)a_table rowViewForRow:(NSInteger)a_row { (void)a_table; (void)a_row; return [[SGACompletionRowView alloc] init]; }
+/* The kind's small picture: 0 plain, 1 keyword, 2 type, 3 feature, 4 variable, 5 snippet. */
+static NSImage *sga_completion_kind_image(NSString *a_kind)
+{
+	static NSString *l_names[] = {@"textformat.abc", @"k.square", @"t.square", @"f.square", @"v.square", @"curlybraces.square"};
+	int k = [a_kind intValue];
+	if (k < 0 || k > 5) k = 0;
+	return [NSImage imageWithSystemSymbolName:l_names[k] accessibilityDescription:nil];
+}
+- (NSView *)tableView:(NSTableView *)a_table viewForTableColumn:(NSTableColumn *)a_column row:(NSInteger)a_row
+{
+	(void)a_column;
+	NSArray<NSString *> *r = completion_rows[(NSUInteger)a_row];
+	NSTableCellView *c = [a_table makeViewWithIdentifier:@"completion" owner:self];
+	NSTextField *l_detail;
+	if (!c) {
+		c = [[NSTableCellView alloc] init];
+		[c setIdentifier:@"completion"];
+		NSImageView *i = [[NSImageView alloc] init];
+		NSTextField *l = [NSTextField labelWithString:@""];
+		l_detail = [NSTextField labelWithString:@""];
+		[l setFont:[self font] ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]];
+		[l setLineBreakMode:NSLineBreakByTruncatingTail];
+		[l_detail setTextColor:[NSColor secondaryLabelColor]];
+		[l_detail setFont:[NSFont systemFontOfSize:11]];
+		[l_detail setLineBreakMode:NSLineBreakByTruncatingTail];
+		[l_detail setTag:2];
+		[l_detail setAlignment:NSTextAlignmentRight];
+		[i setContentTintColor:[NSColor secondaryLabelColor]];
+		for (NSView *v in @[i, l, l_detail]) { [v setTranslatesAutoresizingMaskIntoConstraints:NO]; [c addSubview:v]; }
+		[c setImageView:i];
+		[c setTextField:l];
+		[l setContentCompressionResistancePriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationHorizontal];
+		[l_detail setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+		[NSLayoutConstraint activateConstraints:@[
+			[i.leadingAnchor constraintEqualToAnchor:c.leadingAnchor constant:6], [i.centerYAnchor constraintEqualToAnchor:c.centerYAnchor],
+			[i.widthAnchor constraintEqualToConstant:14], [i.heightAnchor constraintEqualToConstant:14],
+			[l.leadingAnchor constraintEqualToAnchor:i.trailingAnchor constant:6], [l.centerYAnchor constraintEqualToAnchor:c.centerYAnchor],
+			[l_detail.leadingAnchor constraintGreaterThanOrEqualToAnchor:l.trailingAnchor constant:12],
+			[l_detail.trailingAnchor constraintEqualToAnchor:c.trailingAnchor constant:-8], [l_detail.centerYAnchor constraintEqualToAnchor:c.centerYAnchor]]];
+	}
+	else l_detail = [c viewWithTag:2];
+	[[c textField] setStringValue:r[0]];
+	[l_detail setStringValue:r[1]];
+	[[c imageView] setImage:sga_completion_kind_image(r[2])];
+	return c;
+}
+- (void)completionClicked:(id)sender
+{
+	(void)sender;
+	NSInteger r = [completion_table clickedRow];
+	if (r >= 0 && [self completionShown]) { sga_push(59, sga_id_of(self), (int)r + 1, 0, 0); sga_wake(); }
+}
+- (void)selectCompletion:(NSInteger)a_row
+{
+	if (!completion_table || a_row < 1 || a_row > (NSInteger)[completion_rows count]) return;
+	[completion_table selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)a_row - 1] byExtendingSelection:NO];
+	[completion_table scrollRowToVisible:a_row - 1];
+}
+/* Show `a_rows' under the caret's line (above it when there is no room below), at most 8
+   rows tall, or replace the rows of the list that shows. */
+- (void)showCompletions:(NSArray<NSArray<NSString *> *> *)a_rows selected:(NSInteger)a_selected
+{
+	if (![a_rows count]) { [self hideCompletions]; return; }
+	[self makeCompletionPanel];
+	completion_rows = a_rows;
+	[completion_table reloadData];
+	/* the width: the widest label and detail, within bounds */
+	NSFont *l_font = [self font] ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular];
+	CGFloat l_widest = 0;
+	for (NSArray<NSString *> *r in a_rows) {
+		CGFloat w = [r[0] sizeWithAttributes:@{NSFontAttributeName: l_font}].width + ([r[1] length] ? [r[1] sizeWithAttributes:@{NSFontAttributeName: [NSFont systemFontOfSize:11]}].width + 12 : 0);
+		l_widest = MAX(l_widest, w);
+	}
+	CGFloat l_width = MIN(MAX(ceil(l_widest) + 6 + 14 + 6 + 8 + 16, 180), 520);
+	CGFloat l_height = MIN((NSInteger)[a_rows count], 8) * [completion_table rowHeight] + 8;
+	/* where: the caret's line, on the screen */
+	NSRange l_selection = [self selectedRange];
+	NSRect l_caret = [self firstRectForCharacterRange:NSMakeRange(l_selection.location, 0) actualRange:NULL];
+	NSRect l_screen = [[[self window] screen] ?: [NSScreen mainScreen] visibleFrame];
+	NSRect f = NSMakeRect(NSMinX(l_caret) - 26, NSMinY(l_caret) - l_height - 2, l_width, l_height);
+	if (NSMinY(f) < NSMinY(l_screen)) f.origin.y = NSMaxY(l_caret) + 2;
+	if (NSMaxX(f) > NSMaxX(l_screen)) f.origin.x = NSMaxX(l_screen) - l_width;
+	if (NSMinX(f) < NSMinX(l_screen)) f.origin.x = NSMinX(l_screen);
+	[completion_panel setFrame:f display:NO];
+	if (![completion_panel isVisible] || [completion_panel parentWindow] != [self window]) {
+		[[completion_panel parentWindow] removeChildWindow:completion_panel];
+		[[self window] addChildWindow:completion_panel ordered:NSWindowAbove];
+		[completion_panel orderFront:nil];
+	}
+	[self selectCompletion:a_selected];
+}
+/* While the list shows, these keys send 58 in place of their usual work. */
+- (void)moveUp:(id)sender { if ([self completionShown]) [self tellCompletion:1]; else [super moveUp:sender]; }
+- (void)moveDown:(id)sender { if ([self completionShown]) [self tellCompletion:2]; else [super moveDown:sender]; }
+- (void)scrollPageUp:(id)sender { if ([self completionShown]) [self tellCompletion:3]; else [super scrollPageUp:sender]; }
+- (void)scrollPageDown:(id)sender { if ([self completionShown]) [self tellCompletion:4]; else [super scrollPageDown:sender]; }
+- (void)pageUp:(id)sender { if ([self completionShown]) [self tellCompletion:3]; else [super pageUp:sender]; }
+- (void)pageDown:(id)sender { if ([self completionShown]) [self tellCompletion:4]; else [super pageDown:sender]; }
+/* Escape: NSTextView would open the system's own completion list (cancelOperation: calls
+   complete:). Here it closes ours, and does nothing when none shows. */
+- (void)cancelOperation:(id)sender { (void)sender; if ([self completionShown]) [self tellCompletion:6]; }
+/* The text system's completion key (F5, Option+Escape): as Control+Space. */
+- (void)complete:(id)sender { (void)sender; [self tellCompletion:0]; }
+- (void)keyDown:(NSEvent *)e
+{
+	NSEventModifierFlags f = [e modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad | NSEventModifierFlagFunction);
+	if (f == NSEventModifierFlagControl && [e keyCode] == 49) { [self tellCompletion:0]; return; }   /* Control+Space; no space is typed */
+	[super keyDown:e];
+}
+- (BOOL)resignFirstResponder
+{
+	BOOL l_resigned = [super resignFirstResponder];
+	if (l_resigned) [self dropCompletions];
+	return l_resigned;
+}
+- (void)viewWillMoveToWindow:(NSWindow *)a_window
+{
+	NSNotificationCenter *c = [NSNotificationCenter defaultCenter];
+	[c removeObserver:self name:NSWindowDidResignKeyNotification object:[self window]];
+	[c removeObserver:self name:NSWindowWillCloseNotification object:[self window]];
+	if (a_window) {
+		[c addObserver:self selector:@selector(windowResignedKey:) name:NSWindowDidResignKeyNotification object:a_window];
+		[c addObserver:self selector:@selector(windowWillClose:) name:NSWindowWillCloseNotification object:a_window];
+	}
+	else [self hideCompletions];
+	[super viewWillMoveToWindow:a_window];
+}
+- (void)windowResignedKey:(NSNotification *)n { (void)n; [self dropCompletions]; }
+/* The editor's window closes: the list goes with it, quietly (the editor is going too). */
+- (void)windowWillClose:(NSNotification *)n { (void)n; [self hideCompletions]; }
+/* Return keeps the line's indentation; with the list up it accepts (58, a = 5). */
 - (void)insertNewline:(id)sender
 {
+	if ([self completionShown]) { [self tellCompletion:5]; return; }
 	NSString *s = [self string];
 	NSRange l_line = [s lineRangeForRange:NSMakeRange([self selectedRange].location, 0)];
 	NSUInteger k = l_line.location;
@@ -9505,6 +9744,7 @@ static BOOL sga_code_has_mark(SGACodeView *v, int n)
 - (void)insertTab:(id)sender
 {
 	(void)sender;
+	if ([self completionShown]) { [self tellCompletion:5]; return; }
 	NSRange r = [self selectedRange];
 	if (r.length > 0 && [[[self string] substringWithRange:r] rangeOfString:@"\n"].location != NSNotFound) [self shiftLines:YES];
 	else [self insertText:sga_code_indent_unit(self) replacementRange:r];
@@ -9658,7 +9898,8 @@ int sga_code_editor(void)
 	[l_scroll setHasVerticalRuler:YES];
 	[l_scroll setRulersVisible:YES];
 	[[NSNotificationCenter defaultCenter] addObserverForName:NSTextDidChangeNotification object:t queue:nil usingBlock:^(NSNotification *n) { (void)n; [r setRuleThickness:[r requiredThickness]]; [r setNeedsDisplay:YES]; }];
-	[[NSNotificationCenter defaultCenter] addObserverForName:NSViewBoundsDidChangeNotification object:[l_scroll contentView] queue:nil usingBlock:^(NSNotification *n) { (void)n; [r setNeedsDisplay:YES]; }];
+	__weak SGACodeView *l_scrolled = t;
+	[[NSNotificationCenter defaultCenter] addObserverForName:NSViewBoundsDidChangeNotification object:[l_scroll contentView] queue:nil usingBlock:^(NSNotification *n) { (void)n; [r setNeedsDisplay:YES]; [l_scrolled dropCompletions]; }];   /* 1v-e-4: a scroll closes the list */
 	[r setRuleThickness:[r requiredThickness]];
 	/* 1v-e-2: any change of the characters, by the user, by code or by undo, drops the bracket
 	   tint. 1v-e-3: and moves the hidden lines with the text, before the layout manager hears
@@ -9783,6 +10024,7 @@ void sga_test_type_into_code(int a_id, const char *a_text)
 		(void)r; (void)e; (void)a_stop;
 		if ([c isEqualToString:@"\n"]) [t insertNewline:nil];
 		else if ([c isEqualToString:@"\t"]) [t insertTab:nil];
+		else if ([c isEqualToString:@"\b"]) [t deleteBackward:nil];   /* 1v-e-4: character 8 as Backspace */
 		else [t insertText:c replacementRange:[t selectedRange]];
 	}];
 }
@@ -9949,3 +10191,51 @@ void sga_test_code_arrow_key(int a_id, int a_direction)
 	[[t window] makeFirstResponder:t];
 	[t doCommandBySelector:l_moves[a_direction - 1]];
 }
+
+/* ------------------------------------------------------------------ 1v-e-4: completion */
+
+/* Rows joined by 0x1F; in a row the label, the detail and the kind joined by 0x1E. */
+static NSArray<NSArray<NSString *> *> *sga_completion_rows(const char *a_joined)
+{
+	NSMutableArray<NSArray<NSString *> *> *l_rows = [NSMutableArray array];
+	NSString *s = sga_string(a_joined);
+	if (![s length]) return l_rows;
+	for (NSString *r in [s componentsSeparatedByString:@"\x1F"]) {
+		NSArray<NSString *> *f = [r componentsSeparatedByString:@"\x1E"];
+		[l_rows addObject:@[f[0], [f count] > 1 ? f[1] : @"", [f count] > 2 ? f[2] : @"0"]];
+	}
+	return l_rows;
+}
+
+void sga_code_show_completions(int a_id, const char *a_joined, int a_selected)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (t) [t showCompletions:sga_completion_rows(a_joined) selected:a_selected];
+}
+
+void sga_code_select_completion(int a_id, int a_row) { SGACodeView *t = sga_code_of(a_id); if (t) [t selectCompletion:a_row]; }
+
+void sga_code_hide_completions(int a_id) { SGACodeView *t = sga_code_of(a_id); if (t) [t hideCompletions]; }
+
+/* As the user pressing completion key `a_key': 0 Control+Space, 1 Up, 2 Down, 3 Page Up,
+   4 Page Down, 5 Return, 6 Escape, through the same commands the keys reach. */
+void sga_test_completion_key(int a_id, int a_key)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	static SEL l_keys[6];
+	if (!t || a_key < 0 || a_key > 6) return;
+	if (!l_keys[0]) { l_keys[0] = @selector(moveUp:); l_keys[1] = @selector(moveDown:); l_keys[2] = @selector(scrollPageUp:); l_keys[3] = @selector(scrollPageDown:); l_keys[4] = @selector(insertNewline:); l_keys[5] = @selector(cancelOperation:); }
+	[[t window] makeFirstResponder:t];
+	if (a_key == 0) [t tellCompletion:0];
+	else [t doCommandBySelector:l_keys[a_key - 1]];
+}
+
+void sga_test_press_completion(int a_id, int a_row)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || ![t completionShown] || a_row < 1 || a_row > (int)[t->completion_rows count]) return;
+	sga_push(59, a_id, a_row, 0, 0);
+	sga_wake();
+}
+
+int sga_test_completions_shown(int a_id) { SGACodeView *t = sga_code_of(a_id); return t && [t completionShown]; }
