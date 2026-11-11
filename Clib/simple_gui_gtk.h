@@ -5142,6 +5142,7 @@ static void sg_button_set_busy(int id, int on) {
     g_object_set_data(G_OBJECT(sg_w[id]), "sg-busy", GINT_TO_POINTER(on));
     sg_button_build(id);
 }
+static void sg_style_apply(int id);
 static void sg_button_set_style(int id, int style) {
     GtkWidget *b = sg_w[id];
     sg_icons_ready();
@@ -5153,6 +5154,8 @@ static void sg_button_set_style(int id, int style) {
     else if (style == 2) gtk_widget_add_css_class(b, "destructive-action");
     else if (style == 3) gtk_widget_add_css_class(b, "flat");
     else if (style == 4) gtk_widget_add_css_class(b, "sg-pill");
+    /* what a button's style can show goes with its look (1w) */
+    if (g_object_get_data(G_OBJECT(b), "sg-style-spec")) sg_style_apply(id);
 }
 static const char *sg_test_button_icon(int id) {
     const char *icon = g_object_get_data(G_OBJECT(sg_w[id]), "sg-icon");
@@ -8281,6 +8284,654 @@ static void sg_test_cancel_pick(void) {
 static int sg_test_is_accepting(int target) {
     return sg_pick_on && target > 0 && target < SG_MAX && sg_pick_ok[target]
         && gtk_widget_has_css_class(sg_pick_widget(target), "sg-drop-ok");
+}
+
+/* ---------- 1w: styles, theme colors, runtime fonts, the contrast setting.
+   A styled widget gets a CSS class of its own ("sg-s<id>") and a GtkCssProvider of its own
+   on the display, one step above application priority, holding the rules made from the flat
+   style shared code sends. What a kind of widget cannot show is left out of its rules, and
+   `sg_test_style_value' answers only for what went in. Everything is kept on the widget
+   (object data), so it goes when the widget does. */
+#include <fontconfig/fontconfig.h>
+#include <pango/pangofc-fontmap.h>
+
+enum { SGK_FG, SGK_BG, SGK_PLACEHOLDER, SGK_SELECTION, SGK_FONT, SGK_SIZE, SGK_WEIGHT, SGK_ITALIC,
+       SGK_PAD, SGK_BORDER, SGK_BORDER_COLOR, SGK_RADIUS, SGK_SHADOW, SGK_SHADOW_COLOR, SGK_SCROLL,
+       SG_STYLE_KEYS };
+#define SGM(k) (1u << (k))
+#define SGM_TEXT (SGM(SGK_FONT) | SGM(SGK_SIZE) | SGM(SGK_WEIGHT) | SGM(SGK_ITALIC))
+#define SGM_FLAT_BOX (SGM(SGK_BG) | SGM(SGK_PAD) | SGM(SGK_BORDER) | SGM(SGK_BORDER_COLOR) | SGM(SGK_RADIUS))
+#define SGM_BOX (SGM_FLAT_BOX | SGM(SGK_SHADOW) | SGM(SGK_SHADOW_COLOR))
+#define SGM_ROWS (SGM(SGK_FG) | SGM_TEXT | SGM(SGK_SELECTION) | SGM(SGK_BG) | SGM(SGK_SCROLL))
+
+typedef struct { char *buf; const char *v[SG_STYLE_KEYS]; } SgStyle;
+
+static int sg_style_key(const char *k) {
+    static const char *const names[SG_STYLE_KEYS] = { "fg", "bg", "placeholder", "selection", "font", "size",
+        "weight", "italic", "pad", "border", "border_color", "radius", "shadow", "shadow_color", "scroll" };
+    int i;
+    for (i = 0; k && i < SG_STYLE_KEYS; i++) if (!strcmp(k, names[i])) return i;
+    return -1;
+}
+/* `spec' ("key=value" pairs separated by 0x1F) taken apart; free `s->buf' afterwards. */
+static void sg_style_parse(SgStyle *s, const char *spec) {
+    char *p, *next, *eq; int k;
+    memset(s, 0, sizeof *s);
+    s->buf = g_strdup(spec ? spec : "");
+    for (p = s->buf; p && *p; p = next) {
+        next = strchr(p, 0x1F);
+        if (next) *next++ = 0;
+        eq = strchr(p, '=');
+        if (!eq) continue;
+        *eq = 0;
+        k = sg_style_key(p);
+        if (k >= 0) s->v[k] = eq + 1;
+    }
+}
+static int sg_style_hex(const char *v) {
+    int i;
+    if (!v || strlen(v) != 6) return 0;
+    for (i = 0; i < 6; i++) if (!g_ascii_isxdigit(v[i])) return 0;
+    return 1;
+}
+/* Up to `n' numbers from the comma-separated `v'; how many were read. */
+static int sg_style_nums(const char *v, double *out, int n) {
+    int i = 0; char *end;
+    while (v && *v && i < n) {
+        out[i] = g_ascii_strtod(v, &end);
+        if (end == v) break;
+        i++;
+        v = (*end == ',') ? end + 1 : end;
+        if (!*end) break;
+    }
+    return i;
+}
+/* The keys of `s' that hold a value a rule can be made from. */
+static unsigned sg_style_usable(const SgStyle *s) {
+    unsigned m = 0; int k; double d[4];
+    for (k = 0; k < SG_STYLE_KEYS; k++) {
+        const char *v = s->v[k];
+        if (!v || !*v) continue;
+        switch (k) {
+        case SGK_FG: case SGK_BG: case SGK_PLACEHOLDER: case SGK_SELECTION: case SGK_BORDER_COLOR: case SGK_SHADOW_COLOR:
+            if (sg_style_hex(v)) m |= SGM(k);
+            break;
+        case SGK_PAD: case SGK_SHADOW:
+            if (sg_style_nums(v, d, 4) == 4) m |= SGM(k);
+            break;
+        case SGK_FONT:
+            m |= SGM(k);
+            break;
+        default:
+            if (sg_style_nums(v, d, 1) == 1) m |= SGM(k);
+        }
+    }
+    if (!(m & SGM(SGK_BORDER))) m &= ~SGM(SGK_BORDER_COLOR);
+    if (!(m & SGM(SGK_SHADOW)) || !(m & SGM(SGK_SHADOW_COLOR))) m &= ~(SGM(SGK_SHADOW) | SGM(SGK_SHADOW_COLOR));
+    return m;
+}
+/* What widget `id' can show, by its kind (and, for a button, its look of now). The same
+   table answers `sg_widget_style_supported' and decides what goes into the rules. */
+static unsigned sg_style_can(int id) {
+    if (id <= 0 || id >= sg_n || !sg_w[id]) return 0;
+    switch (sg_kind[id]) {
+    case 4: return SGM(SGK_FG) | SGM_TEXT | SGM_BOX;                    /* label */
+    case 2: case 3: case 30: return SGM_BOX;                            /* stack, grid, group box */
+    case 5:                                                             /* button: the box on flat and pill only */
+        return SGM(SGK_FG) | SGM_TEXT
+            | ((gtk_widget_has_css_class(sg_w[id], "flat") || gtk_widget_has_css_class(sg_w[id], "sg-pill")) ? SGM_FLAT_BOX : 0);
+    case 9: case 20: return SGM_TEXT;                                   /* check box, radio group: their labels' font */
+    case 6: case 45:                                                    /* field, password field, search field */
+        return SGM(SGK_FG) | SGM_TEXT | SGM(SGK_PLACEHOLDER) | SGM(SGK_SELECTION) | SGM(SGK_BG);
+    case 10: return SGM(SGK_FG) | SGM_TEXT | SGM(SGK_SELECTION) | SGM(SGK_BG) | SGM(SGK_SCROLL);   /* text area */
+    case 49: return SGM(SGK_SELECTION) | SGM(SGK_BG) | SGM(SGK_SCROLL); /* rich text area: its text has its own fonts and colors */
+    case 7: case 13: case 14: case 33: return SGM_ROWS;                 /* list, table, tree, tree table */
+    case 58: case 27: return SGM(SGK_BG) | SGM(SGK_SCROLL);             /* grid view, scroll area */
+    default: return 0;
+    }
+}
+static int sg_widget_style_supported(int id, const char *key) {
+    int k = sg_style_key(key);
+    /* the border's and the shadow's colors go with the border and the shadow */
+    return k >= 0 && (sg_style_can(id) & SGM(k)) != 0;
+}
+
+static void sg_css_num(GString *c, double d, const char *unit) {
+    char b[G_ASCII_DTOSTR_BUF_SIZE];
+    g_string_append(c, g_ascii_formatd(b, sizeof b, "%.2f", d));
+    g_string_append(c, unit);
+}
+/* The family the system's own font has ("gtk-font-name"); free it. */
+static char *sg_system_family(void) {
+    GtkSettings *st = gtk_settings_get_default();
+    char *name = NULL, *fam = NULL;
+    if (st) g_object_get(st, "gtk-font-name", &name, NULL);
+    if (name) {
+        PangoFontDescription *d = pango_font_description_from_string(name);
+        if (pango_font_description_get_family(d)) fam = g_strdup(pango_font_description_get_family(d));
+        pango_font_description_free(d);
+        g_free(name);
+    }
+    return fam ? fam : g_strdup("sans-serif");
+}
+/* The text declarations of `s' that are in `m'. */
+static void sg_css_text(GString *c, const SgStyle *s, unsigned m) {
+    double d;
+    if (m & SGM(SGK_FG)) g_string_append_printf(c, "color: #%s; ", s->v[SGK_FG]);
+    if (m & SGM(SGK_FONT)) {
+        char *fam = g_ascii_strcasecmp(s->v[SGK_FONT], "system") ? g_strdup(s->v[SGK_FONT]) : sg_system_family();
+        g_strdelimit(fam, "\"\\\n\r;{}", ' ');   /* it goes into a quoted CSS string */
+        g_string_append_printf(c, "font-family: \"%s\"; ", fam);
+        g_free(fam);
+    }
+    if ((m & SGM(SGK_SIZE)) && sg_style_nums(s->v[SGK_SIZE], &d, 1) == 1 && d > 0) {
+        g_string_append(c, "font-size: "); sg_css_num(c, d, "pt; ");
+    }
+    if ((m & SGM(SGK_WEIGHT)) && sg_style_nums(s->v[SGK_WEIGHT], &d, 1) == 1)
+        g_string_append_printf(c, "font-weight: %d; ", (int) CLAMP(d, 100, 900));
+    if (m & SGM(SGK_ITALIC))
+        g_string_append_printf(c, "font-style: %s; ", atoi(s->v[SGK_ITALIC]) ? "italic" : "normal");
+}
+/* The box declarations of `s' that are in `m'; `rtl': the start side is the right one. */
+static void sg_css_box(GString *c, const SgStyle *s, unsigned m, int rtl) {
+    double d[4];
+    if (m & SGM(SGK_BG)) g_string_append_printf(c, "background-color: #%s; background-image: none; ", s->v[SGK_BG]);
+    if ((m & SGM(SGK_PAD)) && sg_style_nums(s->v[SGK_PAD], d, 4) == 4) {   /* top, end, bottom, start */
+        g_string_append(c, "padding: ");
+        sg_css_num(c, MAX(d[0], 0), "px "); sg_css_num(c, MAX(rtl ? d[3] : d[1], 0), "px ");
+        sg_css_num(c, MAX(d[2], 0), "px "); sg_css_num(c, MAX(rtl ? d[1] : d[3], 0), "px; ");
+    }
+    if ((m & SGM(SGK_BORDER)) && sg_style_nums(s->v[SGK_BORDER], d, 1) == 1) {
+        g_string_append(c, "border-style: solid; border-width: "); sg_css_num(c, MAX(d[0], 0), "px; ");
+        /* without a color (the contrast setting is on) the border takes the text's */
+        if (m & SGM(SGK_BORDER_COLOR)) g_string_append_printf(c, "border-color: #%s; ", s->v[SGK_BORDER_COLOR]);
+        else g_string_append(c, "border-color: currentColor; ");
+    }
+    if ((m & SGM(SGK_RADIUS)) && sg_style_nums(s->v[SGK_RADIUS], d, 1) == 1) {
+        g_string_append(c, "border-radius: "); sg_css_num(c, MAX(d[0], 0), "px; ");
+    }
+    if ((m & SGM(SGK_SHADOW)) && sg_style_nums(s->v[SGK_SHADOW], d, 4) == 4) {   /* x, y, blur, alpha percent */
+        unsigned rgb = (unsigned) strtoul(s->v[SGK_SHADOW_COLOR], NULL, 16);
+        g_string_append(c, "box-shadow: ");
+        sg_css_num(c, d[0], "px "); sg_css_num(c, d[1], "px "); sg_css_num(c, MAX(d[2], 0), "px ");
+        g_string_append_printf(c, "rgba(%u, %u, %u, ", (rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+        sg_css_num(c, CLAMP(d[3], 0, 100) / 100.0, "); ");
+    }
+}
+/* The rules for widget `id' from `s', for the keys in `m'. `cls' is the widget's own class. */
+static void sg_style_css(GString *c, int id, const char *cls, const SgStyle *s, unsigned m) {
+    int rtl = gtk_widget_get_direction(sg_w[id]) == GTK_TEXT_DIR_RTL;
+    switch (sg_kind[id]) {
+    case 10: case 49:   /* the class is on the scrolled window; the text view inside paints */
+        g_string_append_printf(c, ".%s textview, .%s textview > text { ", cls, cls);
+        break;
+    case 7:
+        g_string_append_printf(c, ".%s list { ", cls);
+        break;
+    case 13: case 14: case 33:
+        g_string_append_printf(c, ".%s columnview, .%s listview { ", cls, cls);
+        break;
+    case 58:
+        g_string_append_printf(c, ".%s gridview { ", cls);
+        break;
+    default:
+        g_string_append_printf(c, ".%s { ", cls);
+    }
+    sg_css_text(c, s, m);
+    sg_css_box(c, s, m, rtl);
+    g_string_append(c, "} ");
+    if (m & SGM(SGK_PLACEHOLDER))
+        g_string_append_printf(c, ".%s placeholder { color: #%s; } ", cls, s->v[SGK_PLACEHOLDER]);
+    if (m & SGM(SGK_SELECTION)) {
+        /* Through a named color of the widget's own: GTK makes a selection's node only while
+           something is selected, so the name is what `sg_test_style_value' can ask for. */
+        g_string_append_printf(c, "@define-color sg_sel_%d #%s; ", id, s->v[SGK_SELECTION]);
+        g_string_append_printf(c, ".%s selection, .%s row:selected { background-color: @sg_sel_%d; } ", cls, cls, id);
+    }
+}
+
+/* The scroll bars of widget `id': 0 the system's, 1 over the content, 2 always shown,
+   3 hidden (the view still scrolls); -1 back to how the widget was made. */
+static void sg_style_scroll(int id, int kind) {
+    GtkScrolledWindow *sw = GTK_IS_SCROLLED_WINDOW(sg_w[id]) ? GTK_SCROLLED_WINDOW(sg_w[id]) : NULL;
+    GtkPolicyType h, v; int kept, o;
+    if (!sw) return;
+    kept = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(sw), "sg-scroll-kept"));
+    if (!kept) {
+        if (kind < 0) return;
+        gtk_scrolled_window_get_policy(sw, &h, &v);
+        kept = 1 | ((int) h << 1) | ((int) v << 3) | (gtk_scrolled_window_get_overlay_scrolling(sw) ? 32 : 0);
+        g_object_set_data(G_OBJECT(sw), "sg-scroll-kept", GINT_TO_POINTER(kept));
+    }
+    h = (GtkPolicyType) ((kept >> 1) & 3); v = (GtkPolicyType) ((kept >> 3) & 3); o = (kept & 32) != 0;
+    switch (kind) {
+    case 1: gtk_scrolled_window_set_overlay_scrolling(sw, TRUE); gtk_scrolled_window_set_policy(sw, h, GTK_POLICY_AUTOMATIC); break;
+    case 2: gtk_scrolled_window_set_overlay_scrolling(sw, FALSE); gtk_scrolled_window_set_policy(sw, h, GTK_POLICY_ALWAYS); break;
+    case 3: gtk_scrolled_window_set_overlay_scrolling(sw, o);
+            gtk_scrolled_window_set_policy(sw, h == GTK_POLICY_NEVER ? h : GTK_POLICY_EXTERNAL, GTK_POLICY_EXTERNAL); break;
+    default: gtk_scrolled_window_set_overlay_scrolling(sw, o); gtk_scrolled_window_set_policy(sw, h, v);
+    }
+}
+
+static void sg_style_provider_free(gpointer p) {
+    GdkDisplay *d = gdk_display_get_default();
+    if (d) gtk_style_context_remove_provider_for_display(d, GTK_STYLE_PROVIDER(p));
+    g_object_unref(p);
+}
+/* Show the style widget `id' was last given ("sg-style-spec"), as far as its kind allows.
+   Called again when what the widget can show changes (a button's look). */
+static void sg_style_apply(int id) {
+    GtkWidget *w = sg_w[id];
+    char cls[32]; SgStyle s; unsigned m; GtkCssProvider *p;
+    snprintf(cls, sizeof cls, "sg-s%d", id);
+    sg_style_parse(&s, g_object_get_data(G_OBJECT(w), "sg-style-spec"));
+    m = sg_style_usable(&s) & sg_style_can(id);
+    if (!(m & SGM(SGK_BORDER))) m &= ~SGM(SGK_BORDER_COLOR);
+    g_object_set_data(G_OBJECT(w), "sg-style-mask", GUINT_TO_POINTER(m));
+    g_object_set_data(G_OBJECT(w), "sg-style-stale", GINT_TO_POINTER(1));
+    sg_style_scroll(id, (m & SGM(SGK_SCROLL)) ? atoi(s.v[SGK_SCROLL]) : -1);
+    if (!(m & ~SGM(SGK_SCROLL))) {
+        gtk_widget_remove_css_class(w, cls);
+        g_object_set_data(G_OBJECT(w), "sg-style-css", NULL);   /* frees the provider, if there was one */
+    } else {
+        GString *css = g_string_new(NULL);
+        sg_style_css(css, id, cls, &s, m);
+        p = g_object_get_data(G_OBJECT(w), "sg-style-css");
+        if (!p) {
+            p = gtk_css_provider_new();
+            gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(p),
+                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+            g_object_set_data_full(G_OBJECT(w), "sg-style-css", p, sg_style_provider_free);
+        }
+        gtk_css_provider_load_from_string(p, css->str);
+        gtk_widget_add_css_class(w, cls);
+        g_string_free(css, TRUE);
+    }
+    g_free(s.buf);
+}
+static void sg_widget_set_style(int id, const char *spec) {
+    if (id <= 0 || id >= sg_n || !sg_w[id]) return;
+    g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-style-spec", (spec && *spec) ? g_strdup(spec) : NULL, g_free);
+    sg_style_apply(id);
+}
+
+/* ---- Reading a style back (tests): from the widget as GTK lays it out and draws it. */
+
+/* A change of style reaches the widgets in the next frame: its layout phase works the rules
+   out again, and its paint phase makes the new render nodes. Wait for one frame of the
+   widget's window (half a second at most) the first time a value is read after a change. */
+static void sg_style_settle(GtkWidget *w) {
+    GdkFrameClock *fc; gint64 c0; int i;
+    if (!g_object_get_data(G_OBJECT(w), "sg-style-stale")) return;
+    g_object_set_data(G_OBJECT(w), "sg-style-stale", NULL);
+    if (!gtk_widget_get_mapped(w) || !(fc = gtk_widget_get_frame_clock(w))) return;
+    c0 = gdk_frame_clock_get_frame_counter(fc);
+    gtk_widget_queue_draw(w);
+    for (i = 0; i < 100 && gdk_frame_clock_get_frame_counter(fc) == c0; i++) {
+        while (g_main_context_iteration(NULL, FALSE)) { }
+        if (gdk_frame_clock_get_frame_counter(fc) == c0) g_usleep(5000);
+    }
+    while (g_main_context_iteration(NULL, FALSE)) { }
+}
+/* The first label (or inscription) under `w', rows before a table's header; NULL if none. */
+static GtkWidget *sg_style_first_label(GtkWidget *w, int depth) {
+    GtkWidget *c, *r;
+    if (GTK_IS_LABEL(w) || GTK_IS_INSCRIPTION(w)) return w;
+    if (depth > 10) return NULL;
+    for (c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) {
+        if (!strcmp(gtk_widget_get_css_name(c), "header")) continue;
+        if ((r = sg_style_first_label(c, depth + 1))) return r;
+    }
+    return NULL;
+}
+/* The widget inside a scrolled one (the list box, the text view, the column view...). */
+static GtkWidget *sg_style_inner(int id) {
+    GtkWidget *w = sg_w[id], *in;
+    if (!GTK_IS_SCROLLED_WINDOW(w) || sg_kind[id] == 27) return w;
+    in = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(w));
+    if (in && GTK_IS_VIEWPORT(in)) in = gtk_viewport_get_child(GTK_VIEWPORT(in));
+    return in ? in : w;
+}
+/* The widget whose text shows widget `id''s color and font. */
+static GtkWidget *sg_style_text_widget(int id) {
+    GtkWidget *w = sg_w[id], *l;
+    switch (sg_kind[id]) {
+    case 6: case 45:
+        l = GTK_IS_EDITABLE(w) ? GTK_WIDGET(gtk_editable_get_delegate(GTK_EDITABLE(w))) : NULL;
+        return l ? l : w;
+    case 10: case 49:
+        return sg_style_inner(id);
+    case 7: case 13: case 14: case 33:
+        l = sg_style_first_label(sg_style_inner(id), 0);
+        return l ? l : sg_style_inner(id);
+    case 5: case 9: case 20:
+        l = sg_style_first_label(w, 0);
+        return l ? l : w;
+    default:
+        return w;
+    }
+}
+
+typedef struct {
+    float w, h;                 /* the widget's border box */
+    int has_bg, has_border, has_clip, has_shadow;
+    GdkRGBA bg, border_color, shadow_color;
+    float border[4];            /* top, right, bottom, left */
+    float border_radius, clip_radius, dx, dy, blur;
+} SgSeen;
+/* What the render nodes under `n' draw first: the background color (a color node over at
+   least half the widget), the border, the rounded clip and the outset shadow. A widget's
+   own box is drawn before its content, so the first of each is its own when it has one. */
+static void sg_style_scan(GskRenderNode *n, SgSeen *o, int depth) {
+    guint i; graphene_rect_t b; const GdkRGBA *c;
+    if (!n || depth > 16) return;
+    switch (gsk_render_node_get_node_type(n)) {
+    case GSK_CONTAINER_NODE:
+        for (i = 0; i < gsk_container_node_get_n_children(n); i++) sg_style_scan(gsk_container_node_get_child(n, i), o, depth + 1);
+        break;
+    case GSK_TRANSFORM_NODE: sg_style_scan(gsk_transform_node_get_child(n), o, depth + 1); break;
+    case GSK_CLIP_NODE: sg_style_scan(gsk_clip_node_get_child(n), o, depth + 1); break;
+    case GSK_OPACITY_NODE: sg_style_scan(gsk_opacity_node_get_child(n), o, depth + 1); break;
+    case GSK_DEBUG_NODE: sg_style_scan(gsk_debug_node_get_child(n), o, depth + 1); break;
+    case GSK_ROUNDED_CLIP_NODE:
+        if (!o->has_clip && !o->has_bg) { o->has_clip = 1; o->clip_radius = gsk_rounded_clip_node_get_clip(n)->corner[0].width; }
+        sg_style_scan(gsk_rounded_clip_node_get_child(n), o, depth + 1);
+        break;
+    case GSK_COLOR_NODE:
+        gsk_render_node_get_bounds(n, &b);
+        if (!o->has_bg && b.size.width * b.size.height * 2 >= o->w * o->h) { o->has_bg = 1; o->bg = *gsk_color_node_get_color(n); }
+        break;
+    case GSK_BORDER_NODE:
+        if (!o->has_border) {
+            o->has_border = 1;
+            for (i = 0; i < 4; i++) o->border[i] = gsk_border_node_get_widths(n)[i];
+            o->border_color = gsk_border_node_get_colors(n)[0];
+            o->border_radius = gsk_border_node_get_outline(n)->corner[0].width;
+        }
+        break;
+    case GSK_OUTSET_SHADOW_NODE:
+        if (!o->has_shadow) {
+            o->has_shadow = 1;
+            c = gsk_outset_shadow_node_get_color(n);
+            o->shadow_color = *c;
+            o->dx = gsk_outset_shadow_node_get_dx(n); o->dy = gsk_outset_shadow_node_get_dy(n);
+            o->blur = gsk_outset_shadow_node_get_blur_radius(n);
+        }
+        break;
+    default:
+        break;
+    }
+}
+/* `w' as it is drawn now, looked through for its box. With SG_STYLE_DEBUG set, the nodes
+   are written to standard error. */
+static void sg_style_see(GtkWidget *w, SgSeen *o) {
+    graphene_rect_t b; GdkPaintable *p; GtkSnapshot *s; GskRenderNode *n;
+    memset(o, 0, sizeof *o);
+    if (!gtk_widget_get_mapped(w) || !gtk_widget_compute_bounds(w, w, &b)) return;
+    o->w = b.size.width; o->h = b.size.height;
+    p = gtk_widget_paintable_new(w);
+    s = gtk_snapshot_new();
+    gdk_paintable_snapshot(p, GDK_SNAPSHOT(s), b.size.width, b.size.height);
+    n = gtk_snapshot_free_to_node(s);
+    if (n) {
+        sg_style_scan(n, o, 0);
+        if (g_getenv("SG_STYLE_DEBUG")) {
+            GBytes *bytes = gsk_render_node_serialize(n);
+            g_printerr("---- sg style nodes (%s, %g x %g)\n%.*s\n", gtk_widget_get_css_name(w), o->w, o->h,
+                (int) MIN(g_bytes_get_size(bytes), 3000), (const char *) g_bytes_get_data(bytes, NULL));
+            g_bytes_unref(bytes);
+        }
+        gsk_render_node_unref(n);
+    }
+    g_object_unref(p);
+}
+/* A number as the tests read it: two decimals at most, no trailing zeros. */
+static void sg_style_number(GString *out, double d) {
+    char b[G_ASCII_DTOSTR_BUF_SIZE]; char *e;
+    g_ascii_formatd(b, sizeof b, "%.2f", d);
+    if (strchr(b, '.')) {
+        e = b + strlen(b) - 1;
+        while (*e == '0') *e-- = 0;
+        if (*e == '.') *e = 0;
+    }
+    g_string_append(out, strcmp(b, "-0") ? b : "0");
+}
+static void sg_style_hex_out(GString *out, const GdkRGBA *c) {
+    g_string_append_printf(out, "%02x%02x%02x", (int) (CLAMP(c->red, 0, 1) * 255 + 0.5),
+        (int) (CLAMP(c->green, 0, 1) * 255 + 0.5), (int) (CLAMP(c->blue, 0, 1) * 255 + 0.5));
+}
+
+/* Tests: what widget `id' shows now for `key' of its style; empty when the key is not in
+   what was applied, or nothing of it shows.
+   - fg, placeholder: the color GTK worked out for the widget that draws the text;
+   - font, size, weight, italic: that widget's Pango font;
+   - bg, border, border_color, radius, shadow, shadow_color: the widget's render nodes;
+   - pad: where the layout put the content box inside the border box;
+   - scroll: the scrolled window's policy;
+   - selection: the widget's named color, as the display's style providers answer it
+     (nothing is drawn for a selection until something is selected). */
+static const char *sg_test_style_value(int id, const char *key) {
+    static char out[256];
+    GString *r; GtkWidget *w, *tw, *c; SgSeen seen; GdkRGBA col; unsigned m;
+    const PangoFontDescription *fd; int k = sg_style_key(key);
+    out[0] = 0;
+    if (id <= 0 || id >= sg_n || !sg_w[id] || k < 0) return out;
+    w = sg_w[id];
+    m = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(w), "sg-style-mask"));
+    if (!(m & SGM(k))) return out;
+    sg_style_settle(w);
+    r = g_string_new(NULL);
+    tw = sg_style_text_widget(id);
+    switch (k) {
+    case SGK_FG:
+        gtk_widget_get_color(tw, &col);
+        sg_style_hex_out(r, &col);
+        break;
+    case SGK_PLACEHOLDER:
+        for (c = gtk_widget_get_first_child(tw); c; c = gtk_widget_get_next_sibling(c))
+            if (!strcmp(gtk_widget_get_css_name(c), "placeholder")) {
+                gtk_widget_get_color(c, &col);
+                sg_style_hex_out(r, &col);
+                break;
+            }
+        break;
+    case SGK_SELECTION: {
+        char name[32];
+        snprintf(name, sizeof name, "sg_sel_%d", id);
+        G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+        if (gtk_style_context_lookup_color(gtk_widget_get_style_context(w), name, &col)) sg_style_hex_out(r, &col);
+        G_GNUC_END_IGNORE_DEPRECATIONS
+        break;
+    }
+    case SGK_FONT: case SGK_SIZE: case SGK_WEIGHT: case SGK_ITALIC:
+        fd = pango_context_get_font_description(gtk_widget_get_pango_context(tw));
+        if (!fd) break;
+        if (k == SGK_FONT) {
+            const char *fam = pango_font_description_get_family(fd);
+            char *sys = sg_system_family();
+            if (fam && !g_ascii_strcasecmp(fam, sys)) g_string_append(r, "system");
+            else if (fam) g_string_append(r, fam);
+            g_free(sys);
+        } else if (k == SGK_SIZE) {
+            double sz = pango_font_description_get_size(fd) / (double) PANGO_SCALE;
+            /* a CSS size arrives as device-independent pixels, 96 to the inch */
+            sg_style_number(r, pango_font_description_get_size_is_absolute(fd) ? sz * 72.0 / 96.0 : sz);
+        } else if (k == SGK_WEIGHT) {
+            g_string_append_printf(r, "%d", (int) pango_font_description_get_weight(fd));
+        } else {
+            g_string_append(r, pango_font_description_get_style(fd) == PANGO_STYLE_NORMAL ? "0" : "1");
+        }
+        break;
+    case SGK_SCROLL:
+        if (GTK_IS_SCROLLED_WINDOW(w)) {
+            GtkPolicyType h, v; int o = gtk_scrolled_window_get_overlay_scrolling(GTK_SCROLLED_WINDOW(w));
+            int kept = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "sg-scroll-kept"));
+            gtk_scrolled_window_get_policy(GTK_SCROLLED_WINDOW(w), &h, &v);
+            if (v == GTK_POLICY_EXTERNAL) g_string_append(r, "3");
+            else if (v == GTK_POLICY_ALWAYS && !o) g_string_append(r, "2");
+            else if (kept == (1 | ((int) h << 1) | ((int) v << 3) | (o ? 32 : 0))) g_string_append(r, "0");
+            else if (o) g_string_append(r, "1");
+        }
+        break;
+    case SGK_PAD: {
+        /* A widget's own coordinates start at its content box; its bounds are its border box. */
+        graphene_rect_t b; double top, left, right, bottom; int rtl = gtk_widget_get_direction(w) == GTK_TEXT_DIR_RTL;
+        sg_style_see(w, &seen);
+        if (!gtk_widget_compute_bounds(w, w, &b)) break;
+        top = -b.origin.y - seen.border[0];
+        left = -b.origin.x - seen.border[3];
+        right = b.size.width - gtk_widget_get_width(w) + b.origin.x - seen.border[1];
+        bottom = b.size.height - gtk_widget_get_height(w) + b.origin.y - seen.border[2];
+        sg_style_number(r, top); g_string_append_c(r, ',');
+        sg_style_number(r, rtl ? left : right); g_string_append_c(r, ',');
+        sg_style_number(r, bottom); g_string_append_c(r, ',');
+        sg_style_number(r, rtl ? right : left);
+        break;
+    }
+    default:   /* the box, from what is drawn */
+        sg_style_see((k == SGK_BG) ? sg_style_inner(id) : w, &seen);
+        if (k == SGK_BG && seen.has_bg) sg_style_hex_out(r, &seen.bg);
+        else if (k == SGK_BORDER && seen.has_border) sg_style_number(r, seen.border[0]);
+        else if (k == SGK_BORDER_COLOR && seen.has_border) sg_style_hex_out(r, &seen.border_color);
+        else if (k == SGK_RADIUS && seen.has_border) sg_style_number(r, seen.border_radius);
+        else if (k == SGK_RADIUS && seen.has_clip) sg_style_number(r, seen.clip_radius);
+        else if (k == SGK_SHADOW && seen.has_shadow) {
+            sg_style_number(r, seen.dx); g_string_append_c(r, ',');
+            sg_style_number(r, seen.dy); g_string_append_c(r, ',');
+            sg_style_number(r, seen.blur); g_string_append_c(r, ',');
+            g_string_append_printf(r, "%d", (int) (CLAMP(seen.shadow_color.alpha, 0, 1) * 100 + 0.5));
+        } else if (k == SGK_SHADOW_COLOR && seen.has_shadow) sg_style_hex_out(r, &seen.shadow_color);
+    }
+    g_strlcpy(out, r->str, sizeof out);
+    g_string_free(r, TRUE);
+    return out;
+}
+
+/* ---- Theme colors: one provider for the display, at application priority, so a widget's
+   own style (one step higher) still wins. The named colors are defined for themes that use
+   them; the rules beside them are for the default theme, whose rules hold literal colors. */
+__attribute__((weak)) int sg_theme_rgb[7] = { -1, -1, -1, -1, -1, -1, -1 };
+__attribute__((weak)) GtkCssProvider *sg_theme_css;
+
+static void sg_theme_name(GString *c, const char *name, int rgb) {
+    g_string_append_printf(c, "@define-color %s #%06x; ", name, (unsigned) rgb & 0xFFFFFF);
+}
+/* Role `role' (1 window background, 2 text, 3 disabled text, 4 accent, 5 selection,
+   6 border) is `rgb' from now on; the system's again when `rgb' is negative. */
+static void sg_set_theme_color(int role, int rgb) {
+    GdkDisplay *d = gdk_display_get_default();
+    GString *c; const int *t = sg_theme_rgb; int sel;
+    if (role < 1 || role > 6 || !d) return;
+    sg_theme_rgb[role] = rgb < 0 ? -1 : (rgb & 0xFFFFFF);
+    c = g_string_new(NULL);
+    sel = t[5] >= 0 ? t[5] : t[4];
+    if (t[1] >= 0) { sg_theme_name(c, "window_bg_color", t[1]); sg_theme_name(c, "theme_bg_color", t[1]); }
+    if (t[2] >= 0) { sg_theme_name(c, "window_fg_color", t[2]); sg_theme_name(c, "theme_fg_color", t[2]); }
+    if (t[3] >= 0) sg_theme_name(c, "insensitive_fg_color", t[3]);
+    if (t[4] >= 0) { sg_theme_name(c, "accent_bg_color", t[4]); sg_theme_name(c, "accent_color", t[4]); }
+    if (sel >= 0) sg_theme_name(c, "theme_selected_bg_color", sel);
+    if (t[6] >= 0) sg_theme_name(c, "borders", t[6]);
+    if (t[1] >= 0) g_string_append_printf(c, "window.background { background-color: #%06x; } ", (unsigned) t[1]);
+    if (t[2] >= 0) g_string_append_printf(c, "window.background { color: #%06x; } ", (unsigned) t[2]);
+    if (t[3] >= 0) g_string_append_printf(c, "label:disabled { color: #%06x; } ", (unsigned) t[3]);
+    if (t[4] >= 0)
+        g_string_append_printf(c, "button.suggested-action, checkbutton > check:checked, checkbutton > radio:checked, "
+            "scale > trough > highlight, progressbar > trough > progress, switch:checked "
+            "{ background-color: #%06x; background-image: none; border-color: #%06x; } "
+            /* The knob of a switch that is on carries the system's accent on its border. */
+            "switch:checked > slider { border-color: #%06x; } ", (unsigned) t[4], (unsigned) t[4], (unsigned) t[4]);
+    if (sel >= 0) g_string_append_printf(c, "selection, row:selected { background-color: #%06x; } ", (unsigned) sel);
+    if (t[6] >= 0) g_string_append_printf(c, "entry, frame > border { border-color: #%06x; } ", (unsigned) t[6]);
+    if (!sg_theme_css) {
+        sg_theme_css = gtk_css_provider_new();
+        gtk_style_context_add_provider_for_display(d, GTK_STYLE_PROVIDER(sg_theme_css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+    gtk_css_provider_load_from_string(sg_theme_css, c->str);
+    g_string_free(c, TRUE);
+}
+
+/* ---- The contrast setting. GTK 4 has no setting of its own for it: the desktop switches
+   to a high contrast theme, so the theme's name is what tells. Tests force an answer. */
+__attribute__((weak)) int sg_force_contrast = -1;
+
+static int sg_is_high_contrast(void) {
+    GtkSettings *st; char *name = NULL, *low; int r = 0;
+    if (sg_force_contrast >= 0) return sg_force_contrast;
+    st = gtk_settings_get_default();
+    if (st) g_object_get(st, "gtk-theme-name", &name, NULL);
+    if (name) {
+        low = g_ascii_strdown(name, -1);
+        r = strstr(low, "highcontrast") != NULL || strstr(low, "high-contrast") != NULL;
+        g_free(low); g_free(name);
+    }
+    return r;
+}
+/* Tests: answer `on' for the contrast setting from now on, and tell the application (the
+   appearance event) when the answer changed. */
+static void sg_test_set_high_contrast(int on) {
+    int was = sg_is_high_contrast();
+    sg_force_contrast = on ? 1 : 0;
+    if (sg_is_high_contrast() != was) sg_push(10, 0, sg_is_dark() ? 1 : 0, 0);
+}
+
+/* ---- Fonts loaded at run time, for this application only. */
+__attribute__((weak)) GPtrArray *sg_font_paths;
+
+static FcConfig *sg_font_config(void) {
+    PangoFontMap *fm = pango_cairo_font_map_get_default();
+    /* NULL (nothing set on the map) is fontconfig's current configuration, which Pango uses too */
+    return PANGO_IS_FC_FONT_MAP(fm) ? pango_fc_font_map_get_config(PANGO_FC_FONT_MAP(fm)) : NULL;
+}
+/* Load the font file `path'; the family names in it, separated by 0x1F, or empty when
+   there is no such file or no font in it. Loading a file again adds nothing. */
+static const char *sg_font_load(const char *path) {
+    static char out[1024];
+    PangoFontMap *fm = pango_cairo_font_map_get_default();
+    FcConfig *cfg = sg_font_config();
+    FcFontSet *set; GString *r; GPtrArray *seen; char *want; int i; guint j; int known = 0;
+    out[0] = 0;
+    if (!path || !*path || !g_file_test(path, G_FILE_TEST_IS_REGULAR)) return out;
+    if (!sg_font_paths) sg_font_paths = g_ptr_array_new_with_free_func(g_free);
+    for (j = 0; j < sg_font_paths->len; j++) if (!strcmp(g_ptr_array_index(sg_font_paths, j), path)) known = 1;
+    if (!known) {
+        if (!FcConfigAppFontAddFile(cfg, (const FcChar8 *) path)) return out;
+        g_ptr_array_add(sg_font_paths, g_strdup(path));
+        if (PANGO_IS_FC_FONT_MAP(fm)) pango_fc_font_map_config_changed(PANGO_FC_FONT_MAP(fm));
+    }
+    want = g_canonicalize_filename(path, NULL);
+    set = FcConfigGetFonts(cfg, FcSetApplication);
+    r = g_string_new(NULL);
+    seen = g_ptr_array_new();
+    for (i = 0; set && i < set->nfont; i++) {
+        FcChar8 *file = NULL, *fam = NULL; char *have; int same, dup = 0;
+        if (FcPatternGetString(set->fonts[i], FC_FILE, 0, &file) != FcResultMatch || !file) continue;
+        have = g_canonicalize_filename((const char *) file, NULL);
+        same = !strcmp(have, want);
+        g_free(have);
+        if (!same || FcPatternGetString(set->fonts[i], FC_FAMILY, 0, &fam) != FcResultMatch || !fam) continue;
+        for (j = 0; j < seen->len; j++) if (!strcmp(g_ptr_array_index(seen, j), (const char *) fam)) dup = 1;
+        if (dup) continue;
+        g_ptr_array_add(seen, fam);
+        if (r->len) g_string_append_c(r, 0x1F);
+        g_string_append(r, (const char *) fam);
+    }
+    g_strlcpy(out, r->str, sizeof out);
+    g_ptr_array_free(seen, TRUE);
+    g_string_free(r, TRUE);
+    g_free(want);
+    return out;
+}
+/* Is there a font family called `name' (the system's or a loaded one)? The generic names
+   always are. */
+static int sg_font_family_available(const char *name) {
+    PangoFontFamily **fams = NULL; int n = 0, i, r = 0;
+    if (!name || !*name) return 0;
+    if (!g_ascii_strcasecmp(name, "system") || !g_ascii_strcasecmp(name, "sans-serif")
+        || !g_ascii_strcasecmp(name, "serif") || !g_ascii_strcasecmp(name, "monospace")) return 1;
+    pango_font_map_list_families(pango_cairo_font_map_get_default(), &fams, &n);
+    for (i = 0; i < n && !r; i++) r = !g_ascii_strcasecmp(pango_font_family_get_name(fams[i]), name);
+    g_free(fams);
+    return r;
 }
 
 #endif

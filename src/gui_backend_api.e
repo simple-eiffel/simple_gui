@@ -2282,6 +2282,64 @@ feature -- Appearance
 		deferred
 		end
 
+feature -- Styles (1w)
+
+	widget_set_style (an_id: INTEGER; a_spec: POINTER)
+			-- Show a resolved style on a widget: `key=value' pairs separated by 0x1F. The keys:
+			-- `fg', `bg', `placeholder', `selection', `border_color', `shadow_color' (six hex
+			-- digits); `font' (a family, or monospace, serif, sans-serif, system); `size' (points);
+			-- `weight' (100 to 900); `italic' (0 or 1); `pad' (top,end,bottom,start); `border' (its
+			-- width); `radius'; `shadow' (x,y,blur,alpha percent); `scroll' (0 the system's choice,
+			-- 1 overlay, 2 always, 3 hidden). A key the widget cannot show is ignored; an empty
+			-- spec takes the widget back to its native look. Shared code has already picked the
+			-- light or dark colors and left the colors out under the system's contrast setting.
+		deferred
+		end
+
+	widget_style_supported (an_id: INTEGER; a_property: POINTER): BOOLEAN
+			-- Can the widget show the property with this key (`fg', `bg', `placeholder',
+			-- `selection', `font', `size', `weight', `italic', `pad', `border', `radius', `shadow',
+			-- `scroll')?
+		deferred
+		end
+
+	set_theme_color (a_role, a_rgb: INTEGER)
+			-- The program's own color for a `system_color' role, where the toolkit lets a
+			-- program change the theme (role 4, the accent: on the controls that show one);
+			-- -1 goes back to the system's.
+		require
+			known: a_role >= 1 and a_role <= 6
+			rgb_or_reset: a_rgb >= -1 and a_rgb <= 0xFFFFFF
+		deferred
+		end
+
+	font_load (a_path: POINTER): POINTER
+			-- Load a font file for this process only. The family names it adds, separated by
+			-- 0x1F; empty when it cannot be loaded.
+		deferred
+		end
+
+	font_family_available (a_name: POINTER): BOOLEAN
+		deferred
+		end
+
+	is_high_contrast: BOOLEAN
+			-- Is the system's contrast setting on (or forced by `test_set_high_contrast')?
+		deferred
+		end
+
+	test_style_value (an_id: INTEGER; a_key: POINTER): POINTER
+			-- Tests only: what the native control shows now for a key of `widget_set_style',
+			-- read back from the control and written as the spec writes it (colors as six
+			-- lowercase hex digits). Empty when the control does not show the key.
+		deferred
+		end
+
+	test_set_high_contrast (a_on: BOOLEAN)
+			-- Tests only: act as if the system's contrast setting were on (or off again).
+		deferred
+		end
+
 feature -- Test driver
 
 	test_click (an_id: INTEGER)

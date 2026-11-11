@@ -83,6 +83,9 @@ feature -- Operation
 				if a_type = 53 then
 						-- the light/dark setting flipped (the theme followed it)
 					backend.push (10, 0, theme.is_dark.to_integer, 0, 0)
+				elseif a_type = 56 then
+						-- the contrast setting went on or off (1w): the same report
+					backend.push (10, 0, backend.is_dark.to_integer, 0, 0)
 				end
 			end
 		end
