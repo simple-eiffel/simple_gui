@@ -1824,6 +1824,24 @@ feature -- Common widget state
 		alias "sga_test_set_high_contrast($a_on ? 1 : 0);"
 		end
 
+	clock_ms: REAL_64
+			-- 1v-e-6: CLOCK_UPTIME_RAW, in milliseconds.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_REAL_64) sga_clock_ms();"
+		end
+
+	code_first_visible_line (an_id: INTEGER): INTEGER
+			-- 1v-e-6.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_code_visible_line($an_id, 0);"
+		end
+
+	code_last_visible_line (an_id: INTEGER): INTEGER
+			-- 1v-e-6.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_code_visible_line($an_id, 1);"
+		end
+
 	test_pick (a_source, a_row: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_pick($a_source, $a_row);"

@@ -6486,6 +6486,18 @@ static void sg_test_code_key(int id, int action, int shift, const char *text) {
     }
 }
 static void sg_test_caret_gesture(int id, int gesture, int position) { sg_push(61, id, gesture, position); }
+/* View-first coloring: the line, from 1, at the top (or the bottom) of the visible rectangle;
+   GTK answers the nearest shown line for a place in hidden text. */
+static int sg_code_visible_line(int id, int last) {
+    GtkTextView *v = sg_view_of(id);
+    GdkRectangle r;
+    GtkTextIter it;
+    int top;
+    gtk_text_view_get_visible_rect(v, &r);
+    if (r.height <= 0) return 0;
+    gtk_text_view_get_line_at_y(v, &it, last ? r.y + r.height - 1 : r.y, &top);
+    return gtk_text_iter_get_line(&it) + 1;
+}
 static int sg_int_compare(const int *a, const int *b);
 
 /* ---------- 1v-a: grid view (kind 58). A GtkGridView in a scrolled window over a selection
