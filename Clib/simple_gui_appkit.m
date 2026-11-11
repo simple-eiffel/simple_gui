@@ -22,14 +22,19 @@ typedef struct { int type, id, a, b, c; } sga_event;
 static sga_event s_events[SGA_QUEUE];
 static int s_head, s_tail;
 static atomic_int s_wake_pending;
+/* A wake that found the queue full: sga_next hands its event 11 out once the queue is
+   empty. Without it the wake was dropped while `s_wake_pending' stayed set, and every
+   later wake returned at once: no message was read again (issue 107). */
+static atomic_int s_wake_owed;
 
-static void sga_push(int a_type, int a_id, int a, int b, int c)
+/* Queue one event; False when the queue is full and it is dropped. */
+static int sga_push(int a_type, int a_id, int a, int b, int c)
 {
 	int next = (s_tail + 1) % SGA_QUEUE;
-	if (next != s_head) {
-		s_events[s_tail] = (sga_event){a_type, a_id, a, b, c};
-		s_tail = next;
-	}
+	if (next == s_head) return 0;
+	s_events[s_tail] = (sga_event){a_type, a_id, a, b, c};
+	s_tail = next;
+	return 1;
 }
 
 /* ---------------------------------------------------------------- handles */
@@ -470,7 +475,7 @@ void sga_wake(void)
 	int l_expected = 0;
 	if (!atomic_compare_exchange_strong(&s_wake_pending, &l_expected, 1)) return;
 	dispatch_async(dispatch_get_main_queue(), ^{
-		sga_push(11, 0, 0, 0, 0);
+		if (!sga_push(11, 0, 0, 0, 0)) atomic_store(&s_wake_owed, 1);
 		NSEvent *e = [NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint
 			modifierFlags:0 timestamp:0 windowNumber:0 context:nil subtype:0 data1:0 data2:0];
 		[NSApp postEvent:e atStart:NO];
@@ -479,12 +484,26 @@ void sga_wake(void)
 
 int sga_next(int *a_type, int *a_id, int *a, int *b, int *c)
 {
-	if (s_head == s_tail) return 0;
+	if (s_head == s_tail) {
+		if (!atomic_exchange(&s_wake_owed, 0)) return 0;
+		/* the wake that found the queue full */
+		*a_type = 11; *a_id = 0; *a = 0; *b = 0; *c = 0;
+		atomic_store(&s_wake_pending, 0);
+		return 1;
+	}
 	*a_type = s_events[s_head].type; *a_id = s_events[s_head].id;
 	*a = s_events[s_head].a; *b = s_events[s_head].b; *c = s_events[s_head].c;
 	if (*a_type == 11) atomic_store(&s_wake_pending, 0);
 	s_head = (s_head + 1) % SGA_QUEUE;
 	return 1;
+}
+
+/* For the tests of a full queue: `a_count' events no widget answers (type 0, id 0), queued
+   when the loop next turns, through the main dispatch queue as a wake is. So a wake sent
+   after this call meets the queue full: the main queue runs its blocks in order. */
+void sga_test_fill_event_queue(int a_count)
+{
+	dispatch_async(dispatch_get_main_queue(), ^{ for (int i = 0; i < a_count; i++) sga_push(0, 0, 0, 0, 0); });
 }
 
 /* ------------------------------------------------------ 1l: reference pills */

@@ -256,6 +256,35 @@ feature -- Tests
 			assert ("payload copied", received_text.same_string ("from the worker"))
 		end
 
+	test_wake_arrives_after_a_full_event_queue
+			-- A worker's wake still arrives when the event queue is full as it lands, and the
+			-- wakes after it are not lost: 4,096 events no widget answers are queued for the
+			-- loop's next turn, past the queue's size (2,048 on macOS); then a worker posts and
+			-- wakes; then the loop turns, and the flood lands just ahead of the wake.
+		local
+			l_worker: separate GUI_TEST_WORKER
+			i: INTEGER
+		do
+			received_tag := 0
+			driver.fill_event_queue (4096)
+			create l_worker.make (app.mailbox)
+			start_worker (l_worker)
+			assert ("the worker has posted and woken", worker_started (l_worker))
+			from i := 1 until received_tag /= 0 or i > 30 loop
+				app.process_events (100)
+				i := i + 1
+			end
+			assert ("the message arrived after a full queue", received_tag = 7)
+			received_tag := 0
+			create l_worker.make (app.mailbox)
+			start_worker (l_worker)
+			from i := 1 until received_tag /= 0 or i > 30 loop
+				app.process_events (100)
+				i := i + 1
+			end
+			assert ("and the next wake too", received_tag = 7)
+		end
+
 	test_close_request_without_agents_closes
 		local
 			l_window: GUI_WINDOW
@@ -5680,6 +5709,12 @@ feature {NONE} -- Fixtures
 	start_worker (a_worker: separate GUI_TEST_WORKER)
 		do
 			a_worker.start
+		end
+
+	worker_started (a_worker: separate GUI_TEST_WORKER): BOOLEAN
+			-- Has `a_worker' done its `start'? Waits for it.
+		do
+			Result := a_worker.has_started
 		end
 
 	shown_window_with_button (a_text: STRING): GUI_WINDOW
