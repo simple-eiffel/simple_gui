@@ -13,9 +13,17 @@ note
 		in characters, and are read from the text, so they answer before the first layout.
 
 		Cost: the colors are marks, and only the lines in view carry them (`mark_view'): a
-		mark for every colored run of a long text costs more than drawing it. The box still
-		lays out the whole text after an edit and walks every character when it draws, so
-		the time of one keystroke grows with the size of the text.
+		mark for every colored run of a long text costs more than drawing it. A frame draws
+		the lines in view only, and an edit lays out the edited paragraphs only.
+	]"
+	performance: "[
+		2026-11-10, Windows, 10,000 lines (388,893 characters), contract checking off: a
+		frame's text drawing 4 to 5 milliseconds; a test keystroke (3 to 5 frames) 84
+		milliseconds mean. What still grows with the text on each keystroke: the style
+		sync (about 7 milliseconds) and the editor's comparison of the old text with the
+		new (about 8), the copy the box keeps for undo, and `report_caret' finding the
+		caret's line by a scan (about 2, twice). An edit report from the box (start,
+		removed, inserted; planned as 1v-e) ends the comparing.
 	]"
 
 class
