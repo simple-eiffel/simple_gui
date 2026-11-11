@@ -54,14 +54,6 @@ feature -- Operation
 	dispatch (a_type, a_x, a_y: INTEGER)
 			-- simple_shell's events, simple_gui's where they differ.
 		do
-			if a_type = 7 then
-					-- the heartbeat: look in the mailbox each tick, so a lost wake costs at most
-					-- one tick, as simple_shell's heartbeat intends. Wakes were lost: a grid's
-					-- pictures never arrived in about one run in four (grid_view_items, 7 of 10
-					-- passing before this, 20 of 20 after); where the wake goes missing is not
-					-- yet found.
-				backend.push (11, 0, 0, 0, 0)
-			end
 			inspect a_type
 			when 54 then
 					-- a processor called SHELL_WAKE.wake
