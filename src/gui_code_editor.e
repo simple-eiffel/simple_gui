@@ -48,6 +48,11 @@ feature {NONE} -- Initialization
 			create delimiters.make (2)
 			create highlighted.make_empty
 			create starts.make (64)
+			create fold_actions.make
+			create fold_lines.make
+			create closed_folds.make
+			create hidden_lines.make
+			is_fold_lines_stale := True
 			is_case_sensitive := True
 			is_bracket_matching := True
 			tab_width := 4
@@ -146,6 +151,11 @@ feature -- Display
 		do
 			tab_width := a_width
 			backend.code_set_indent (id, a_width, is_indent_with_spaces)
+			if syntax = Void then
+					-- the folds of the indentation depend on it
+				is_fold_lines_stale := True
+				folds_touched (highlighted)
+			end
 		ensure
 			set: tab_width = a_width
 		end
@@ -188,15 +198,18 @@ feature -- Lines and the caret
 		end
 
 	go_to_line (n: INTEGER)
-			-- The caret at the start of line `n', scrolled into view; no event.
+			-- The caret at the start of line `n', scrolled into view; no event. A closed
+			-- fold that hides the line opens first.
 		require
 			gui_thread: is_gui_thread
 			valid: 1 <= n and n <= line_count
 		do
+			show_lines (n, n)
 			backend.text_go_to_line (id, n)
 			look_for_bracket
 		ensure
 			there: caret_line = n and caret_column = 1
+			shown: not is_line_hidden (n)
 		end
 
 	caret_actions: GUI_ACTIONS [TUPLE [line, column: INTEGER]]
@@ -272,7 +285,11 @@ feature -- Highlighting by a syntax object
 					al_old.detach
 				end
 				syntax := a_syntax
-				folds := Void
+					-- the folds were the old one's, or the indentation's: every fold opens,
+					-- and they are found again
+				open_every_fold
+				create fold_lines.make
+				is_fold_lines_stale := a_syntax = Void
 				if attached a_syntax as al_new then
 					make_plain
 					al_new.attach (Current)
@@ -280,6 +297,7 @@ feature -- Highlighting by a syntax object
 				else
 					highlight_all
 				end
+				folds_touched (highlighted)
 			end
 		ensure
 			set: syntax = a_syntax
@@ -369,23 +387,58 @@ feature -- Highlighting by a syntax object
 
 	set_folds (a_folds: GUI_SYNTAX_RANGES)
 			-- The folds of the whole text are `a_folds'. For the syntax object, on the GUI
-			-- processor. The object is kept and read in place. (1v-e-3 shows the folds;
-			-- until then `fold_count' and its fellows answer them.)
+			-- processor. Read during the call: the object is not kept. A range of one line
+			-- hides nothing and is no fold; of ranges that start on one line, the one that
+			-- reaches furthest is the fold. A closed fold stays closed while one of
+			-- `a_folds' starts on its first line.
+			-- Cost: fastest with the ranges in order of their first lines.
 		require
 			gui_thread: is_gui_thread
 			has_syntax: syntax /= Void
 		do
-			folds := a_folds
+			create fold_lines.make_from (a_folds)
+			is_fold_lines_stale := False
+			folds_touched (highlighted)
 		ensure
-			kept: fold_count = a_folds.count
+			kept: fold_count <= a_folds.count
+		end
+
+feature -- Folding (1v-e-3)
+
+	is_folding_shown: BOOLEAN
+			-- Does the gutter show a marker beside each line that starts a fold, and do the
+			-- fold keys work? (Off until set.) `fold' and its fellows work either way.
+			-- The keys: Control+Shift+[ closes the innermost open fold that holds the
+			-- caret's line, Control+Shift+] opens the closed fold that starts on it
+			-- (Command+Option+[ and ] on macOS).
+
+	set_folding_shown (a_on: BOOLEAN)
+		require
+			gui_thread: is_gui_thread
+		do
+			if a_on /= is_folding_shown then
+				is_folding_shown := a_on
+				backend.code_set_folding_shown (id, a_on)
+				if a_on then
+					folds_changed (highlighted)
+				end
+			end
+		ensure
+			set: is_folding_shown = a_on
 		end
 
 	fold_count: INTEGER
-			-- How many folds the syntax object has given; 0 without one.
+			-- How many folds the text has. A fold is a first line, which always shows, and
+			-- the lines after it through its last, which a closed fold hides. With a syntax
+			-- object the folds are those it gave last (`set_folds'). Without one they are
+			-- the indentation's: a line followed by lines indented deeper folds through the
+			-- last of them; blank lines between them belong to the fold, blank lines after
+			-- them do not; a tab reaches the next multiple of `tab_width'.
+			-- The folds are in order of their first lines, one to a first line.
+			-- Cost, without a syntax object: the first call after a change of the text
+			-- walks every line's indent (unless folding is shown, which has done so).
 		do
-			if attached folds as al_folds then
-				Result := al_folds.count
-			end
+			Result := current_folds.count
 		ensure
 			not_negative: Result >= 0
 		end
@@ -403,11 +456,10 @@ feature -- Highlighting by a syntax object
 		require
 			valid_fold: is_valid_fold (i)
 		do
-			if attached folds as al_folds then
-				Result := al_folds.first_line (i)
-			end
+			Result := current_folds.first_line (i)
 		ensure
 			positive: Result >= 1
+			foldable: is_foldable (Result)
 		end
 
 	fold_last_line (i: INTEGER): INTEGER
@@ -415,12 +467,109 @@ feature -- Highlighting by a syntax object
 		require
 			valid_fold: is_valid_fold (i)
 		do
-			if attached folds as al_folds then
-				Result := al_folds.last_line (i)
+			Result := current_folds.last_line (i)
+		ensure
+			after_the_first: Result > fold_first_line (i)
+		end
+
+	is_foldable (a_line: INTEGER): BOOLEAN
+			-- Does a fold start on `a_line'?
+		do
+			Result := current_folds.has_start (a_line)
+		end
+
+	is_folded (a_line: INTEGER): BOOLEAN
+			-- Is the fold that starts on `a_line' closed?
+		do
+			Result := closed_folds.has_start (a_line)
+		end
+
+	is_line_hidden (a_line: INTEGER): BOOLEAN
+			-- Is `a_line' hidden in a closed fold? (Never a fold's own first line, unless a
+			-- fold around it is closed too.) The text is whole all the same: `text',
+			-- `line_text' and the positions count hidden lines like any other.
+		do
+			Result := hidden_lines.is_hidden (a_line)
+		end
+
+	fold (a_line: INTEGER)
+			-- Close the fold that starts on `a_line'. Where an end of the selection is in a
+			-- line this hides, the caret goes to the end of `a_line', nothing selected.
+			-- No event.
+		require
+			gui_thread: is_gui_thread
+			foldable: is_foldable (a_line)
+		local
+			l_folds: GUI_LINE_RANGES
+		do
+			if not is_folded (a_line) then
+				l_folds := current_folds
+				closed_folds.put (a_line, l_folds.last_line (l_folds.index_starting_at (a_line)))
+				closed_changed
+				leave_hidden_lines
 			end
 		ensure
-			not_before_the_first: Result >= fold_first_line (i)
+			folded: is_folded (a_line)
+			hides_the_next: is_line_hidden (a_line + 1)
 		end
+
+	unfold (a_line: INTEGER)
+			-- Open the fold that starts on `a_line'. A closed fold inside it stays closed;
+			-- its lines stay hidden while a fold around it is closed. No event.
+		require
+			gui_thread: is_gui_thread
+			foldable: is_foldable (a_line)
+		do
+			if is_folded (a_line) then
+				closed_folds.remove_starting_at (a_line)
+				closed_changed
+			end
+		ensure
+			open: not is_folded (a_line)
+		end
+
+	toggle_fold (a_line: INTEGER)
+			-- Close the fold that starts on `a_line' when it is open, open it when closed.
+		require
+			gui_thread: is_gui_thread
+			foldable: is_foldable (a_line)
+		do
+			if is_folded (a_line) then
+				unfold (a_line)
+			else
+				fold (a_line)
+			end
+		ensure
+			toggled: is_folded (a_line) /= old is_folded (a_line)
+		end
+
+	fold_all
+			-- Close every fold. The caret leaves a hidden line as with `fold'.
+		require
+			gui_thread: is_gui_thread
+		do
+			create closed_folds.make_from (current_folds)
+			closed_changed
+			leave_hidden_lines
+		ensure
+			all_closed: across 1 |..| fold_count as ic all is_folded (fold_first_line (ic)) end
+		end
+
+	unfold_all
+			-- Open every fold.
+		require
+			gui_thread: is_gui_thread
+		do
+			open_every_fold
+		ensure
+			none_hidden: across 1 |..| fold_count as ic all not is_folded (fold_first_line (ic)) end
+		end
+
+	fold_actions: GUI_ACTIONS [TUPLE [line: INTEGER; folded: BOOLEAN]]
+			-- Run when the user closes or opens a fold, by a click on its marker or by a
+			-- fold key: the fold's first line, and whether it is closed now. Not run when
+			-- the program folds, nor when a fold opens because the caret or an edit went
+			-- into it.
 
 feature -- Bracket matching (1v-e-2)
 
@@ -590,11 +739,15 @@ feature {GUI_APPLICATION} -- Events
 
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)
 			-- 52: the user moved the caret (line, column); 56: the user pressed the key that
-			-- goes to the matching bracket; else as a text area.
+			-- goes to the matching bracket; 57: the user clicked a fold marker or pressed a
+			-- fold key (line, which); else as a text area.
 		do
 			if a_type = 52 then
+				show_lines (a_a, a_a)
 				look_for_bracket
 				caret_actions.call ([a_a, a_b])
+			elseif a_type = 57 then
+				fold_by_user (a_a, a_b)
 			elseif a_type = 56 then
 				if has_bracket_pair then
 					go_to_matching_bracket
@@ -608,14 +761,31 @@ feature {GUI_APPLICATION} -- Events
 feature -- Element change
 
 	set_text (a_text: READABLE_STRING_GENERAL)
+			-- Also: every fold opens, and the folds are found again.
 		do
 			Precursor (a_text)
+			open_every_fold
+			if syntax = Void then
+				is_fold_lines_stale := True
+			else
+					-- the syntax object gives the new text's folds (`set_folds')
+				create fold_lines.make
+			end
 			highlight_all
+			folds_touched (highlighted)
 		end
 
 	select_range (a_start, an_end: INTEGER)
-			-- Also: a bracket at the caret's new place gets its pair.
+			-- Also: a closed fold that hides either end opens first, and a bracket at the
+			-- caret's new place gets its pair.
+		local
+			l_first: INTEGER
 		do
+			if hidden_lines.count > 0 then
+				l_first := line_at (highlighted, a_start)
+				show_lines (l_first, l_first + line_breaks_in (highlighted,
+					a_start.min (highlighted.count + 1), an_end.min (highlighted.count).max (a_start.min (highlighted.count + 1) - 1)))
+			end
 			Precursor (a_start, an_end)
 			look_for_bracket
 		end
@@ -630,7 +800,7 @@ feature -- Element change
 				al_syntax.text_replaced (highlighted)
 			else
 				starts.wipe_out
-				rehighlight
+				rehighlight (text)
 			end
 			look_for_bracket
 		end
@@ -663,7 +833,6 @@ feature {NONE} -- The application's calls
 				if attached syntax as al_syntax then
 					al_syntax.detach
 					syntax := Void
-					folds := Void
 				end
 				if attached appearance_agent as al_agent then
 					application.appearance_changed_actions.prune (al_agent)
@@ -691,17 +860,19 @@ feature {NONE} -- Highlighting
 			-- The state each line of `highlighted' started in; empty when every line is
 			-- to be highlighted again.
 
-	folds: detachable GUI_SYNTAX_RANGES
-			-- The folds the syntax object gave last.
-
 	text_changed
-			-- The user edited the text: the syntax object hears what changed, or the rules
-			-- color the changed lines.
+			-- The user edited the text: the folds follow the edit, then the syntax object
+			-- hears what changed, or the rules color the changed lines.
+		local
+			l_text: STRING_32
 		do
+			l_text := text
+				-- before the syntax object hears: it may answer with `set_folds' at once
+			folds_follow (highlighted, l_text)
 			if attached syntax as al_syntax then
-				report_edit (al_syntax)
+				report_edit (al_syntax, l_text)
 			else
-				rehighlight
+				rehighlight (l_text)
 			end
 			look_for_bracket
 		end
@@ -716,10 +887,15 @@ feature {NONE} -- Highlighting
 
 	program_edited
 			-- A feature of this class changed a part of the text (no change event follows):
-			-- the syntax object hears what changed, or the rules color every line.
+			-- the folds follow the edit, then the syntax object hears what changed, or the
+			-- rules color every line.
+		local
+			l_text: STRING_32
 		do
+			l_text := text
+			folds_follow (highlighted, l_text)
 			if attached syntax as al_syntax then
-				report_edit (al_syntax)
+				report_edit (al_syntax, l_text)
 				look_for_bracket
 			else
 				highlight_all
@@ -738,20 +914,20 @@ feature {NONE} -- Highlighting
 			no_states: starts.is_empty
 		end
 
-	report_edit (a_syntax: GUI_EDITOR_SYNTAX)
-			-- Tell `a_syntax' the edit that makes the text now from `highlighted', the text
+	report_edit (a_syntax: GUI_EDITOR_SYNTAX; a_text: STRING_32)
+			-- Tell `a_syntax' the edit that makes `a_text', the text now, from `highlighted', the text
 			-- as last reported: what lies between the start and the end the two share. Where
 			-- the shared start and the shared end overlap (a stretch that repeats), the end
 			-- gives way, so the edit is always a true one. Nothing is told when the texts are
 			-- equal (one edit that reached here twice).
-			-- Cost: one read of the text and one comparison of memory.
+			-- Cost: one comparison of memory.
 		require
 			working_for_this: a_syntax.editor = Current
 		local
 			l_text, l_old: STRING_32
 			l_head, l_tail, l_limit: INTEGER
 		do
-			l_text := text
+			l_text := a_text
 			l_old := highlighted
 			l_limit := l_text.count.min (l_old.count)
 			l_head := shared_head (l_text, l_old, l_limit)
@@ -764,7 +940,8 @@ feature {NONE} -- Highlighting
 			end
 		end
 
-	rehighlight
+	rehighlight (a_text: STRING_32)
+			-- `a_text' is the text now.
 			-- Highlight the lines that changed since `highlighted', then the following ones
 			-- while the state they start in differs from before.
 			-- The changed lines are found from the characters the two texts share at their
@@ -779,7 +956,7 @@ feature {NONE} -- Highlighting
 			l_starts: ARRAYED_LIST [INTEGER]
 			l_done: BOOLEAN
 		do
-			l_text := text
+			l_text := a_text
 			l_count := l_text.occurrences ('%N') + 1
 			l_old_count := starts.count
 			if l_old_count = 0 then
@@ -1244,6 +1421,304 @@ feature {NONE} -- Bracket matching
 			end
 		end
 
+feature {NONE} -- Folding
+
+	fold_lines: GUI_LINE_RANGES
+			-- The folds as last found; ask `current_folds'.
+
+	is_fold_lines_stale: BOOLEAN
+			-- Has the text changed since `fold_lines' were found from its indentation?
+
+	closed_folds: GUI_LINE_RANGES
+			-- The folds that are closed, each with the last line it had when last looked at.
+
+	hidden_lines: GUI_LINE_RANGES
+			-- The lines `closed_folds' hide together: what the control is given.
+
+	has_left_hidden_lines: BOOLEAN
+			-- Did the last `leave_hidden_lines' move the caret?
+
+	current_folds: GUI_LINE_RANGES
+			-- The folds of the text: the syntax object's, or the indentation's, found again
+			-- when the text has changed since they were.
+		do
+			if is_fold_lines_stale then
+				create fold_lines.make_by_indentation (highlighted, tab_width)
+				is_fold_lines_stale := False
+			end
+			Result := fold_lines
+		ensure
+			fresh: not is_fold_lines_stale
+		end
+
+	folds_follow (a_old, a_new: STRING_32)
+			-- The text was `a_old' and is `a_new'. The closed folds follow the edit by the
+			-- rule of GUI_LINE_RANGES, and so do the syntax object's folds, which stand
+			-- until it gives new ones; the indentation's are found again.
+			-- Cost: one comparison of the texts while a fold is closed or a syntax object
+			-- has given folds; else nothing.
+		local
+			l_had_hidden: BOOLEAN
+		do
+			l_had_hidden := hidden_lines.count > 0
+			if syntax = Void then
+				is_fold_lines_stale := True
+				closed_folds.follow_texts (a_old, a_new)
+			else
+					-- (the edit is found once for the two)
+				closed_folds.follow_both (a_old, a_new, fold_lines)
+			end
+			if is_folding_shown or l_had_hidden then
+				folds_changed (a_new)
+			end
+		end
+
+	folds_touched (a_text: STRING_32)
+			-- The folds of `a_text', the text now, may be new: see to the closed folds and
+			-- the control, where either has a part in it.
+		do
+			if is_folding_shown or closed_folds.count > 0 then
+				folds_changed (a_text)
+			end
+		end
+
+	folds_changed (a_text: STRING_32)
+			-- The folds of `a_text', the text now, are new or have moved. A closed fold
+			-- stays closed while a fold starts on its first line, and reaches as far as
+			-- that one; any other opens. A fold that would hide an end of the selection
+			-- opens: the caret is never in a hidden line. Then the control is told.
+		local
+			l_folds, l_kept: GUI_LINE_RANGES
+			i, k: INTEGER
+			l_had_hidden: BOOLEAN
+		do
+			l_had_hidden := hidden_lines.count > 0
+			if is_fold_lines_stale then
+				create fold_lines.make_by_indentation (a_text, tab_width)
+				is_fold_lines_stale := False
+			end
+			l_folds := fold_lines
+			if closed_folds.count > 0 then
+				create l_kept.make
+				from
+					i := 1
+				until
+					i > closed_folds.count
+				loop
+					k := l_folds.index_starting_at (closed_folds.first_line (i))
+					if k > 0 then
+						l_kept.put (l_folds.first_line (k), l_folds.last_line (k))
+					end
+					i := i + 1
+				end
+				closed_folds := l_kept
+				if closed_folds.count > 0 then
+					open_folds_hiding (line_at (a_text, selection_start))
+					open_folds_hiding (line_at (a_text, selection_end + 1))
+				end
+			end
+			hidden_lines := closed_folds.merged
+			if is_folding_shown then
+				send_fold_marks
+			end
+			if l_had_hidden or hidden_lines.count > 0 then
+				send_hidden_lines
+			end
+		end
+
+	closed_changed
+			-- `closed_folds' changed: the hidden lines are found again and the control told.
+		do
+			hidden_lines := closed_folds.merged
+			send_hidden_lines
+		end
+
+	open_every_fold
+			-- No fold is closed; the control is told when one was.
+		do
+			if closed_folds.count > 0 then
+				closed_folds.wipe_out
+				closed_changed
+			end
+		ensure
+			none_closed: closed_folds.count = 0
+		end
+
+	open_folds_hiding (a_line: INTEGER)
+			-- Every closed fold that hides `a_line' is open in `closed_folds'. (The caller
+			-- sees to `hidden_lines' and the control.)
+		local
+			i: INTEGER
+		do
+			from
+				i := 1
+			until
+				i > closed_folds.count
+			loop
+				if closed_folds.first_line (i) < a_line and a_line <= closed_folds.last_line (i) then
+					closed_folds.remove_starting_at (closed_folds.first_line (i))
+				else
+					i := i + 1
+				end
+			end
+		end
+
+	show_lines (a_first, a_last: INTEGER)
+			-- Open every closed fold that hides line `a_first' or line `a_last'.
+			-- Cost: nothing while no fold is closed.
+		do
+			if hidden_lines.count > 0 and then (hidden_lines.is_hidden (a_first) or hidden_lines.is_hidden (a_last)) then
+				open_folds_hiding (a_first)
+				open_folds_hiding (a_last)
+				closed_changed
+			end
+		ensure
+			shown: not hidden_lines.is_hidden (a_first) and not hidden_lines.is_hidden (a_last)
+		end
+
+	leave_hidden_lines
+			-- Where an end of the selection is in a hidden line, put the caret at the end
+			-- of the first line of what hides it, nothing selected.
+			-- `has_left_hidden_lines' tells whether the caret went.
+		local
+			k, l_end: INTEGER
+		do
+			has_left_hidden_lines := False
+			if hidden_lines.count > 0 then
+				k := hidden_lines.index_hiding (line_at (highlighted, selection_start))
+				if k = 0 then
+					k := hidden_lines.index_hiding (line_at (highlighted, selection_end + 1))
+				end
+				if k > 0 then
+					l_end := line_end (highlighted, hidden_lines.first_line (k))
+					backend.rich_text_select (id, l_end, l_end - 1)
+					has_left_hidden_lines := True
+					look_for_bracket
+				end
+			end
+		end
+
+	fold_by_user (a_line, a_which: INTEGER)
+			-- 57. `a_which' 0: the user clicked the marker beside `a_line'. 1: the fold key
+			-- with the caret on `a_line', which closes the innermost open fold that holds
+			-- the line. 2: the unfold key, which opens the closed fold that starts on it.
+			-- `fold_actions' run; so do `caret_actions' when the fold moved the caret.
+		local
+			l_line: INTEGER
+		do
+			if a_which = 0 then
+				if is_foldable (a_line) then
+					l_line := a_line
+				end
+			elseif a_which = 1 then
+				l_line := open_fold_holding (a_line)
+			elseif a_which = 2 and then is_folded (a_line) then
+				l_line := a_line
+			end
+			if l_line > 0 then
+				has_left_hidden_lines := False
+				toggle_fold (l_line)
+				fold_actions.call ([l_line, is_folded (l_line)])
+				if has_left_hidden_lines then
+					caret_actions.call ([caret_line, caret_column])
+				end
+			end
+		end
+
+	open_fold_holding (a_line: INTEGER): INTEGER
+			-- The first line of the innermost fold that holds `a_line' (its first line
+			-- among them) and is open; 0 when there is none.
+		local
+			l_folds: GUI_LINE_RANGES
+			i: INTEGER
+		do
+			l_folds := current_folds
+			from
+				i := l_folds.count_starting_before (a_line + 1)
+			until
+				i = 0 or Result > 0
+			loop
+				if l_folds.last_line (i) >= a_line and not closed_folds.has_start (l_folds.first_line (i)) then
+					Result := l_folds.first_line (i)
+				end
+				i := i - 1
+			end
+		ensure
+			none_or_foldable: Result = 0 or else (is_foldable (Result) and not is_folded (Result))
+		end
+
+	send_fold_marks
+			-- Tell the control the lines that start a fold.
+		local
+			l_buffer: MANAGED_POINTER
+			i, n: INTEGER
+		do
+			n := fold_lines.count
+			create l_buffer.make (n.max (1) * 4)
+			from
+				i := 1
+			until
+				i > n
+			loop
+				l_buffer.put_integer_32 (fold_lines.first_line (i), (i - 1) * 4)
+				i := i + 1
+			end
+			backend.code_set_fold_marks (id, l_buffer.item, n)
+		end
+
+	send_hidden_lines
+			-- Tell the control the lines that are hidden.
+		local
+			l_buffer: MANAGED_POINTER
+			i, n: INTEGER
+		do
+			n := hidden_lines.count
+			create l_buffer.make (n.max (1) * 8)
+			from
+				i := 1
+			until
+				i > n
+			loop
+				l_buffer.put_integer_32 (hidden_lines.first_line (i), (i - 1) * 8)
+				l_buffer.put_integer_32 (hidden_lines.last_line (i), (i - 1) * 8 + 4)
+				i := i + 1
+			end
+			backend.code_set_folded_lines (id, l_buffer.item, n)
+		end
+
+	line_at (a_text: STRING_32; a_position: INTEGER): INTEGER
+			-- The line of `a_text' a caret before character `a_position' is on. A position
+			-- past the text counts as its end.
+		do
+			Result := 1 + line_breaks_in (a_text, 1, (a_position - 1).min (a_text.count).max (0))
+		ensure
+			positive: Result >= 1
+		end
+
+	line_end (a_text: STRING_32; a_line: INTEGER): INTEGER
+			-- Where the line break that ends line `a_line' of `a_text' is (a caret before
+			-- it is at the line's end); one past the text for its last line.
+		require
+			line_positive: a_line >= 1
+		local
+			l_line: INTEGER
+		do
+			from
+				l_line := 1
+				Result := a_text.index_of ('%N', 1)
+			until
+				Result = 0 or l_line = a_line
+			loop
+				l_line := l_line + 1
+				Result := a_text.index_of ('%N', Result + 1)
+			end
+			if Result = 0 then
+				Result := a_text.count + 1
+			end
+		ensure
+			in_or_just_past: 1 <= Result and Result <= a_text.count + 1
+		end
+
 feature {NONE} -- Finding
 
 	find_from (a_text: READABLE_STRING_GENERAL; a_case_sensitive, a_whole_word, a_forward: BOOLEAN): BOOLEAN
@@ -1307,7 +1782,9 @@ feature {NONE} -- Finding
 
 invariant
 	starts_fit_the_text: starts.count <= highlighted.count + 1
-	folds_come_from_a_syntax: syntax = Void implies folds = Void
+	stale_folds_are_by_indentation: is_fold_lines_stale implies syntax = Void
+	hidden_only_when_closed: closed_folds.count = 0 implies hidden_lines.count = 0
+	hidden_lines_apart: hidden_lines.is_disjoint
 	pair_only_when_matching: has_bracket_pair implies is_bracket_matching
 	pair_answers_the_bracket_asked: has_bracket_pair implies bracket_asked >= 1
 	pair_in_order: has_bracket_pair implies (1 <= bracket_first and bracket_first < bracket_second)

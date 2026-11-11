@@ -399,13 +399,30 @@ feature -- Following an edit
 			-- The edit is what lies between the start and the end the two texts share; where
 			-- those overlap (a stretch that repeats) the end gives way.
 			-- Cost: one comparison of memory and the line breaks before the edit.
+		do
+			follow_both (a_old, a_new, Void)
+		ensure
+			not_more: count <= old count
+		end
+
+	follow_both (a_old, a_new: READABLE_STRING_32; a_other: detachable GUI_LINE_RANGES)
+			-- As `follow_texts', and `a_other' (when there is one) goes through the same
+			-- edit: the edit is found once for the two.
+			-- Cost: nothing when neither has a range.
+		require
+			another: a_other /= Current
 		local
-			l_limit, l_head, l_tail, l_removed, l_inserted, l_from, l_through, l_end: INTEGER
+			l_limit, l_head, l_tail, l_removed, l_inserted, l_from, l_through, l_end, l_delta: INTEGER
 			l_clean: BOOLEAN
 		do
-			l_limit := a_old.count.min (a_new.count)
-			l_head := shared_head (a_new, a_old, l_limit)
-			if count > 0 and (l_head < l_limit or a_old.count /= a_new.count) then
+			if count = 0 and (a_other = Void or else a_other.count = 0) then
+					-- nothing_to_follow: no comparison
+				l_limit := -1
+			else
+				l_limit := a_old.count.min (a_new.count)
+				l_head := shared_head (a_new, a_old, l_limit)
+			end
+			if l_limit >= 0 and (l_head < l_limit or a_old.count /= a_new.count) then
 				l_tail := shared_tail (a_new, a_old, l_limit).min (l_limit - l_head)
 				l_removed := a_old.count - l_head - l_tail
 				l_inserted := a_new.count - l_head - l_tail
@@ -422,8 +439,11 @@ feature -- Following an edit
 						l_clean := l_head = 0 or else a_old [l_head] = '%N'
 					end
 				end
-				follow (l_from, l_through, l_clean,
-					line_breaks_in (a_new, l_head + 1, l_head + l_inserted) - (l_through - l_from))
+				l_delta := line_breaks_in (a_new, l_head + 1, l_head + l_inserted) - (l_through - l_from)
+				follow (l_from, l_through, l_clean, l_delta)
+				if a_other /= Void then
+					a_other.follow (l_from, l_through, l_clean, l_delta)
+				end
 			end
 		ensure
 			not_more: count <= old count

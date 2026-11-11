@@ -769,6 +769,44 @@ feature -- User actions
 			Result := backend.test_bracket_tint_at (an_editor.id, a_position)
 		end
 
+	press_fold_marker (an_editor: GUI_CODE_EDITOR; a_line: INTEGER)
+			-- Click the fold marker beside `a_line', as the user would: 57. Nothing when
+			-- the line shows no marker.
+		require
+			has_application: has_application
+		do
+			backend.test_press_fold_marker (an_editor.id, a_line)
+			settle
+		end
+
+	press_fold_key (an_editor: GUI_CODE_EDITOR; a_unfold: BOOLEAN)
+			-- Press the fold key (the unfold key when `a_unfold'), as the user would: 57.
+		require
+			has_application: has_application
+		do
+			backend.test_fold_key (an_editor.id, a_unfold)
+			settle
+		end
+
+	press_arrow_key (an_editor: GUI_CODE_EDITOR; a_direction: INTEGER)
+			-- Press an arrow key in `an_editor', as the user would: `a_direction' 1 up,
+			-- 2 down, 3 left, 4 right.
+		require
+			has_application: has_application
+			a_direction: 1 <= a_direction and a_direction <= 4
+		do
+			backend.test_code_arrow_key (an_editor.id, a_direction)
+			settle
+		end
+
+	is_line_shown (an_editor: GUI_CODE_EDITOR; a_line: INTEGER): BOOLEAN
+			-- Does the control show line `a_line': is it in the text and in no closed fold?
+		require
+			has_application: has_application
+		do
+			Result := backend.test_line_is_shown (an_editor.id, a_line)
+		end
+
 	choose_grid_item (a_grid: GUI_GRID_VIEW; i: INTEGER)
 			-- Click item `i', as the user would: 50.
 		require
