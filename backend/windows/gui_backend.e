@@ -29,8 +29,13 @@ feature -- Lifecycle and loop
 			-- Windows always has a display. Become DPI aware first, before anything asks the
 			-- desktop's scale: until then Windows answers 96 DPI, so a window and its first
 			-- theme were sized at 100% on a 150% display and grew when a later theme came.
+			-- Then claim the pump for this thread, so a worker's wake always has somewhere
+			-- to go: before any shell window exists (a grid asks for its pictures on its
+			-- first frame, while its window is composed) `SHELL_WAKE.wake' found no window
+			-- and no claimed thread, answered "nobody", and the wake was lost (issue 107).
 		do
 			desktop.become_dpi_aware
+			wake_reader.claim_pump_thread
 			if not from_c (a_name).is_empty then
 				app_title.put (from_c (a_name))
 			end

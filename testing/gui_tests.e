@@ -3137,6 +3137,42 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_grid_view_pictures_arrive_while_more_decode
+			-- 1v-a: a small picture's message arrives while three large ones are still queued
+			-- on the worker. The loader asks the worker for results from inside the message
+			-- handler, and the worker posts each result to the mailbox: with the mailbox
+			-- held while handlers ran, both processors waited on each other for good.
+		local
+			l_window: GUI_WINDOW
+			l_grid: GUI_GRID_VIEW
+			l_small, l_large: PATH
+			i: INTEGER
+			l_all: BOOLEAN
+		do
+			create l_small.make_from_string ("testing/fixtures/grid_small.jpg")
+			create l_large.make_from_string ("testing/fixtures/grid_large.jpg")
+			create l_window.make ("Pictures while more decode", 560, 400)
+			create l_grid.make
+			l_grid.extend_picture ("Small", l_small)
+			l_grid.extend_picture ("Large 1", l_large)
+			l_grid.extend_picture ("Large 2", l_large)
+			l_grid.extend_picture ("Large 3", l_large)
+			l_window.set_content (l_grid)
+			l_window.show
+			settle_window
+			from
+				i := 1
+				l_all := True
+			until
+				i > 4
+			loop
+				l_all := l_all and driver.grid_picture_ready (l_grid, i, 30000)
+				i := i + 1
+			end
+			assert ("all four pictures loaded", l_all)
+			l_window.close
+		end
+
 	test_grid_view_keeps_turning_while_a_large_picture_decodes
 			-- 1v-a: a 6000 by 4000 JPEG decodes off the GUI thread, so a 20 ms timer keeps firing
 			-- (no gap over 400 ms) until the picture shows.
