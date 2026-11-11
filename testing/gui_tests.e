@@ -2805,6 +2805,117 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_code_carets_type_and_undo
+			-- 1v-e-5: text typed at three carets, two of them on one line, goes in at each;
+			-- one undo takes all three back; the syntax object hears one true edit.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_syntax: GUI_TEST_SYNTAX
+			l_menu: GUI_MENU
+			l_undo, l_edits: INTEGER
+		do
+			l_menu := app.menu.add_menu ("Edit")
+			l_menu.add_edit_item (l_menu.Role_undo, "Undo")
+			l_undo := l_menu.last_item_id
+			create l_window.make ("Carets", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			create l_syntax.make
+			l_code.set_syntax (l_syntax)
+			l_code.set_text ("abc%Nabc%N")
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 1)
+			l_code.add_caret (1, 3)
+			l_code.add_caret (2, 1)
+			assert ("three carets: " + l_code.caret_count.out, l_code.caret_count = 3)
+			l_edits := l_syntax.edit_count
+			driver.press_code_key (l_code, 1, False, "X")
+			assert ("typed at all three: " + l_code.text.to_string_8, l_code.text.same_string ("XabXc%NXabc%N"))
+			assert ("still three", l_code.caret_count = 3)
+			assert ("one edit heard: " + (l_syntax.edit_count - l_edits).out, l_syntax.edit_count = l_edits + 1)
+			assert_copy_holds ("the syntax copy holds", l_code, l_syntax)
+			driver.invoke_menu (l_undo)
+			assert ("one undo takes all three back: " + l_code.text.to_string_8, l_code.text.same_string ("abc%Nabc%N"))
+			driver.press_code_key (l_code, 15, False, "")
+			assert ("Escape: back to one", l_code.caret_count = 1)
+			l_window.close
+		end
+
+	test_code_carets_meet_and_occurrences
+			-- 1v-e-5: Backspace at two carets until they meet makes one; Control+D selects
+			-- the word, then adds each next occurrence; typing replaces all of them.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+		do
+			create l_window.make ("Carets meet", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("ab")
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 2)
+			l_code.add_caret (1, 3)
+			assert ("two carets", l_code.caret_count = 2)
+			driver.press_code_key (l_code, 4, False, "")
+			assert ("both gone: " + l_code.text.to_string_8, l_code.text.is_empty)
+			assert ("they met: one caret", l_code.caret_count = 1)
+			l_code.set_text ("foo bar foo baz foo")
+			driver.move_caret (l_code, 1, 2)
+			driver.make_caret_gesture (l_code, 4, 0)
+			assert ("the word selected", l_code.caret_count = 1 and l_code.selection_start = 1 and l_code.selection_end = 3)
+			driver.make_caret_gesture (l_code, 4, 0)
+			driver.make_caret_gesture (l_code, 4, 0)
+			assert ("three occurrences: " + l_code.caret_count.out, l_code.caret_count = 3)
+			assert ("the last one", l_code.caret_start (3) = 17 and l_code.caret_end (3) = 19)
+			driver.press_code_key (l_code, 1, False, "x")
+			assert ("each replaced: " + l_code.text.to_string_8, l_code.text.same_string ("x bar x baz x"))
+			driver.press_code_key (l_code, 15, False, "")
+			assert ("Escape", l_code.caret_count = 1)
+			l_window.close
+		end
+
+	test_code_carets_paste_copy_and_shift
+			-- 1v-e-5: a paste of as many lines as there are carets gives each its line; any
+			-- other text goes whole to each; Shift+Left grows each selection; copy joins the
+			-- selections top to bottom.
+		local
+			l_window: GUI_WINDOW
+			l_code: GUI_CODE_EDITOR
+			l_theirs: STRING_32
+		do
+				-- the person's own clipboard text is put back at the end
+			l_theirs := app.clipboard.text
+			create l_window.make ("Carets paste", 560, 360)
+			create l_code.make
+			l_window.set_content (l_code)
+			l_window.show
+			settle_window
+			l_code.set_text ("a%Nb%Nc")
+			driver.focus (l_code)
+			driver.move_caret (l_code, 1, 2)
+			l_code.add_caret (2, 2)
+			l_code.add_caret (3, 2)
+			assert ("three carets", l_code.caret_count = 3)
+			app.clipboard.set_text ("1%N2%N3")
+			driver.press_code_key (l_code, 14, False, "")
+			assert ("a line each: " + l_code.text.to_string_8, l_code.text.same_string ("a1%Nb2%Nc3"))
+			app.clipboard.set_text ("Z")
+			driver.press_code_key (l_code, 14, False, "")
+			assert ("whole to each: " + l_code.text.to_string_8, l_code.text.same_string ("a1Z%Nb2Z%Nc3Z"))
+			driver.press_code_key (l_code, 6, True, "")
+			assert ("Shift+Left grew the second", l_code.caret_end (2) - l_code.caret_start (2) = 0
+				and l_code.caret_start (2) = 7)
+			driver.press_code_key (l_code, 13, False, "")
+			assert ("copy joins them: " + app.clipboard.text.to_string_8, app.clipboard.text.same_string ("Z%NZ%NZ"))
+			app.clipboard.set_text (l_theirs)
+			l_window.close
+		end
+
 	test_code_completion_lists_and_narrows
 			-- 1v-e-4: a list opens by itself at the second word character typed and not the
 			-- first; labels that start with the word come first, then those that hold it,

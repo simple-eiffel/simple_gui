@@ -586,12 +586,67 @@ feature -- Windows and containers
 		deferred
 		end
 
+	code_set_extra_carets (an_id: INTEGER; a_pairs: POINTER; a_count: INTEGER)
+			-- 1v-e-5: the carets after the control's own, in place of the last set: `a_count'
+			-- pairs of 32-bit integers at `a_pairs', each a caret's position and its anchor
+			-- (the other end of its selection; equal to the position when nothing is
+			-- selected), positions from 1 as the text counts them. Read during the call.
+			-- The control draws a caret line and a selection tint for each, blinking with its
+			-- own; a decoration (no change event, no undo step).
+			-- While extra carets are set (`a_count' > 0) the control's editing keys go to the
+			-- editor instead of acting: event 60 with a = the action and b = 1 with Shift
+			-- held: 1 typed text (read it with `code_typed_text'), 2 Return, 3 Tab, 4 Backspace,
+			-- 5 Delete, 6 Left, 7 Right, 8 Up, 9 Down, 10 Home, 11 End, 12 cut, 13 copy,
+			-- 14 paste, 15 Escape.
+			-- With any number of carets, the gestures send event 61 with a = the gesture and
+			-- b = a position: 1 Alt+click (Option+click) at b, 2 add a caret on the next line
+			-- (Control+Alt+Down; Command+Option+Down), 3 on the previous line (Up), 4 add the
+			-- next occurrence (Control+D; Command+D). The control adds no caret by itself.
+		require
+			count_not_negative: a_count >= 0
+		deferred
+		end
+
 	test_fill_event_queue (a_count: INTEGER)
 			-- Queue `a_count' events that no widget answers (type 0, id 0), as a flood would:
 			-- for the tests of a full event queue. They are queued by the time the loop next
 			-- turns, ahead of a wake sent after this call. A bounded queue keeps what fits.
 		require
 			count_not_negative: a_count >= 0
+		deferred
+		end
+
+	code_typed_text (an_id: INTEGER): POINTER
+			-- The text of the last event 60 with a = 1, UTF-8 ending in NUL; valid until the
+			-- next event from this control.
+		deferred
+		end
+
+	text_begin_edit_group (an_id: INTEGER)
+			-- 1v-e-5: the text changes until `text_end_edit_group' are one undo step, and
+			-- send one change event (2), at the end.
+		deferred
+		end
+
+	text_end_edit_group (an_id: INTEGER)
+			-- End the group `text_begin_edit_group' began.
+		deferred
+		end
+
+	test_code_key (an_id, an_action: INTEGER; a_shift: BOOLEAN; a_text: POINTER)
+			-- As the user pressing editing key `an_action' (as for event 60) with Shift held
+			-- when `a_shift', `a_text' (UTF-8) being the typed text for action 1. While extra
+			-- carets are set: event 60. Otherwise the key does its usual work.
+		require
+			an_action: 1 <= an_action and an_action <= 15
+		deferred
+		end
+
+	test_caret_gesture (an_id, a_gesture, a_position: INTEGER)
+			-- As the user making caret gesture `a_gesture' (1 to 4, as for event 61); for 1 an
+			-- Alt+click at character position `a_position'. Event 61.
+		require
+			a_gesture: 1 <= a_gesture and a_gesture <= 4
 		deferred
 		end
 

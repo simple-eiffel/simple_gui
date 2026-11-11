@@ -9270,6 +9270,14 @@ void sga_test_field_escape(int a_id)
 	NSPanel *completion_panel;
 	NSTableView *completion_table;
 	NSArray<NSArray<NSString *> *> *completion_rows;
+	/* 1v-e-5: the carets after the control's own, as UTF-16 offsets: `extra_at' where each
+	   caret is, `extra_anchor' the other end of its selection. While any are set the editing
+	   keys go to the editor (60). `extra_marks' are their caret lines; `typed' is the text of
+	   the last 60 with a = 1. */
+	NSUInteger *extra_at, *extra_anchor;
+	int extra_count;
+	NSMutableArray<NSView *> *extra_marks;
+	NSString *typed;
 }
 @end
 
@@ -9462,6 +9470,7 @@ static BOOL sga_code_has_mark(SGACodeView *v, int n)
 - (void)drawViewBackgroundInRect:(NSRect)a_rect
 {
 	[super drawViewBackgroundInRect:a_rect];
+	if (extra_count) [self drawExtraSelectionsInRect:a_rect];
 	if (hidden_count) [self drawFoldMarksInRect:a_rect];
 	if (!pair_on) return;
 	NSUInteger n = [[self textStorage] length];
@@ -9496,6 +9505,17 @@ static BOOL sga_code_has_mark(SGACodeView *v, int n)
 		&& ([e keyCode] == 42 || [c isEqualToString:@"\\"] || [c isEqualToString:@"|"])) {
 		sga_push(56, sga_id_of(self), 0, 0, 0);
 		sga_wake();
+		return YES;
+	}
+	/* 1v-e-5: the caret gestures, with any number of carets: Command+Option+Down and Up add
+	   a caret on the next or the previous line (61, a 2 and 3), Command+D the next occurrence
+	   (61, a 4); b is the caret's position. The control adds no caret itself. */
+	if ([[self window] firstResponder] == self && f == (NSEventModifierFlagCommand | NSEventModifierFlagOption) && ([e keyCode] == 125 || [e keyCode] == 126)) {
+		[self tellGesture:[e keyCode] == 125 ? 2 : 3 at:[self selectedRange].location];
+		return YES;
+	}
+	if ([[self window] firstResponder] == self && f == NSEventModifierFlagCommand && [e keyCode] == 2) {
+		[self tellGesture:4 at:[self selectedRange].location];
 		return YES;
 	}
 	/* 1v-e-3: Command+Option+[ and ], while folding is shown: 57 with the caret's line, b 1
@@ -9665,16 +9685,184 @@ static NSImage *sga_completion_kind_image(NSString *a_kind)
 	}
 	[self selectCompletion:a_selected];
 }
-/* While the list shows, these keys send 58 in place of their usual work. */
-- (void)moveUp:(id)sender { if ([self completionShown]) [self tellCompletion:1]; else [super moveUp:sender]; }
-- (void)moveDown:(id)sender { if ([self completionShown]) [self tellCompletion:2]; else [super moveDown:sender]; }
+/* ------------------------------------------------ 1v-e-5: the extra carets */
+/* An editing key while extra carets are set: 60, a = the action, b = 1 with Shift. */
+- (void)tellKey:(int)an_action shift:(BOOL)a_shift
+{
+	sga_push(60, sga_id_of(self), an_action, a_shift ? 1 : 0, 0);
+	sga_wake();
+}
+/* A caret gesture: 61, a = the gesture, b = position (from 1, in characters) of UTF-16 offset `k'. */
+- (void)tellGesture:(int)a_gesture at:(NSUInteger)k
+{
+	sga_push(61, sga_id_of(self), a_gesture, (int)sga_text_index([self textStorage], k) + 1, 0);
+	sga_wake();
+}
+/* The caret line at UTF-16 offset `k', in this view's coordinates. */
+- (NSRect)caretRectAt:(NSUInteger)k
+{
+	NSLayoutManager *m = [self layoutManager];
+	NSUInteger n = [[self textStorage] length];
+	NSRect r;
+	if (n == 0) r = [m extraLineFragmentRect];
+	else if (k < n) {
+		NSUInteger g = [m glyphIndexForCharacterAtIndex:k];
+		NSRect l_line = [m lineFragmentRectForGlyphAtIndex:g effectiveRange:NULL];
+		r = NSMakeRect([m locationForGlyphAtIndex:g].x + NSMinX(l_line), NSMinY(l_line), 1, NSHeight(l_line));
+	}
+	else if ([[self string] hasSuffix:@"\n"]) r = [m extraLineFragmentRect];
+	else {
+		NSUInteger g = [m glyphIndexForCharacterAtIndex:n - 1];
+		NSRect l_glyph = [m boundingRectForGlyphRange:NSMakeRange(g, 1) inTextContainer:[self textContainer]];
+		NSRect l_line = [m lineFragmentRectForGlyphAtIndex:g effectiveRange:NULL];
+		r = NSMakeRect(NSMaxX(l_glyph), NSMinY(l_line), 1, NSHeight(l_line));
+	}
+	r.size.width = 1;
+	return NSOffsetRect(r, [self textContainerOrigin].x, [self textContainerOrigin].y);
+}
+- (void)drawExtraSelectionsInRect:(NSRect)a_rect
+{
+	NSLayoutManager *m = [self layoutManager];
+	NSColor *c = [[self window] isKeyWindow] && [[self window] firstResponder] == self ? [NSColor selectedTextBackgroundColor] : [NSColor unemphasizedSelectedTextBackgroundColor];
+	[c setFill];
+	for (int i = 0; i < extra_count; i++) {
+		NSUInteger a = MIN(extra_at[i], extra_anchor[i]), z = MAX(extra_at[i], extra_anchor[i]);
+		if (z == a || z > [[self textStorage] length]) continue;
+		NSRange g = [m glyphRangeForCharacterRange:NSMakeRange(a, z - a) actualCharacterRange:NULL];
+		[m enumerateEnclosingRectsForGlyphRange:g withinSelectedGlyphRange:g inTextContainer:[self textContainer] usingBlock:^(NSRect r, BOOL *a_stop) {
+			(void)a_stop;
+			NSRect x = NSOffsetRect(r, [self textContainerOrigin].x, [self textContainerOrigin].y);
+			if (NSIntersectsRect(x, a_rect)) NSRectFill(x);
+		}];
+	}
+}
+/* The caret lines are the system's own insertion indicator, shown while the editor has the
+   focus (as its own caret is) and hidden otherwise. In the automatic mode an indicator the
+   text system does not manage never shows, so they are set visible or hidden here; they do
+   not blink (the main caret's blink is the text system's own). */
+- (void)syncExtraMarks { [self showExtraMarks:[[self window] isKeyWindow] && [[self window] firstResponder] == self]; }
+/* (Inside becomeFirstResponder and resignFirstResponder the window does not name the new first
+   responder yet, so they say outright which it is.) */
+- (void)showExtraMarks:(BOOL)l_focused
+{
+	for (NSView *v in extra_marks) {
+		if (@available(macOS 14.0, *)) {
+			if ([v isKindOfClass:[NSTextInsertionIndicator class]])
+				[(NSTextInsertionIndicator *)v setDisplayMode:l_focused ? NSTextInsertionIndicatorDisplayModeVisible : NSTextInsertionIndicatorDisplayModeHidden];
+		}
+		else [v setHidden:!l_focused];
+	}
+}
+- (BOOL)becomeFirstResponder
+{
+	BOOL l_became = [super becomeFirstResponder];
+	if (l_became) [self showExtraMarks:[[self window] isKeyWindow]];
+	return l_became;
+}
+- (void)windowBecameKey:(NSNotification *)n { (void)n; [self syncExtraMarks]; }
+- (void)placeExtraMarks
+{
+	for (NSView *v in extra_marks) [v removeFromSuperview];
+	[extra_marks removeAllObjects];
+	if (!extra_marks) extra_marks = [NSMutableArray array];
+	for (int i = 0; i < extra_count; i++) {
+		if (extra_at[i] > [[self textStorage] length]) continue;
+		NSRect r = [self caretRectAt:extra_at[i]];
+		NSView *v;
+		if (@available(macOS 14.0, *)) {
+			NSTextInsertionIndicator *l_mark = [[NSTextInsertionIndicator alloc] initWithFrame:r];
+			v = l_mark;
+		}
+		else {
+			NSBox *l_line = [[NSBox alloc] initWithFrame:NSMakeRect(NSMinX(r), NSMinY(r), 2, NSHeight(r))];
+			[l_line setBoxType:NSBoxCustom];
+			[l_line setBorderWidth:0];
+			[l_line setFillColor:[NSColor textColor]];
+			v = l_line;
+		}
+		[self addSubview:v];
+		[extra_marks addObject:v];
+	}
+	[self syncExtraMarks];
+}
+- (void)setExtraCarets:(const int *)a_pairs count:(int)a_count
+{
+	NSTextStorage *m = [self textStorage];
+	free(extra_at); free(extra_anchor);
+	extra_at = extra_anchor = NULL;
+	extra_count = 0;
+	if (a_pairs && a_count > 0) {
+		extra_at = malloc(sizeof(NSUInteger) * (size_t)a_count);
+		extra_anchor = malloc(sizeof(NSUInteger) * (size_t)a_count);
+		for (int i = 0; i < a_count; i++) {
+			extra_at[i] = sga_text_offset(m, a_pairs[2 * i] - 1);
+			extra_anchor[i] = sga_text_offset(m, a_pairs[2 * i + 1] - 1);
+		}
+		extra_count = a_count;
+	}
+	[self placeExtraMarks];
+	[self setNeedsDisplay:YES];
+}
+/* Option+click: 61 (1) at the click, with any number of carets. Not AppKit's box selection. */
+- (void)mouseDown:(NSEvent *)e
+{
+	NSEventModifierFlags f = [e modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask & ~(NSEventModifierFlagCapsLock | NSEventModifierFlagNumericPad | NSEventModifierFlagFunction);
+	if (f == NSEventModifierFlagOption && [e clickCount] == 1) {
+		[[self window] makeFirstResponder:self];
+		[self tellGesture:1 at:[self characterIndexForInsertionAtPoint:[self convertPoint:[e locationInWindow] fromView:nil]]];
+		return;
+	}
+	[super mouseDown:e];
+}
+/* While extra carets are set, the editing keys send 60 in place of their usual work. */
+- (void)insertText:(id)a_text replacementRange:(NSRange)r
+{
+	if (extra_count && ![self hasMarkedText]) {
+		typed = [a_text isKindOfClass:[NSAttributedString class]] ? [a_text string] : a_text;
+		[self tellKey:1 shift:NO];
+		return;
+	}
+	[super insertText:a_text replacementRange:r];
+}
+- (void)deleteBackward:(id)sender { if (extra_count) [self tellKey:4 shift:NO]; else [super deleteBackward:sender]; }
+- (void)deleteForward:(id)sender { if (extra_count) [self tellKey:5 shift:NO]; else [super deleteForward:sender]; }
+- (void)moveLeft:(id)sender { if (extra_count) [self tellKey:6 shift:NO]; else [super moveLeft:sender]; }
+- (void)moveRight:(id)sender { if (extra_count) [self tellKey:7 shift:NO]; else [super moveRight:sender]; }
+- (void)moveLeftAndModifySelection:(id)sender { if (extra_count) [self tellKey:6 shift:YES]; else [super moveLeftAndModifySelection:sender]; }
+- (void)moveRightAndModifySelection:(id)sender { if (extra_count) [self tellKey:7 shift:YES]; else [super moveRightAndModifySelection:sender]; }
+- (void)moveUpAndModifySelection:(id)sender { if (extra_count) [self tellKey:8 shift:YES]; else [super moveUpAndModifySelection:sender]; }
+- (void)moveDownAndModifySelection:(id)sender { if (extra_count) [self tellKey:9 shift:YES]; else [super moveDownAndModifySelection:sender]; }
+/* Home and End: the line's start and end (Command+Left and Right on macOS). */
+- (void)moveToLeftEndOfLine:(id)sender { if (extra_count) [self tellKey:10 shift:NO]; else [super moveToLeftEndOfLine:sender]; }
+- (void)moveToBeginningOfLine:(id)sender { if (extra_count) [self tellKey:10 shift:NO]; else [super moveToBeginningOfLine:sender]; }
+- (void)moveToRightEndOfLine:(id)sender { if (extra_count) [self tellKey:11 shift:NO]; else [super moveToRightEndOfLine:sender]; }
+- (void)moveToEndOfLine:(id)sender { if (extra_count) [self tellKey:11 shift:NO]; else [super moveToEndOfLine:sender]; }
+- (void)moveToLeftEndOfLineAndModifySelection:(id)sender { if (extra_count) [self tellKey:10 shift:YES]; else [super moveToLeftEndOfLineAndModifySelection:sender]; }
+- (void)moveToBeginningOfLineAndModifySelection:(id)sender { if (extra_count) [self tellKey:10 shift:YES]; else [super moveToBeginningOfLineAndModifySelection:sender]; }
+- (void)moveToRightEndOfLineAndModifySelection:(id)sender { if (extra_count) [self tellKey:11 shift:YES]; else [super moveToRightEndOfLineAndModifySelection:sender]; }
+- (void)moveToEndOfLineAndModifySelection:(id)sender { if (extra_count) [self tellKey:11 shift:YES]; else [super moveToEndOfLineAndModifySelection:sender]; }
+- (void)cut:(id)sender { if (extra_count) [self tellKey:12 shift:NO]; else [super cut:sender]; }
+- (void)copy:(id)sender { if (extra_count) [self tellKey:13 shift:NO]; else [super copy:sender]; }
+- (void)paste:(id)sender { if (extra_count) [self tellKey:14 shift:NO]; else [super paste:sender]; }
+/* The Edit menu asks before it enables cut, copy and paste: with extra carets each acts on
+   every caret, so they stay enabled whatever the control's own selection is. */
+- (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)an_item
+{
+	SEL a = [an_item action];
+	if (extra_count && (a == @selector(cut:) || a == @selector(copy:) || a == @selector(paste:))) return YES;
+	return [super validateUserInterfaceItem:an_item];
+}
+/* While the list shows, these keys send 58 in place of their usual work; with extra carets
+   (and no list), Up and Down send 60. */
+- (void)moveUp:(id)sender { if ([self completionShown]) [self tellCompletion:1]; else if (extra_count) [self tellKey:8 shift:NO]; else [super moveUp:sender]; }
+- (void)moveDown:(id)sender { if ([self completionShown]) [self tellCompletion:2]; else if (extra_count) [self tellKey:9 shift:NO]; else [super moveDown:sender]; }
 - (void)scrollPageUp:(id)sender { if ([self completionShown]) [self tellCompletion:3]; else [super scrollPageUp:sender]; }
 - (void)scrollPageDown:(id)sender { if ([self completionShown]) [self tellCompletion:4]; else [super scrollPageDown:sender]; }
 - (void)pageUp:(id)sender { if ([self completionShown]) [self tellCompletion:3]; else [super pageUp:sender]; }
 - (void)pageDown:(id)sender { if ([self completionShown]) [self tellCompletion:4]; else [super pageDown:sender]; }
 /* Escape: NSTextView would open the system's own completion list (cancelOperation: calls
    complete:). Here it closes ours, and does nothing when none shows. */
-- (void)cancelOperation:(id)sender { (void)sender; if ([self completionShown]) [self tellCompletion:6]; }
+- (void)cancelOperation:(id)sender { (void)sender; if ([self completionShown]) [self tellCompletion:6]; else if (extra_count) [self tellKey:15 shift:NO]; }
 /* The text system's completion key (F5, Option+Escape): as Control+Space. */
 - (void)complete:(id)sender { (void)sender; [self tellCompletion:0]; }
 - (void)keyDown:(NSEvent *)e
@@ -9686,7 +9874,7 @@ static NSImage *sga_completion_kind_image(NSString *a_kind)
 - (BOOL)resignFirstResponder
 {
 	BOOL l_resigned = [super resignFirstResponder];
-	if (l_resigned) [self dropCompletions];
+	if (l_resigned) { [self dropCompletions]; [self showExtraMarks:NO]; }
 	return l_resigned;
 }
 - (void)viewWillMoveToWindow:(NSWindow *)a_window
@@ -9694,20 +9882,23 @@ static NSImage *sga_completion_kind_image(NSString *a_kind)
 	NSNotificationCenter *c = [NSNotificationCenter defaultCenter];
 	[c removeObserver:self name:NSWindowDidResignKeyNotification object:[self window]];
 	[c removeObserver:self name:NSWindowWillCloseNotification object:[self window]];
+	[c removeObserver:self name:NSWindowDidBecomeKeyNotification object:[self window]];
 	if (a_window) {
 		[c addObserver:self selector:@selector(windowResignedKey:) name:NSWindowDidResignKeyNotification object:a_window];
+		[c addObserver:self selector:@selector(windowBecameKey:) name:NSWindowDidBecomeKeyNotification object:a_window];
 		[c addObserver:self selector:@selector(windowWillClose:) name:NSWindowWillCloseNotification object:a_window];
 	}
 	else [self hideCompletions];
 	[super viewWillMoveToWindow:a_window];
 }
-- (void)windowResignedKey:(NSNotification *)n { (void)n; [self dropCompletions]; }
+- (void)windowResignedKey:(NSNotification *)n { (void)n; [self dropCompletions]; [self syncExtraMarks]; }
 /* The editor's window closes: the list goes with it, quietly (the editor is going too). */
 - (void)windowWillClose:(NSNotification *)n { (void)n; [self hideCompletions]; }
 /* Return keeps the line's indentation; with the list up it accepts (58, a = 5). */
 - (void)insertNewline:(id)sender
 {
 	if ([self completionShown]) { [self tellCompletion:5]; return; }
+	if (extra_count) { [self tellKey:2 shift:NO]; return; }
 	NSString *s = [self string];
 	NSRange l_line = [s lineRangeForRange:NSMakeRange([self selectedRange].location, 0)];
 	NSUInteger k = l_line.location;
@@ -9745,11 +9936,12 @@ static NSImage *sga_completion_kind_image(NSString *a_kind)
 {
 	(void)sender;
 	if ([self completionShown]) { [self tellCompletion:5]; return; }
+	if (extra_count) { [self tellKey:3 shift:NO]; return; }
 	NSRange r = [self selectedRange];
 	if (r.length > 0 && [[[self string] substringWithRange:r] rangeOfString:@"\n"].location != NSNotFound) [self shiftLines:YES];
 	else [self insertText:sga_code_indent_unit(self) replacementRange:r];
 }
-- (void)insertBacktab:(id)sender { (void)sender; [self shiftLines:NO]; }
+- (void)insertBacktab:(id)sender { (void)sender; if (extra_count) [self tellKey:3 shift:YES]; else [self shiftLines:NO]; }
 @end
 
 /* The gutter: each shown line's number, right-aligned, beside its first line fragment; and,
@@ -10239,3 +10431,79 @@ void sga_test_press_completion(int a_id, int a_row)
 }
 
 int sga_test_completions_shown(int a_id) { SGACodeView *t = sga_code_of(a_id); return t && [t completionShown]; }
+
+/* ------------------------------------------------------------------ 1v-e-5: multiple carets */
+
+void sga_code_set_extra_carets(int a_id, const int *a_pairs, int a_count)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (t) [t setExtraCarets:a_pairs count:a_count];
+}
+
+/* The text of the last 60 with a = 1, as UTF-8; kept until the next one. */
+const char *sga_code_typed_text(int a_id)
+{
+	static char *l_kept;
+	SGACodeView *t = sga_code_of(a_id);
+	free(l_kept);
+	l_kept = strdup(t && t->typed ? [t->typed UTF8String] : "");
+	return l_kept;
+}
+
+/* The text changes until the matching end are one undo step and one change event (2), sent at
+   the end. (Not the text storage's beginEditing: inside it the kept positions would not
+   follow each change, and the group's changes are made by position.) */
+static int s_edit_group_depth;
+void sga_text_begin_edit_group(int a_id)
+{
+	NSTextView *t = s_inner[a_id];
+	if (![t isKindOfClass:[NSTextView class]]) return;
+	if (s_edit_group_depth++ > 0) return;
+	[t breakUndoCoalescing];
+	[[t undoManager] beginUndoGrouping];
+}
+
+void sga_text_end_edit_group(int a_id)
+{
+	NSTextView *t = s_inner[a_id];
+	if (![t isKindOfClass:[NSTextView class]]) return;
+	if (s_edit_group_depth <= 0 || --s_edit_group_depth > 0) return;
+	[[t undoManager] endUndoGrouping];
+	sga_push(2, a_id, 0, 0, 0);
+	sga_wake();
+}
+
+/* As the user pressing editing key `an_action' (as for 60), through the commands the keys reach. */
+void sga_test_code_key(int a_id, int an_action, int a_shift, const char *a_text)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || an_action < 1 || an_action > 15) return;
+	[[t window] makeFirstResponder:t];
+	switch (an_action) {
+	case 1: [t insertText:sga_string(a_text) replacementRange:[t selectedRange]]; break;
+	case 2: [t doCommandBySelector:@selector(insertNewline:)]; break;
+	case 3: [t doCommandBySelector:a_shift ? @selector(insertBacktab:) : @selector(insertTab:)]; break;
+	case 4: [t doCommandBySelector:@selector(deleteBackward:)]; break;
+	case 5: [t doCommandBySelector:@selector(deleteForward:)]; break;
+	case 6: [t doCommandBySelector:a_shift ? @selector(moveLeftAndModifySelection:) : @selector(moveLeft:)]; break;
+	case 7: [t doCommandBySelector:a_shift ? @selector(moveRightAndModifySelection:) : @selector(moveRight:)]; break;
+	case 8: [t doCommandBySelector:a_shift ? @selector(moveUpAndModifySelection:) : @selector(moveUp:)]; break;
+	case 9: [t doCommandBySelector:a_shift ? @selector(moveDownAndModifySelection:) : @selector(moveDown:)]; break;
+	case 10: [t doCommandBySelector:a_shift ? @selector(moveToLeftEndOfLineAndModifySelection:) : @selector(moveToLeftEndOfLine:)]; break;
+	case 11: [t doCommandBySelector:a_shift ? @selector(moveToRightEndOfLineAndModifySelection:) : @selector(moveToRightEndOfLine:)]; break;
+	case 12: [t cut:nil]; break;
+	case 13: [t copy:nil]; break;
+	case 14: [t paste:nil]; break;
+	case 15: [t doCommandBySelector:@selector(cancelOperation:)]; break;
+	}
+}
+
+/* As the user making caret gesture `a_gesture' (61), b = `a_position' (for 1, the Option+click's
+   character; the editor reads b for that gesture only). */
+void sga_test_caret_gesture(int a_id, int a_gesture, int a_position)
+{
+	SGACodeView *t = sga_code_of(a_id);
+	if (!t || a_gesture < 1 || a_gesture > 4) return;
+	sga_push(61, a_id, a_gesture, a_position, 0);
+	sga_wake();
+}
