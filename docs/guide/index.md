@@ -97,6 +97,7 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - [Pagination](pagination.md): previous, page numbers with gaps, next
 - [Rating](rating.md): stars
 - [Rich text area](rich-text-area.md): styled text
+- [Code editor](code-editor.md): line numbers, auto-indent, syntax coloring, find and replace
 
 ## Rules every control keeps
 - **Native:** each control is the platform's own. Nothing is drawn to imitate a platform.
