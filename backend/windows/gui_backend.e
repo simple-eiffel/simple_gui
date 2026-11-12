@@ -2522,18 +2522,90 @@ feature -- Controls
 		end
 
 	save_file_named (a_window: INTEGER; a_title, an_extensions, a_name: POINTER): POINTER
-			-- simple_widgets' drawn Save dialog suggesting `a_name', waited for.
+			-- The system's own Save dialog (simple_shell: IFileSaveDialog), owned by the window,
+			-- suggesting `a_name' (2026-11-11: it replaced simple_widgets' drawn sheet, which
+			-- overflowed a small window and left Save and Cancel out of reach).
+		local
+			l_dialog: SHELL_FILE_DIALOG
 		do
-			if attached windows.item (a_window) as al_w and then attached al_w.choose_file_titled (True, from_c (a_title), ".", from_c (a_name), from_c (an_extensions)) as al_path then
-				Result := c_text (al_path)
+			create l_dialog.make
+			arm_dialog_cancel
+			l_dialog.choose_save_file (window_native_handle (a_window), from_c (a_title), file_filter (from_c (an_extensions)), working_folder, from_c (a_name))
+			if l_dialog.has_choice then
+				Result := c_text (l_dialog.chosen_path)
+			end
+		end
+
+	open_dialog_answer (a_title, a_extensions: READABLE_STRING_32): detachable STRING_32
+			-- The system's own Open dialog (simple_shell), or Void when cancelled.
+		local
+			l_dialog: SHELL_FILE_DIALOG
+		do
+			create l_dialog.make
+			arm_dialog_cancel
+			l_dialog.choose_file (if a_title.is_empty then {STRING_32} "Open" else a_title end, file_filter (a_extensions), working_folder)
+			if l_dialog.has_choice then
+				Result := l_dialog.chosen_path
 			end
 		end
 
 	choose_folder (a_window: INTEGER; a_title: POINTER): POINTER
+			-- The system's own folder dialog (simple_shell: IFileOpenDialog picking folders).
+		local
+			l_dialog: SHELL_FILE_DIALOG
 		do
-			if attached windows.item (a_window) as al_w and then attached al_w.choose_folder (from_c (a_title), ".") as al_path then
-				Result := c_text (al_path)
+			create l_dialog.make
+			arm_dialog_cancel
+			l_dialog.choose_folder (window_native_handle (a_window), from_c (a_title), working_folder)
+			if l_dialog.has_choice then
+				Result := c_text (l_dialog.chosen_path)
 			end
+		end
+
+	file_filter (a_extensions: READABLE_STRING_32): STRING_32
+			-- `a_extensions' ("pdf;txt"; empty: any file) as a dialog filter:
+			-- "Files (*.pdf;*.txt)|*.pdf;*.txt|All files|*.*".
+		local
+			l_patterns: STRING_32
+		do
+			create l_patterns.make_empty
+			across a_extensions.split (';') as ic loop
+				if not ic.is_empty then
+					if not l_patterns.is_empty then
+						l_patterns.append_character (';')
+					end
+					l_patterns.append ({STRING_32} "*." + ic)
+				end
+			end
+			if l_patterns.is_empty then
+				Result := {STRING_32} "All files|*.*"
+			else
+				Result := {STRING_32} "Files (" + l_patterns + ")|" + l_patterns + "|All files|*.*"
+			end
+		ensure
+			paired: Result.has ('|')
+		end
+
+	arm_dialog_cancel
+			-- Tests (`test_auto_cancel_dialogs'): cancel the system dialog about to open, as GTK's
+			-- timer does for its own; nothing when the tests have not asked.
+		do
+			if auto_cancel_ms > 0 then
+				c_cancel_dialog_after (auto_cancel_ms)
+			end
+		end
+
+	c_cancel_dialog_after (a_ms: INTEGER)
+			-- A thread waits for this process's next system dialog (class #32770) and presses
+			-- Cancel on it `a_ms' milliseconds after it appears.
+		external "C inline use %"simple_gui_win_dialog_cancel.h%""
+		alias "sgw_cancel_dialog_after ($a_ms);"
+		end
+
+	working_folder: STRING_32
+			-- Where the file dialogs start: the program's working folder.
+		do
+			Result := (create {EXECUTION_ENVIRONMENT}).current_working_path.name.to_string_32
 		end
 
 	ask (a_window: INTEGER; a_title, a_text: POINTER): INTEGER
@@ -4786,9 +4858,12 @@ feature -- Menus
 feature -- Dialogs
 
 	open_file (a_window: INTEGER; a_title: POINTER; a_save: BOOLEAN; an_extensions: POINTER): POINTER
-			-- simple_widgets' drawn file dialog, waited for (W9).
+			-- The system's own Open or Save dialog (simple_shell), waited for (2026-11-11: they
+			-- replaced simple_widgets' drawn sheets, as GTK and AppKit already use their own).
 		do
-			if attached windows.item (a_window) as al_w and then attached al_w.choose_file_titled (a_save, from_c (a_title), ".", "", from_c (an_extensions)) as al_path then
+			if a_save then
+				Result := save_file_named (a_window, a_title, an_extensions, c_text (""))
+			elseif attached open_dialog_answer (from_c (a_title), from_c (an_extensions)) as al_path then
 				Result := c_text (al_path)
 			end
 		end
