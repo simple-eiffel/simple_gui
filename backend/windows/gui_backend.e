@@ -5061,6 +5061,34 @@ feature -- Appearance
 			end
 		end
 
+	widget_set_reveal (an_id, a_effect: INTEGER; a_fraction: REAL_64; a_takes_input: BOOLEAN)
+			-- 1x-b interface: not shown yet (this platform's half).
+		do
+		end
+
+	widget_yield_focus (an_id: INTEGER)
+			-- 1x-b interface: not yet (this platform's half).
+		do
+		end
+
+	test_reveal_shown (an_id: INTEGER): REAL_64
+			-- 1x-b: not read yet (this platform's half): -1.
+		do
+			Result := -1.0
+		end
+
+	test_extent (an_id: INTEGER; a_vertical: BOOLEAN): INTEGER
+			-- 1x-b: not read yet (this platform's half): -1.
+		do
+			Result := -1
+		end
+
+	test_has_focus (an_id: INTEGER): INTEGER
+			-- 1x-b: not read yet (this platform's half): -1.
+		do
+			Result := -1
+		end
+
 	test_opacity_shown (an_id: INTEGER): REAL_64
 			-- 1x: the opacity simple_widgets paints the widget at; -1 when it is gone.
 		do

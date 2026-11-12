@@ -1869,6 +1869,25 @@ feature -- Common widget state
 		deferred
 		end
 
+	widget_set_reveal (an_id, a_effect: INTEGER; a_fraction: REAL_64; a_takes_input: BOOLEAN)
+			-- 1x-b: show widget `an_id' revealed to `a_fraction' (1 whole, 0 nothing) under
+			-- `a_effect' (GUI_WIDGET's Effect_ constants): faded; slid in from an edge (leading
+			-- and trailing mirrored under right-to-left), its content moving with the edge; or
+			-- grown from the middle. For the slides and grow the widget takes that share of its
+			-- full space in its layout; a fade keeps the full space. Without `a_takes_input' it
+			-- takes no pointer input.
+		require
+			known_effect: a_effect >= 1 and a_effect <= 6
+			in_range: a_fraction >= 0.0 and a_fraction <= 1.0
+		deferred
+		end
+
+	widget_yield_focus (an_id: INTEGER)
+			-- 1x-b: when the keyboard focus is on `an_id' or inside it, move it on to the next
+			-- focusable widget outside it, as hiding the widget at once would.
+		deferred
+		end
+
 	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)
 			-- 1x: show widget `an_id' at `a_opacity' (0 transparent to 1 opaque). At 0 it
 			-- takes no pointer input, on every platform.
@@ -2418,6 +2437,30 @@ feature -- Styles (1w)
 		require
 			known_question: a_which >= 0 and a_which <= 3
 		deferred
+		end
+
+	test_reveal_shown (an_id: INTEGER): REAL_64
+			-- Tests only, 1x-b: the reveal the toolkit shows widget `an_id' at; -1 where it
+			-- can't be read yet.
+		deferred
+		ensure
+			known_or_unreadable: Result = -1.0 or else (Result >= 0.0 and Result <= 1.0)
+		end
+
+	test_extent (an_id: INTEGER; a_vertical: BOOLEAN): INTEGER
+			-- Tests only, 1x-b: the space widget `an_id' takes in its parent's layout, in
+			-- pixels, its height (`a_vertical') or width; -1 where it can't be read yet.
+		deferred
+		ensure
+			known: Result >= -1
+		end
+
+	test_has_focus (an_id: INTEGER): INTEGER
+			-- Tests only, 1x-b: does `an_id', or something in it, hold the keyboard focus? 1
+			-- yes, 0 no, -1 can't tell yet.
+		deferred
+		ensure
+			known: Result >= -1 and Result <= 1
 		end
 
 feature -- Test driver

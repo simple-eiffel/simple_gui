@@ -2795,6 +2795,169 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_show_animated_reveals_on_the_manual_clock
+			-- 1x-b: an animated show makes the widget shown at once and reveals it from 0 to 1
+			-- over 200 ms (a half at 100), then says so once.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_kinds: ARRAYED_LIST [INTEGER]
+		do
+			create l_window.make ("Show", 240, 120)
+			create l_label.make ("Coming in")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			create l_kinds.make (2)
+			l_label.animation_finished_actions.extend (agent (a_kinds: ARRAYED_LIST [INTEGER]; a_kind: INTEGER) do a_kinds.extend (a_kind) end (l_kinds, ?))
+			l_label.hide
+			l_label.show_animated (l_label.Effect_slide_from_top)
+			assert ("shown at once", l_label.is_shown)
+			assert ("nothing revealed yet", l_label.reveal = 0.0)
+			app.animation_clock.step (100)
+			assert ("half way at half time", (l_label.reveal - 0.5).abs < 1.0e-9)
+			app.animation_clock.step (100)
+			assert ("whole at the end", l_label.reveal = 1.0)
+			assert ("said once, shown", l_kinds.count = 1 and then l_kinds.first = l_label.Kind_shown)
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_hide_animated_stays_shown_until_the_end
+			-- 1x-b: an animated hide keeps the widget shown while it conceals it, takes no
+			-- pointer input from the start (where the toolkit can tell), hides it at the end,
+			-- makes it whole again for a later plain show, and says so once.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_kinds: ARRAYED_LIST [INTEGER]
+		do
+			create l_window.make ("Hide", 240, 120)
+			create l_label.make ("Going out")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			create l_kinds.make (2)
+			l_label.animation_finished_actions.extend (agent (a_kinds: ARRAYED_LIST [INTEGER]; a_kind: INTEGER) do a_kinds.extend (a_kind) end (l_kinds, ?))
+			l_label.hide_animated (l_label.Effect_fade)
+			assert ("hiding", l_label.is_hiding)
+			if backend.test_reveal_shown (l_label.id) /= -1.0 and then backend.test_pointer_reaches (l_label.id) /= -1 then
+					-- where this platform's 1x-b half shows reveals
+				assert ("no pointer input while hiding", backend.test_pointer_reaches (l_label.id) = 0)
+			end
+			app.animation_clock.step (100)
+			assert ("still shown half way", l_label.is_shown and (l_label.reveal - 0.5).abs < 1.0e-9)
+			app.animation_clock.step (100)
+			assert ("hidden at the end", not l_label.is_shown and not l_label.is_hiding)
+			assert ("whole again for a later show", l_label.reveal = 1.0)
+			assert ("said once, hidden", l_kinds.count = 1 and then l_kinds.first = l_label.Kind_hidden)
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_a_show_turns_a_hide_around
+			-- 1x-b: a show during a hide goes on from where the hide got to, without a jump.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_reveal: REAL_64
+		do
+			create l_window.make ("Turn", 240, 120)
+			create l_label.make ("Back again")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_label.hide_animated (l_label.Effect_slide_from_leading)
+			app.animation_clock.step (100)
+			l_reveal := l_label.reveal
+			l_label.show_animated (l_label.Effect_slide_from_leading)
+			assert ("no jump", l_label.reveal = l_reveal and l_label.is_shown and not l_label.is_hiding)
+			app.animation_clock.step (100)
+			assert ("on the way back", l_label.reveal > l_reveal and l_label.reveal < 1.0)
+			app.animation_clock.step (200)
+			assert ("whole", l_label.reveal = 1.0 and not app.animation_clock.is_running)
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_reduced_motion_shows_and_hides_at_once
+			-- 1x-b: while the system asks for reduced motion, an animated hide hides at once
+			-- and an animated show shows the widget whole at once.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+		do
+			create l_window.make ("Reduced", 240, 120)
+			create l_label.make ("At once")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (True)
+			l_label.hide_animated (l_label.Effect_grow)
+			assert ("hidden at once", not l_label.is_shown)
+			l_label.show_animated (l_label.Effect_grow)
+			assert ("whole at once", l_label.is_shown and l_label.reveal = 1.0)
+			assert ("nothing running", not app.animation_clock.is_running)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_the_toolkit_shows_the_reveal_and_the_focus_leaves
+			-- 1x-b, where the toolkit can tell (each platform's half): half way through a slide
+			-- the toolkit shows half, the widget takes about half its space along the slide,
+			-- and a hide starting on the focused field moves the focus off it at once.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_field: GUI_TEXT_FIELD
+			l_other: GUI_TEXT_FIELD
+			l_full: INTEGER
+		do
+			create l_window.make ("Reveal", 320, 200)
+			create l_stack.make_vertical
+			create l_field.make
+			create l_other.make
+			l_stack.extend (l_field)
+			l_stack.extend (l_other)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_full := backend.test_extent (l_field.id, True)
+			l_field.hide
+			l_field.show_animated (l_field.Effect_slide_from_top)
+			app.animation_clock.step (100)
+			if backend.test_reveal_shown (l_field.id) /= -1.0 then
+				assert ("the toolkit shows half", (backend.test_reveal_shown (l_field.id) - 0.5).abs < 0.01)
+			end
+			if l_full > 0 and then backend.test_extent (l_field.id, True) /= -1 then
+				assert ("half the space half way: " + backend.test_extent (l_field.id, True).out + " of " + l_full.out,
+					(backend.test_extent (l_field.id, True) - l_full // 2).abs <= 2)
+			end
+			app.animation_clock.finish_all
+			l_field.focus
+			settle_window
+			if backend.test_has_focus (l_field.id) /= -1 then
+				assert ("the field holds the focus", backend.test_has_focus (l_field.id) = 1)
+				l_field.hide_animated (l_field.Effect_fade)
+				assert ("the focus left it at once", backend.test_has_focus (l_field.id) = 0)
+				app.animation_clock.finish_all
+			end
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
 	test_the_clock_ticks_only_while_something_runs
 			-- 1x: a real clock asks for frame ticks when an animation starts and stops them
 			-- when the last one ends, so an idle program never wakes at the display rate.

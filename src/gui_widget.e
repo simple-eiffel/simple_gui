@@ -144,6 +144,102 @@ feature -- Opacity (1x)
 	opacity_animation: detachable GUI_ANIMATION
 			-- The opacity animation started last, if any.
 
+feature -- Animated show and hide (1x)
+
+	Effect_fade: INTEGER = 1
+			-- Fade in or out; the widget keeps its full space.
+
+	Effect_slide_from_top: INTEGER = 2
+			-- Slide in from the top edge (out to it).
+
+	Effect_slide_from_bottom: INTEGER = 3
+			-- Slide in from the bottom edge.
+
+	Effect_slide_from_leading: INTEGER = 4
+			-- Slide in from the leading edge: the left, the right under right-to-left.
+
+	Effect_slide_from_trailing: INTEGER = 5
+			-- Slide in from the trailing edge: the right, the left under right-to-left.
+
+	Effect_grow: INTEGER = 6
+			-- Grow from the middle (shrink to it).
+
+	is_effect (a_effect: INTEGER): BOOLEAN
+			-- Is `a_effect' one of the effects above?
+		do
+			Result := a_effect >= Effect_fade and a_effect <= Effect_grow
+		end
+
+	Kind_shown: INTEGER = 1
+			-- `animation_finished_actions': an animated show ended.
+
+	Kind_hidden: INTEGER = 2
+			-- `animation_finished_actions': an animated hide ended.
+
+	reveal: REAL_64
+			-- How much of the widget its show or hide effect lets show: 1 all (the default),
+			-- 0 nothing. For the slides and grow the widget takes that share of its space.
+		do
+			if is_reveal_set then
+				Result := reveal_chosen
+			else
+				Result := 1.0
+			end
+		end
+
+	is_hiding: BOOLEAN
+			-- Is an animated hide running? (The widget takes no pointer input meanwhile.)
+
+	show_animated (a_effect: INTEGER)
+			-- Show the widget, revealing it with `a_effect' over the application's
+			-- `animation_duration' (at once while motion is reduced). It is shown from the
+			-- start. A hide still running stops where it is, and the show goes on from there.
+		require
+			gui_thread: is_gui_thread
+			known: is_effect (a_effect)
+		do
+			stop_reveal
+			is_hiding := False
+			if not is_shown then
+				set_reveal_value (a_effect, 0.0, True)
+				show
+			end
+			start_reveal (a_effect, reveal, 1.0)
+		ensure
+			shown: is_shown
+			not_hiding: not is_hiding
+			reduced_means_whole: (old application.reduces_motion) implies reveal = 1.0
+		end
+
+	hide_animated (a_effect: INTEGER)
+			-- Hide the widget, concealing it with `a_effect' over the application's
+			-- `animation_duration' (at once while motion is reduced). It stays shown until the
+			-- end, but the keyboard focus leaves it at once and it takes no pointer input from
+			-- the start. A show still running stops where it is, and the hide goes on from there.
+		require
+			gui_thread: is_gui_thread
+			known: is_effect (a_effect)
+		do
+			stop_reveal
+			if is_shown then
+				backend.widget_yield_focus (id)
+				is_hiding := True
+				set_reveal_value (a_effect, reveal, False)
+				start_reveal (a_effect, reveal, 0.0)
+			end
+		ensure
+			reduced_means_hidden: (old application.reduces_motion) implies not is_shown
+		end
+
+	reveal_animation: detachable GUI_ANIMATION
+			-- The show or hide animation running, if any.
+
+	animation_finished_actions: GUI_ACTIONS [TUPLE [kind: INTEGER]]
+			-- Called when an animated show (`Kind_shown') or hide (`Kind_hidden') ends.
+		once ("OBJECT")
+			create Result.make
+		end
+
 feature -- Accessibility
 
 	accessible_label: STRING_32
@@ -345,6 +441,73 @@ feature {GUI_APPLICATION, GUI_WIDGET} -- Reference pill
 				l_code := backend.to_c (al_code)
 				l_tip := backend.to_c (application.pills.item (al_code).tip)
 				backend.pill_set (id, l_code.item, l_tip.item, pill_corner)
+			end
+		end
+
+feature {NONE} -- Animated show and hide (1x)
+
+	reveal_chosen: REAL_64
+			-- The reveal set last.
+
+	is_reveal_set: BOOLEAN
+			-- Has a reveal been set? (A REAL_64 attribute cannot start at 1 by itself.)
+
+	set_reveal_value (a_effect: INTEGER; a_fraction: REAL_64; a_takes_input: BOOLEAN)
+			-- Show `a_fraction' of the widget under `a_effect', taking pointer input or not.
+		require
+			known: is_effect (a_effect)
+			in_range: a_fraction >= 0.0 and a_fraction <= 1.0
+		do
+			reveal_chosen := a_fraction
+			is_reveal_set := True
+			backend.widget_set_reveal (id, a_effect, a_fraction, a_takes_input)
+		ensure
+			set: reveal = a_fraction
+		end
+
+	stop_reveal
+			-- Stop a show or hide running where it is.
+		do
+			if attached reveal_animation as al_running then
+				application.animation_clock.cancel (al_running)
+			end
+			reveal_animation := Void
+		end
+
+	start_reveal (a_effect: INTEGER; a_from, a_to: REAL_64)
+			-- Animate the reveal from `a_from' to `a_to' under `a_effect'.
+		local
+			l_animation: GUI_ANIMATION
+		do
+			create l_animation.make (a_from, a_to, application.animation_duration, {GUI_EASING}.Ease_in_out,
+				agent reveal_step (a_effect, a_to, ?))
+			reveal_animation := l_animation
+			application.animation_clock.run (l_animation)
+		end
+
+	reveal_step (a_effect: INTEGER; a_to, a_value: REAL_64)
+			-- One step toward `a_to'. At the end of a hide the widget is hidden and made whole
+			-- again for a later plain `show'; the finished actions are called here, at the
+			-- last step, so a hide completed at once (reduced motion) is hidden at once.
+		local
+			l_value: REAL_64
+		do
+			l_value := a_value.max (0.0).min (1.0)
+			if a_to = 0.0 then
+				set_reveal_value (a_effect, l_value, False)
+				if l_value = 0.0 then
+					is_hiding := False
+					reveal_animation := Void
+					hide
+					set_reveal_value (a_effect, 1.0, True)
+					animation_finished_actions.call ([Kind_hidden])
+				end
+			else
+				set_reveal_value (a_effect, l_value, True)
+				if l_value = 1.0 then
+					reveal_animation := Void
+					animation_finished_actions.call ([Kind_shown])
+				end
 			end
 		end
 
