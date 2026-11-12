@@ -1400,14 +1400,25 @@ feature -- Controls
 		end
 
 	start_frame_ticks
-			-- 1x interface: noted only; the GdkFrameClock ticks arrive with the GTK half.
+			-- 1x: ticks from a shown window's GdkFrameClock (coalesced event 62).
 		do
-			is_frame_ticking := True
+			is_frame_ticking := c_start_frame_ticks /= 0
 		end
 
 	stop_frame_ticks
 		do
+			c_stop_frame_ticks
 			is_frame_ticking := False
+		end
+
+	c_start_frame_ticks: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_start_frame_ticks();"
+		end
+
+	c_stop_frame_ticks
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_stop_frame_ticks();"
 		end
 
 	is_frame_ticking: BOOLEAN
@@ -2585,21 +2596,21 @@ feature -- Test driver
 		end
 
 	test_opacity_shown (an_id: INTEGER): REAL_64
-			-- 1x: not read on GTK yet (PROD's half): -1.
-		do
-			Result := -1.0
+			-- 1x: gtk_widget_get_opacity.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_opacity_shown($an_id);"
 		end
 
 	test_pointer_reaches (an_id: INTEGER): INTEGER
-			-- 1x: not read on GTK yet (PROD's half): -1.
-		do
-			Result := -1
+			-- 1x: gtk_widget_pick at the widget's middle.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_pointer_reaches($an_id);"
 		end
 
 	test_frames (a_which: INTEGER): INTEGER
-			-- 1x: not counted on GTK yet (PROD's half): -1.
-		do
-			Result := -1
+			-- 1x: frames counted from the frame clock's after-paint while ticking.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_frames($a_which);"
 		end
 
 	test_set_high_contrast (a_on: BOOLEAN)
