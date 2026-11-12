@@ -2825,9 +2825,30 @@ feature -- Controls
 		end
 
 	widget_focus (an_id: INTEGER)
-			-- 1p-b: the keyboard focus to the widget, from code (a click's focus path).
+			-- 1p-b: the keyboard focus to the widget, from code (a click's focus path), in the
+			-- window it is in: a second window's own (a print preview's canvas), else the main one.
+		local
+			l_top: SW_WIDGET
+			l_done: BOOLEAN
 		do
-			test_focus (an_id)
+			if attached widget (an_id) as al_w and then al_w.accepts_focus then
+				from
+					l_top := al_w
+				until
+					not attached l_top.parent as al_up
+				loop
+					l_top := al_up
+				end
+				across floats as ic until l_done loop
+					if ic.content = l_top then
+						ic.give_focus (al_w)
+						l_done := True
+					end
+				end
+			end
+			if not l_done then
+				test_focus (an_id)
+			end
 		end
 
 	test_press_chevron (an_id, a_part: INTEGER)
