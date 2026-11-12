@@ -102,7 +102,8 @@ Press **Preview…**: the psalm's page appears on gray, "Page 1 of 1", fitted; c
 | `set_orientation (a_landscape)`, `is_landscape`, `page_width`, `page_height` | Portrait or landscape; `page_width` and `page_height` are the drawing area, turned with the orientation. |
 | `print_text (a_text)` | Render `a_text` into pages: each line break starts a line, long lines wrap at spaces, one-inch margins, "Page N of M" in the footer. An empty text is one empty page. |
 | `print_pages (a_count, a_draw)` | Render `a_count` pages, each drawn by `a_draw` (the page's number from 1, and a `CAIRO_CONTEXT` in points with the origin at the page's top left). |
-| `page_count`, `last_error` | The pages rendered (0 before a rendering and after printing); why the last step failed. |
+| `page_count`, `last_error` | The pages rendered (0 before a rendering and after printing); why the last step failed, in a sentence you can show the user. |
+| `last_error_detail` | For your log, not the user: what the platform's printing said behind `last_error` (on Windows, the print helper's exit code and output). Void when it said nothing. |
 | `save_pdf (a_path)` | Write the rendered pages to `a_path` as a PDF, with no dialog: this is Save as PDF. False, with `last_error`, when the file can't be written. |
 | `run_dialog (a_parent)` | The system's print dialog over window `a_parent`, then the rendered pages printed as the user chose. Afterwards `last_outcome` says how it ended, and the rendering is gone: render again to print or save again. |
 | `run_preview (a_parent)` | A print preview of the rendered pages over `a_parent`, the same window on every platform: Previous and Next, "Page N of M", zoom (fit page, fit width, 100%), Print… and Close. Print… goes on to the system's print dialog (`run_dialog`); Close leaves `last_outcome` at `Outcome_cancelled` and keeps the rendering. Page Up and Page Down change pages, Home and End go to the first and last, the arrows or dragging move a page larger than the view, + and - step the zoom. |
@@ -123,6 +124,10 @@ Every platform shows its own print dialog and prints the same pages; the drawing
   Copies follow the dialog's collation: whole sets when it's on, and each page's copies together when it's off.
 
   Windows' print dialog itself shows no preview of a program's pages (macOS's panel has one of its own); `run_preview` is the preview on every platform.
+
+  A printer that writes a file, such as Microsoft Print to PDF or the XPS writer, asks where to save it with the system's Save dialog, owned by your window. Cancelling there cancels the job, with no message.
+
+  While a job goes to the printer, your windows are disabled, as they are under a dialog: they keep painting, but clicks and keys are ignored, and a request to close a window waits until the job has gone. A job that never finishes, such as a printer waiting on an answer nobody can give, is stopped after an hour and reported as failed. If your program ends during a job, the job ends with it.
 
   Printers whose names use characters outside plain ASCII can't be reached, and printing to them fails with a message. A PDF printed on Windows through a PDF printer carries its text as drawn shapes, so it can't be searched.
 
