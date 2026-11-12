@@ -10,6 +10,8 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <UserNotifications/UserNotifications.h>
 #import <CoreText/CoreText.h>
+#import <QuartzCore/QuartzCore.h>
+#import <objc/runtime.h>
 #include <cairo.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -88,6 +90,10 @@ static void sga_theme_apply(int a_id);
 static unsigned char s_style_hint[SGA_MAX];   /* 1: a check box (an NSButton like any other) */
 static unsigned char s_button_style[SGA_MAX];   /* a button's style: 1 suggested (it shows the accent), 3 flat, 4 pill */
 static int s_contrast_seen;
+static int s_motion_seen;                                   /* 1x: reduce motion, as last reported */
+int sga_motion_reduced(void);
+static int sga_frame_tick_read(void);
+static void sga_frame_value_set(void);
 int sga_is_high_contrast(void);
 int sga_is_dark(void);
 void sga_wake(void);
@@ -399,8 +405,11 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 {
 	(void)n;
 	int l_now = sga_is_high_contrast();
-	if (l_now == s_contrast_seen) return;
+	int l_motion = sga_motion_reduced();
+	/* 1x: Reduce motion arrives on the same notification (NSWorkspace's own center) */
+	if (l_now == s_contrast_seen && l_motion == s_motion_seen) return;
 	s_contrast_seen = l_now;
+	s_motion_seen = l_motion;
 	sga_push(10, 0, sga_is_dark(), 0, 0);
 	sga_wake();
 }
@@ -480,6 +489,7 @@ int sga_init(const char *a_name, const char *a_id)
 	[NSApp setWindowsMenu:[s_window_item submenu]];
 	[NSApp addObserver:s_target forKeyPath:@"effectiveAppearance" options:0 context:NULL];
 	s_contrast_seen = sga_is_high_contrast();
+	s_motion_seen = sga_motion_reduced();
 	[[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:s_target selector:@selector(contrastChanged:)
 		name:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification object:nil];
 	[NSApp finishLaunching];
@@ -556,6 +566,7 @@ int sga_next(int *a_type, int *a_id, int *a, int *b, int *c)
 	*a_type = s_events[s_head].type; *a_id = s_events[s_head].id;
 	*a = s_events[s_head].a; *b = s_events[s_head].b; *c = s_events[s_head].c;
 	if (*a_type == 11) atomic_store(&s_wake_pending, 0);
+	if (*a_type == 62) *a = sga_frame_tick_read();
 	s_head = (s_head + 1) % SGA_QUEUE;
 	return 1;
 }
@@ -11528,6 +11539,168 @@ void sga_test_set_high_contrast(int a_on)
 	s_contrast_seen = s_force_contrast;
 	sga_push(10, 0, sga_is_dark(), 0, 0);
 	sga_wake();
+}
+
+/* ---- 1x: opacity, reduced motion, the frame clock */
+
+/* Views shown at opacity 0: they take no pointer input, as on every platform (GTK's can_target).
+   AppKit still hit-tests a view at alpha 0, so the hitTest: of each such view's class is wrapped
+   (once per implementation) to answer nil for a view in this set, and the press goes to what is
+   under it. Views not in the set are untouched. */
+static NSHashTable *s_transparent;
+static NSMutableSet *s_hit_wrapped;   /* the hitTest: implementations already wrapped */
+
+static void sga_guard_hit_test(Class a_class)
+{
+	Method m = class_getInstanceMethod(a_class, @selector(hitTest:));
+	if (!m) return;
+	if (!s_hit_wrapped) s_hit_wrapped = [NSMutableSet set];
+	NSValue *l_key = [NSValue valueWithPointer:m];
+	if ([s_hit_wrapped containsObject:l_key]) return;
+	NSView *(*l_original)(id, SEL, NSPoint) = (NSView *(*)(id, SEL, NSPoint))method_getImplementation(m);
+	IMP l_guarded = imp_implementationWithBlock(^NSView *(NSView *a_self, NSPoint p) {
+		if ([s_transparent containsObject:a_self]) return nil;
+		return l_original(a_self, @selector(hitTest:), p);
+	});
+	method_setImplementation(m, l_guarded);
+	[s_hit_wrapped addObject:l_key];
+}
+
+void sga_set_opacity(int a_id, double a_opacity)
+{
+	id o = sga_get(a_id);
+	if (!s_transparent) s_transparent = [NSHashTable weakObjectsHashTable];
+	sga_frame_value_set();
+	if ([o isKindOfClass:[NSWindow class]]) {
+		[(NSWindow *)o setAlphaValue:a_opacity];
+		[(NSWindow *)o setIgnoresMouseEvents:a_opacity <= 0.0];
+	}
+	else if ([o isKindOfClass:[NSView class]]) {
+		[(NSView *)o setAlphaValue:a_opacity];
+		if (a_opacity <= 0.0) { sga_guard_hit_test([o class]); [s_transparent addObject:o]; }
+		else [s_transparent removeObject:o];
+	}
+}
+
+int sga_motion_reduced(void)
+{
+	return [[NSWorkspace sharedWorkspace] accessibilityDisplayShouldReduceMotion] ? 1 : 0;
+}
+
+/* The frame clock: a display link on the main screen (macOS 14+; it runs on the main run loop,
+   in the common modes, so it keeps ticking through live resize, menus, scroller drags and
+   sheets), or a 1/60 s timer when there is no screen. Each tick queues event 62 unless one is
+   still unread (coalesced), and wakes the pump, whose wait is not ended by a run-loop source.
+   The milliseconds since the last tick are measured when the event is read. */
+@interface SGAFrameClock : NSObject
+- (void)tick:(id)a_source;
+@end
+static SGAFrameClock *s_frame_clock;
+static CADisplayLink *s_frame_link;
+static NSTimer *s_frame_timer;
+static int s_tick_queued;
+static double s_tick_last;          /* when the last tick was read, or ticks started */
+static double s_tick_target;        /* the latest tick's target time (when its frame shows) */
+static double s_frame_counted;      /* the target of the frame last counted */
+static int s_frames_painted, s_frames_missed;
+static double s_frame_painted_last, s_frame_gap_longest;
+
+@implementation SGAFrameClock
+- (void)tick:(id)a_source
+{
+	s_tick_target = [a_source isKindOfClass:[CADisplayLink class]] ? [(CADisplayLink *)a_source targetTimestamp] : CACurrentMediaTime() + 1.0 / 60;
+	if (s_tick_queued) return;
+	if (!sga_push(62, 0, 0, 0, 0)) return;
+	s_tick_queued = 1;
+	NSEvent *e = [NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint
+		modifierFlags:0 timestamp:0 windowNumber:0 context:nil subtype:0 data1:0 data2:0];
+	[NSApp postEvent:e atStart:NO];
+}
+@end
+
+static int sga_frame_tick_read(void)
+{
+	double l_now = CACurrentMediaTime();
+	int l_ms = (int)lround((l_now - s_tick_last) * 1000.0);
+	s_tick_last = l_now;
+	s_tick_queued = 0;
+	return l_ms < 0 ? 0 : l_ms;
+}
+
+/* A value was set for the frame being drawn: count it as painted when it is set before that
+   frame's target time, else missed (the first value set for each frame only). */
+static void sga_frame_value_set(void)
+{
+	if (!s_frame_link && !s_frame_timer) return;
+	if (s_tick_target <= 0 || s_tick_target == s_frame_counted) return;
+	s_frame_counted = s_tick_target;
+	if (CACurrentMediaTime() < s_tick_target) {
+		if (s_frame_painted_last > 0) s_frame_gap_longest = fmax(s_frame_gap_longest, (s_tick_target - s_frame_painted_last) * 1000.0);
+		s_frame_painted_last = s_tick_target;
+		s_frames_painted++;
+	}
+	else s_frames_missed++;
+}
+
+void sga_start_frame_ticks(void)
+{
+	if (s_frame_link || s_frame_timer) return;
+	if (!s_frame_clock) s_frame_clock = [SGAFrameClock new];
+	s_tick_last = CACurrentMediaTime();
+	s_tick_queued = 0;
+	NSScreen *l_screen = [[NSApp keyWindow] screen] ?: [NSScreen mainScreen];
+	if (l_screen && [l_screen respondsToSelector:@selector(displayLinkWithTarget:selector:)]) {
+		s_frame_link = [l_screen displayLinkWithTarget:s_frame_clock selector:@selector(tick:)];
+		[s_frame_link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+	}
+	else {
+		s_frame_timer = [NSTimer timerWithTimeInterval:1.0 / 60 target:s_frame_clock selector:@selector(tick:) userInfo:nil repeats:YES];
+		[[NSRunLoop mainRunLoop] addTimer:s_frame_timer forMode:NSRunLoopCommonModes];
+	}
+}
+
+void sga_stop_frame_ticks(void)
+{
+	[s_frame_link invalidate]; s_frame_link = nil;
+	[s_frame_timer invalidate]; s_frame_timer = nil;
+	s_tick_target = 0;
+}
+
+/* Tests */
+
+double sga_test_opacity_shown(int a_id)
+{
+	id o = sga_get(a_id);
+	if ([o isKindOfClass:[NSWindow class]]) return [(NSWindow *)o alphaValue];
+	return [o isKindOfClass:[NSView class]] ? [(NSView *)o alphaValue] : -1.0;
+}
+
+/* Would a press at the middle of widget `a_id' reach it (it or something inside it)? 1 yes, 0 no. */
+int sga_test_pointer_reaches(int a_id)
+{
+	id o = sga_get(a_id);
+	if ([o isKindOfClass:[NSWindow class]]) return [(NSWindow *)o ignoresMouseEvents] ? 0 : 1;
+	if (![o isKindOfClass:[NSView class]] || ![(NSView *)o window]) return 0;
+	NSView *v = o;
+	[[[v window] contentView] layoutSubtreeIfNeeded];
+	NSPoint p = [v convertPoint:NSMakePoint(NSMidX([v bounds]), NSMidY([v bounds])) toView:nil];
+	NSView *l_frame = [[[v window] contentView] superview];
+	NSView *l_hit = [l_frame hitTest:[l_frame convertPoint:p fromView:nil]];
+	return l_hit && [l_hit isDescendantOf:v] ? 1 : 0;
+}
+
+/* The frames counted since the last reset: which 0 painted, 1 missed, 2 the longest gap
+   between painted frames in tenths of a millisecond; 3 resets them. */
+int sga_test_frames(int a_which)
+{
+	switch (a_which) {
+	case 0: return s_frames_painted;
+	case 1: return s_frames_missed;
+	case 2: return (int)lround(s_frame_gap_longest * 10.0);
+	default:
+		s_frames_painted = 0; s_frames_missed = 0; s_frame_gap_longest = 0; s_frame_painted_last = 0; s_frame_counted = 0;
+		return 0;
+	}
 }
 
 /* ---- fonts loaded while the program runs */

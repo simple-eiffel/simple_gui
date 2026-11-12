@@ -2645,6 +2645,110 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_opacity_is_shown_and_zero_takes_no_pointer
+			-- 1x: the native widget shows the opacity set, and at 0 a press at its middle does
+			-- not reach it (a button, and a list, whose scroll view hit-tests on its own);
+			-- above 0 it does again. Parts a backend can't read yet (-1) are left out.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_button: GUI_BUTTON
+			l_list: GUI_LIST
+		do
+			create l_window.make ("Opacity", 320, 240)
+			create l_stack.make_vertical
+			create l_button.make ("Press")
+			create l_list.make
+			l_list.extend ("Genesis")
+			l_list.extend ("Exodus")
+			l_stack.extend (l_button)
+			l_stack.extend_stretching (l_list)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			across {ARRAY [GUI_WIDGET]} <<l_button, l_list>> as ic loop
+				ic.set_opacity (0.5)
+				if backend.test_opacity_shown (ic.id) /= -1.0 then
+					assert ("half shown", (backend.test_opacity_shown (ic.id) - 0.5).abs < 0.01)
+				end
+				if backend.test_pointer_reaches (ic.id) /= -1 then
+					assert ("half still takes the pointer", backend.test_pointer_reaches (ic.id) = 1)
+				end
+				ic.set_opacity (0.0)
+				if backend.test_opacity_shown (ic.id) /= -1.0 then
+					assert ("transparent shown", backend.test_opacity_shown (ic.id) = 0.0)
+				end
+				if backend.test_pointer_reaches (ic.id) /= -1 then
+					assert ("transparent takes no pointer", backend.test_pointer_reaches (ic.id) = 0)
+				end
+				ic.set_opacity (1.0)
+				if backend.test_pointer_reaches (ic.id) /= -1 then
+					assert ("opaque takes the pointer again", backend.test_pointer_reaches (ic.id) = 1)
+				end
+			end
+			l_window.close
+		end
+
+	test_the_real_clock_paints_every_frame
+			-- 1x-a's real-clock count (the spec: before 1x-a merges, on all three): ten 200 ms
+			-- fades back and forth on the real clock, through event 62 and GUI_APPLICATION.
+			-- Where the backend can tell when a frame shows, it counts the frames whose value
+			-- was set in time (painted) and those that missed; at most 1 in 20 may miss and no
+			-- gap between painted frames may pass 50 ms. The counts are printed for the record.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_done: CELL [INTEGER]
+			l_rounds: INTEGER
+		do
+			if backend.test_frames (3) = -1 then
+					-- no frame ticks to count on this backend yet (its 1x half brings them)
+				io.put_string ("    SKIP: this backend cannot count frames yet (its 1x half)%N")
+			else
+				create l_window.make ("Real clock", 240, 120)
+				create l_label.make ("Fading back and forth")
+				l_window.set_content (l_label)
+				l_window.show
+				settle_window
+				app.set_reduces_motion_for_tests (False)
+				app.animation_clock.set_manual (False)
+				create l_done.put (0)
+				l_label.set_opacity (1.0)
+				l_label.animate_opacity (0.0)
+				if attached l_label.opacity_animation as al_fade then
+					al_fade.finished_actions.extend (agent next_fade (l_label, l_done))
+				end
+				if backend.test_frames (3) = 0 then end
+				from until l_done.item >= 10 or l_rounds > 20_000 loop
+					app.process_events (5)
+					l_rounds := l_rounds + 1
+				end
+				assert ("ten fades ran", l_done.item >= 10)
+				assert ("nothing running", not app.animation_clock.is_running)
+				if backend.test_frames (0) /= -1 then
+					print ("    real clock: painted " + backend.test_frames (0).out + ", missed " + backend.test_frames (1).out
+						+ ", longest gap " + (backend.test_frames (2) // 10).out + "." + (backend.test_frames (2) \\ 10).out + " ms%N")
+					assert ("frames painted", backend.test_frames (0) > 0)
+					assert ("at most 1 in 20 missed", backend.test_frames (1) * 20 <= backend.test_frames (0))
+					assert ("no gap past 50 ms", backend.test_frames (2) <= 500)
+				end
+				app.clear_reduces_motion_for_tests
+				l_window.close
+			end
+		end
+
+	next_fade (a_label: GUI_LABEL; a_done: CELL [INTEGER])
+			-- Count a finished fade and, before ten, start the next one the other way.
+		do
+			a_done.put (a_done.item + 1)
+			if a_done.item < 10 then
+				a_label.animate_opacity (1.0 - a_label.opacity)
+				if attached a_label.opacity_animation as al_fade then
+					al_fade.finished_actions.extend (agent next_fade (a_label, a_done))
+				end
+			end
+		end
+
 	test_reduced_motion_completes_every_animation_at_once
 			-- 1x: while the system asks for reduced motion, an animation hands on its end
 			-- value at once and nothing runs.
