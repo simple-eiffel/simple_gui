@@ -2587,6 +2587,77 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_a_container_disables_and_enables
+			-- A container can be disabled and enabled again, as the print preview does to its
+			-- parent's content: it reports disabled while off; afterwards what was on is on
+			-- again, and a control disabled on its own stays disabled. (On AppKit a container is
+			-- no control: disabling it disables what it holds, and enabling restores that.)
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_on, l_off: GUI_BUTTON
+		do
+			create l_window.make ("Container enabling", 320, 160)
+			create l_stack.make_vertical
+			create l_on.make ("On")
+			create l_off.make ("Off on its own")
+			l_stack.extend (l_on)
+			l_stack.extend (l_off)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_off.disable
+			l_stack.disable
+			assert ("the container reports disabled", not l_stack.is_enabled)
+			l_stack.enable
+			assert ("the container reports enabled", l_stack.is_enabled)
+			assert ("what was on is on again", l_on.is_enabled)
+			assert ("what was off on its own stays off", not l_off.is_enabled)
+			l_window.close
+		end
+
+	test_print_preview_navigates_zooms_and_closes
+			-- The print preview, driven with no person: three pages, Page 1 of 3 fitted; Next and the
+			-- keys move between pages; actual size draws larger than fit page; Close answers
+			-- close_button.
+		local
+			l_window: GUI_WINDOW
+			l_job: GUI_PRINT_JOB
+			l_preview: GUI_PRINT_PREVIEW
+			l_fit: REAL_64
+		do
+			create l_window.make ("Preview test", 400, 200)
+			l_window.show
+			settle_window
+			create l_job.make ("Preview test")
+			l_job.print_pages (3, agent (a_page: INTEGER; a_context: CAIRO_CONTEXT)
+				do
+					a_context.select_font ("sans-serif", a_context.Slant_normal, a_context.Weight_normal).set_font_size (24.0).do_nothing
+					a_context.move_to (72.0, 144.0).show_text ("Page " + a_page.out).do_nothing
+				end)
+			create l_preview.make (l_job.rendered_path, "Preview")
+			assert ("three pages", l_preview.page_count = 3)
+			l_preview.present (l_window)
+			settle_window
+			assert ("on page 1, fitted", l_preview.page = 1 and l_preview.zoom = l_preview.Zoom_fit_page)
+			assert ("the page was drawn", l_preview.pixels_per_point > 0.0)
+			l_fit := l_preview.pixels_per_point
+			l_preview.next_page
+			assert ("Next: page 2", l_preview.page = 2)
+			l_preview.go_to_page (3)
+			l_preview.next_page
+			assert ("no page after the last", l_preview.page = 3)
+			l_preview.set_zoom (l_preview.Zoom_actual)
+			settle_window
+			assert ("actual size is larger than fitted: " + l_preview.pixels_per_point.out + " against " + l_fit.out, l_preview.pixels_per_point > l_fit)
+			l_preview.pan_by (-40, -40)
+			assert ("a larger page can move", l_preview.pan_y <= 0)
+			l_preview.close_with (l_preview.close_button)
+			assert ("Close answers close_button", l_preview.answer = l_preview.close_button)
+			settle_window
+			l_window.close
+		end
+
 	test_print_job_renders_and_saves
 			-- 1v-c: `print_text' lays a long text out over several pages and `print_pages'
 			-- makes exactly the pages asked for; `save_pdf' writes a whole PDF with that many

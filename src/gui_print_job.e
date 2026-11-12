@@ -83,7 +83,11 @@ feature -- Access
 			-- How many pages the last rendering made; 0 before one.
 
 	last_error: detachable STRING_32
-			-- Why the last rendering, save or print failed; Void when it did not.
+			-- Why the last rendering, save or print failed, written for a person; Void when it did not.
+
+	last_error_detail: detachable STRING_32
+			-- For the program's log, not the person: what the platform's printing said behind
+			-- `last_error' (on Windows, pdftocairo's exit code and output); Void when it said nothing.
 
 	Letter_width: REAL_64 = 612.0
 	Letter_height: REAL_64 = 792.0
@@ -196,8 +200,14 @@ feature -- Output
 			last_outcome := l_printer.last_outcome
 			if last_outcome = Outcome_failed then
 				last_error := l_printer.last_error.twin
+				if not l_printer.last_error_detail.is_empty then
+					last_error_detail := l_printer.last_error_detail.twin
+				else
+					last_error_detail := Void
+				end
 			else
 				last_error := Void
+				last_error_detail := Void
 			end
 			delete_if_there (pdf_path)
 			create pdf_path.make_empty
@@ -206,6 +216,27 @@ feature -- Output
 			known_outcome: last_outcome >= Outcome_no_printer and last_outcome <= Outcome_printed
 			failure_explained: last_outcome = Outcome_failed implies attached last_error
 			rendering_removed: page_count = 0
+		end
+
+	run_preview (a_parent: GUI_WINDOW)
+			-- A print preview of the rendered pages over `a_parent' (GUI_PRINT_PREVIEW). Print...
+			-- there goes on to the system's print dialog (`run_dialog'); Close answers
+			-- `Outcome_cancelled' and keeps the rendering, to preview, print or save again.
+		require
+			rendered: page_count >= 1
+		local
+			l_preview: GUI_PRINT_PREVIEW
+		do
+			create l_preview.make (pdf_path, "Print preview")
+			if l_preview.run_modal (a_parent) = l_preview.print_button then
+				run_dialog (a_parent)
+			else
+				last_outcome := Outcome_cancelled
+				last_error := Void
+			end
+		ensure
+			known_outcome: last_outcome >= Outcome_no_printer and last_outcome <= Outcome_printed
+			kept_when_closed: last_outcome = Outcome_cancelled implies page_count = old page_count or page_count = 0
 		end
 
 	last_outcome: INTEGER

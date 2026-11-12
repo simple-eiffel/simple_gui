@@ -732,7 +732,10 @@ void sga_window_set_content(int a_window, int a_child)
 	sga_pills_sync();
 }
 
-void sga_window_show(int a_window) { [(NSWindow *)sga_get(a_window) orderFront:nil]; sga_pills_sync(); }
+/* A shown window is the key window of this program, as showing one is on Windows and GTK (so
+   the keys reach it). It does not bring the program forward over others: an inactive program's
+   key window becomes key when the person comes to it. */
+void sga_window_show(int a_window) { [(NSWindow *)sga_get(a_window) makeKeyAndOrderFront:nil]; sga_pills_sync(); }
 void sga_window_close(int a_window) { [(NSWindow *)sga_get(a_window) orderOut:nil]; }
 void sga_window_set_title(int a_window, const char *a_title) { [(NSWindow *)sga_get(a_window) setTitle:sga_string(a_title)]; }
 
@@ -5799,9 +5802,51 @@ const char *sga_test_badge_shown(int a_id)
 
 /* ----------------------------------------------------------------- common */
 
+/* A view that is no control (a stack, a grid, a scroll area...) is disabled by disabling what is
+   in it: every enabled control and every editable text view inside, as GTK's sensitivity does.
+   What it turned off is kept, so enabling it again turns on those alone, and a control that was
+   disabled on its own stays disabled. */
+static NSMapTable<NSView *, NSMutableArray *> *s_disabled_parts;
+
+static void sga_disable_inside(NSView *v, NSMutableArray *a_turned_off)
+{
+	for (NSView *x in [v subviews]) {
+		if ([x isKindOfClass:[NSControl class]]) {
+			if ([(NSControl *)x isEnabled]) { [(NSControl *)x setEnabled:NO]; [a_turned_off addObject:x]; }
+		}
+		else if ([x isKindOfClass:[NSTextView class]]) {
+			if ([(NSTextView *)x isEditable]) { [(NSTextView *)x setEditable:NO]; [a_turned_off addObject:x]; }
+		}
+		sga_disable_inside(x, a_turned_off);
+	}
+}
+
+static void sga_set_view_enabled(NSView *v, BOOL a_on)
+{
+	if (!s_disabled_parts) s_disabled_parts = [NSMapTable weakToStrongObjectsMapTable];
+	NSMutableArray *l_off = [s_disabled_parts objectForKey:v];
+	if (!a_on && !l_off) {
+		l_off = [NSMutableArray array];
+		sga_disable_inside(v, l_off);
+		[s_disabled_parts setObject:l_off forKey:v];
+	}
+	else if (a_on && l_off) {
+		for (id x in l_off) {
+			if ([x isKindOfClass:[NSControl class]]) [(NSControl *)x setEnabled:YES];
+			else if ([x isKindOfClass:[NSTextView class]]) [(NSTextView *)x setEditable:YES];
+		}
+		[s_disabled_parts removeObjectForKey:v];
+	}
+}
+
 void sga_set_enabled(int a_id, int a_on)
 {
 	id o = sga_core(a_id);
+	if (![o isKindOfClass:[NSControl class]] && ![o isKindOfClass:[SGASpin class]] && ![o isKindOfClass:[SGARadioGroup class]]
+		&& ![o isKindOfClass:[SGAExpander class]] && [o isKindOfClass:[NSView class]]) {
+		sga_set_view_enabled((NSView *)o, a_on != 0);
+		return;
+	}
 	if ([o isKindOfClass:[SGASpin class]]) {
 		[((SGASpin *)o)->field setEnabled:a_on != 0];
 		[((SGASpin *)o)->stepper setEnabled:a_on != 0];
@@ -5821,7 +5866,8 @@ int sga_is_enabled(int a_id)
 	if ([o isKindOfClass:[SGASpin class]]) return [((SGASpin *)o)->field isEnabled] ? 1 : 0;
 	if ([o isKindOfClass:[SGARadioGroup class]]) return [[[(SGARadioGroup *)o arrangedSubviews] firstObject] isEnabled] || ![[(SGARadioGroup *)o arrangedSubviews] count] ? 1 : 0;
 	if ([o isKindOfClass:[SGAExpander class]]) return [((SGAExpander *)o)->triangle isEnabled] ? 1 : 0;
-	return [o isKindOfClass:[NSControl class]] ? ([(NSControl *)o isEnabled] ? 1 : 0) : 1;
+	if ([o isKindOfClass:[NSControl class]]) return [(NSControl *)o isEnabled] ? 1 : 0;
+	return [s_disabled_parts objectForKey:o] ? 0 : 1;   /* another view: disabled while it holds what it turned off */
 }
 
 void sga_set_visible(int a_id, int a_on)

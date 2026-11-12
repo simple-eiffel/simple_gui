@@ -135,6 +135,8 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_view_first_cost, "view_first_cost")
 				run_test (agent t.test_a_label_beyond_ascii_reads_as_written, "a_label_beyond_ascii_reads_as_written")
 				run_test (agent t.test_print_job_renders_and_saves, "print_job_renders_and_saves")
+				run_test (agent t.test_print_preview_navigates_zooms_and_closes, "print_preview_navigates_zooms_and_closes")
+				run_test (agent t.test_a_container_disables_and_enables, "a_container_disables_and_enables")
 				run_test (agent t.test_code_editor_bracket_pairs, "code_editor_bracket_pairs")
 				run_test (agent t.test_line_ranges, "line_ranges")
 				run_test (agent t.test_code_carets_type_and_undo, "code_carets_type_and_undo")

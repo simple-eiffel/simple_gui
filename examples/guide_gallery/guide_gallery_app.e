@@ -48,6 +48,7 @@ feature {NONE} -- Initialization
 				shoot_collections_and_preferences
 				shoot_code_editor
 				shoot_printing
+				shoot_print_preview
 				print ("guide gallery: " + saved.out + " pictures in " + folder.name.to_string_8 + "%N")
 			else
 				print ("guide gallery: no display%N")
@@ -924,12 +925,34 @@ feature {NONE} -- Code editor (1v-b)
 			create l_stack.make_vertical
 			l_stack.extend (create {GUI_LABEL}.make ("Psalm 23%NThe Lord is my shepherd; I shall not want.%NHe maketh me to lie down in green pastures:%Nhe leadeth me beside the still waters."))
 			create l_buttons.make_horizontal
+			l_buttons.extend (create {GUI_BUTTON}.make ({STRING_32} "Preview%/8230/"))
 			l_buttons.extend (create {GUI_BUTTON}.make ({STRING_32} "Print%/8230/"))
 			l_buttons.extend (create {GUI_BUTTON}.make ("Save as PDF"))
 			l_stack.extend (l_buttons)
 			create l_window.make ("Psalm 23", 440, 200)
 			l_window.set_content (l_stack)
 			save ("printing", l_window)
+		end
+
+	shoot_print_preview
+			-- 1v-c: the print preview over its window, the psalm's page fitted.
+		local
+			l_window: GUI_WINDOW
+			l_job: GUI_PRINT_JOB
+			l_preview: GUI_PRINT_PREVIEW
+		do
+			create l_window.make ("Psalm 23", 440, 200)
+			l_window.set_content (create {GUI_LABEL}.make ("Psalm 23"))
+			l_window.show
+			settle
+			create l_job.make ("Psalm 23")
+			l_job.print_text ("Psalm 23%NThe Lord is my shepherd; I shall not want.%NHe maketh me to lie down in green pastures:%Nhe leadeth me beside the still waters.")
+			create l_preview.make (l_job.rendered_path, "Print preview")
+			l_preview.present (l_window)
+			settle
+			save ("printing-preview", l_preview.window)
+			l_preview.close_with (l_preview.close_button)
+			l_window.close
 		end
 
 	Greeter_text: STRING = "[
