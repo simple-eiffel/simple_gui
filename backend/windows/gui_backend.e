@@ -5105,8 +5105,12 @@ feature -- Appearance
 
 	test_frames (a_which: INTEGER): INTEGER
 			-- 1x: frames counted at each tick: painted when a value set since the tick before
-			-- was rendered before this one, missed when not; the longest gap between painted
-			-- frames in tenths of a millisecond; 3 resets.
+			-- was rendered before this one, missed when not; 2 the longest gap between painted
+			-- frames and 4 their 95th-percentile gap (nearest rank; 0 with none yet), both in
+			-- tenths of a millisecond; 3 resets.
+		local
+			l_sorted: ARRAYED_LIST [INTEGER]
+			l_rank, i, j, l_v: INTEGER
 		do
 			inspect a_which
 			when 0 then
@@ -5115,12 +5119,35 @@ feature -- Appearance
 				Result := frames_missed
 			when 2 then
 				Result := frames_longest_gap
+			when 4 then
+				if not frame_gaps.is_empty then
+					l_sorted := frame_gaps.twin
+						-- insertion sort: a run holds about 130 gaps
+					from i := 2 until i > l_sorted.count loop
+						l_v := l_sorted.i_th (i)
+						from j := i - 1 until j < 1 or else l_sorted.i_th (j) <= l_v loop
+							l_sorted.put_i_th (l_sorted.i_th (j), j + 1)
+							j := j - 1
+						end
+						l_sorted.put_i_th (l_v, j + 1)
+						i := i + 1
+					end
+					l_rank := (0.95 * l_sorted.count).ceiling.max (1)
+					Result := l_sorted.i_th (l_rank)
+				end
 			else
 				frames_painted := 0
 				frames_missed := 0
 				frames_longest_gap := 0
 				frames_last_painted_ms := 0
+				frame_gaps.wipe_out
 			end
+		end
+
+	frame_gaps: ARRAYED_LIST [INTEGER]
+			-- The gaps between painted frames since the last reset, in tenths of a millisecond.
+		once ("OBJECT")
+			create Result.make (256)
 		end
 
 	frames_painted, frames_missed, frames_longest_gap: INTEGER
@@ -5156,6 +5183,7 @@ feature -- Appearance
 					frames_painted := frames_painted + 1
 					if frames_last_painted_ms > 0 then
 						frames_longest_gap := frames_longest_gap.max (((l_now - frames_last_painted_ms) * 10).to_integer_32)
+						frame_gaps.extend (((l_now - frames_last_painted_ms) * 10).to_integer_32)
 					end
 					frames_last_painted_ms := l_now
 				else

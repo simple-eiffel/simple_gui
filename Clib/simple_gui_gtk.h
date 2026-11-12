@@ -54,6 +54,10 @@ __attribute__((weak)) int sg_fr_missed = 0;
 __attribute__((weak)) gint64 sg_fr_longest = 0;
 __attribute__((weak)) gint64 sg_fr_last_painted = 0;
 __attribute__((weak)) int sg_fr_value_set = 0;
+/* the gaps between painted frames since the last reset, in tenths of a millisecond (p95) */
+#define SG_FR_GAPS 4096
+__attribute__((weak)) int sg_fr_gaps[SG_FR_GAPS] = {0};
+__attribute__((weak)) int sg_fr_gap_count = 0;
 
 static void sg_push5(int t, int id, int a, int b, int c) {
     int n = (sg_qt + 1) % SG_QCAP;
@@ -5055,6 +5059,7 @@ static void sg_on_after_paint(GdkFrameClock *clock, gpointer d) {
     if (sg_fr_value_set) {
         sg_fr_painted++;
         if (sg_fr_last_painted > 0 && now - sg_fr_last_painted > sg_fr_longest) sg_fr_longest = now - sg_fr_last_painted;
+        if (sg_fr_last_painted > 0 && sg_fr_gap_count < SG_FR_GAPS) sg_fr_gaps[sg_fr_gap_count++] = (int) ((now - sg_fr_last_painted) / 100);
         sg_fr_last_painted = now;
         sg_fr_value_set = 0;
     } else {
@@ -5093,13 +5098,28 @@ static int sg_start_frame_ticks(void) {
     return 1;
 }
 /* Tests, 1x: the frame counts (0 painted, 1 missed, 2 longest gap in tenths of a ms; 3 resets). */
+static int sg_fr_compare(const void *a, const void *b) {
+    int x = *(const int *) a, y = *(const int *) b;
+    return (x > y) - (x < y);
+}
+/* Tests, 1x: the frame counts (0 painted, 1 missed, 2 longest gap, 4 the 95th-percentile gap by
+   nearest rank, both in tenths of a ms, 0 with no gap yet; 3 resets). */
 static int sg_test_frames(int which) {
+    int sorted[SG_FR_GAPS], rank;
     switch (which) {
         case 0: return sg_fr_painted;
         case 1: return sg_fr_missed;
         case 2: return (int) (sg_fr_longest / 100);
+        case 4:
+            if (sg_fr_gap_count == 0) return 0;
+            memcpy(sorted, sg_fr_gaps, (size_t) sg_fr_gap_count * sizeof(int));
+            qsort(sorted, (size_t) sg_fr_gap_count, sizeof(int), sg_fr_compare);
+            rank = (int) ((95 * sg_fr_gap_count + 99) / 100);   /* ceiling of 0.95 n */
+            if (rank < 1) rank = 1;
+            return sorted[rank - 1];
         default:
             sg_fr_painted = 0; sg_fr_missed = 0; sg_fr_longest = 0; sg_fr_last_painted = 0;
+            sg_fr_gap_count = 0;
             return 0;
     }
 }
