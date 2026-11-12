@@ -170,6 +170,17 @@ feature -- Animated show and hide (1x)
 			Result := a_effect >= Effect_fade and a_effect <= Effect_grow
 		end
 
+	effective_effect (a_effect: INTEGER): INTEGER
+			-- The effect `a_effect' is shown with on this kind of widget: itself (a window
+			-- fades whatever it is asked for).
+		require
+			known: is_effect (a_effect)
+		do
+			Result := a_effect
+		ensure
+			known: is_effect (Result)
+		end
+
 	Kind_shown: INTEGER = 1
 			-- `animation_finished_actions': an animated show ended.
 
@@ -201,10 +212,10 @@ feature -- Animated show and hide (1x)
 			stop_reveal
 			is_hiding := False
 			if not is_shown then
-				set_reveal_value (a_effect, 0.0, True)
+				set_reveal_value (effective_effect (a_effect), 0.0, True)
 				show
 			end
-			start_reveal (a_effect, reveal, 1.0)
+			start_reveal (effective_effect (a_effect), reveal, 1.0)
 		ensure
 			shown: is_shown
 			not_hiding: not is_hiding
@@ -224,8 +235,8 @@ feature -- Animated show and hide (1x)
 			if is_shown then
 				backend.widget_yield_focus (id)
 				is_hiding := True
-				set_reveal_value (a_effect, reveal, False)
-				start_reveal (a_effect, reveal, 0.0)
+				set_reveal_value (effective_effect (a_effect), reveal, False)
+				start_reveal (effective_effect (a_effect), reveal, 0.0)
 			end
 		ensure
 			reduced_means_hidden: (old application.reduces_motion) implies not is_shown

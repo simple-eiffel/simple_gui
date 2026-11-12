@@ -1874,8 +1874,12 @@ feature -- Common widget state
 			-- `a_effect' (GUI_WIDGET's Effect_ constants): faded; slid in from an edge (leading
 			-- and trailing mirrored under right-to-left), its content moving with the edge; or
 			-- grown from the middle. For the slides and grow the widget takes that share of its
-			-- full space in its layout; a fade keeps the full space. Without `a_takes_input' it
-			-- takes no pointer input.
+			-- full space in its layout - its natural size along the axis, as GtkRevealer's; a
+			-- widget that stretches settles into its stretched size at the end - and a fade
+			-- keeps the full space. The alpha shown is the widget's opacity times a fade's
+			-- reveal (the backend keeps both numbers; the last write never wins). It takes
+			-- pointer input when its opacity is above 0 and `a_takes_input'. A call with
+			-- another effect undoes the earlier effect's state first. (MACMINI's review.)
 		require
 			known_effect: a_effect >= 1 and a_effect <= 6
 			in_range: a_fraction >= 0.0 and a_fraction <= 1.0
@@ -1890,7 +1894,8 @@ feature -- Common widget state
 
 	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)
 			-- 1x: show widget `an_id' at `a_opacity' (0 transparent to 1 opaque). At 0 it
-			-- takes no pointer input, on every platform.
+			-- takes no pointer input, on every platform. A fade's reveal multiplies it (see
+			-- `widget_set_reveal').
 		require
 			in_range: a_opacity >= 0.0 and a_opacity <= 1.0
 		deferred

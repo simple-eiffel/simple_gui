@@ -2944,6 +2944,14 @@ feature -- The remaining controls (1j)
 				assert ("half the space half way: " + backend.test_extent (l_field.id, True).out + " of " + l_full.out,
 					(backend.test_extent (l_field.id, True) - l_full // 2).abs <= 2)
 			end
+			if l_full > 0 and then backend.test_extent (l_field.id, True) /= -1 then
+					-- an effect change undoes the earlier effect: a fade keeps the full space
+				l_field.hide_animated (l_field.Effect_fade)
+				assert ("a fade after a slide: the full space at once: " + backend.test_extent (l_field.id, True).out,
+					(backend.test_extent (l_field.id, True) - l_full).abs <= 2)
+				app.animation_clock.finish_all
+				l_field.show
+			end
 			app.animation_clock.finish_all
 			l_field.focus
 			settle_window
