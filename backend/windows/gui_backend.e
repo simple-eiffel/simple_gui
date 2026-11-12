@@ -1544,16 +1544,24 @@ feature -- Controls
 		end
 
 	start_frame_ticks
-			-- 1x interface: noted only. The ticks themselves (DwmFlush-paced on a helper
-			-- thread, with the high-resolution timer as the fallback) arrive with the Windows
-			-- half; until then animations run in tests on the manual clock.
+			-- 1x: simple_shell's frame ticks (DwmFlush-paced on a helper thread, the
+			-- high-resolution timer as the fallback), each pushed as event 62.
 		do
-			is_frame_ticking := True
+			frame_ticks.start
+			is_frame_ticking := frame_ticks.last_started
+			frame_value_pending := False
 		end
 
 	stop_frame_ticks
 		do
+			frame_ticks.stop
 			is_frame_ticking := False
+		end
+
+	frame_ticks: SHELL_FRAME_TICKS
+			-- simple_shell's frame ticks (event 69).
+		once ("OBJECT")
+			create Result
 		end
 
 	is_frame_ticking: BOOLEAN
@@ -1566,10 +1574,19 @@ feature -- Controls
 		end
 
 	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)
-			-- 1x interface: kept for each widget; drawn with the Windows half (simple_widgets'
-			-- painter alpha).
+			-- 1x: simple_widgets paints the widget at that alpha; at 0 a hit passes to its
+			-- parent.
 		do
 			widget_opacities.force (a_opacity, an_id)
+			if is_frame_ticking then
+					-- noted before `changed', which renders at once
+				frame_value_pending := True
+				frame_value_mark := frames_rendered_total
+			end
+			if attached widget (an_id) as al_w then
+				al_w.set_opacity (a_opacity)
+				changed
+			end
 		end
 
 	widget_opacities: HASH_TABLE [REAL_64, INTEGER]
@@ -5045,21 +5062,107 @@ feature -- Appearance
 		end
 
 	test_opacity_shown (an_id: INTEGER): REAL_64
-			-- 1x: not read on Windows yet (PROD's half): -1.
+			-- 1x: the opacity simple_widgets paints the widget at; -1 when it is gone.
 		do
-			Result := -1.0
+			if attached widget (an_id) as al_w then
+				Result := al_w.opacity
+			else
+				Result := -1.0
+			end
 		end
 
 	test_pointer_reaches (an_id: INTEGER): INTEGER
-			-- 1x: not read on Windows yet (PROD's half): -1.
+			-- 1x: would a press at the middle of `an_id' reach it or something in it (a hit on
+			-- a fully transparent widget passes to its parent)? -1 when it has no size or top.
+		local
+			l_top: SW_WIDGET
+			l_hit: detachable SW_WIDGET
 		do
 			Result := -1
+			if attached widget (an_id) as al_w and then al_w.width > 0.0 and then al_w.height > 0.0 then
+				from
+					l_top := al_w
+				until
+					not attached l_top.parent as al_up
+				loop
+					l_top := al_up
+				end
+				if attached open_window as al_win then
+					l_hit := al_win.reachable_target (l_top.widget_at (al_w.x + al_w.width / 2.0, al_w.y + al_w.height / 2.0))
+					Result := 0
+					from
+					until
+						l_hit = Void or Result = 1
+					loop
+						if l_hit = al_w then
+							Result := 1
+						end
+						l_hit := l_hit.parent
+					end
+				end
+			end
 		end
 
 	test_frames (a_which: INTEGER): INTEGER
-			-- 1x: not counted on Windows yet (PROD's half): -1.
+			-- 1x: frames counted at each tick: painted when a value set since the tick before
+			-- was rendered before this one, missed when not; the longest gap between painted
+			-- frames in tenths of a millisecond; 3 resets.
 		do
-			Result := -1
+			inspect a_which
+			when 0 then
+				Result := frames_painted
+			when 1 then
+				Result := frames_missed
+			when 2 then
+				Result := frames_longest_gap
+			else
+				frames_painted := 0
+				frames_missed := 0
+				frames_longest_gap := 0
+				frames_last_painted_ms := 0
+			end
+		end
+
+	frames_painted, frames_missed, frames_longest_gap: INTEGER
+			-- 1x frame counts (`test_frames').
+
+	frames_last_painted_ms: INTEGER_64
+			-- When the last painted frame was counted.
+
+	frame_value_pending: BOOLEAN
+			-- Was a value set since the last tick?
+
+	frame_value_mark: INTEGER
+			-- `frames_rendered_total' when that value was set.
+
+	frames_rendered_total: INTEGER
+			-- Frames the open windows have rendered.
+		do
+			across windows as ic loop
+				if attached ic as al_w then
+					Result := Result + al_w.frames_rendered
+				end
+			end
+		end
+
+	count_frame
+			-- A tick: count the value set since the tick before as painted or missed.
+		local
+			l_now: INTEGER_64
+		do
+			if frame_value_pending then
+				l_now := clock.milliseconds
+				if frames_rendered_total > frame_value_mark then
+					frames_painted := frames_painted + 1
+					if frames_last_painted_ms > 0 then
+						frames_longest_gap := frames_longest_gap.max (((l_now - frames_last_painted_ms) * 10).to_integer_32)
+					end
+					frames_last_painted_ms := l_now
+				else
+					frames_missed := frames_missed + 1
+				end
+				frame_value_pending := False
+			end
 		end
 
 	test_set_high_contrast (a_on: BOOLEAN)
@@ -5696,6 +5799,10 @@ feature {NONE} -- Drawn views (1i)
 					al_w.request_render
 				end
 				render_spinning
+			elseif a_type = {SHELL_EVENTS}.Event_frame_tick then
+					-- 1x: a frame tick, `a_x' milliseconds after the last
+				count_frame
+				push (62, 0, a_x, 0, 0)
 			elseif a_type = {SHELL_TRAY}.Event_click and then a_x = {SHELL_TRAY}.Click_balloon and then last_notification_id > 0 then
 				push (28, 0, last_notification_id, 0, 0)
 			end
