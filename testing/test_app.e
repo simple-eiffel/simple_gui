@@ -147,6 +147,8 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_a_show_turns_a_hide_around, "a_show_turns_a_hide_around")
 				run_test (agent t.test_reduced_motion_shows_and_hides_at_once, "reduced_motion_shows_and_hides_at_once")
 				run_test (agent t.test_the_toolkit_shows_the_reveal_and_the_focus_leaves, "the_toolkit_shows_the_reveal_and_the_focus_leaves")
+				run_test (agent t.test_every_effect_shows_its_share_in_both_stacks, "every_effect_shows_its_share_in_both_stacks")
+				run_test (agent t.test_opacity_and_a_fade_multiply, "opacity_and_a_fade_multiply")
 				run_test (agent t.test_opacity_is_shown_and_zero_takes_no_pointer, "opacity_is_shown_and_zero_takes_no_pointer")
 				run_test (agent t.test_the_real_clock_paints_every_frame, "the_real_clock_paints_every_frame")
 				run_test (agent t.test_code_editor_bracket_pairs, "code_editor_bracket_pairs")
