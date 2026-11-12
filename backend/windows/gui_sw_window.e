@@ -15,11 +15,16 @@ inherit
 		rename
 			make as make_window
 		redefine
-			dispatch, run_modal_until, close_sheet
+			dispatch, run_modal_until, close_sheet, render
 		end
 
 create
 	make
+
+feature -- Measurement (1x)
+
+	frames_rendered: INTEGER
+			-- How many frames this window has rendered (the backend's frame counts).
 
 feature {NONE} -- Initialization
 
@@ -609,6 +614,15 @@ feature {GUI_BACKEND} -- Sizing
 			end
 		ensure
 			never_shrinks: win_w >= old win_w and win_h >= old win_h
+		end
+
+feature {NONE} -- Rendering (1x)
+
+	render
+			-- <Precursor>, counted.
+		do
+			Precursor
+			frames_rendered := frames_rendered + 1
 		end
 
 invariant
