@@ -2693,8 +2693,13 @@ feature -- The remaining controls (1j)
 			-- 1x-a's real-clock count (the spec: before 1x-a merges, on all three): ten 200 ms
 			-- fades back and forth on the real clock, through event 62 and GUI_APPLICATION.
 			-- Where the backend can tell when a frame shows, it counts the frames whose value
-			-- was set in time (painted) and those that missed; at most 1 in 20 may miss and no
-			-- gap between painted frames may pass 50 ms. The counts are printed for the record.
+			-- was set in time (painted) and those that missed. At most 1 in 20 may miss; the
+			-- 95th-percentile gap between painted frames may not pass 25 ms (1.5 frames at 60
+			-- Hz: what a user sees), and the single longest gap not 100 ms (one gap is ruled by
+			-- the compositor's own hitches: a plain C spike on Windows' DwmFlush, none of our
+			-- code, reached 47 ms). EIF-GROUP, 2026-11-12: the same on all three; if any
+			-- platform's 95th percentile sits near 25 ms, say so rather than widen it. The
+			-- counts, the longest gap included, are printed for the record.
 		local
 			l_window: GUI_WINDOW
 			l_label: GUI_LABEL
@@ -2727,10 +2732,12 @@ feature -- The remaining controls (1j)
 				assert ("nothing running", not app.animation_clock.is_running)
 				if backend.test_frames (0) /= -1 then
 					print ("    real clock: painted " + backend.test_frames (0).out + ", missed " + backend.test_frames (1).out
-						+ ", longest gap " + (backend.test_frames (2) // 10).out + "." + (backend.test_frames (2) \\ 10).out + " ms%N")
+						+ ", 95th-percentile gap " + (backend.test_frames (4) // 10).out + "." + (backend.test_frames (4) \\ 10).out
+						+ " ms, longest gap " + (backend.test_frames (2) // 10).out + "." + (backend.test_frames (2) \\ 10).out + " ms%N")
 					assert ("frames painted", backend.test_frames (0) > 0)
 					assert ("at most 1 in 20 missed", backend.test_frames (1) * 20 <= backend.test_frames (0))
-					assert ("no gap past 50 ms", backend.test_frames (2) <= 500)
+					assert ("95th-percentile gap at most 25 ms", backend.test_frames (4) <= 250)
+					assert ("no gap past 100 ms", backend.test_frames (2) <= 1000)
 				end
 				app.clear_reduces_motion_for_tests
 				l_window.close

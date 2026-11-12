@@ -11604,6 +11604,9 @@ static double s_tick_target;        /* the latest tick's target time (when its f
 static double s_frame_counted;      /* the target of the frame last counted */
 static int s_frames_painted, s_frames_missed;
 static double s_frame_painted_last, s_frame_gap_longest;
+#define SGA_FRAME_GAPS 8192
+static double s_frame_gaps[SGA_FRAME_GAPS];   /* the gaps between painted frames, ms (tests) */
+static int s_frame_gap_count;
 
 @implementation SGAFrameClock
 - (void)tick:(id)a_source
@@ -11635,7 +11638,11 @@ static void sga_frame_value_set(void)
 	if (s_tick_target <= 0 || s_tick_target == s_frame_counted) return;
 	s_frame_counted = s_tick_target;
 	if (CACurrentMediaTime() < s_tick_target) {
-		if (s_frame_painted_last > 0) s_frame_gap_longest = fmax(s_frame_gap_longest, (s_tick_target - s_frame_painted_last) * 1000.0);
+		if (s_frame_painted_last > 0) {
+			double l_gap = (s_tick_target - s_frame_painted_last) * 1000.0;
+			s_frame_gap_longest = fmax(s_frame_gap_longest, l_gap);
+			if (s_frame_gap_count < SGA_FRAME_GAPS) s_frame_gaps[s_frame_gap_count++] = l_gap;
+		}
 		s_frame_painted_last = s_tick_target;
 		s_frames_painted++;
 	}
@@ -11689,16 +11696,35 @@ int sga_test_pointer_reaches(int a_id)
 	return l_hit && [l_hit isDescendantOf:v] ? 1 : 0;
 }
 
+static int sga_compare_doubles(const void *x, const void *y)
+{
+	double a = *(const double *)x, b = *(const double *)y;
+	return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /* The frames counted since the last reset: which 0 painted, 1 missed, 2 the longest gap
-   between painted frames in tenths of a millisecond; 3 resets them. */
+   between painted frames and 4 the 95th-percentile gap, both in tenths of a millisecond (0
+   with no gap yet); 3 resets them. */
 int sga_test_frames(int a_which)
 {
 	switch (a_which) {
 	case 0: return s_frames_painted;
 	case 1: return s_frames_missed;
 	case 2: return (int)lround(s_frame_gap_longest * 10.0);
+	case 4: {
+		if (!s_frame_gap_count) return 0;
+		double *l_sorted = malloc(sizeof(double) * (size_t)s_frame_gap_count);
+		if (!l_sorted) return 0;
+		memcpy(l_sorted, s_frame_gaps, sizeof(double) * (size_t)s_frame_gap_count);
+		qsort(l_sorted, (size_t)s_frame_gap_count, sizeof(double), sga_compare_doubles);
+		int l_index = (int)ceil(0.95 * s_frame_gap_count) - 1;   /* nearest rank */
+		int l_result = (int)lround(l_sorted[l_index < 0 ? 0 : l_index] * 10.0);
+		free(l_sorted);
+		return l_result;
+	}
 	default:
 		s_frames_painted = 0; s_frames_missed = 0; s_frame_gap_longest = 0; s_frame_painted_last = 0; s_frame_counted = 0;
+		s_frame_gap_count = 0;
 		return 0;
 	}
 }
