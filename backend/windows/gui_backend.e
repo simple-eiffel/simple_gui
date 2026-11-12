@@ -4534,10 +4534,50 @@ feature -- Path controls, continued
 feature -- Every widget
 
 	set_enabled (an_id: INTEGER; a_on: BOOLEAN)
+			-- A container switched off switches off every enabled widget it holds, and on
+			-- again exactly those, as on GTK and AppKit: SW_WIDGET's own flag stops only the
+			-- widget itself, so the example's buttons still answered under its print preview
+			-- (found by the simple_shell#48 probe, 2026-11-12).
+		local
+			l_held: ARRAYED_LIST [SW_WIDGET]
 		do
 			if attached widget (an_id) as al_w then
+				if not a_on then
+					if not held_off.has (an_id) and then not al_w.sub_widgets.is_empty then
+						create l_held.make (8)
+						collect_enabled_below (al_w, l_held)
+						across l_held as ic loop
+							ic.set_enabled (False)
+						end
+						held_off.force (l_held, an_id)
+					end
+				elseif attached held_off.item (an_id) as al_held then
+					across al_held as ic loop
+						ic.set_enabled (True)
+					end
+					held_off.remove (an_id)
+				end
 				al_w.set_enabled (a_on)
 				changed
+			end
+		end
+
+	held_off: HASH_TABLE [ARRAYED_LIST [SW_WIDGET], INTEGER]
+			-- By container: the widgets inside it its switching off switched off.
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	collect_enabled_below (a_widget: SW_WIDGET; a_into: ARRAYED_LIST [SW_WIDGET])
+			-- Every enabled widget below `a_widget', at any depth, into `a_into'.
+		do
+			across
+				a_widget.sub_widgets as ic
+			loop
+				if ic.is_enabled then
+					a_into.extend (ic)
+				end
+				collect_enabled_below (ic, a_into)
 			end
 		end
 
