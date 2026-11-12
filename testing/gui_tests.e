@@ -2882,6 +2882,9 @@ feature -- The remaining controls (1j)
 			l_fit := l_preview.pixels_per_point
 			l_preview.next_page
 			assert ("Next: page 2", l_preview.page = 2)
+				-- #126: the page is named for screen readers, as an image, and follows the page
+			assert ("the page named: " + l_preview.canvas.accessible_label.to_string_8, l_preview.canvas.accessible_label.same_string ("Page 2 of 3"))
+			assert ("the page is an image: " + l_preview.canvas.accessible_role.to_string_8, l_preview.canvas.accessible_role.same_string ("img"))
 			l_preview.go_to_page (3)
 			l_preview.next_page
 			assert ("no page after the last", l_preview.page = 3)
