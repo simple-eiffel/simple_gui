@@ -5010,6 +5010,19 @@ static void sg_timer_start(int id, int ms, int repeat) {
     src = g_timeout_add_full(G_PRIORITY_DEFAULT, (guint) ms, sg_on_timer, r, g_free);
     g_hash_table_insert(sg_timer_sources, GINT_TO_POINTER(id), GUINT_TO_POINTER(src));
 }
+/* 1x: a widget's opacity (at 0 it takes no pointer input, as on every platform), and the
+   system's reduce-motion answer (gtk-enable-animations off). */
+static void sg_set_opacity(int id, double a) {
+    if (!sg_w[id]) return;
+    gtk_widget_set_opacity(sg_w[id], a);
+    gtk_widget_set_can_target(sg_w[id], a > 0.0 ? TRUE : FALSE);
+}
+static int sg_motion_reduced(void) {
+    GtkSettings *s = gtk_settings_get_default();
+    gboolean on = TRUE;
+    if (s) g_object_get(s, "gtk-enable-animations", &on, NULL);
+    return on ? 0 : 1;
+}
 static void sg_timer_stop(int id) {
     guint src;
     if (!sg_timer_sources) return;

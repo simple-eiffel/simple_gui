@@ -94,6 +94,56 @@ feature -- Status setting
 			hidden: not is_shown
 		end
 
+feature -- Opacity (1x)
+
+	opacity: REAL_64
+			-- How opaque the widget shows: 1 opaque (the default) to 0 transparent. At 0 it
+			-- takes no pointer input, on every platform.
+		do
+			if is_opacity_set then
+				Result := opacity_chosen
+			else
+				Result := 1.0
+			end
+		end
+
+	set_opacity (a_opacity: REAL_64)
+			-- Show the widget at `a_opacity'.
+		require
+			gui_thread: is_gui_thread
+			in_range: a_opacity >= 0.0 and a_opacity <= 1.0
+		do
+			opacity_chosen := a_opacity
+			is_opacity_set := True
+			backend.widget_set_opacity (id, a_opacity)
+		ensure
+			set: opacity = a_opacity
+		end
+
+	animate_opacity (a_to: REAL_64)
+			-- Change `opacity' to `a_to' over the application's `animation_duration' along the
+			-- default curve (at once while motion is reduced). An earlier opacity animation of
+			-- this widget stops where it is.
+		require
+			gui_thread: is_gui_thread
+			in_range: a_to >= 0.0 and a_to <= 1.0
+		local
+			l_animation: GUI_ANIMATION
+		do
+			if attached opacity_animation as al_earlier then
+				application.animation_clock.cancel (al_earlier)
+			end
+			create l_animation.make (opacity, a_to, application.animation_duration, {GUI_EASING}.Ease_in_out,
+				agent set_opacity_step)
+			opacity_animation := l_animation
+			application.animation_clock.run (l_animation)
+		ensure
+			reduced_means_done: (old application.reduces_motion) implies opacity = a_to
+		end
+
+	opacity_animation: detachable GUI_ANIMATION
+			-- The opacity animation started last, if any.
+
 feature -- Accessibility
 
 	accessible_label: STRING_32
@@ -296,6 +346,21 @@ feature {GUI_APPLICATION, GUI_WIDGET} -- Reference pill
 				l_tip := backend.to_c (application.pills.item (al_code).tip)
 				backend.pill_set (id, l_code.item, l_tip.item, pill_corner)
 			end
+		end
+
+feature {NONE} -- Opacity (1x)
+
+	opacity_chosen: REAL_64
+			-- The opacity set last.
+
+	is_opacity_set: BOOLEAN
+			-- Has `set_opacity' been called? (A REAL_64 attribute cannot start at 1 by itself:
+			-- a self-initializing body never runs for an expanded type.)
+
+	set_opacity_step (a_value: REAL_64)
+			-- One step of `animate_opacity', kept in range against rounding.
+		do
+			set_opacity (a_value.max (0.0).min (1.0))
 		end
 
 feature {NONE} -- Reference pill

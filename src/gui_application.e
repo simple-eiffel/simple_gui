@@ -167,6 +167,66 @@ feature -- Timers (1m)
 			active: Result.is_active and not Result.is_repeating
 		end
 
+feature -- Animation (1x)
+
+	animation_clock: GUI_ANIMATION_CLOCK
+			-- The shared clock every animation runs on (Larry's decision A, 2026-11-12): it
+			-- decides every value, and the backend only shows it.
+		once ("OBJECT")
+			create Result.make (agent backend.start_frame_ticks, agent backend.stop_frame_ticks,
+				agent reduces_motion, agent run_later)
+		end
+
+	animation_duration: INTEGER
+			-- How long an animation runs unless told otherwise, in milliseconds.
+		do
+			if is_animation_duration_set then
+				Result := animation_duration_chosen
+			else
+				Result := Default_animation_duration
+			end
+		end
+
+	Default_animation_duration: INTEGER = 200
+			-- `animation_duration' until a program sets another.
+
+	set_animation_duration (a_ms: INTEGER)
+			-- Run animations `a_ms' long unless told otherwise.
+		require
+			non_negative: a_ms >= 0
+		do
+			animation_duration_chosen := a_ms
+			is_animation_duration_set := True
+		ensure
+			set: animation_duration = a_ms
+		end
+
+	reduces_motion: BOOLEAN
+			-- Does the system ask for reduced motion now (Windows' "Show animations" off,
+			-- GTK's gtk-enable-animations off, macOS's Reduce motion)? While it does, every
+			-- animation completes at once. A test may stand in for the system.
+		do
+			if attached motion_override as al_override then
+				Result := al_override.item
+			else
+				Result := backend.motion_reduced
+			end
+		end
+
+	set_reduces_motion_for_tests (a_on: BOOLEAN)
+			-- Tests: answer `reduces_motion' with `a_on', whatever the system says.
+		do
+			create motion_override.put (a_on)
+		ensure
+			overridden: reduces_motion = a_on
+		end
+
+	clear_reduces_motion_for_tests
+			-- Tests: let the system answer `reduces_motion' again.
+		do
+			motion_override := Void
+		end
+
 feature -- Desktop notifications (1o)
 
 	last_notification: STRING_32
@@ -523,6 +583,9 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 					if attached widgets.item (l_id) as al_source then
 						al_source.end_drag_out (l_a)
 					end
+				when 62 then
+						-- 1x: a frame tick, `l_a' milliseconds after the last one
+					animation_clock.frame_tick (l_a.max (0))
 				when 24 then
 					if attached timers.item (l_a) as al_timer then
 						al_timer.fire
@@ -632,6 +695,25 @@ feature {NONE} -- Style (1w)
 				return EIF_FALSE;
 				#endif
 			]"
+		end
+
+feature {NONE} -- Animation (1x)
+
+	motion_override: detachable CELL [BOOLEAN]
+			-- A test's stand-in for the system's reduce-motion answer.
+
+	animation_duration_chosen: INTEGER
+			-- The duration a program chose (`set_animation_duration').
+
+	is_animation_duration_set: BOOLEAN
+			-- Has a program chosen `animation_duration'? (An INTEGER attribute cannot start at
+			-- 200 by itself: a self-initializing body never runs for an expanded type.)
+
+	run_later (an_action: PROCEDURE)
+			-- Run `an_action' on the queue's next turn (the clock's finished actions for an
+			-- animation completed at once).
+		do
+			after (1, an_action).do_nothing
 		end
 
 feature {NONE} -- Implementation

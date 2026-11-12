@@ -1543,6 +1543,41 @@ feature -- Controls
 			gui_timers.remove (a_timer_id)
 		end
 
+	start_frame_ticks
+			-- 1x interface: noted only. The ticks themselves (DwmFlush-paced on a helper
+			-- thread, with the high-resolution timer as the fallback) arrive with the Windows
+			-- half; until then animations run in tests on the manual clock.
+		do
+			is_frame_ticking := True
+		end
+
+	stop_frame_ticks
+		do
+			is_frame_ticking := False
+		end
+
+	is_frame_ticking: BOOLEAN
+			-- Has the clock asked for frame ticks?
+
+	motion_reduced: BOOLEAN
+			-- Windows' "Show animations in Windows" off (simple_shell, event 57).
+		do
+			Result := (create {SHELL_APPEARANCE}).system_reduces_motion
+		end
+
+	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)
+			-- 1x interface: kept for each widget; drawn with the Windows half (simple_widgets'
+			-- painter alpha).
+		do
+			widget_opacities.force (a_opacity, an_id)
+		end
+
+	widget_opacities: HASH_TABLE [REAL_64, INTEGER]
+			-- The opacity each widget was given (1x).
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
 	clipboard_text: POINTER
 		do
 			Result := c_text ((create {SW_CLIPBOARD}).text)
