@@ -2976,6 +2976,72 @@ feature -- The remaining controls (1j)
 			app.clear_reduces_motion_for_tests
 		end
 
+	test_reveals_at_a_window_content_and_fades_elsewhere
+			-- 1x-b, the rule on all three: slides and grow reveal in stacks and as a window's
+			-- content; elsewhere (a grid cell here) they fade. As the content the window keeps
+			-- its size (the content moves in, clipped); in a grid the cell keeps its space and
+			-- the widget fades. Half way the toolkit shows half; at the end all is whole.
+		local
+			l_window: GUI_WINDOW
+			l_grid: GUI_GRID
+			l_label, l_cell: GUI_LABEL
+			l_effect, l_full_w, l_full_h: INTEGER
+		do
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			create l_window.make ("Content", 300, 160)
+			create l_label.make ("The window's content")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			l_full_w := backend.test_extent (l_label.id, False)
+			l_full_h := backend.test_extent (l_label.id, True)
+			from l_effect := l_label.Effect_slide_from_top until l_effect > l_label.Effect_grow loop
+				l_label.hide
+				l_label.show_animated (l_effect)
+				app.animation_clock.step (100)
+				if backend.test_reveal_shown (l_label.id) /= -1.0 then
+					assert ("content half shown, effect " + l_effect.out, (backend.test_reveal_shown (l_label.id) - 0.5).abs < 0.02)
+				end
+				if l_full_h > 0 and then backend.test_extent (l_label.id, True) /= -1 then
+					assert ("the window keeps its size, effect " + l_effect.out,
+						(backend.test_extent (l_label.id, True) - l_full_h).abs <= 2 and (backend.test_extent (l_label.id, False) - l_full_w).abs <= 2)
+				end
+				app.animation_clock.step (100)
+				assert ("content whole, effect " + l_effect.out, l_label.reveal = 1.0)
+				if backend.test_opacity_shown (l_label.id) /= -1.0 then
+					assert ("content opaque at the end, effect " + l_effect.out, backend.test_opacity_shown (l_label.id) = 1.0)
+				end
+				l_effect := l_effect + 1
+			end
+			l_window.close
+			create l_window.make ("Grid", 300, 160)
+			create l_grid.make
+			create l_cell.make ("In a cell")
+			l_grid.put (l_cell, 1, 1)
+			l_grid.put (create {GUI_LABEL}.make ("Beside it"), 1, 2)
+			l_window.set_content (l_grid)
+			l_window.show
+			settle_window
+			l_full_h := backend.test_extent (l_cell.id, True)
+			l_cell.hide
+			l_cell.show_animated (l_cell.Effect_slide_from_top)
+			app.animation_clock.step (100)
+			if backend.test_opacity_shown (l_cell.id) /= -1.0 then
+				assert ("a grid cell fades: half seen", (backend.test_opacity_shown (l_cell.id) - 0.5).abs < 0.02)
+			end
+			if l_full_h > 0 and then backend.test_extent (l_cell.id, True) /= -1 then
+				assert ("a grid cell keeps its space", (backend.test_extent (l_cell.id, True) - l_full_h).abs <= 2)
+			end
+			app.animation_clock.step (100)
+			if backend.test_opacity_shown (l_cell.id) /= -1.0 then
+				assert ("a grid cell opaque at the end", backend.test_opacity_shown (l_cell.id) = 1.0)
+			end
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
 	test_opacity_and_a_fade_multiply
 			-- 1x-b: what shows is the opacity times the fade's reveal: at opacity 0.5, a fade
 			-- half way shows 0.25, and at its end 0.5 again.
