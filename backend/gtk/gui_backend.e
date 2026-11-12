@@ -2596,31 +2596,31 @@ feature -- Test driver
 		end
 
 	widget_set_reveal (an_id, a_effect: INTEGER; a_fraction: REAL_64; a_takes_input: BOOLEAN)
-			-- 1x-b interface: not shown yet (this platform's half).
-		do
+			-- 1x-b: a fade multiplies the opacity; a slide or grow wraps the widget in
+			-- SgReveal while part way (its natural size times the fraction, clipped).
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_set_reveal($an_id, $a_effect, $a_fraction, $a_takes_input ? 1 : 0);"
 		end
 
 	widget_yield_focus (an_id: INTEGER)
-			-- 1x-b interface: not yet (this platform's half).
-		do
+			-- 1x-b: steps GTK's focus chain on until the focus is outside the widget.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_yield_focus($an_id);"
 		end
 
 	test_reveal_shown (an_id: INTEGER): REAL_64
-			-- 1x-b: not read yet (this platform's half): -1.
-		do
-			Result := -1.0
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_reveal_shown($an_id);"
 		end
 
 	test_extent (an_id: INTEGER; a_vertical: BOOLEAN): INTEGER
-			-- 1x-b: not read yet (this platform's half): -1.
-		do
-			Result := -1
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_extent($an_id, $a_vertical ? 1 : 0);"
 		end
 
 	test_has_focus (an_id: INTEGER): INTEGER
-			-- 1x-b: not read yet (this platform's half): -1.
-		do
-			Result := -1
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_has_focus($an_id);"
 		end
 
 	test_opacity_shown (an_id: INTEGER): REAL_64

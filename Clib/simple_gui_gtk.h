@@ -5028,10 +5028,272 @@ static void sg_timer_start(int id, int ms, int repeat) {
 }
 /* 1x: a widget's opacity (at 0 it takes no pointer input, as on every platform), and the
    system's reduce-motion answer (gtk-enable-animations off). */
+/* ---------- 1x-b: animated show and hide ----------
+   Each widget keeps its opacity and a fade's reveal apart, and shows their product (MACMINI's
+   review: the last write never wins); it takes pointer input while that opacity is above 0
+   and it takes input. A slide or grow puts the widget, for as long as it is part way, inside
+   SgReveal: a one-child container whose size along the effect's axis is the child's natural
+   size times the fraction, which lays its child out at full size where GtkRevealer would
+   (from the top: its bottom part first; from the bottom: its top part; leading and trailing
+   mirrored under right-to-left; grow: scaled about the middle) and clips it. The widget is
+   wrapped when a slide or grow starts and put back when it is whole or fades; a widget whose
+   parent is neither a box nor a window cannot be wrapped and fades instead.
+   The type is registered by hand, looked up by name first: this header is compiled into many
+   C files, each with its own statics, and must not register it twice. */
+
+__attribute__((weak)) double sg_opacity_of[SG_MAX] = {0};      /* 0 means 1: never set */
+__attribute__((weak)) int sg_opacity_set[SG_MAX] = {0};
+__attribute__((weak)) double sg_fade_of[SG_MAX] = {0};
+__attribute__((weak)) int sg_fade_set[SG_MAX] = {0};
+__attribute__((weak)) int sg_blocked[SG_MAX] = {0};
+
+typedef struct { GtkWidget parent_instance; GtkWidget *child; int effect; double fraction; } SgReveal;
+typedef struct { GtkWidgetClass parent_class; } SgRevealClass;
+
+static double sg_opacity_value(int id) { return sg_opacity_set[id] ? sg_opacity_of[id] : 1.0; }
+static double sg_fade_value(int id) { return sg_fade_set[id] ? sg_fade_of[id] : 1.0; }
+
+/* The opacity shown and whether a press reaches the widget, from its numbers. */
+static void sg_apply_alpha(int id) {
+    GtkWidget *w = sg_w[id];
+    double a = sg_opacity_value(id) * sg_fade_value(id);
+    if (!w) return;
+    gtk_widget_set_opacity(w, a);
+    gtk_widget_set_can_target(w, (sg_opacity_value(id) > 0.0 && !sg_blocked[id]) ? TRUE : FALSE);
+}
+
+static int sg_reveal_shares_width(int e) { return e == 4 || e == 5 || e == 6; }
+static int sg_reveal_shares_height(int e) { return e == 2 || e == 3 || e == 6; }
+
+static void sg_reveal_measure(GtkWidget *w, GtkOrientation o, int for_size, int *mn, int *nat, int *mnb, int *natb) {
+    SgReveal *r = (SgReveal *) w;
+    int cmin = 0, cnat = 0, shares;
+    *mnb = -1; *natb = -1;
+    if (r->child && gtk_widget_get_visible(r->child)) gtk_widget_measure(r->child, o, -1, &cmin, &cnat, NULL, NULL);
+    (void) for_size;
+    shares = (o == GTK_ORIENTATION_HORIZONTAL) ? sg_reveal_shares_width(r->effect) : sg_reveal_shares_height(r->effect);
+    if (shares) {
+        *mn = (int) (cnat * r->fraction + 0.5);
+        *nat = *mn;
+    } else {
+        *mn = cmin;
+        *nat = cnat;
+    }
+}
+
+static void sg_reveal_allocate(GtkWidget *w, int width, int height, int baseline) {
+    SgReveal *r = (SgReveal *) w;
+    int fw = width, fh = height, ox = 0, oy = 0, cmin, cnat, from_left;
+    GskTransform *t = NULL;
+    (void) baseline;
+    if (!r->child || !gtk_widget_get_visible(r->child)) return;
+    if (sg_reveal_shares_width(r->effect)) {
+        gtk_widget_measure(r->child, GTK_ORIENTATION_HORIZONTAL, -1, &cmin, &cnat, NULL, NULL);
+        fw = cnat > width ? cnat : width;
+    }
+    if (sg_reveal_shares_height(r->effect)) {
+        gtk_widget_measure(r->child, GTK_ORIENTATION_VERTICAL, fw, &cmin, &cnat, NULL, NULL);
+        fh = cnat > height ? cnat : height;
+    }
+    switch (r->effect) {
+        case 2: oy = height - fh; break;                          /* from the top */
+        case 3: oy = 0; break;                                    /* from the bottom */
+        case 4: case 5:
+            from_left = (r->effect == 4) != (gtk_widget_get_direction(w) == GTK_TEXT_DIR_RTL);
+            ox = from_left ? width - fw : 0;
+            break;
+        default: break;
+    }
+    if (r->effect == 6) {
+        graphene_point_t mid, back;
+        graphene_point_init(&mid, width / 2.0f, height / 2.0f);
+        graphene_point_init(&back, - fw / 2.0f, - fh / 2.0f);
+        t = gsk_transform_translate(NULL, &mid);
+        t = gsk_transform_scale(t, (float) r->fraction, (float) r->fraction);
+        t = gsk_transform_translate(t, &back);
+    } else {
+        graphene_point_t at;
+        graphene_point_init(&at, (float) ox, (float) oy);
+        t = gsk_transform_translate(NULL, &at);
+    }
+    gtk_widget_allocate(r->child, fw, fh, -1, t);
+}
+
+static void sg_reveal_dispose(GObject *o) {
+    SgReveal *r = (SgReveal *) o;
+    if (r->child) { gtk_widget_unparent(r->child); r->child = NULL; }
+    G_OBJECT_CLASS(g_type_class_peek_parent(G_OBJECT_GET_CLASS(o)))->dispose(o);
+}
+
+static void sg_reveal_class_init(gpointer klass, gpointer data) {
+    GtkWidgetClass *wc = GTK_WIDGET_CLASS(klass);
+    (void) data;
+    wc->measure = sg_reveal_measure;
+    wc->size_allocate = sg_reveal_allocate;
+    G_OBJECT_CLASS(klass)->dispose = sg_reveal_dispose;
+}
+
+static void sg_reveal_init(GTypeInstance *inst, gpointer klass) {
+    SgReveal *r = (SgReveal *) inst;
+    (void) klass;
+    r->child = NULL; r->effect = 0; r->fraction = 1.0;
+    gtk_widget_set_overflow(GTK_WIDGET(inst), GTK_OVERFLOW_HIDDEN);
+}
+
+static GType sg_reveal_type(void) {
+    GType t = g_type_from_name("SgReveal");
+    if (!t) {
+        GTypeInfo info;
+        memset(&info, 0, sizeof info);
+        info.class_size = sizeof(SgRevealClass);
+        info.class_init = sg_reveal_class_init;
+        info.instance_size = sizeof(SgReveal);
+        info.instance_init = sg_reveal_init;
+        t = g_type_register_static(GTK_TYPE_WIDGET, "SgReveal", &info, 0);
+    }
+    return t;
+}
+
+/* The wrapper around widget `id' while a slide or grow is part way; NULL when it cannot be
+   wrapped (its parent is neither a box nor a window). */
+static SgReveal *sg_reveal_wrap(int id) {
+    GtkWidget *w = sg_w[id], *parent, *prev, *rv;
+    SgReveal *r;
+    if (!w) return NULL;
+    r = (SgReveal *) g_object_get_data(G_OBJECT(w), "sg-reveal");
+    if (r) return r;
+    parent = gtk_widget_get_parent(w);
+    if (!parent || !(GTK_IS_BOX(parent) || GTK_IS_WINDOW(parent))) return NULL;
+    rv = GTK_WIDGET(g_object_new(sg_reveal_type(), NULL));
+    gtk_widget_set_hexpand(rv, gtk_widget_get_hexpand(w));
+    gtk_widget_set_vexpand(rv, gtk_widget_get_vexpand(w));
+    g_object_ref(w);
+    if (GTK_IS_BOX(parent)) {
+        prev = gtk_widget_get_prev_sibling(w);
+        gtk_box_remove(GTK_BOX(parent), w);
+        gtk_box_insert_child_after(GTK_BOX(parent), rv, prev);
+    } else {
+        gtk_window_set_child(GTK_WINDOW(parent), NULL);
+        gtk_window_set_child(GTK_WINDOW(parent), rv);
+    }
+    r = (SgReveal *) rv;
+    r->child = w;
+    gtk_widget_set_parent(w, rv);
+    g_object_unref(w);
+    g_object_set_data(G_OBJECT(w), "sg-reveal", r);
+    return r;
+}
+
+/* Put widget `id' back where its wrapper stands, and drop the wrapper. */
+static void sg_reveal_unwrap(int id) {
+    GtkWidget *w = sg_w[id], *rv, *parent, *prev;
+    SgReveal *r;
+    if (!w) return;
+    r = (SgReveal *) g_object_get_data(G_OBJECT(w), "sg-reveal");
+    if (!r) return;
+    rv = GTK_WIDGET(r);
+    parent = gtk_widget_get_parent(rv);
+    g_object_set_data(G_OBJECT(w), "sg-reveal", NULL);
+    g_object_ref(w);
+    gtk_widget_unparent(w);
+    r->child = NULL;
+    if (parent && GTK_IS_BOX(parent)) {
+        prev = gtk_widget_get_prev_sibling(rv);
+        gtk_box_remove(GTK_BOX(parent), rv);
+        gtk_box_insert_child_after(GTK_BOX(parent), w, prev);
+    } else if (parent && GTK_IS_WINDOW(parent)) {
+        gtk_window_set_child(GTK_WINDOW(parent), w);
+    }
+    g_object_unref(w);
+}
+
+/* 1x-b: show widget `id' revealed to `fraction' under `effect' (1 fade, 2-5 slides, 6 grow). */
+static void sg_set_reveal(int id, int effect, double fraction, int takes_input) {
+    SgReveal *r = NULL;
+    if (!sg_w[id]) return;
+    sg_blocked[id] = takes_input ? 0 : 1;
+    if (effect == 1 || fraction >= 1.0) {
+        sg_reveal_unwrap(id);
+        sg_fade_of[id] = effect == 1 ? fraction : 1.0;
+        sg_fade_set[id] = 1;
+    } else {
+        sg_fade_of[id] = 1.0;
+        sg_fade_set[id] = 1;
+        r = sg_reveal_wrap(id);
+        if (r) {
+            r->effect = effect;
+            r->fraction = fraction;
+            gtk_widget_queue_resize(GTK_WIDGET(r));
+        } else {
+            sg_fade_of[id] = fraction;   /* no wrapper possible here: it fades instead */
+        }
+    }
+    sg_apply_alpha(id);
+    sg_fr_value_set = 1;
+}
+
+/* 1x-b: when the focus is on widget `id' or inside it, step the focus chain on until it is
+   outside; with nowhere else to go, no focus. */
+static void sg_yield_focus(int id) {
+    GtkWidget *w = sg_w[id], *focus;
+    GtkRoot *root;
+    int i;
+    if (!w) return;
+    root = gtk_widget_get_root(w);
+    if (!root) return;
+    for (i = 0; i < 64; i++) {
+        focus = gtk_root_get_focus(root);
+        if (!focus || !(focus == w || gtk_widget_is_ancestor(focus, w))) return;
+        if (!gtk_widget_child_focus(GTK_WIDGET(root), GTK_DIR_TAB_FORWARD)) break;
+    }
+    focus = gtk_root_get_focus(root);
+    if (focus && (focus == w || gtk_widget_is_ancestor(focus, w))) gtk_root_set_focus(root, NULL);
+}
+
+/* Tests, 1x-b: the reveal shown (the wrapper's fraction, else a fade's); -1 when gone. */
+static double sg_test_reveal_shown(int id) {
+    SgReveal *r;
+    if (!sg_w[id]) return -1.0;
+    r = (SgReveal *) g_object_get_data(G_OBJECT(sg_w[id]), "sg-reveal");
+    return r ? r->fraction : sg_fade_value(id);
+}
+
+/* Tests, 1x-b: the space the widget takes along an axis: its wrapper's measured size while
+   wrapped (GTK lays out on the next frame), else its allocation, or its natural size before
+   GTK has laid it out again; -1 when gone. */
+static int sg_test_extent(int id, int vertical) {
+    SgReveal *r;
+    int mn = 0, nat = 0;
+    if (!sg_w[id]) return -1;
+    r = (SgReveal *) g_object_get_data(G_OBJECT(sg_w[id]), "sg-reveal");
+    if (r) {
+        gtk_widget_measure(GTK_WIDGET(r), vertical ? GTK_ORIENTATION_VERTICAL : GTK_ORIENTATION_HORIZONTAL, -1, &mn, &nat, NULL, NULL);
+        return nat;
+    }
+    nat = vertical ? gtk_widget_get_height(sg_w[id]) : gtk_widget_get_width(sg_w[id]);
+    if (nat <= 0) {
+        /* just put back from its wrapper: GTK lays it out on the next frame; its natural
+           size is the space it takes */
+        gtk_widget_measure(sg_w[id], vertical ? GTK_ORIENTATION_VERTICAL : GTK_ORIENTATION_HORIZONTAL, -1, &mn, &nat, NULL, NULL);
+    }
+    return nat;
+}
+
+/* Tests, 1x-b: does the focus sit on widget `id' or inside it? -1 when gone or not in a window. */
+static int sg_test_has_focus(int id) {
+    GtkWidget *w = sg_w[id], *focus;
+    GtkRoot *root;
+    if (!w) return -1;
+    root = gtk_widget_get_root(w);
+    if (!root) return -1;
+    focus = gtk_root_get_focus(root);
+    return (focus && (focus == w || gtk_widget_is_ancestor(focus, w))) ? 1 : 0;
+}
 static void sg_set_opacity(int id, double a) {
     if (!sg_w[id]) return;
-    gtk_widget_set_opacity(sg_w[id], a);
-    gtk_widget_set_can_target(sg_w[id], a > 0.0 ? TRUE : FALSE);
+    sg_opacity_of[id] = a;
+    sg_opacity_set[id] = 1;
+    sg_apply_alpha(id);    /* times a fade's reveal; input while above 0 and not blocked */
     sg_fr_value_set = 1;   /* counted when the next frame paints */
 }
 /* 1x: frame ticks from the frame clock of a shown window: event 62 (a = the milliseconds
