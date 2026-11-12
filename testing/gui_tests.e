@@ -2623,7 +2623,8 @@ feature -- The remaining controls (1j)
 			assert ("actual size is larger than fitted: " + l_preview.pixels_per_point.out + " against " + l_fit.out, l_preview.pixels_per_point > l_fit)
 			l_preview.pan_by (-40, -40)
 			assert ("a larger page can move", l_preview.pan_y <= 0)
-			l_preview.dialog.close_with (l_preview.close_button)
+			l_preview.close_with (l_preview.close_button)
+			assert ("Close answers close_button", l_preview.answer = l_preview.close_button)
 			settle_window
 			l_window.close
 		end

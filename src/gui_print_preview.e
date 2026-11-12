@@ -2,9 +2,11 @@ note
 	description: "[
 		A print preview (Larry, 2026-11-11: "Option C just like Word, Excel, Chrome, Edge,
 		Firefox, Acrobat, LibreOffice, Qt, et al ... we have the parts"): a PDF's pages in a
-		modal dialog of simple_gui's own controls, the same on every platform, with Print... and
-		Close. Built from parts the fleet has: the pages are drawn by simple_pdf (Poppler on
-		Windows and Linux, PDFKit on macOS), the window is GUI_DIALOG with a GUI_CANVAS.
+		window of its own (as Qt's, Word's and the browsers' are), the same on every platform,
+		with Print... and Close; the parent window waits while it is open. Built from parts the
+		fleet has: the pages are drawn by simple_pdf (Poppler on Windows and Linux, PDFKit on
+		macOS); the window is a GUI_WINDOW with a GUI_CANVAS. (Not a GUI_DIALOG: on Windows that
+		is drawn inside its parent and would clip the page to a small parent window.)
 
 		Behavior follows Qt's QPrintPreviewDialog and wxWidgets' wxPrintPreview: Previous and
 		Next and "Page N of M"; zoom to fit the page, fit the width, or actual size (100%: 72
@@ -32,15 +34,16 @@ feature {NONE} -- Initialization
 			path_not_empty: not a_pdf_path.is_empty
 			title_not_empty: not a_title.is_empty
 		local
-			l_bar, l_stack: GUI_STACK
+			l_bar, l_stack, l_bottom: GUI_STACK
+			l_print, l_close: GUI_BUTTON
 		do
 			create pdf_path.make_from_string_general (a_pdf_path)
 			create printer.make
 			page_count := printer.pdf_page_count (a_pdf_path)
 			page := 1
 			zoom := Zoom_fit_page
-			create dialog.make (a_title)
-			create canvas.make (560, 680)
+			create window.make (a_title, 640, 860)
+			create canvas.make (600, 740)
 			create previous_button.make ("Previous")
 			create next_button.make ("Next")
 			create page_label.make ("")
@@ -57,9 +60,16 @@ feature {NONE} -- Initialization
 			create l_stack.make_vertical
 			l_stack.extend (l_bar)
 			l_stack.extend_stretching (canvas)
-			dialog.set_content (l_stack)
-			print_button := dialog.add_button ({STRING_32} "Print%/8230/", dialog.Role_default)
-			close_button := dialog.add_button ("Close", dialog.Role_cancel)
+			create l_bottom.make_horizontal
+			create l_print.make ({STRING_32} "Print%/8230/")
+			create l_close.make ("Close")
+			l_bottom.extend (l_print)
+			l_bottom.extend (l_close)
+			l_stack.extend (l_bottom)
+			window.set_content (l_stack)
+			l_print.click_actions.extend (agent close_with (print_button))
+			l_close.click_actions.extend (agent close_with (close_button))
+			window.close_requested_actions.extend (agent close_with (close_button))
 			previous_button.click_actions.extend (agent previous_page)
 			next_button.click_actions.extend (agent next_page)
 			zoom_choice.selection_actions.extend (agent (a_row: INTEGER) do set_zoom (a_row) end)
@@ -96,22 +106,27 @@ feature -- Access
 	pan_x, pan_y: INTEGER
 			-- How far a page larger than the view is moved, device pixels (0 or less).
 
-	print_button, close_button: INTEGER
-			-- The dialog's buttons, as `run_modal' answers them.
+	print_button: INTEGER = 1
+	close_button: INTEGER = 2
+			-- The answers `run_modal' gives: Print... pressed, or Close (the button, the close box,
+			-- Escape).
 
-	dialog: GUI_DIALOG
-			-- The window.
+	answer: INTEGER
+			-- How the preview ended; 0 while it is open.
+
+	window: GUI_WINDOW
+			-- The preview's own window.
 
 feature -- Showing
 
 	run_modal (a_parent: detachable GUI_WINDOW): INTEGER
 			-- Show the preview and wait: `print_button' or `close_button'.
-		local
-			l_timer: GUI_TIMER
 		do
-				-- the canvas reports no first size, so draw once the dialog is up
-			l_timer := application.after (1, agent refresh)
-			Result := dialog.run_modal (a_parent)
+			present (a_parent)
+			from until answer /= 0 loop
+				application.process_events (30)
+			end
+			Result := answer
 		ensure
 			known_answer: Result = print_button or Result = close_button
 		end
@@ -121,9 +136,37 @@ feature -- Showing
 		local
 			l_timer: GUI_TIMER
 		do
-			dialog.present (a_parent)
+			answer := 0
+			if attached a_parent as al_parent and then attached al_parent.content as al_content and then al_content.is_enabled then
+				al_content.disable
+				waiting_parent := al_content
+			end
+			window.show
+				-- the canvas reports no first size, so draw once the window is up
 			l_timer := application.after (1, agent refresh)
 		end
+
+	close_with (a_answer: INTEGER)
+			-- End the preview with `a_answer': the window closes and the parent takes input again.
+		require
+			known_answer: a_answer = print_button or a_answer = close_button
+		do
+			if answer = 0 then
+				answer := a_answer
+				if attached waiting_parent as al_content then
+					al_content.enable
+					waiting_parent := Void
+				end
+				if not window.is_closed then
+					window.close
+				end
+			end
+		ensure
+			answered: answer /= 0
+		end
+
+	waiting_parent: detachable GUI_WIDGET
+			-- The parent's content, disabled while the preview is open.
 
 feature -- Navigation
 
@@ -295,6 +338,7 @@ feature {NONE} -- Input
 			when 0xFF55 then previous_page
 			when 0xFF50 then if page_count >= 1 then go_to_page (1) end
 			when 0xFF57 then if page_count >= 1 then go_to_page (page_count) end
+			when 0xFF1B then close_with (close_button)
 			when 0xFF51 then pan_by (Pan_step, 0)
 			when 0xFF53 then pan_by (- Pan_step, 0)
 			when 0xFF52 then pan_by (0, Pan_step)
