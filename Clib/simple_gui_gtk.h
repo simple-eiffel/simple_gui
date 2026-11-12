@@ -2802,7 +2802,39 @@ static int sg_y(int id) { return sg_point(id, 1); }
 
 /* ---------- common widget state ---------- */
 
-static void sg_set_enabled(int id, int on) { gtk_widget_set_sensitive(sg_w[id], on ? TRUE : FALSE); }
+/* A widget switched off switches off every sensitive widget inside it, and on again exactly
+   those, as on Windows and AppKit: each then reports disabled while its container is off
+   (simple_shell#48, 2026-11-12). GTK would block their input anyway, but would report
+   them enabled. */
+static void sg_collect_sensitive(GtkWidget *w, GPtrArray *into) {
+    GtkWidget *c;
+    for (c = gtk_widget_get_first_child(w); c; c = gtk_widget_get_next_sibling(c)) {
+        if (gtk_widget_get_sensitive(c)) g_ptr_array_add(into, g_object_ref(c));
+        sg_collect_sensitive(c, into);
+    }
+}
+static void sg_set_enabled(int id, int on) {
+    GtkWidget *w = sg_w[id];
+    GPtrArray *held;
+    guint i;
+    if (!w) return;
+    held = (GPtrArray *)g_object_get_data(G_OBJECT(w), "sg-held-off");
+    if (!on) {
+        if (!held && gtk_widget_get_first_child(w)) {
+            held = g_ptr_array_new_with_free_func(g_object_unref);
+            sg_collect_sensitive(w, held);
+            for (i = 0; i < held->len; i++) gtk_widget_set_sensitive(GTK_WIDGET(g_ptr_array_index(held, i)), FALSE);
+            g_object_set_data_full(G_OBJECT(w), "sg-held-off", held, (GDestroyNotify)g_ptr_array_unref);
+        }
+        gtk_widget_set_sensitive(w, FALSE);
+    } else {
+        if (held) {
+            for (i = 0; i < held->len; i++) gtk_widget_set_sensitive(GTK_WIDGET(g_ptr_array_index(held, i)), TRUE);
+            g_object_set_data(G_OBJECT(w), "sg-held-off", NULL);
+        }
+        gtk_widget_set_sensitive(w, TRUE);
+    }
+}
 static int sg_is_enabled(int id) { return (sg_w[id] && gtk_widget_get_sensitive(sg_w[id])) ? 1 : 0; }   /* a dead widget (its window closed) is not enabled */
 static void sg_set_visible(int id, int on) { gtk_widget_set_visible(sg_w[id], on ? TRUE : FALSE); }
 static int sg_is_visible(int id) { return gtk_widget_get_visible(sg_w[id]) ? 1 : 0; }

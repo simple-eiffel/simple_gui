@@ -2609,6 +2609,9 @@ feature -- The remaining controls (1j)
 			l_off.disable
 			l_stack.disable
 			assert ("the container reports disabled", not l_stack.is_enabled)
+				-- and what it holds is off with it, so nothing inside answers a press (on
+				-- Windows the example's buttons still did under its preview: #48 probe)
+			assert ("what it holds is off while it is", not l_on.is_enabled)
 			l_stack.enable
 			assert ("the container reports enabled", l_stack.is_enabled)
 			assert ("what was on is on again", l_on.is_enabled)
