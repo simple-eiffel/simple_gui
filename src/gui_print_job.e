@@ -217,7 +217,7 @@ feature -- Output
 		local
 			l_preview: GUI_PRINT_PREVIEW
 		do
-			create l_preview.make (pdf_path, title)
+			create l_preview.make (pdf_path, "Print preview")
 			if l_preview.run_modal (a_parent) = l_preview.print_button then
 				run_dialog (a_parent)
 			else
