@@ -39,6 +39,21 @@ static void sg_update_edit_enabled(void);   /* below, with the Edit roles */
 __attribute__((weak)) GMenu *sg_menubar = NULL;
 __attribute__((weak)) int sg_dark_seen = -1;
 __attribute__((weak)) cairo_surface_t *sg_canvas_image[SG_MAX] = {0};
+/* 1x frame ticks: the window whose frame clock ticks, its callback, the time of the tick
+   pushed last, and whether that tick is still unread (sg_next clears it: coalescing). */
+__attribute__((weak)) GtkWidget *sg_tick_widget = NULL;
+__attribute__((weak)) guint sg_tick_id = 0;
+__attribute__((weak)) gint64 sg_tick_last = 0;
+__attribute__((weak)) volatile int sg_tick_unread = 0;
+/* 1x frame counts (tests): frames painted with a value set since the last paint, frames
+   painted without one, the longest gap between painted frames (microseconds). */
+__attribute__((weak)) GdkFrameClock *sg_fr_clock = NULL;
+__attribute__((weak)) gulong sg_fr_handler = 0;
+__attribute__((weak)) int sg_fr_painted = 0;
+__attribute__((weak)) int sg_fr_missed = 0;
+__attribute__((weak)) gint64 sg_fr_longest = 0;
+__attribute__((weak)) gint64 sg_fr_last_painted = 0;
+__attribute__((weak)) int sg_fr_value_set = 0;
 
 static void sg_push5(int t, int id, int a, int b, int c) {
     int n = (sg_qt + 1) % SG_QCAP;
@@ -97,6 +112,7 @@ static int sg_next(int *t, int *id, int *a, int *b, int *c) {
         if (sg_qh == sg_qt) return 0;
         *t = sg_q[sg_qh][0]; *id = sg_q[sg_qh][1]; *a = sg_q[sg_qh][2]; *b = sg_q[sg_qh][3]; *c = sg_q[sg_qh][4];
         sg_qh = (sg_qh + 1) % SG_QCAP;
+        if (*t == 62) sg_tick_unread = 0;   /* 1x: the next frame may tick again */
         if (*id <= 0 || *id >= SG_MAX || sg_w[*id] != NULL) return 1;
     }
 }
@@ -5016,6 +5032,94 @@ static void sg_set_opacity(int id, double a) {
     if (!sg_w[id]) return;
     gtk_widget_set_opacity(sg_w[id], a);
     gtk_widget_set_can_target(sg_w[id], a > 0.0 ? TRUE : FALSE);
+    sg_fr_value_set = 1;   /* counted when the next frame paints */
+}
+/* 1x: frame ticks from the frame clock of a shown window: event 62 (a = the milliseconds
+   since the tick pushed last, or since the start), never a second while one is unread. */
+static gboolean sg_on_frame(GtkWidget *w, GdkFrameClock *clock, gpointer d) {
+    gint64 now = gdk_frame_clock_get_frame_time(clock);
+    int ms;
+    (void) w; (void) d;
+    if (!sg_tick_unread) {
+        ms = (int) ((now - sg_tick_last) / 1000);
+        sg_tick_last = now;
+        sg_tick_unread = 1;
+        sg_push(62, 0, ms < 0 ? 0 : ms, 0);
+    }
+    return G_SOURCE_CONTINUE;
+}
+/* After each paint while ticking: painted if a value was set since the last paint. */
+static void sg_on_after_paint(GdkFrameClock *clock, gpointer d) {
+    gint64 now = gdk_frame_clock_get_frame_time(clock);
+    (void) d;
+    if (sg_fr_value_set) {
+        sg_fr_painted++;
+        if (sg_fr_last_painted > 0 && now - sg_fr_last_painted > sg_fr_longest) sg_fr_longest = now - sg_fr_last_painted;
+        sg_fr_last_painted = now;
+        sg_fr_value_set = 0;
+    } else {
+        sg_fr_missed++;
+    }
+}
+static void sg_stop_frame_ticks(void) {
+    if (sg_fr_clock && sg_fr_handler) g_signal_handler_disconnect(sg_fr_clock, sg_fr_handler);
+    sg_fr_clock = NULL;
+    sg_fr_handler = 0;
+    if (sg_tick_widget) {
+        if (sg_tick_id) gtk_widget_remove_tick_callback(sg_tick_widget, sg_tick_id);
+        g_object_remove_weak_pointer(G_OBJECT(sg_tick_widget), (gpointer *) &sg_tick_widget);
+    }
+    sg_tick_widget = NULL;
+    sg_tick_id = 0;
+    sg_tick_unread = 0;
+}
+/* 1 when a shown window's frame clock now ticks; 0 when no window is shown. */
+static int sg_start_frame_ticks(void) {
+    GListModel *tops = gtk_window_get_toplevels();
+    guint i, n = g_list_model_get_n_items(tops);
+    sg_stop_frame_ticks();
+    for (i = 0; i < n && !sg_tick_widget; i++) {
+        GtkWidget *win = GTK_WIDGET(g_list_model_get_item(tops, i));
+        if (gtk_widget_get_mapped(win)) sg_tick_widget = win;
+        g_object_unref(win);
+    }
+    if (!sg_tick_widget) return 0;
+    g_object_add_weak_pointer(G_OBJECT(sg_tick_widget), (gpointer *) &sg_tick_widget);
+    sg_tick_last = g_get_monotonic_time();
+    sg_tick_id = gtk_widget_add_tick_callback(sg_tick_widget, sg_on_frame, NULL, NULL);
+    sg_fr_clock = gtk_widget_get_frame_clock(sg_tick_widget);
+    sg_fr_value_set = 0;
+    if (sg_fr_clock) sg_fr_handler = g_signal_connect(sg_fr_clock, "after-paint", G_CALLBACK(sg_on_after_paint), NULL);
+    return 1;
+}
+/* Tests, 1x: the frame counts (0 painted, 1 missed, 2 longest gap in tenths of a ms; 3 resets). */
+static int sg_test_frames(int which) {
+    switch (which) {
+        case 0: return sg_fr_painted;
+        case 1: return sg_fr_missed;
+        case 2: return (int) (sg_fr_longest / 100);
+        default:
+            sg_fr_painted = 0; sg_fr_missed = 0; sg_fr_longest = 0; sg_fr_last_painted = 0;
+            return 0;
+    }
+}
+/* Tests, 1x: the opacity GTK shows widget `id' at; -1 when it is gone. */
+static double sg_test_opacity_shown(int id) {
+    return sg_w[id] ? gtk_widget_get_opacity(sg_w[id]) : -1.0;
+}
+/* Tests, 1x: would a press at the middle of `id' reach it or something in it? 1 yes, 0 no,
+   -1 when it is not shown in a window. */
+static int sg_test_pointer_reaches(int id) {
+    GtkWidget *w = sg_w[id];
+    GtkWidget *root, *hit;
+    graphene_point_t mid, at;
+    if (!w || !gtk_widget_get_mapped(w)) return -1;
+    root = GTK_WIDGET(gtk_widget_get_root(w));
+    if (!root) return -1;
+    graphene_point_init(&mid, gtk_widget_get_width(w) / 2.0f, gtk_widget_get_height(w) / 2.0f);
+    if (!gtk_widget_compute_point(w, root, &mid, &at)) return -1;
+    hit = gtk_widget_pick(root, at.x, at.y, GTK_PICK_DEFAULT);
+    return (hit && (hit == w || gtk_widget_is_ancestor(hit, w))) ? 1 : 0;
 }
 static int sg_motion_reduced(void) {
     GtkSettings *s = gtk_settings_get_default();

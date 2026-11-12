@@ -109,8 +109,32 @@ feature -- Running
 			elapsed_non_negative: a_elapsed_ms >= 0
 		do
 			if not is_manual then
+				tick_count := tick_count + 1
+				tick_total_ms := tick_total_ms + a_elapsed_ms
+				longest_tick_ms := longest_tick_ms.max (a_elapsed_ms)
 				advance (a_elapsed_ms)
 			end
+		end
+
+feature -- Measurement
+
+	tick_count: INTEGER
+			-- Real ticks since `reset_tick_stats'.
+
+	tick_total_ms: INTEGER_64
+			-- Their milliseconds, added up.
+
+	longest_tick_ms: INTEGER
+			-- The longest gap between two of them.
+
+	reset_tick_stats
+			-- Count real ticks afresh.
+		do
+			tick_count := 0
+			tick_total_ms := 0
+			longest_tick_ms := 0
+		ensure
+			reset: tick_count = 0 and tick_total_ms = 0 and longest_tick_ms = 0
 		end
 
 feature -- Test seam
