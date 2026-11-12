@@ -2394,6 +2394,32 @@ feature -- Styles (1w)
 		deferred
 		end
 
+	test_opacity_shown (an_id: INTEGER): REAL_64
+			-- Tests only, 1x: the opacity the toolkit shows widget `an_id' at, read from the
+			-- native widget; -1 where it can't be read yet.
+		deferred
+		ensure
+			known_or_unreadable: Result = -1.0 or else (Result >= 0.0 and Result <= 1.0)
+		end
+
+	test_pointer_reaches (an_id: INTEGER): INTEGER
+			-- Tests only, 1x: would a press at the middle of `an_id' reach it (or something in
+			-- it)? 1 yes, 0 no, -1 can't tell yet.
+		deferred
+		ensure
+			known: Result >= -1 and Result <= 1
+		end
+
+	test_frames (a_which: INTEGER): INTEGER
+			-- Tests only, 1x: the frames counted since the last reset, where the toolkit can
+			-- tell when a frame shows: `a_which' 0 painted (a value set before its frame's
+			-- target time), 1 missed, 2 the longest gap between painted frames in tenths of a
+			-- millisecond; 3 resets. -1 where frames can't be counted yet.
+		require
+			known_question: a_which >= 0 and a_which <= 3
+		deferred
+		end
+
 feature -- Test driver
 
 	test_click (an_id: INTEGER)

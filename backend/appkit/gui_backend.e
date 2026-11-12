@@ -957,13 +957,15 @@ feature -- Common widget state
 		end
 
 	start_frame_ticks
-			-- 1x interface: noted only; MACMINI's AppKit half brings the displayLink ticks.
+			-- 1x: the main screen's display link (macOS 14+, common modes), event 62 coalesced.
 		do
+			c_start_frame_ticks
 			is_frame_ticking := True
 		end
 
 	stop_frame_ticks
 		do
+			c_stop_frame_ticks
 			is_frame_ticking := False
 		end
 
@@ -971,14 +973,25 @@ feature -- Common widget state
 			-- Has the clock asked for frame ticks?
 
 	motion_reduced: BOOLEAN
-			-- 1x interface: False until MACMINI's AppKit half reads
-			-- accessibilityDisplayShouldReduceMotion.
-		do
+			-- 1x: accessibilityDisplayShouldReduceMotion; a change arrives on event 10.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_motion_reduced() ? EIF_TRUE : EIF_FALSE;"
 		end
 
 	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)
-			-- 1x interface: not shown until MACMINI's AppKit half sets alphaValue.
-		do
+			-- 1x: alphaValue; at 0 the widget takes no pointer input.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_set_opacity($an_id, $a_opacity);"
+		end
+
+	c_start_frame_ticks
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_start_frame_ticks();"
+		end
+
+	c_stop_frame_ticks
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_stop_frame_ticks();"
 		end
 
 	timer_stop (a_timer_id: INTEGER)
@@ -1842,6 +1855,21 @@ feature -- Common widget state
 	test_style_value (an_id: INTEGER; a_key: POINTER): POINTER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return (EIF_POINTER) sga_test_style_value($an_id, (const char *)$a_key);"
+		end
+
+	test_opacity_shown (an_id: INTEGER): REAL_64
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_opacity_shown($an_id);"
+		end
+
+	test_pointer_reaches (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_pointer_reaches($an_id);"
+		end
+
+	test_frames (a_which: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_frames($a_which);"
 		end
 
 	test_set_high_contrast (a_on: BOOLEAN)

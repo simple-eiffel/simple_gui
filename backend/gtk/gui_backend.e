@@ -2584,6 +2584,24 @@ feature -- Test driver
 		alias "return (EIF_POINTER) sg_test_style_value($an_id, (const char *) $a_key);"
 		end
 
+	test_opacity_shown (an_id: INTEGER): REAL_64
+			-- 1x: not read on GTK yet (PROD's half): -1.
+		do
+			Result := -1.0
+		end
+
+	test_pointer_reaches (an_id: INTEGER): INTEGER
+			-- 1x: not read on GTK yet (PROD's half): -1.
+		do
+			Result := -1
+		end
+
+	test_frames (a_which: INTEGER): INTEGER
+			-- 1x: not counted on GTK yet (PROD's half): -1.
+		do
+			Result := -1
+		end
+
 	test_set_high_contrast (a_on: BOOLEAN)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_test_set_high_contrast($a_on ? 1 : 0);"

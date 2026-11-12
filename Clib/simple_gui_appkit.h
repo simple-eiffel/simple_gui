@@ -293,6 +293,15 @@ void sga_set_theme_color(int a_role, int a_rgb);   /* -1: the system's again */
 const char *sga_font_load(const char *a_path);     /* the families added, separated by 0x1F */
 int sga_font_family_available(const char *a_name);
 int sga_is_high_contrast(void);
+
+/* 1x: opacity (at 0 no pointer input), reduced motion, the frame clock (event 62) */
+void sga_set_opacity(int a_id, double a_opacity);
+int sga_motion_reduced(void);
+void sga_start_frame_ticks(void);
+void sga_stop_frame_ticks(void);
+double sga_test_opacity_shown(int a_id);
+int sga_test_pointer_reaches(int a_id);
+int sga_test_frames(int a_which);
 const char *sga_test_style_value(int a_id, const char *a_key);
 void sga_test_set_high_contrast(int a_on);
 void sga_test_pick(int a_source, int a_row);

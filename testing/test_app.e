@@ -142,6 +142,8 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_reduced_motion_completes_every_animation_at_once, "reduced_motion_completes_every_animation_at_once")
 				run_test (agent t.test_a_new_opacity_animation_replaces_the_old_one, "a_new_opacity_animation_replaces_the_old_one")
 				run_test (agent t.test_the_clock_ticks_only_while_something_runs, "the_clock_ticks_only_while_something_runs")
+				run_test (agent t.test_opacity_is_shown_and_zero_takes_no_pointer, "opacity_is_shown_and_zero_takes_no_pointer")
+				run_test (agent t.test_the_real_clock_paints_every_frame, "the_real_clock_paints_every_frame")
 				run_test (agent t.test_code_editor_bracket_pairs, "code_editor_bracket_pairs")
 				run_test (agent t.test_line_ranges, "line_ranges")
 				run_test (agent t.test_code_carets_type_and_undo, "code_carets_type_and_undo")

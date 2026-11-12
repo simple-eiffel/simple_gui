@@ -5044,6 +5044,24 @@ feature -- Appearance
 			end
 		end
 
+	test_opacity_shown (an_id: INTEGER): REAL_64
+			-- 1x: not read on Windows yet (PROD's half): -1.
+		do
+			Result := -1.0
+		end
+
+	test_pointer_reaches (an_id: INTEGER): INTEGER
+			-- 1x: not read on Windows yet (PROD's half): -1.
+		do
+			Result := -1
+		end
+
+	test_frames (a_which: INTEGER): INTEGER
+			-- 1x: not counted on Windows yet (PROD's half): -1.
+		do
+			Result := -1
+		end
+
 	test_set_high_contrast (a_on: BOOLEAN)
 			-- Tests: behave as if the contrast setting were `a_on', and report the change.
 		local
