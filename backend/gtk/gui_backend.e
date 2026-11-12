@@ -1399,6 +1399,36 @@ feature -- Controls
 		alias "sg_timer_stop($a_timer_id);"
 		end
 
+	start_frame_ticks
+			-- 1x interface: noted only; the GdkFrameClock ticks arrive with the GTK half.
+		do
+			is_frame_ticking := True
+		end
+
+	stop_frame_ticks
+		do
+			is_frame_ticking := False
+		end
+
+	is_frame_ticking: BOOLEAN
+			-- Has the clock asked for frame ticks?
+
+	motion_reduced: BOOLEAN
+			-- GTK's gtk-enable-animations off.
+		do
+			Result := c_motion_reduced /= 0
+		end
+
+	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_set_opacity($an_id, $a_opacity);"
+		end
+
+	c_motion_reduced: INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_motion_reduced();"
+		end
+
 	clipboard_text: POINTER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return (EIF_POINTER) sg_clipboard_text();"

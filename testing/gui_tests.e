@@ -2587,6 +2587,137 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_easing_curves_are_fixed_at_their_ends
+			-- 1x: every curve starts at 0 and ends at 1, rises, and ease in-out is half
+			-- done at half time.
+		local
+			l_ease: GUI_EASING
+			l_kind, i: INTEGER
+			l_before, l_now: REAL_64
+		do
+			create l_ease
+			from l_kind := l_ease.Linear until l_kind > l_ease.Ease_in_out loop
+				assert ("starts at 0", l_ease.value (l_kind, 0.0) = 0.0)
+				assert ("ends at 1", l_ease.value (l_kind, 1.0) = 1.0)
+				l_before := 0.0
+				from i := 1 until i > 20 loop
+					l_now := l_ease.value (l_kind, i / 20)
+					assert ("rises", l_now >= l_before)
+					l_before := l_now
+					i := i + 1
+				end
+				l_kind := l_kind + 1
+			end
+			assert ("ease in-out is half done at half time", (l_ease.value (l_ease.Ease_in_out, 0.5) - 0.5).abs < 1.0e-9)
+		end
+
+	test_a_fade_steps_on_the_manual_clock
+			-- 1x: on the manual clock a 200 ms fade reads 0, a half and 1 at 0, 100 and 200
+			-- ms, ends exactly, calls its finished actions once, and leaves nothing running.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_done: CELL [INTEGER]
+		do
+			create l_window.make ("Fade", 240, 120)
+			create l_label.make ("Fading")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_label.set_opacity (0.0)
+			l_label.animate_opacity (1.0)
+			create l_done.put (0)
+			if attached l_label.opacity_animation as al_fade then
+				al_fade.finished_actions.extend (agent (a_done: CELL [INTEGER]) do a_done.put (a_done.item + 1) end (l_done))
+			end
+			assert ("starts transparent", l_label.opacity = 0.0)
+			assert ("running", app.animation_clock.is_running)
+			app.animation_clock.step (100)
+			assert ("half way at half time", (l_label.opacity - 0.5).abs < 1.0e-9)
+			app.animation_clock.step (100)
+			assert ("ends exactly opaque", l_label.opacity = 1.0)
+			assert ("nothing running", not app.animation_clock.is_running)
+			assert ("finished once", l_done.item = 1)
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_reduced_motion_completes_every_animation_at_once
+			-- 1x: while the system asks for reduced motion, an animation hands on its end
+			-- value at once and nothing runs.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+		do
+			create l_window.make ("Reduced", 240, 120)
+			create l_label.make ("Still")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (True)
+			l_label.animate_opacity (0.25)
+			assert ("at its end at once", l_label.opacity = 0.25)
+			assert ("nothing running", not app.animation_clock.is_running)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_a_new_opacity_animation_replaces_the_old_one
+			-- 1x: animating a widget's opacity again stops the earlier animation where it is;
+			-- `finish_all' ends the new one and leaves the clock idle.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+		do
+			create l_window.make ("Replace", 240, 120)
+			create l_label.make ("Twice")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_label.animate_opacity (0.0)
+			app.animation_clock.step (50)
+			l_label.animate_opacity (1.0)
+			assert ("one animation running", app.animation_clock.running_count = 1)
+			app.animation_clock.finish_all
+			assert ("ends where the new one goes", l_label.opacity = 1.0)
+			assert ("nothing running", not app.animation_clock.is_running and not app.animation_clock.is_ticking)
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_the_clock_ticks_only_while_something_runs
+			-- 1x: a real clock asks for frame ticks when an animation starts and stops them
+			-- when the last one ends, so an idle program never wakes at the display rate.
+		local
+			l_clock: GUI_ANIMATION_CLOCK
+			l_starts, l_stops: CELL [INTEGER]
+			l_value: CELL [REAL_64]
+			l_animation: GUI_ANIMATION
+		do
+			create l_starts.put (0)
+			create l_stops.put (0)
+			create l_value.put (0.0)
+			create l_clock.make (agent (a_c: CELL [INTEGER]) do a_c.put (a_c.item + 1) end (l_starts),
+				agent (a_c: CELL [INTEGER]) do a_c.put (a_c.item + 1) end (l_stops),
+				agent: BOOLEAN do Result := False end,
+				agent (a_action: PROCEDURE) do a_action.call (Void) end)
+			assert ("idle at first", not l_clock.is_ticking)
+			create l_animation.make (0.0, 10.0, 200, {GUI_EASING}.Linear, agent (a_v: REAL_64; a_c: CELL [REAL_64]) do a_c.put (a_v) end (?, l_value))
+			l_clock.run (l_animation)
+			assert ("asked for ticks once", l_starts.item = 1 and l_clock.is_ticking)
+			l_clock.frame_tick (16)
+			assert ("a linear step", (l_value.item - 0.8).abs < 1.0e-9)
+			l_clock.frame_tick (200)
+			assert ("ended exactly", l_value.item = 10.0)
+			assert ("stopped the ticks once", l_stops.item = 1 and not l_clock.is_ticking)
+		end
+
 	test_a_container_disables_and_enables
 			-- A container can be disabled and enabled again, as the print preview does to its
 			-- parent's content: it reports disabled while off; afterwards what was on is on

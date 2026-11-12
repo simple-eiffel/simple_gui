@@ -956,6 +956,31 @@ feature -- Common widget state
 		alias "sga_timer_start($a_timer_id, $a_ms, $a_repeat ? 1 : 0);"
 		end
 
+	start_frame_ticks
+			-- 1x interface: noted only; MACMINI's AppKit half brings the displayLink ticks.
+		do
+			is_frame_ticking := True
+		end
+
+	stop_frame_ticks
+		do
+			is_frame_ticking := False
+		end
+
+	is_frame_ticking: BOOLEAN
+			-- Has the clock asked for frame ticks?
+
+	motion_reduced: BOOLEAN
+			-- 1x interface: False until MACMINI's AppKit half reads
+			-- accessibilityDisplayShouldReduceMotion.
+		do
+		end
+
+	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)
+			-- 1x interface: not shown until MACMINI's AppKit half sets alphaValue.
+		do
+		end
+
 	timer_stop (a_timer_id: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_timer_stop($a_timer_id);"

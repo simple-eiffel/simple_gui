@@ -1852,6 +1852,31 @@ feature -- Common widget state
 		deferred
 		end
 
+	start_frame_ticks
+			-- 1x: event 62 (id 0, a = the milliseconds since the last tick, or since this
+			-- call for the first) at the display's rate, coalesced (never a second while one
+			-- is unread), until `stop_frame_ticks'. Never blocks the GUI thread.
+		deferred
+		end
+
+	stop_frame_ticks
+			-- 1x: no more frame ticks; an idle program does not wake at the display rate.
+		deferred
+		end
+
+	motion_reduced: BOOLEAN
+			-- 1x: does the system ask for reduced motion now? A change arrives on event 10.
+		deferred
+		end
+
+	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)
+			-- 1x: show widget `an_id' at `a_opacity' (0 transparent to 1 opaque). At 0 it
+			-- takes no pointer input, on every platform.
+		require
+			in_range: a_opacity >= 0.0 and a_opacity <= 1.0
+		deferred
+		end
+
 	clipboard_text: POINTER
 			-- The clipboard's text now; empty when it holds none.
 		deferred
