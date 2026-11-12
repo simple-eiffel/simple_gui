@@ -5062,31 +5062,63 @@ feature -- Appearance
 		end
 
 	widget_set_reveal (an_id, a_effect: INTEGER; a_fraction: REAL_64; a_takes_input: BOOLEAN)
-			-- 1x-b interface: not shown yet (this platform's half).
+			-- 1x-b: simple_widgets shows the widget revealed (a fade multiplies its alpha, a
+			-- slide or grow takes that share of its natural size and draws clipped in it),
+			-- passing pointer hits to its parent without `a_takes_input'.
 		do
+			if is_frame_ticking then
+					-- noted before `changed', which renders at once
+				frame_value_pending := True
+				frame_value_mark := frames_rendered_total
+			end
+			if attached widget (an_id) as al_w then
+				al_w.set_reveal (a_effect, a_fraction, a_takes_input)
+				changed
+			end
 		end
 
 	widget_yield_focus (an_id: INTEGER)
-			-- 1x-b interface: not yet (this platform's half).
+			-- 1x-b: the main window's focus leaves the widget for the next in its ring.
 		do
+			if attached widget (an_id) as al_w and then attached open_window as al_win then
+				al_win.yield_focus (al_w)
+			end
 		end
 
 	test_reveal_shown (an_id: INTEGER): REAL_64
-			-- 1x-b: not read yet (this platform's half): -1.
+			-- 1x-b: the reveal simple_widgets shows the widget at; -1 when it is gone.
 		do
-			Result := -1.0
+			if attached widget (an_id) as al_w then
+				Result := al_w.reveal
+			else
+				Result := -1.0
+			end
 		end
 
 	test_extent (an_id: INTEGER; a_vertical: BOOLEAN): INTEGER
-			-- 1x-b: not read yet (this platform's half): -1.
+			-- 1x-b: the height (`a_vertical') or width the widget was laid out at; -1 when gone.
 		do
-			Result := -1
+			if attached widget (an_id) as al_w then
+				if a_vertical then
+					Result := al_w.height.rounded
+				else
+					Result := al_w.width.rounded
+				end
+			else
+				Result := -1
+			end
 		end
 
 	test_has_focus (an_id: INTEGER): INTEGER
-			-- 1x-b: not read yet (this platform's half): -1.
+			-- 1x-b: does the main window's focus sit on the widget or inside it? -1 when gone.
 		do
-			Result := -1
+			if attached widget (an_id) as al_w and then attached open_window as al_win then
+				if attached al_win.focused as al_f and then al_win.is_within (al_f, al_w) then
+					Result := 1
+				end
+			else
+				Result := -1
+			end
 		end
 
 	test_opacity_shown (an_id: INTEGER): REAL_64
