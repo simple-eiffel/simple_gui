@@ -2587,6 +2587,35 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_a_container_disables_and_enables
+			-- A container can be disabled and enabled again, as the print preview does to its
+			-- parent's content: it reports disabled while off; afterwards what was on is on
+			-- again, and a control disabled on its own stays disabled. (On AppKit a container is
+			-- no control: disabling it disables what it holds, and enabling restores that.)
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_on, l_off: GUI_BUTTON
+		do
+			create l_window.make ("Container enabling", 320, 160)
+			create l_stack.make_vertical
+			create l_on.make ("On")
+			create l_off.make ("Off on its own")
+			l_stack.extend (l_on)
+			l_stack.extend (l_off)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_off.disable
+			l_stack.disable
+			assert ("the container reports disabled", not l_stack.is_enabled)
+			l_stack.enable
+			assert ("the container reports enabled", l_stack.is_enabled)
+			assert ("what was on is on again", l_on.is_enabled)
+			assert ("what was off on its own stays off", not l_off.is_enabled)
+			l_window.close
+		end
+
 	test_print_preview_navigates_zooms_and_closes
 			-- The print preview, driven with no person: three pages, Page 1 of 3 fitted; Next and the
 			-- keys move between pages; actual size draws larger than fit page; Close answers

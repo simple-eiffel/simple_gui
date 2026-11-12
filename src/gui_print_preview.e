@@ -142,6 +142,8 @@ feature -- Showing
 				waiting_parent := al_content
 			end
 			window.show
+				-- the keys (Escape, Page Up and Down, the arrows, + and -) go to the canvas
+			canvas.focus
 				-- the canvas reports no first size, so draw once the window is up
 			l_timer := application.after (1, agent refresh)
 		end
