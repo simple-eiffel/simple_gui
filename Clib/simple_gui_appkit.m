@@ -6288,8 +6288,26 @@ static void sga_maybe_auto_cancel(void)
 {
 	if (s_auto_cancel_ms > 0) {
 		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)s_auto_cancel_ms * NSEC_PER_MSEC),
-			dispatch_get_main_queue(), ^{ [NSApp stopModalWithCode:NSModalResponseCancel]; });
+			dispatch_get_main_queue(), ^{
+				/* a panel shown as a sheet ends through its window; an app-modal one through the app */
+				for (NSWindow *w in [NSApp windows]) if ([w attachedSheet]) { [w endSheet:[w attachedSheet] returnCode:NSModalResponseCancel]; return; }
+				[NSApp stopModalWithCode:NSModalResponseCancel];
+			});
 	}
+}
+
+/* Runs a file panel as a sheet on window `a_window' when it is shown (waiting in AppKit's own
+   modal loop for the parent and its sheet, as the print sheet does), else app-modal: the same
+   as Windows' owned dialog and GTK's transient one (Larry's same-everywhere rule). */
+static NSModalResponse sga_run_file_panel(NSSavePanel *p, int a_window)
+{
+	id w = sga_get(a_window);
+	sga_maybe_auto_cancel();
+	if (![w isKindOfClass:[NSWindow class]] || ![w isVisible] || [w attachedSheet]) return [p runModal];
+	__block NSModalResponse l_answer = NSModalResponseCancel;
+	[p beginSheetModalForWindow:w completionHandler:^(NSModalResponse r) { l_answer = r; [NSApp stopModal]; }];
+	[NSApp runModalForWindow:w];
+	return l_answer;
 }
 
 static NSArray<UTType *> *sga_types(const char *a_extensions)
@@ -6307,21 +6325,20 @@ const char *sga_open_file(int a_window, const char *a_title, int a_save, const c
 {
 	NSArray *l_types = sga_types(a_extensions);
 	NSURL *l_url = nil;
-	(void)a_window;   /* app-modal for 0.1; a sheet on `a_window' later */
 	if (a_save) {
 		NSSavePanel *p = [NSSavePanel savePanel];
+		[p setTitle:sga_string(a_title)];
 		[p setMessage:sga_string(a_title)];
 		if ([l_types count]) [p setAllowedContentTypes:l_types];
-		sga_maybe_auto_cancel();
-		if ([p runModal] == NSModalResponseOK) l_url = [p URL];
+		if (sga_run_file_panel(p, a_window) == NSModalResponseOK) l_url = [p URL];
 	} else {
 		NSOpenPanel *p = [NSOpenPanel openPanel];
+		[p setTitle:sga_string(a_title)];
 		[p setMessage:sga_string(a_title)];
 		[p setCanChooseFiles:YES];
 		[p setCanChooseDirectories:NO];
 		if ([l_types count]) [p setAllowedContentTypes:l_types];
-		sga_maybe_auto_cancel();
-		if ([p runModal] == NSModalResponseOK) l_url = [[p URLs] firstObject];
+		if (sga_run_file_panel(p, a_window) == NSModalResponseOK) l_url = [[p URLs] firstObject];
 	}
 	return l_url ? sga_return(Kind_path, [l_url path]) : NULL;
 }
@@ -6338,33 +6355,32 @@ int sga_message(int a_window, const char *a_title, const char *a_text, int a_con
 	return [l_alert runModal] == NSAlertFirstButtonReturn ? 1 : 0;
 }
 
-/* Dialogs (1h). Like the others, app-modal; sga_test_auto_cancel_dialogs cancels them. */
+/* Dialogs (1h). The file panels are sheets on their window (sga_run_file_panel); the alerts stay
+   app-modal. sga_test_auto_cancel_dialogs cancels them all. */
 
 /* Save, with a suggested file name; NULL when cancelled. */
 const char *sga_save_file_named(int a_window, const char *a_title, const char *a_extensions, const char *a_name)
 {
 	NSArray *l_types = sga_types(a_extensions);
 	NSSavePanel *p = [NSSavePanel savePanel];
-	(void)a_window;
+	[p setTitle:sga_string(a_title)];
 	[p setMessage:sga_string(a_title)];
 	if ([l_types count]) [p setAllowedContentTypes:l_types];
 	[p setNameFieldStringValue:sga_string(a_name)];
-	sga_maybe_auto_cancel();
-	return [p runModal] == NSModalResponseOK ? sga_return(Kind_path, [[p URL] path]) : NULL;
+	return sga_run_file_panel(p, a_window) == NSModalResponseOK ? sga_return(Kind_path, [[p URL] path]) : NULL;
 }
 
 /* Choose a folder; NULL when cancelled. A new folder can be made from the panel. */
 const char *sga_choose_folder(int a_window, const char *a_title)
 {
 	NSOpenPanel *p = [NSOpenPanel openPanel];
-	(void)a_window;
+	[p setTitle:sga_string(a_title)];
 	[p setMessage:sga_string(a_title)];
 	[p setCanChooseFiles:NO];
 	[p setCanChooseDirectories:YES];
 	[p setCanCreateDirectories:YES];
 	[p setAllowsMultipleSelection:NO];
-	sga_maybe_auto_cancel();
-	return [p runModal] == NSModalResponseOK ? sga_return(Kind_path, [[[p URLs] firstObject] path]) : NULL;
+	return sga_run_file_panel(p, a_window) == NSModalResponseOK ? sga_return(Kind_path, [[[p URLs] firstObject] path]) : NULL;
 }
 
 /* A three-way question: 1 yes, 2 no, 0 cancel. Mac keys: Return is Yes, Escape is Cancel,
