@@ -2163,14 +2163,14 @@ feature -- Controls
 		end
 
 	pages: INTEGER
-			-- 1x-c interface: a tabless tabs control until this platform's half.
+			-- 1x-c: a notebook with no tabs, each page in an SgSwitch frame.
 		do
 			Result := tabs
 			tabs_set_position (Result, 0)
 		end
 
 	pages_extend (a_pages, a_page: INTEGER)
-			-- 1x-c interface: as a tab (this platform's half replaces it).
+			-- 1x-c: a page of the notebook (its tab title is never shown).
 		local
 			l_title: C_STRING
 		do
@@ -2179,23 +2179,22 @@ feature -- Controls
 		end
 
 	pages_select (a_pages, a_page: INTEGER)
-			-- 1x-c interface: as a tab.
+			-- 1x-c: as a tab, ending any switch shown.
 		do
 			tabs_select (a_pages, a_page)
 		end
 
 	pages_selected (a_pages: INTEGER): INTEGER
-			-- 1x-c interface: as a tab.
+			-- 1x-c: as a tab.
 		do
 			Result := tabs_selected (a_pages)
 		end
 
 	pages_set_transition_frame (an_id, a_from, a_to, a_kind: INTEGER; a_fraction: REAL_64)
-			-- 1x-c interface: no frames yet (this platform's half); the new page at once.
-		do
-			if tabs_selected (an_id) /= a_to then
-				tabs_select (an_id, a_to)
-			end
+			-- 1x-c: the new page's SgSwitch frame draws the switch with a still image of
+			-- the page leaving (sg_pages_frame).
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_pages_frame($an_id, $a_from, $a_to, $a_kind, $a_fraction);"
 		end
 
 	list: INTEGER
@@ -2645,9 +2644,9 @@ feature -- Test driver
 		end
 
 	test_transition_shown (an_id: INTEGER): REAL_64
-			-- 1x-c: not read yet (this platform's half): -1.
-		do
-			Result := -1.0
+			-- 1x-c: the switch the current page's SgSwitch frame shows (1 when none).
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_transition_shown($an_id);"
 		end
 
 	test_reveal_shown (an_id: INTEGER): REAL_64
