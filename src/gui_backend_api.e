@@ -1100,6 +1100,51 @@ feature -- Controls
 		deferred
 		end
 
+	pages: INTEGER
+			-- 1x-c: pages shown one at a time with no tab strip, switched only from code. GTK: a
+			-- GtkStack with its own transition off; macOS: a host view of our own; Windows: a
+			-- drawn page host. Sends no events.
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	pages_extend (a_pages, a_page: INTEGER)
+			-- Add `a_page' as the last page; the first page added is shown.
+		deferred
+		end
+
+	pages_select (a_pages, a_page: INTEGER)
+			-- Show page `a_page' (1-based) alone, at once.
+		require
+			positive: a_page >= 1
+		deferred
+		end
+
+	pages_selected (a_pages: INTEGER): INTEGER
+			-- The page selected (1-based), or 0.
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	pages_set_transition_frame (an_id, a_from, a_to, a_kind: INTEGER; a_fraction: REAL_64)
+			-- 1x-c: show the switch of pages or tabs `an_id' from page `a_from' to page `a_to'
+			-- at `a_fraction' (0 all `a_from', 1 all `a_to'), under `a_kind'
+			-- (GUI_PAGE_SWITCHER: 1 crossfade, the old page fading out as the new fades in;
+			-- 2 slide, both moving together, the new page coming in from the trailing side
+			-- when `a_to' > `a_from' and from the leading side when back, mirrored under
+			-- right-to-left). Page `a_to' is the selected page from the first frame on; at 1
+			-- it shows alone, as `pages_select' or `tabs_select' leaves it. Only the new page
+			-- takes input during the switch. Shared code sends every frame; the toolkit's own
+			-- transitions stay off. A frame for a widget whose window has closed does nothing.
+		require
+			known_kind: a_kind = 1 or a_kind = 2
+			pages_given: a_from >= 1 and a_to >= 1 and a_from /= a_to
+			in_range: a_fraction >= 0.0 and a_fraction <= 1.0
+		deferred
+		end
+
 	list: INTEGER
 		deferred
 		ensure
@@ -2446,6 +2491,14 @@ feature -- Styles (1w)
 		require
 			known_question: a_which >= 0 and a_which <= 5
 		deferred
+		end
+
+	test_transition_shown (an_id: INTEGER): REAL_64
+			-- Tests only, 1x-c: how far the switch of pages or tabs `an_id' the toolkit shows has
+			-- got (0 to 1; 1 when none is showing); -1 where it can't be read yet.
+		deferred
+		ensure
+			known_or_unreadable: Result = -1.0 or else (Result >= 0.0 and Result <= 1.0)
 		end
 
 	test_reveal_shown (an_id: INTEGER): REAL_64

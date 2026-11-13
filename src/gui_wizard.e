@@ -4,7 +4,8 @@ note
 		bar, the step's page, and Back, Next (Finish on the last step) and Cancel. Each step
 		may have a `can_advance' check: Next and Finish ask it, and a False stays on the step,
 		whose page shows its own errors (1p). A shared composite of GUI_LABEL, GUI_PROGRESS_BAR,
-		a tabless GUI_TABS and GUI_BUTTONs. `go_to_step' fires nothing; the user's buttons do.
+		a GUI_PAGES and GUI_BUTTONs. `go_to_step' fires nothing; the user's buttons do.
+		Steps slide by default (1x-c): Next forward, Back back; `set_step_transition' changes it.
 	]"
 
 class
@@ -40,7 +41,7 @@ feature {NONE} -- Initialization
 			create header.make (" ")
 			create progress.make
 			create pages.make
-			pages.set_tab_position (pages.Tabs_none)
+			pages.set_page_transition (pages.Transition_slide)
 			create back_button.make ("Back")
 			create next_button.make ("Next")
 			create cancel_button.make ("Cancel")
@@ -114,7 +115,7 @@ feature -- Element change
 		do
 			titles.extend (a_title.to_string_32)
 			checks.extend (Void)
-			pages.extend (a_page, a_title)
+			pages.extend_page (a_page)
 			refresh
 		ensure
 			one_more: step_count = old step_count + 1
@@ -127,6 +128,24 @@ feature -- Element change
 			valid: 1 <= i and i <= step_count
 		do
 			checks [i] := a_check
+		end
+
+	set_step_transition (a_kind: INTEGER)
+			-- Show later changes of step with `a_kind' (GUI_PAGE_SWITCHER's Transition_ constants;
+			-- `Transition_slide' until set).
+		require
+			gui_thread: is_gui_thread
+			known: {GUI_PAGE_SWITCHER}.Transition_none <= a_kind and a_kind <= {GUI_PAGE_SWITCHER}.Transition_slide
+		do
+			pages.set_page_transition (a_kind)
+		ensure
+			set: step_transition = a_kind
+		end
+
+	step_transition: INTEGER
+			-- How a change of step is shown.
+		do
+			Result := pages.page_transition
 		end
 
 	go_to_step (i: INTEGER)
@@ -162,7 +181,7 @@ feature {NONE} -- Implementation
 
 	header: GUI_LABEL
 	progress: GUI_PROGRESS_BAR
-	pages: GUI_TABS
+	pages: GUI_PAGES
 	titles: ARRAYED_LIST [STRING_32]
 	checks: ARRAYED_LIST [detachable FUNCTION [BOOLEAN]]
 

@@ -3163,6 +3163,168 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_pages_crossfade_on_the_manual_clock
+			-- 1x-c: a switch selects the new page at once, crossfades from 0 to 1 over 200 ms (a
+			-- half at 100), and says so once, at the end.
+		local
+			l_window: GUI_WINDOW
+			l_pages: GUI_PAGES
+			l_told: ARRAYED_LIST [INTEGER]
+			l_shown: REAL_64
+		do
+			create l_window.make ("Pages", 320, 200)
+			l_pages := three_pages
+			l_window.set_content (l_pages)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_told := pages_told (l_pages)
+			l_pages.set_page_transition (l_pages.Transition_crossfade)
+			assert ("page 1 first", l_pages.selected_index = 1 and not l_pages.is_switching)
+			l_pages.select_page (3)
+			assert ("page 3 selected at once", l_pages.selected_index = 3)
+			assert ("from 1 to 3, at the start", l_pages.is_switching and l_pages.switch_from = 1
+				and l_pages.switch_to = 3 and l_pages.switch_fraction = 0.0)
+			app.animation_clock.step (100)
+			assert ("half way at half time", (l_pages.switch_fraction - 0.5).abs < 1.0e-9)
+			l_shown := backend.test_transition_shown (l_pages.id)
+			assert ("the toolkit shows half: " + l_shown.out, l_shown = -1.0 or else (l_shown - 0.5).abs < 0.02)
+			assert ("not said yet", l_told.is_empty)
+			app.animation_clock.step (100)
+			assert ("ended", not l_pages.is_switching and l_pages.switch_fraction = 1.0)
+			assert ("said once, page 3", l_told.count = 1 and then l_told.first = 3)
+			l_shown := backend.test_transition_shown (l_pages.id)
+			assert ("the toolkit shows the end: " + l_shown.out, l_shown = -1.0 or else l_shown = 1.0)
+			end_manual_clock
+			l_window.close
+		end
+
+	test_a_page_switch_cut_short_says_only_the_last
+			-- 1x-c: a second switch while one runs starts from the page the first was going to,
+			-- and only the last says it ended.
+		local
+			l_window: GUI_WINDOW
+			l_pages: GUI_PAGES
+			l_told: ARRAYED_LIST [INTEGER]
+		do
+			create l_window.make ("Pages", 320, 200)
+			l_pages := three_pages
+			l_window.set_content (l_pages)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_told := pages_told (l_pages)
+			l_pages.set_page_transition (l_pages.Transition_slide)
+			l_pages.select_page (2)
+			app.animation_clock.step (50)
+			l_pages.select_page (3)
+			assert ("from 2 to 3", l_pages.switch_from = 2 and l_pages.switch_to = 3 and l_pages.selected_index = 3)
+			assert ("one switch running", app.animation_clock.running_count = 1)
+			app.animation_clock.step (200)
+			assert ("said once, page 3", l_told.count = 1 and then l_told.first = 3)
+			l_pages.select_page (3)
+			assert ("the page already selected: nothing", not l_pages.is_switching and l_told.count = 1)
+			end_manual_clock
+			l_window.close
+		end
+
+	test_pages_switch_at_once_without_a_transition_or_motion
+			-- 1x-c: with no transition, or while the system asks for reduced motion, a switch
+			-- shows the new page at once and says so on the queue's next turn.
+		local
+			l_window: GUI_WINDOW
+			l_pages: GUI_PAGES
+			l_told: ARRAYED_LIST [INTEGER]
+		do
+			create l_window.make ("Pages", 320, 200)
+			l_pages := three_pages
+			l_window.set_content (l_pages)
+			l_window.show
+			settle_window
+			l_told := pages_told (l_pages)
+			assert ("no transition until set", l_pages.page_transition = l_pages.Transition_none)
+			l_pages.select_page (2)
+			assert ("page 2 at once", l_pages.selected_index = 2 and not l_pages.is_switching)
+			assert ("not said yet", l_told.is_empty)
+			driver.pump_until_idle (100)
+			assert ("said on the next turn", l_told.count = 1 and then l_told.first = 2)
+			app.set_reduces_motion_for_tests (True)
+			l_pages.set_page_transition (l_pages.Transition_crossfade)
+			l_pages.select_page (3)
+			assert ("reduced: page 3 at once", l_pages.selected_index = 3 and not l_pages.is_switching)
+			driver.pump_until_idle (100)
+			assert ("said once more", l_told.count = 2 and then l_told.last = 3)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_tabs_switch_with_a_transition_when_the_user_chooses
+			-- 1x-c: tabs show their transition when the user picks a tab (from the page shown
+			-- before) and when code selects one; the user's choice is told at once, as before.
+		local
+			l_window: GUI_WINDOW
+			l_tabs: GUI_TABS
+			l_told: ARRAYED_LIST [INTEGER]
+		do
+			create l_window.make ("Tabs", 320, 200)
+			create l_tabs.make
+			l_tabs.extend (create {GUI_LABEL}.make ("One"), "One")
+			l_tabs.extend (create {GUI_LABEL}.make ("Two"), "Two")
+			l_tabs.extend (create {GUI_LABEL}.make ("Three"), "Three")
+			l_window.set_content (l_tabs)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			create l_told.make (2)
+			l_tabs.page_changed_actions.extend (agent (a_told: ARRAYED_LIST [INTEGER]; p: INTEGER) do a_told.extend (p) end (l_told, ?))
+			l_tabs.set_page_transition (l_tabs.Transition_slide)
+			backend.test_choose (l_tabs.id, 2)
+			driver.pump_until_idle (100)
+			assert ("told at once", l_told.count = 1 and then l_told.first = 2)
+			assert ("sliding from 1 to 2", l_tabs.is_switching and l_tabs.switch_from = 1 and l_tabs.switch_to = 2)
+			assert ("page 2 selected", l_tabs.selected_index = 2)
+			app.animation_clock.step (200)
+			assert ("ended", not l_tabs.is_switching)
+			l_tabs.select_page (1)
+			assert ("code: sliding back, quietly", l_tabs.is_switching and l_tabs.switch_from = 2 and l_tabs.switch_to = 1
+				and l_tabs.selected_index = 1 and l_told.count = 1)
+			end_manual_clock
+			l_window.close
+		end
+
+	test_a_wizard_slides_between_steps
+			-- 1x-c: a wizard slides by default, forward on Next and back on Back; the step
+			-- changes at once.
+		local
+			l_window: GUI_WINDOW
+			l_wizard: GUI_WIZARD
+		do
+			create l_window.make ("Wizard", 480, 320)
+			create l_wizard.make
+			l_wizard.extend_step (create {GUI_LABEL}.make ("Welcome"), "Welcome")
+			l_wizard.extend_step (create {GUI_LABEL}.make ("Address"), "Address")
+			l_window.set_content (l_wizard)
+			l_window.show
+			settle_window
+			assert ("slides by default", l_wizard.step_transition = {GUI_PAGE_SWITCHER}.Transition_slide)
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			driver.perform_click (l_wizard.next_button)
+			assert ("step 2 at once, sliding", l_wizard.step = 2 and app.animation_clock.running_count = 1)
+			app.animation_clock.step (200)
+			driver.perform_click (l_wizard.back_button)
+			assert ("back to 1, sliding", l_wizard.step = 1 and app.animation_clock.running_count = 1)
+			l_wizard.set_step_transition ({GUI_PAGE_SWITCHER}.Transition_none)
+			app.animation_clock.finish_all
+			driver.perform_click (l_wizard.next_button)
+			assert ("no transition: at once", l_wizard.step = 2 and not app.animation_clock.is_running)
+			end_manual_clock
+			l_window.close
+		end
+
 	test_the_clock_ticks_only_while_something_runs
 			-- 1x: a real clock asks for frame ticks when an animation starts and stops them
 			-- when the last one ends, so an idle program never wakes at the display rate.
@@ -7710,6 +7872,30 @@ feature {NONE} -- Fixtures
 				app.process_events (30)
 				i := i + 1
 			end
+		end
+
+	three_pages: GUI_PAGES
+			-- Pages "One", "Two" and "Three".
+		do
+			create Result.make
+			Result.extend_page (create {GUI_LABEL}.make ("One"))
+			Result.extend_page (create {GUI_LABEL}.make ("Two"))
+			Result.extend_page (create {GUI_LABEL}.make ("Three"))
+		end
+
+	pages_told (a_pages: GUI_PAGES): ARRAYED_LIST [INTEGER]
+			-- A list that gathers every page `a_pages' says it switched to.
+		do
+			create Result.make (2)
+			a_pages.page_changed_actions.extend (agent (a_told: ARRAYED_LIST [INTEGER]; p: INTEGER) do a_told.extend (p) end (Result, ?))
+		end
+
+	end_manual_clock
+			-- Finish every animation and give the clock and motion back to the system.
+		do
+			app.animation_clock.finish_all
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
 		end
 
 	settle_window

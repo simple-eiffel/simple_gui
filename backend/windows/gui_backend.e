@@ -3771,6 +3771,42 @@ feature -- Path controls, continued
 			end
 		end
 
+	pages: INTEGER
+			-- 1x-c interface: a tabless tabs control until this platform's half.
+		do
+			Result := tabs
+			tabs_set_position (Result, 0)
+		end
+
+	pages_extend (a_pages, a_page: INTEGER)
+			-- 1x-c interface: as a tab (this platform's half replaces it).
+		local
+			l_title: C_STRING
+		do
+			l_title := to_c ("Page")
+			tabs_extend (a_pages, a_page, l_title.item)
+		end
+
+	pages_select (a_pages, a_page: INTEGER)
+			-- 1x-c interface: as a tab.
+		do
+			tabs_select (a_pages, a_page)
+		end
+
+	pages_selected (a_pages: INTEGER): INTEGER
+			-- 1x-c interface: as a tab.
+		do
+			Result := tabs_selected (a_pages)
+		end
+
+	pages_set_transition_frame (an_id, a_from, a_to, a_kind: INTEGER; a_fraction: REAL_64)
+			-- 1x-c interface: no frames yet (this platform's half); the new page at once.
+		do
+			if tabs_selected (an_id) /= a_to then
+				tabs_select (an_id, a_to)
+			end
+		end
+
 	list: INTEGER
 		local
 			l_l: SW_TEXT_LIST
@@ -5111,6 +5147,12 @@ feature -- Appearance
 			if attached widget (an_id) as al_w and then attached open_window as al_win then
 				al_win.yield_focus (al_w)
 			end
+		end
+
+	test_transition_shown (an_id: INTEGER): REAL_64
+			-- 1x-c: not read yet (this platform's half): -1.
+		do
+			Result := -1.0
 		end
 
 	test_reveal_shown (an_id: INTEGER): REAL_64
