@@ -1857,6 +1857,32 @@ feature -- Common widget state
 		alias "return (EIF_POINTER) sga_test_style_value($an_id, (const char *)$a_key);"
 		end
 
+	widget_set_reveal (an_id, a_effect: INTEGER; a_fraction: REAL_64; a_takes_input: BOOLEAN)
+			-- 1x-b: a fade multiplies alphaValue; a slide or grow works in the widget's stack slot.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_set_reveal($an_id, $a_effect, $a_fraction, $a_takes_input ? 1 : 0);"
+		end
+
+	widget_yield_focus (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_yield_focus($an_id);"
+		end
+
+	test_reveal_shown (an_id: INTEGER): REAL_64
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_reveal_shown($an_id);"
+		end
+
+	test_extent (an_id: INTEGER; a_vertical: BOOLEAN): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_extent($an_id, $a_vertical ? 1 : 0);"
+		end
+
+	test_has_focus (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_has_focus($an_id);"
+		end
+
 	test_opacity_shown (an_id: INTEGER): REAL_64
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_test_opacity_shown($an_id);"

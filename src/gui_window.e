@@ -15,7 +15,7 @@ class
 inherit
 	GUI_WIDGET
 		redefine
-			dispatch, cascade_direction, show
+			dispatch, cascade_direction, show, effective_effect
 		end
 
 create
@@ -287,6 +287,15 @@ feature {NONE} -- Implementation
 			if attached status_bar as al_bar then
 				al_bar.inherit_direction (base_direction)
 			end
+		end
+
+
+feature -- Animated show and hide (1x)
+
+	effective_effect (a_effect: INTEGER): INTEGER
+			-- A window fades, whatever effect it is asked for (MACMINI's review of 1x-b).
+		do
+			Result := Effect_fade
 		end
 
 end

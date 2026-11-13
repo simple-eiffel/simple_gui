@@ -2693,13 +2693,28 @@ feature -- The remaining controls (1j)
 			-- 1x-a's real-clock count (the spec: before 1x-a merges, on all three): ten 200 ms
 			-- fades back and forth on the real clock, through event 62 and GUI_APPLICATION.
 			-- Where the backend can tell when a frame shows, it counts the frames whose value
-			-- was set in time (painted) and those that missed; at most 1 in 20 may miss and no
-			-- gap between painted frames may pass 50 ms. The counts are printed for the record.
+			-- was set in time (painted) and those that missed. At most 1 in 20 may miss; the
+			-- 95th-percentile gap between painted frames may not pass 25 ms (1.5 frames at 60
+			-- Hz: what a user sees), and the single longest gap not 100 ms (one gap is ruled by
+			-- the compositor's own hitches: a plain C spike on Windows' DwmFlush, none of our
+			-- code, reached 47 ms). EIF-GROUP, 2026-11-12: the same on all three; if any
+			-- platform's 95th percentile sits near 25 ms, say so rather than widen it. The
+			-- counts, the longest gap included, are printed for the record. Gaps are between the
+			-- vblanks the frames made: a draw that ends late takes the next vblank (EIF-GROUP,
+			-- 2026-11-12); the measure before (tick or aimed time, `test_frames (5)') is printed
+			-- beside it. Every value is read before the checks: a backend without 5 resets on it.
+			-- Linux: the 95th percentile is printed and logged but does not fail (Larry,
+			-- 2026-11-13): Linux runs in WSLg, whose remote compositor's timing varies run to run
+			-- (17 to 32 ms on the same build; the GTK renderer is not the cause), and no native
+			-- Linux desktop is available to measure on. Every other check still holds there,
+			-- the longest gap included: a GTK estimate more than 3 refresh periods past a paint's
+			-- end is stale (one read as a 3.6 s gap in WSLg, 2026-11-13), so the frame is stamped
+			-- with the paint's end instead, as Windows does when DWM gives no timing.
 		local
 			l_window: GUI_WINDOW
 			l_label: GUI_LABEL
 			l_done: CELL [INTEGER]
-			l_rounds: INTEGER
+			l_rounds, l_painted, l_missed, l_longest, l_p95, l_before: INTEGER
 		do
 			if backend.test_frames (3) = -1 then
 					-- no frame ticks to count on this backend yet (its 1x half brings them)
@@ -2726,11 +2741,24 @@ feature -- The remaining controls (1j)
 				assert ("ten fades ran", l_done.item >= 10)
 				assert ("nothing running", not app.animation_clock.is_running)
 				if backend.test_frames (0) /= -1 then
-					print ("    real clock: painted " + backend.test_frames (0).out + ", missed " + backend.test_frames (1).out
-						+ ", longest gap " + (backend.test_frames (2) // 10).out + "." + (backend.test_frames (2) \\ 10).out + " ms%N")
-					assert ("frames painted", backend.test_frames (0) > 0)
-					assert ("at most 1 in 20 missed", backend.test_frames (1) * 20 <= backend.test_frames (0))
-					assert ("no gap past 50 ms", backend.test_frames (2) <= 500)
+					l_painted := backend.test_frames (0)
+					l_missed := backend.test_frames (1)
+					l_longest := backend.test_frames (2)
+					l_p95 := backend.test_frames (4)
+					l_before := backend.test_frames (5)
+					print ("    real clock: painted " + l_painted.out + ", missed " + l_missed.out
+						+ ", 95th-percentile gap " + (l_p95 // 10).out + "." + (l_p95 \\ 10).out
+						+ " ms, longest gap " + (l_longest // 10).out + "." + (l_longest \\ 10).out
+						+ " ms (by vblank made; by tick or aimed time the 95th was " + (l_before // 10).out + "."
+						+ (l_before \\ 10).out + " ms)%N")
+					assert ("frames painted", l_painted > 0)
+					assert ("at most 1 in 20 missed", l_missed * 20 <= l_painted)
+					if {PLATFORM}.is_unix and not {PLATFORM}.is_mac then
+						print ("    Linux (WSLg): the 95th percentile is reported, not gated%N")
+					else
+						assert ("95th-percentile gap at most 25 ms", l_p95 <= 250)
+					end
+					assert ("no gap past 100 ms", l_longest <= 1000)
 				end
 				app.clear_reduces_motion_for_tests
 				l_window.close
@@ -2790,6 +2818,339 @@ feature -- The remaining controls (1j)
 			app.animation_clock.finish_all
 			assert ("ends where the new one goes", l_label.opacity = 1.0)
 			assert ("nothing running", not app.animation_clock.is_running and not app.animation_clock.is_ticking)
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_show_animated_reveals_on_the_manual_clock
+			-- 1x-b: an animated show makes the widget shown at once and reveals it from 0 to 1
+			-- over 200 ms (a half at 100), then says so once.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_kinds: ARRAYED_LIST [INTEGER]
+		do
+			create l_window.make ("Show", 240, 120)
+			create l_label.make ("Coming in")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			create l_kinds.make (2)
+			l_label.animation_finished_actions.extend (agent (a_kinds: ARRAYED_LIST [INTEGER]; a_kind: INTEGER) do a_kinds.extend (a_kind) end (l_kinds, ?))
+			l_label.hide
+			l_label.show_animated (l_label.Effect_slide_from_top)
+			assert ("shown at once", l_label.is_shown)
+			assert ("nothing revealed yet", l_label.reveal = 0.0)
+			app.animation_clock.step (100)
+			assert ("half way at half time", (l_label.reveal - 0.5).abs < 1.0e-9)
+			app.animation_clock.step (100)
+			assert ("whole at the end", l_label.reveal = 1.0)
+			assert ("said once, shown", l_kinds.count = 1 and then l_kinds.first = l_label.Kind_shown)
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_hide_animated_stays_shown_until_the_end
+			-- 1x-b: an animated hide keeps the widget shown while it conceals it, takes no
+			-- pointer input from the start (where the toolkit can tell), hides it at the end,
+			-- makes it whole again for a later plain show, and says so once.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_kinds: ARRAYED_LIST [INTEGER]
+		do
+			create l_window.make ("Hide", 240, 120)
+			create l_label.make ("Going out")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			create l_kinds.make (2)
+			l_label.animation_finished_actions.extend (agent (a_kinds: ARRAYED_LIST [INTEGER]; a_kind: INTEGER) do a_kinds.extend (a_kind) end (l_kinds, ?))
+			l_label.hide_animated (l_label.Effect_fade)
+			assert ("hiding", l_label.is_hiding)
+			if backend.test_reveal_shown (l_label.id) /= -1.0 and then backend.test_pointer_reaches (l_label.id) /= -1 then
+					-- where this platform's 1x-b half shows reveals
+				assert ("no pointer input while hiding", backend.test_pointer_reaches (l_label.id) = 0)
+			end
+			app.animation_clock.step (100)
+			assert ("still shown half way", l_label.is_shown and (l_label.reveal - 0.5).abs < 1.0e-9)
+			app.animation_clock.step (100)
+			assert ("hidden at the end", not l_label.is_shown and not l_label.is_hiding)
+			assert ("whole again for a later show", l_label.reveal = 1.0)
+			assert ("said once, hidden", l_kinds.count = 1 and then l_kinds.first = l_label.Kind_hidden)
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_a_show_turns_a_hide_around
+			-- 1x-b: a show during a hide goes on from where the hide got to, without a jump.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+			l_reveal: REAL_64
+		do
+			create l_window.make ("Turn", 240, 120)
+			create l_label.make ("Back again")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_label.hide_animated (l_label.Effect_slide_from_leading)
+			app.animation_clock.step (100)
+			l_reveal := l_label.reveal
+			l_label.show_animated (l_label.Effect_slide_from_leading)
+			assert ("no jump", l_label.reveal = l_reveal and l_label.is_shown and not l_label.is_hiding)
+			app.animation_clock.step (100)
+			assert ("on the way back", l_label.reveal > l_reveal and l_label.reveal < 1.0)
+			app.animation_clock.step (200)
+			assert ("whole", l_label.reveal = 1.0 and not app.animation_clock.is_running)
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_reduced_motion_shows_and_hides_at_once
+			-- 1x-b: while the system asks for reduced motion, an animated hide hides at once
+			-- and an animated show shows the widget whole at once.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+		do
+			create l_window.make ("Reduced", 240, 120)
+			create l_label.make ("At once")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (True)
+			l_label.hide_animated (l_label.Effect_grow)
+			assert ("hidden at once", not l_label.is_shown)
+			l_label.show_animated (l_label.Effect_grow)
+			assert ("whole at once", l_label.is_shown and l_label.reveal = 1.0)
+			assert ("nothing running", not app.animation_clock.is_running)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_every_effect_shows_its_share_in_both_stacks
+			-- 1x-b: each of the six effects, in a vertical and a horizontal stack, half way
+			-- through a show: the toolkit shows half; a slide along the stack takes half its
+			-- space, one across the stack keeps the stack's size, a fade keeps the full space;
+			-- and at the end each is whole, in its full space, at full opacity. Parts a backend
+			-- can't read yet (-1) are left out.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_label, l_other: GUI_LABEL
+			l_effect, l_full, l_full_across, l_half: INTEGER
+			l_vertical, l_along: BOOLEAN
+		do
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			across {ARRAY [BOOLEAN]} <<True, False>> as ic_vertical loop
+				l_vertical := ic_vertical
+				create l_window.make ("Effects", 360, 240)
+				if l_vertical then create l_stack.make_vertical else create l_stack.make_horizontal end
+				create l_label.make ("Effect")
+				create l_other.make ("Neighbor")
+				l_stack.extend (l_label)
+				l_stack.extend (l_other)
+				l_window.set_content (l_stack)
+				l_window.show
+				settle_window
+				l_full := backend.test_extent (l_label.id, l_vertical)
+				l_full_across := backend.test_extent (l_label.id, not l_vertical)
+				from l_effect := l_label.Effect_fade until l_effect > l_label.Effect_grow loop
+					l_label.hide
+					l_label.show_animated (l_effect)
+					app.animation_clock.step (100)
+					if backend.test_reveal_shown (l_label.id) /= -1.0 then
+						assert ("half shown, effect " + l_effect.out, (backend.test_reveal_shown (l_label.id) - 0.5).abs < 0.02)
+					end
+					if l_full > 0 and then backend.test_extent (l_label.id, l_vertical) /= -1 then
+						l_half := backend.test_extent (l_label.id, l_vertical)
+						l_along := (l_effect = l_label.Effect_grow)
+							or (l_vertical and (l_effect = l_label.Effect_slide_from_top or l_effect = l_label.Effect_slide_from_bottom))
+							or (not l_vertical and (l_effect = l_label.Effect_slide_from_leading or l_effect = l_label.Effect_slide_from_trailing))
+						if l_along then
+							assert ("half the space along the stack, effect " + l_effect.out + ": " + l_half.out + " of " + l_full.out,
+								(l_half - l_full // 2).abs <= 2)
+						else
+							assert ("the full space, effect " + l_effect.out + ": " + l_half.out + " of " + l_full.out,
+								(l_half - l_full).abs <= 2)
+						end
+					end
+					app.animation_clock.step (100)
+					assert ("whole, effect " + l_effect.out, l_label.reveal = 1.0)
+					if l_full > 0 and then backend.test_extent (l_label.id, l_vertical) /= -1 then
+						assert ("full space at the end, effect " + l_effect.out, (backend.test_extent (l_label.id, l_vertical) - l_full).abs <= 2)
+						assert ("full space across at the end, effect " + l_effect.out, (backend.test_extent (l_label.id, not l_vertical) - l_full_across).abs <= 2)
+					end
+					if backend.test_opacity_shown (l_label.id) /= -1.0 then
+						assert ("opaque at the end, effect " + l_effect.out, backend.test_opacity_shown (l_label.id) = 1.0)
+					end
+					l_effect := l_effect + 1
+				end
+				l_window.close
+			end
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+		end
+
+	test_reveals_at_a_window_content_and_fades_elsewhere
+			-- 1x-b, the rule on all three: slides and grow reveal in stacks and as a window's
+			-- content; elsewhere (a grid cell here) they fade. As the content the window keeps
+			-- its size (the content moves in, clipped); in a grid the cell keeps its space and
+			-- the widget fades. Half way the toolkit shows half; at the end all is whole.
+		local
+			l_window: GUI_WINDOW
+			l_grid: GUI_GRID
+			l_label, l_cell: GUI_LABEL
+			l_effect, l_full_w, l_full_h: INTEGER
+		do
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			create l_window.make ("Content", 300, 160)
+			create l_label.make ("The window's content")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			l_full_w := backend.test_extent (l_label.id, False)
+			l_full_h := backend.test_extent (l_label.id, True)
+			from l_effect := l_label.Effect_slide_from_top until l_effect > l_label.Effect_grow loop
+				l_label.hide
+				l_label.show_animated (l_effect)
+				app.animation_clock.step (100)
+				if backend.test_reveal_shown (l_label.id) /= -1.0 then
+					assert ("content half shown, effect " + l_effect.out, (backend.test_reveal_shown (l_label.id) - 0.5).abs < 0.02)
+				end
+				if l_full_h > 0 and then backend.test_extent (l_label.id, True) /= -1 then
+					assert ("the window keeps its size, effect " + l_effect.out,
+						(backend.test_extent (l_label.id, True) - l_full_h).abs <= 2 and (backend.test_extent (l_label.id, False) - l_full_w).abs <= 2)
+				end
+				app.animation_clock.step (100)
+				assert ("content whole, effect " + l_effect.out, l_label.reveal = 1.0)
+				if backend.test_opacity_shown (l_label.id) /= -1.0 then
+					assert ("content opaque at the end, effect " + l_effect.out, backend.test_opacity_shown (l_label.id) = 1.0)
+				end
+				l_effect := l_effect + 1
+			end
+			l_window.close
+			create l_window.make ("Grid", 300, 160)
+			create l_grid.make
+			create l_cell.make ("In a cell")
+			l_grid.put (l_cell, 1, 1)
+			l_grid.put (create {GUI_LABEL}.make ("Beside it"), 1, 2)
+			l_window.set_content (l_grid)
+			l_window.show
+			settle_window
+			l_full_h := backend.test_extent (l_cell.id, True)
+			l_cell.hide
+			l_cell.show_animated (l_cell.Effect_slide_from_top)
+			app.animation_clock.step (100)
+			if backend.test_opacity_shown (l_cell.id) /= -1.0 then
+				assert ("a grid cell fades: half seen", (backend.test_opacity_shown (l_cell.id) - 0.5).abs < 0.02)
+			end
+			if l_full_h > 0 and then backend.test_extent (l_cell.id, True) /= -1 then
+				assert ("a grid cell keeps its space", (backend.test_extent (l_cell.id, True) - l_full_h).abs <= 2)
+			end
+			app.animation_clock.step (100)
+			if backend.test_opacity_shown (l_cell.id) /= -1.0 then
+				assert ("a grid cell opaque at the end", backend.test_opacity_shown (l_cell.id) = 1.0)
+			end
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_opacity_and_a_fade_multiply
+			-- 1x-b: what shows is the opacity times the fade's reveal: at opacity 0.5, a fade
+			-- half way shows 0.25, and at its end 0.5 again.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+		do
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			create l_window.make ("Multiply", 240, 120)
+			create l_label.make ("Half seen")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			l_label.set_opacity (0.5)
+			l_label.hide
+			l_label.show_animated (l_label.Effect_fade)
+			app.animation_clock.step (100)
+			if backend.test_opacity_shown (l_label.id) /= -1.0 then
+				assert ("a quarter half way: " + backend.test_opacity_shown (l_label.id).out, (backend.test_opacity_shown (l_label.id) - 0.25).abs < 0.01)
+			end
+			app.animation_clock.step (100)
+			if backend.test_opacity_shown (l_label.id) /= -1.0 then
+				assert ("the opacity at the end", (backend.test_opacity_shown (l_label.id) - 0.5).abs < 0.01)
+			end
+			assert ("the opacity kept", l_label.opacity = 0.5)
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_the_toolkit_shows_the_reveal_and_the_focus_leaves
+			-- 1x-b, where the toolkit can tell (each platform's half): half way through a slide
+			-- the toolkit shows half, the widget takes about half its space along the slide,
+			-- and a hide starting on the focused field moves the focus off it at once.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_field: GUI_TEXT_FIELD
+			l_other: GUI_TEXT_FIELD
+			l_full: INTEGER
+		do
+			create l_window.make ("Reveal", 320, 200)
+			create l_stack.make_vertical
+			create l_field.make
+			create l_other.make
+			l_stack.extend (l_field)
+			l_stack.extend (l_other)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_full := backend.test_extent (l_field.id, True)
+			l_field.hide
+			l_field.show_animated (l_field.Effect_slide_from_top)
+			app.animation_clock.step (100)
+			if backend.test_reveal_shown (l_field.id) /= -1.0 then
+				assert ("the toolkit shows half", (backend.test_reveal_shown (l_field.id) - 0.5).abs < 0.01)
+			end
+			if l_full > 0 and then backend.test_extent (l_field.id, True) /= -1 then
+				assert ("half the space half way: " + backend.test_extent (l_field.id, True).out + " of " + l_full.out,
+					(backend.test_extent (l_field.id, True) - l_full // 2).abs <= 2)
+			end
+			if l_full > 0 and then backend.test_extent (l_field.id, True) /= -1 then
+					-- an effect change undoes the earlier effect: a fade keeps the full space
+				l_field.hide_animated (l_field.Effect_fade)
+				assert ("a fade after a slide: the full space at once: " + backend.test_extent (l_field.id, True).out,
+					(backend.test_extent (l_field.id, True) - l_full).abs <= 2)
+				app.animation_clock.finish_all
+				l_field.show
+			end
+			app.animation_clock.finish_all
+			l_field.focus
+			settle_window
+			if backend.test_has_focus (l_field.id) /= -1 then
+				assert ("the field holds the focus", backend.test_has_focus (l_field.id) = 1)
+				l_field.hide_animated (l_field.Effect_fade)
+				assert ("the focus left it at once", backend.test_has_focus (l_field.id) = 0)
+				app.animation_clock.finish_all
+			end
 			app.animation_clock.set_manual (False)
 			app.clear_reduces_motion_for_tests
 			l_window.close

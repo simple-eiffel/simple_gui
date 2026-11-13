@@ -252,6 +252,7 @@ feature -- Windows and containers
 				l_col.set_gap (scaled (a_spacing))
 				Result := register (l_col)
 				margins.force (scaled (Stack_margin), Result)
+				stack_ids.force (True, Result)
 			else
 				create l_row.make
 				l_row.set_padding (scaled (Stack_margin))
@@ -260,6 +261,7 @@ feature -- Windows and containers
 				l_row.set_cross_axis ({SW_ROW}.Cross_stretch)
 				Result := register (l_row)
 				margins.force (scaled (Stack_margin), Result)
+				stack_ids.force (True, Result)
 			end
 		end
 
@@ -5061,11 +5063,97 @@ feature -- Appearance
 			end
 		end
 
-	test_opacity_shown (an_id: INTEGER): REAL_64
-			-- 1x: the opacity simple_widgets paints the widget at; -1 when it is gone.
+	widget_set_reveal (an_id, a_effect: INTEGER; a_fraction: REAL_64; a_takes_input: BOOLEAN)
+			-- 1x-b: simple_widgets shows the widget revealed (a fade multiplies its alpha, a
+			-- slide or grow takes that share of its natural size and draws clipped in it),
+			-- passing pointer hits to its parent without `a_takes_input'.
+		local
+			l_effect: INTEGER
+		do
+			if is_frame_ticking then
+					-- noted before `changed', which renders at once
+				frame_value_pending := True
+				frame_value_mark := frames_rendered_total
+			end
+			l_effect := a_effect
+			if l_effect > 1 and then not reveals_in_place (an_id) then
+					-- the rule on all three: slides and grow reveal in a stack or as a window's
+					-- content; elsewhere they fade
+				l_effect := 1
+			end
+			if attached widget (an_id) as al_w then
+				al_w.set_reveal (l_effect, a_fraction, a_takes_input)
+				changed
+			end
+		end
+
+	reveals_in_place (an_id: INTEGER): BOOLEAN
+			-- Do slides and grow reveal widget `an_id' - in a stack, or as a window's content?
+			-- Elsewhere they fade, as on GTK and AppKit (PROD and MACMINI, 2026-11-12).
+		do
+			if window_content.has_item (an_id) then
+				Result := True
+			elseif attached widget (an_id) as al_w and then attached al_w.parent as al_p then
+				Result := stack_ids.has (items.index_of (al_p, 1))
+			end
+		end
+
+	stack_ids: HASH_TABLE [BOOLEAN, INTEGER]
+			-- The ids of the widgets `stack' made.
+		once ("OBJECT")
+			create Result.make (16)
+		end
+
+	widget_yield_focus (an_id: INTEGER)
+			-- 1x-b: the main window's focus leaves the widget for the next in its ring.
+		do
+			if attached widget (an_id) as al_w and then attached open_window as al_win then
+				al_win.yield_focus (al_w)
+			end
+		end
+
+	test_reveal_shown (an_id: INTEGER): REAL_64
+			-- 1x-b: the reveal simple_widgets shows the widget at; -1 when it is gone.
 		do
 			if attached widget (an_id) as al_w then
-				Result := al_w.opacity
+				Result := al_w.reveal
+			else
+				Result := -1.0
+			end
+		end
+
+	test_extent (an_id: INTEGER; a_vertical: BOOLEAN): INTEGER
+			-- 1x-b: the height (`a_vertical') or width the widget was laid out at; -1 when gone.
+		do
+			if attached widget (an_id) as al_w then
+				if a_vertical then
+					Result := al_w.height.rounded
+				else
+					Result := al_w.width.rounded
+				end
+			else
+				Result := -1
+			end
+		end
+
+	test_has_focus (an_id: INTEGER): INTEGER
+			-- 1x-b: does the main window's focus sit on the widget or inside it? -1 when gone.
+		do
+			if attached widget (an_id) as al_w and then attached open_window as al_win then
+				if attached al_win.focused as al_f and then al_win.is_within (al_f, al_w) then
+					Result := 1
+				end
+			else
+				Result := -1
+			end
+		end
+
+	test_opacity_shown (an_id: INTEGER): REAL_64
+			-- 1x: the opacity simple_widgets paints the widget at, a fade's share included; -1
+			-- when it is gone.
+		do
+			if attached widget (an_id) as al_w then
+				Result := al_w.painted_opacity
 			else
 				Result := -1.0
 			end
@@ -5105,8 +5193,11 @@ feature -- Appearance
 
 	test_frames (a_which: INTEGER): INTEGER
 			-- 1x: frames counted at each tick: painted when a value set since the tick before
-			-- was rendered before this one, missed when not; the longest gap between painted
-			-- frames in tenths of a millisecond; 3 resets.
+			-- was rendered before this one, missed when not; 2 the longest gap between painted
+			-- frames and 4 their 95th-percentile gap (nearest rank; 0 with none yet), both in
+			-- tenths of a millisecond, each frame stamped with the compositor vblank it made
+			-- (the first at or after its drawing ended); 5 the 95th-percentile gap by tick
+			-- time, the measure before vblank stamps (for the record); 3 resets.
 		do
 			inspect a_which
 			when 0 then
@@ -5115,12 +5206,103 @@ feature -- Appearance
 				Result := frames_missed
 			when 2 then
 				Result := frames_longest_gap
+			when 4 then
+				Result := percentile_95 (frame_gaps)
+			when 5 then
+				Result := percentile_95 (frame_tick_gaps)
 			else
 				frames_painted := 0
 				frames_missed := 0
 				frames_longest_gap := 0
 				frames_last_painted_ms := 0
+				frames_last_vblank_ms := 0.0
+				frame_gaps.wipe_out
+				frame_tick_gaps.wipe_out
 			end
+		end
+
+	percentile_95 (a_gaps: ARRAYED_LIST [INTEGER]): INTEGER
+			-- The 95th-percentile of `a_gaps' by nearest rank; 0 when empty.
+		local
+			l_sorted: ARRAYED_LIST [INTEGER]
+			i, j, l_v: INTEGER
+		do
+			if not a_gaps.is_empty then
+				l_sorted := a_gaps.twin
+					-- insertion sort: a run holds about 130 gaps
+				from i := 2 until i > l_sorted.count loop
+					l_v := l_sorted.i_th (i)
+					from j := i - 1 until j < 1 or else l_sorted.i_th (j) <= l_v loop
+						l_sorted.put_i_th (l_sorted.i_th (j), j + 1)
+						j := j - 1
+					end
+					l_sorted.put_i_th (l_v, j + 1)
+					i := i + 1
+				end
+				Result := l_sorted.i_th ((0.95 * l_sorted.count).ceiling.max (1))
+			end
+		ensure
+			none_is_zero: a_gaps.is_empty implies Result = 0
+		end
+
+	frame_tick_gaps: ARRAYED_LIST [INTEGER]
+			-- The gaps between painted frames by tick time, in tenths of a millisecond (the
+			-- measure before vblank stamps, kept for the record).
+		once ("OBJECT")
+			create Result.make (256)
+		end
+
+	note_frame_drawn
+			-- A window finished drawing a frame now.
+		do
+			last_draw_end_ms := c_now_ms
+		end
+
+	last_draw_end_ms: REAL_64
+			-- When a window last finished drawing a frame (high-resolution milliseconds).
+
+	frames_last_vblank_ms: REAL_64
+			-- The vblank the last painted frame made.
+
+	c_now_ms: REAL_64
+			-- Now, in the high-resolution milliseconds the frame stamps use.
+		external "C inline use %"simple_shell.h%""
+		alias "return shell_now_ms();"
+		end
+
+	c_vblank_made (a_ms: REAL_64): REAL_64
+			-- The first compositor vblank at or after `a_ms' (high-resolution milliseconds): the
+			-- vblank a frame whose drawing ended then made. `a_ms' itself when the compositor
+			-- gives no timing. DwmGetCompositionTimingInfo is loaded at run time (the ISE target
+			-- predates it); with no window it gives the compositor's own timing (Windows 8.1 on).
+		external "C inline use %"simple_shell.h%", <dwmapi.h>, <math.h>"
+		alias "[
+			typedef HRESULT (WINAPI *sg_dwm_timing_fn)(HWND, DWM_TIMING_INFO*);
+			static sg_dwm_timing_fn l_timing = 0;
+			static int l_looked = 0;
+			DWM_TIMING_INFO l_info;
+			LARGE_INTEGER l_freq;
+			double l_vblank, l_period;
+			if (!l_looked) {
+				HMODULE l_dwm = LoadLibraryW(L"dwmapi.dll");
+				l_looked = 1;
+				if (l_dwm) l_timing = (sg_dwm_timing_fn)(void*)GetProcAddress(l_dwm, "DwmGetCompositionTimingInfo");
+			}
+			if (!l_timing) return $a_ms;
+			ZeroMemory(&l_info, sizeof(l_info));
+			l_info.cbSize = sizeof(l_info);
+			if (FAILED(l_timing(NULL, &l_info)) || l_info.qpcRefreshPeriod == 0) return $a_ms;
+			QueryPerformanceFrequency(&l_freq);
+			l_vblank = (double)l_info.qpcVBlank * 1000.0 / (double)l_freq.QuadPart;
+			l_period = (double)l_info.qpcRefreshPeriod * 1000.0 / (double)l_freq.QuadPart;
+			return l_vblank + ceil(($a_ms - l_vblank) / l_period) * l_period;
+		]"
+		end
+
+	frame_gaps: ARRAYED_LIST [INTEGER]
+			-- The gaps between painted frames since the last reset, in tenths of a millisecond.
+		once ("OBJECT")
+			create Result.make (256)
 		end
 
 	frames_painted, frames_missed, frames_longest_gap: INTEGER
@@ -5147,15 +5329,26 @@ feature -- Appearance
 
 	count_frame
 			-- A tick: count the value set since the tick before as painted or missed.
+			-- A painted frame is stamped with the vblank its drawing made: a draw that ends
+			-- after a vblank takes the next one, so a late frame shows as a two-frame gap.
 		local
 			l_now: INTEGER_64
+			l_vblank: REAL_64
+			l_gap: INTEGER
 		do
 			if frame_value_pending then
 				l_now := clock.milliseconds
 				if frames_rendered_total > frame_value_mark then
 					frames_painted := frames_painted + 1
+					l_vblank := c_vblank_made (last_draw_end_ms)
+					if frames_last_vblank_ms > 0.0 then
+						l_gap := ((l_vblank - frames_last_vblank_ms) * 10.0).rounded
+						frames_longest_gap := frames_longest_gap.max (l_gap)
+						frame_gaps.extend (l_gap)
+					end
+					frames_last_vblank_ms := l_vblank
 					if frames_last_painted_ms > 0 then
-						frames_longest_gap := frames_longest_gap.max (((l_now - frames_last_painted_ms) * 10).to_integer_32)
+						frame_tick_gaps.extend (((l_now - frames_last_painted_ms) * 10).to_integer_32)
 					end
 					frames_last_painted_ms := l_now
 				else

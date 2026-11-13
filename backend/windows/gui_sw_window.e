@@ -619,10 +619,11 @@ feature {GUI_BACKEND} -- Sizing
 feature {NONE} -- Rendering (1x)
 
 	render
-			-- <Precursor>, counted.
+			-- <Precursor>, counted, and when the drawing ended noted (1x frame stamps).
 		do
 			Precursor
 			frames_rendered := frames_rendered + 1
+			backend.note_frame_drawn
 		end
 
 invariant

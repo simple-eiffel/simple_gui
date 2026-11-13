@@ -1869,9 +1869,33 @@ feature -- Common widget state
 		deferred
 		end
 
+	widget_set_reveal (an_id, a_effect: INTEGER; a_fraction: REAL_64; a_takes_input: BOOLEAN)
+			-- 1x-b: show widget `an_id' revealed to `a_fraction' (1 whole, 0 nothing) under
+			-- `a_effect' (GUI_WIDGET's Effect_ constants): faded; slid in from an edge (leading
+			-- and trailing mirrored under right-to-left), its content moving with the edge; or
+			-- grown from the middle. For the slides and grow the widget takes that share of its
+			-- full space in its layout - its natural size along the axis, as GtkRevealer's; a
+			-- widget that stretches settles into its stretched size at the end - and a fade
+			-- keeps the full space. The alpha shown is the widget's opacity times a fade's
+			-- reveal (the backend keeps both numbers; the last write never wins). It takes
+			-- pointer input when its opacity is above 0 and `a_takes_input'. A call with
+			-- another effect undoes the earlier effect's state first. (MACMINI's review.)
+		require
+			known_effect: a_effect >= 1 and a_effect <= 6
+			in_range: a_fraction >= 0.0 and a_fraction <= 1.0
+		deferred
+		end
+
+	widget_yield_focus (an_id: INTEGER)
+			-- 1x-b: when the keyboard focus is on `an_id' or inside it, move it on to the next
+			-- focusable widget outside it, as hiding the widget at once would.
+		deferred
+		end
+
 	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)
 			-- 1x: show widget `an_id' at `a_opacity' (0 transparent to 1 opaque). At 0 it
-			-- takes no pointer input, on every platform.
+			-- takes no pointer input, on every platform. A fade's reveal multiplies it (see
+			-- `widget_set_reveal').
 		require
 			in_range: a_opacity >= 0.0 and a_opacity <= 1.0
 		deferred
@@ -2413,11 +2437,39 @@ feature -- Styles (1w)
 	test_frames (a_which: INTEGER): INTEGER
 			-- Tests only, 1x: the frames counted since the last reset, where the toolkit can
 			-- tell when a frame shows: `a_which' 0 painted (a value set before its frame's
-			-- target time), 1 missed, 2 the longest gap between painted frames in tenths of a
-			-- millisecond; 3 resets. -1 where frames can't be counted yet.
+			-- target time), 1 missed, 2 the longest gap between painted frames, 4 the
+			-- 95th-percentile gap between painted frames (nearest rank), both in tenths of a
+			-- millisecond (0 with no gap yet), between the vblanks the frames made (a draw that
+			-- ends after its vblank takes the next); 5 the 95th-percentile gap by the measure
+			-- before vblank stamps (tick or aimed time; for the record); 3 resets. -1 where
+			-- frames can't be counted yet.
 		require
-			known_question: a_which >= 0 and a_which <= 3
+			known_question: a_which >= 0 and a_which <= 5
 		deferred
+		end
+
+	test_reveal_shown (an_id: INTEGER): REAL_64
+			-- Tests only, 1x-b: the reveal the toolkit shows widget `an_id' at; -1 where it
+			-- can't be read yet.
+		deferred
+		ensure
+			known_or_unreadable: Result = -1.0 or else (Result >= 0.0 and Result <= 1.0)
+		end
+
+	test_extent (an_id: INTEGER; a_vertical: BOOLEAN): INTEGER
+			-- Tests only, 1x-b: the space widget `an_id' takes in its parent's layout, in
+			-- pixels, its height (`a_vertical') or width; -1 where it can't be read yet.
+		deferred
+		ensure
+			known: Result >= -1
+		end
+
+	test_has_focus (an_id: INTEGER): INTEGER
+			-- Tests only, 1x-b: does `an_id', or something in it, hold the keyboard focus? 1
+			-- yes, 0 no, -1 can't tell yet.
+		deferred
+		ensure
+			known: Result >= -1 and Result <= 1
 		end
 
 feature -- Test driver

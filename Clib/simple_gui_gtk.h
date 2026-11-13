@@ -54,6 +54,14 @@ __attribute__((weak)) int sg_fr_missed = 0;
 __attribute__((weak)) gint64 sg_fr_longest = 0;
 __attribute__((weak)) gint64 sg_fr_last_painted = 0;
 __attribute__((weak)) int sg_fr_value_set = 0;
+/* the gaps between painted frames since the last reset, in tenths of a millisecond (p95) */
+#define SG_FR_GAPS 4096
+__attribute__((weak)) int sg_fr_gaps[SG_FR_GAPS] = {0};
+__attribute__((weak)) int sg_fr_gap_count = 0;
+/* the measure before vblank stamps (the frame time aimed for), kept for the record */
+__attribute__((weak)) int sg_fr_aim_gaps[SG_FR_GAPS] = {0};
+__attribute__((weak)) int sg_fr_aim_gap_count = 0;
+__attribute__((weak)) gint64 sg_fr_last_made = 0;
 
 static void sg_push5(int t, int id, int a, int b, int c) {
     int n = (sg_qt + 1) % SG_QCAP;
@@ -5028,10 +5036,314 @@ static void sg_timer_start(int id, int ms, int repeat) {
 }
 /* 1x: a widget's opacity (at 0 it takes no pointer input, as on every platform), and the
    system's reduce-motion answer (gtk-enable-animations off). */
+/* ---------- 1x-b: animated show and hide ----------
+   Each widget keeps its opacity and a fade's reveal apart, and shows their product (MACMINI's
+   review: the last write never wins); it takes pointer input while that opacity is above 0
+   and it takes input. A slide or grow puts the widget, for as long as it is part way, inside
+   SgReveal: a one-child container whose size along the effect's axis is the child's natural
+   size times the fraction, which lays its child out at full size where GtkRevealer would
+   (from the top: its bottom part first; from the bottom: its top part; leading and trailing
+   mirrored under right-to-left; grow: scaled about the middle) and clips it. The widget is
+   wrapped when a slide or grow starts and put back when it is whole or fades; a widget whose
+   parent is neither a box nor a window cannot be wrapped and fades instead.
+   The type is registered by hand, looked up by name first: this header is compiled into many
+   C files, each with its own statics, and must not register it twice. */
+
+__attribute__((weak)) double sg_opacity_of[SG_MAX] = {0};      /* 0 means 1: never set */
+__attribute__((weak)) int sg_opacity_set[SG_MAX] = {0};
+__attribute__((weak)) double sg_fade_of[SG_MAX] = {0};
+__attribute__((weak)) int sg_fade_set[SG_MAX] = {0};
+__attribute__((weak)) int sg_blocked[SG_MAX] = {0};
+
+typedef struct { GtkWidget parent_instance; GtkWidget *child; int effect; double fraction; int in_place; } SgReveal;
+/* Tests, 1x-b: the last size each widget was seen allocated (its slot), for the moments GTK
+   has not laid it out again yet. */
+__attribute__((weak)) int sg_last_w[SG_MAX] = {0};
+__attribute__((weak)) int sg_last_h[SG_MAX] = {0};
+typedef struct { GtkWidgetClass parent_class; } SgRevealClass;
+
+static double sg_opacity_value(int id) { return sg_opacity_set[id] ? sg_opacity_of[id] : 1.0; }
+static double sg_fade_value(int id) { return sg_fade_set[id] ? sg_fade_of[id] : 1.0; }
+
+/* The opacity shown and whether a press reaches the widget, from its numbers. */
+static void sg_apply_alpha(int id) {
+    GtkWidget *w = sg_w[id];
+    double a = sg_opacity_value(id) * sg_fade_value(id);
+    if (!w) return;
+    gtk_widget_set_opacity(w, a);
+    gtk_widget_set_can_target(w, (sg_opacity_value(id) > 0.0 && !sg_blocked[id]) ? TRUE : FALSE);
+}
+
+static int sg_reveal_shares_width(int e) { return e == 4 || e == 5 || e == 6; }
+static int sg_reveal_shares_height(int e) { return e == 2 || e == 3 || e == 6; }
+
+static void sg_reveal_measure(GtkWidget *w, GtkOrientation o, int for_size, int *mn, int *nat, int *mnb, int *natb) {
+    SgReveal *r = (SgReveal *) w;
+    int cmin = 0, cnat = 0, shares;
+    *mnb = -1; *natb = -1;
+    if (r->child && gtk_widget_get_visible(r->child)) gtk_widget_measure(r->child, o, -1, &cmin, &cnat, NULL, NULL);
+    (void) for_size;
+    shares = (o == GTK_ORIENTATION_HORIZONTAL) ? sg_reveal_shares_width(r->effect) : sg_reveal_shares_height(r->effect);
+    if (r->in_place) shares = 0;   /* a window's content: it moves in clipped, taking its full space */
+    if (shares) {
+        *mn = (int) (cnat * r->fraction + 0.5);
+        *nat = *mn;
+    } else {
+        *mn = cmin;
+        *nat = cnat;
+    }
+}
+
+static void sg_reveal_allocate(GtkWidget *w, int width, int height, int baseline) {
+    SgReveal *r = (SgReveal *) w;
+    int fw = width, fh = height, ox = 0, oy = 0, cmin, cnat, from_left;
+    GskTransform *t = NULL;
+    (void) baseline;
+    if (!r->child || !gtk_widget_get_visible(r->child)) return;
+    if (sg_reveal_shares_width(r->effect)) {
+        gtk_widget_measure(r->child, GTK_ORIENTATION_HORIZONTAL, -1, &cmin, &cnat, NULL, NULL);
+        fw = cnat > width ? cnat : width;
+    }
+    if (sg_reveal_shares_height(r->effect)) {
+        gtk_widget_measure(r->child, GTK_ORIENTATION_VERTICAL, fw, &cmin, &cnat, NULL, NULL);
+        fh = cnat > height ? cnat : height;
+    }
+    if (r->in_place && r->effect >= 2 && r->effect <= 5) {
+        /* a window's content: full size, moved in by the part not yet shown, clipped */
+        int hidden_h = (int) ((1.0 - r->fraction) * fh + 0.5), hidden_w = (int) ((1.0 - r->fraction) * fw + 0.5);
+        switch (r->effect) {
+            case 2: oy = - hidden_h; break;
+            case 3: oy = hidden_h; break;
+            default:
+                from_left = (r->effect == 4) != (gtk_widget_get_direction(w) == GTK_TEXT_DIR_RTL);
+                ox = from_left ? - hidden_w : hidden_w;
+                break;
+        }
+    } else switch (r->effect) {
+        case 2: oy = height - fh; break;                          /* from the top */
+        case 3: oy = 0; break;                                    /* from the bottom */
+        case 4: case 5:
+            from_left = (r->effect == 4) != (gtk_widget_get_direction(w) == GTK_TEXT_DIR_RTL);
+            ox = from_left ? width - fw : 0;
+            break;
+        default: break;
+    }
+    if (r->effect == 6) {
+        graphene_point_t mid, back;
+        graphene_point_init(&mid, width / 2.0f, height / 2.0f);
+        graphene_point_init(&back, - fw / 2.0f, - fh / 2.0f);
+        t = gsk_transform_translate(NULL, &mid);
+        t = gsk_transform_scale(t, (float) r->fraction, (float) r->fraction);
+        t = gsk_transform_translate(t, &back);
+    } else {
+        graphene_point_t at;
+        graphene_point_init(&at, (float) ox, (float) oy);
+        t = gsk_transform_translate(NULL, &at);
+    }
+    gtk_widget_allocate(r->child, fw, fh, -1, t);
+}
+
+static void sg_reveal_dispose(GObject *o) {
+    SgReveal *r = (SgReveal *) o;
+    if (r->child) { gtk_widget_unparent(r->child); r->child = NULL; }
+    G_OBJECT_CLASS(g_type_class_peek_parent(G_OBJECT_GET_CLASS(o)))->dispose(o);
+}
+
+static void sg_reveal_class_init(gpointer klass, gpointer data) {
+    GtkWidgetClass *wc = GTK_WIDGET_CLASS(klass);
+    (void) data;
+    wc->measure = sg_reveal_measure;
+    wc->size_allocate = sg_reveal_allocate;
+    G_OBJECT_CLASS(klass)->dispose = sg_reveal_dispose;
+}
+
+static void sg_reveal_init(GTypeInstance *inst, gpointer klass) {
+    SgReveal *r = (SgReveal *) inst;
+    (void) klass;
+    r->child = NULL; r->effect = 0; r->fraction = 1.0;
+    gtk_widget_set_overflow(GTK_WIDGET(inst), GTK_OVERFLOW_HIDDEN);
+}
+
+static GType sg_reveal_type(void) {
+    GType t = g_type_from_name("SgReveal");
+    if (!t) {
+        GTypeInfo info;
+        memset(&info, 0, sizeof info);
+        info.class_size = sizeof(SgRevealClass);
+        info.class_init = sg_reveal_class_init;
+        info.instance_size = sizeof(SgReveal);
+        info.instance_init = sg_reveal_init;
+        t = g_type_register_static(GTK_TYPE_WIDGET, "SgReveal", &info, 0);
+    }
+    return t;
+}
+
+/* The wrapper around widget `id' while a slide or grow is part way; NULL when it cannot be
+   wrapped (its parent is neither a box nor a window). */
+/* Is `w' a window's content (sg_window_set_content puts it in the window's middle box)? */
+static int sg_is_window_content(GtkWidget *w) {
+    GtkRoot *root = gtk_widget_get_root(w);
+    return root && GTK_IS_WINDOW(root) && g_object_get_data(G_OBJECT(root), "sg-content") == (gpointer) w;
+}
+
+static SgReveal *sg_reveal_wrap(int id) {
+    GtkWidget *w = sg_w[id], *parent, *prev, *rv;
+    SgReveal *r;
+    int in_place;
+    if (!w) return NULL;
+    r = (SgReveal *) g_object_get_data(G_OBJECT(w), "sg-reveal");
+    if (r) return r;
+    in_place = sg_is_window_content(w);   /* asked before it leaves its place */
+    parent = gtk_widget_get_parent(w);
+    if (!parent || !(GTK_IS_BOX(parent) || GTK_IS_WINDOW(parent))) return NULL;
+    rv = GTK_WIDGET(g_object_new(sg_reveal_type(), NULL));
+    gtk_widget_set_hexpand(rv, gtk_widget_get_hexpand(w));
+    gtk_widget_set_vexpand(rv, gtk_widget_get_vexpand(w));
+    g_object_ref(w);
+    if (GTK_IS_BOX(parent)) {
+        prev = gtk_widget_get_prev_sibling(w);
+        gtk_box_remove(GTK_BOX(parent), w);
+        gtk_box_insert_child_after(GTK_BOX(parent), rv, prev);
+    } else {
+        gtk_window_set_child(GTK_WINDOW(parent), NULL);
+        gtk_window_set_child(GTK_WINDOW(parent), rv);
+    }
+    r = (SgReveal *) rv;
+    r->child = w;
+    r->in_place = (in_place || GTK_IS_WINDOW(parent)) ? 1 : 0;
+    gtk_widget_set_parent(w, rv);
+    g_object_unref(w);
+    g_object_set_data(G_OBJECT(w), "sg-reveal", r);
+    return r;
+}
+
+/* Put widget `id' back where its wrapper stands, and drop the wrapper. */
+static void sg_reveal_unwrap(int id) {
+    GtkWidget *w = sg_w[id], *rv, *parent, *prev;
+    SgReveal *r;
+    if (!w) return;
+    r = (SgReveal *) g_object_get_data(G_OBJECT(w), "sg-reveal");
+    if (!r) return;
+    rv = GTK_WIDGET(r);
+    parent = gtk_widget_get_parent(rv);
+    g_object_set_data(G_OBJECT(w), "sg-reveal", NULL);
+    g_object_ref(w);
+    gtk_widget_unparent(w);
+    r->child = NULL;
+    if (parent && GTK_IS_BOX(parent)) {
+        prev = gtk_widget_get_prev_sibling(rv);
+        gtk_box_remove(GTK_BOX(parent), rv);
+        gtk_box_insert_child_after(GTK_BOX(parent), w, prev);
+    } else if (parent && GTK_IS_WINDOW(parent)) {
+        gtk_window_set_child(GTK_WINDOW(parent), w);
+    }
+    g_object_unref(w);
+}
+
+/* 1x-b: show widget `id' revealed to `fraction' under `effect' (1 fade, 2-5 slides, 6 grow). */
+static void sg_set_reveal(int id, int effect, double fraction, int takes_input) {
+    SgReveal *r = NULL;
+    if (!sg_w[id]) return;
+    sg_blocked[id] = takes_input ? 0 : 1;
+    if (effect == 1 || fraction >= 1.0) {
+        sg_reveal_unwrap(id);
+        sg_fade_of[id] = effect == 1 ? fraction : 1.0;
+        sg_fade_set[id] = 1;
+    } else {
+        sg_fade_of[id] = 1.0;
+        sg_fade_set[id] = 1;
+        r = sg_reveal_wrap(id);
+        if (r) {
+            r->effect = effect;
+            r->fraction = fraction;
+            gtk_widget_queue_resize(GTK_WIDGET(r));
+        } else {
+            sg_fade_of[id] = fraction;   /* no wrapper possible here: it fades instead */
+        }
+    }
+    sg_apply_alpha(id);
+    sg_fr_value_set = 1;
+}
+
+/* 1x-b: when the focus is on widget `id' or inside it, step the focus chain on until it is
+   outside; with nowhere else to go, no focus. */
+static void sg_yield_focus(int id) {
+    GtkWidget *w = sg_w[id], *focus;
+    GtkRoot *root;
+    int i;
+    if (!w) return;
+    root = gtk_widget_get_root(w);
+    if (!root) return;
+    for (i = 0; i < 64; i++) {
+        focus = gtk_root_get_focus(root);
+        if (!focus || !(focus == w || gtk_widget_is_ancestor(focus, w))) return;
+        if (!gtk_widget_child_focus(GTK_WIDGET(root), GTK_DIR_TAB_FORWARD)) break;
+    }
+    focus = gtk_root_get_focus(root);
+    if (focus && (focus == w || gtk_widget_is_ancestor(focus, w))) gtk_root_set_focus(root, NULL);
+}
+
+/* Tests, 1x-b: the reveal shown (the wrapper's fraction, else a fade's); -1 when gone. */
+static double sg_test_reveal_shown(int id) {
+    SgReveal *r;
+    if (!sg_w[id]) return -1.0;
+    r = (SgReveal *) g_object_get_data(G_OBJECT(sg_w[id]), "sg-reveal");
+    return r ? r->fraction : sg_fade_value(id);
+}
+
+/* Tests, 1x-b: the space the widget takes along an axis: in a box while wrapped, the share its
+   wrapper asks for (GTK lays out on the next frame); else its allocation; before GTK has laid it
+   out again, a window's content keeps its slot, a filling child across a box takes the box's
+   size, anything else its natural size; -1 when gone. */
+static int sg_test_extent(int id, int vertical) {
+    SgReveal *r;
+    GtkWidget *w = sg_w[id], *slot, *parent;
+    GtkOrientation o = vertical ? GTK_ORIENTATION_VERTICAL : GTK_ORIENTATION_HORIZONTAL;
+    int mn = 0, nat = 0, last, box, margins;
+    if (!w) return -1;
+    r = (SgReveal *) g_object_get_data(G_OBJECT(w), "sg-reveal");
+    slot = r ? GTK_WIDGET(r) : w;
+    nat = vertical ? gtk_widget_get_height(slot) : gtk_widget_get_width(slot);
+    if (nat > 0 && (!r || r->in_place)) {
+        if (vertical) sg_last_h[id] = nat; else sg_last_w[id] = nat;
+    }
+    last = vertical ? sg_last_h[id] : sg_last_w[id];
+    if (r && !r->in_place) {
+        /* in a box: the share its wrapper asks for (GTK lays it out on the next frame) */
+        gtk_widget_measure(slot, o, -1, &mn, &nat, NULL, NULL);
+        return nat;
+    }
+    if (nat > 0) return nat;
+    /* not laid out again yet (just shown, or put back from its wrapper) */
+    parent = gtk_widget_get_parent(slot);
+    if ((r || sg_is_window_content(w)) && last > 0) return last;   /* a window's content keeps its slot */
+    gtk_widget_measure(w, o, -1, &mn, &nat, NULL, NULL);
+    if (parent && GTK_IS_BOX(parent) && gtk_orientable_get_orientation(GTK_ORIENTABLE(parent)) != o
+            && (vertical ? gtk_widget_get_valign(w) : gtk_widget_get_halign(w)) == GTK_ALIGN_FILL) {
+        /* across a box a filling child takes the box's size, less its margins */
+        box = vertical ? gtk_widget_get_height(parent) : gtk_widget_get_width(parent);
+        margins = vertical ? gtk_widget_get_margin_top(w) + gtk_widget_get_margin_bottom(w)
+                           : gtk_widget_get_margin_start(w) + gtk_widget_get_margin_end(w);
+        if (box - margins > nat) nat = box - margins;
+    }
+    return nat;
+}
+
+/* Tests, 1x-b: does the focus sit on widget `id' or inside it? -1 when gone or not in a window. */
+static int sg_test_has_focus(int id) {
+    GtkWidget *w = sg_w[id], *focus;
+    GtkRoot *root;
+    if (!w) return -1;
+    root = gtk_widget_get_root(w);
+    if (!root) return -1;
+    focus = gtk_root_get_focus(root);
+    return (focus && (focus == w || gtk_widget_is_ancestor(focus, w))) ? 1 : 0;
+}
 static void sg_set_opacity(int id, double a) {
     if (!sg_w[id]) return;
-    gtk_widget_set_opacity(sg_w[id], a);
-    gtk_widget_set_can_target(sg_w[id], a > 0.0 ? TRUE : FALSE);
+    sg_opacity_of[id] = a;
+    sg_opacity_set[id] = 1;
+    sg_apply_alpha(id);    /* times a fade's reveal; input while above 0 and not blocked */
     sg_fr_value_set = 1;   /* counted when the next frame paints */
 }
 /* 1x: frame ticks from the frame clock of a shown window: event 62 (a = the milliseconds
@@ -5048,14 +5360,27 @@ static gboolean sg_on_frame(GtkWidget *w, GdkFrameClock *clock, gpointer d) {
     }
     return G_SOURCE_CONTINUE;
 }
-/* After each paint while ticking: painted if a value was set since the last paint. */
+/* After each paint while ticking: painted if a value was set since the last paint. A painted
+   frame is stamped with the vblank its drawing made - the first presentation time at or after
+   the moment the paint ended - so a late draw shows as a two-frame gap. */
 static void sg_on_after_paint(GdkFrameClock *clock, gpointer d) {
-    gint64 now = gdk_frame_clock_get_frame_time(clock);
+    gint64 aimed = gdk_frame_clock_get_frame_time(clock);
+    gint64 drawn = g_get_monotonic_time();
+    gint64 interval = 0, made = 0;
     (void) d;
+    gdk_frame_clock_get_refresh_info(clock, drawn, &interval, &made);
+    if (made <= 0) made = drawn;   /* the clock knows no presentation times */
+    /* a stale estimate (WSLg, after a compositor hiccup): more than 3 refresh periods past the
+       paint's end is not a vblank this frame can make; stamp the paint's end, as Windows does
+       when DWM gives no timing (Larry, 2026-11-13: one such stamp read as a 3.6 s gap) */
+    if (made - drawn > 3 * (interval > 0 ? interval : 16667)) made = drawn;
     if (sg_fr_value_set) {
         sg_fr_painted++;
-        if (sg_fr_last_painted > 0 && now - sg_fr_last_painted > sg_fr_longest) sg_fr_longest = now - sg_fr_last_painted;
-        sg_fr_last_painted = now;
+        if (sg_fr_last_made > 0 && made - sg_fr_last_made > sg_fr_longest) sg_fr_longest = made - sg_fr_last_made;
+        if (sg_fr_last_made > 0 && sg_fr_gap_count < SG_FR_GAPS) sg_fr_gaps[sg_fr_gap_count++] = (int) ((made - sg_fr_last_made) / 100);
+        if (sg_fr_last_painted > 0 && sg_fr_aim_gap_count < SG_FR_GAPS) sg_fr_aim_gaps[sg_fr_aim_gap_count++] = (int) ((aimed - sg_fr_last_painted) / 100);
+        sg_fr_last_made = made;
+        sg_fr_last_painted = aimed;
         sg_fr_value_set = 0;
     } else {
         sg_fr_missed++;
@@ -5093,13 +5418,33 @@ static int sg_start_frame_ticks(void) {
     return 1;
 }
 /* Tests, 1x: the frame counts (0 painted, 1 missed, 2 longest gap in tenths of a ms; 3 resets). */
+static int sg_fr_compare(const void *a, const void *b) {
+    int x = *(const int *) a, y = *(const int *) b;
+    return (x > y) - (x < y);
+}
+/* The 95th-percentile of `count' gaps by nearest rank; 0 with none. */
+static int sg_fr_p95(const int *gaps, int count) {
+    int sorted[SG_FR_GAPS], rank;
+    if (count == 0) return 0;
+    memcpy(sorted, gaps, (size_t) count * sizeof(int));
+    qsort(sorted, (size_t) count, sizeof(int), sg_fr_compare);
+    rank = (int) ((95 * count + 99) / 100);   /* ceiling of 0.95 n */
+    if (rank < 1) rank = 1;
+    return sorted[rank - 1];
+}
+/* Tests, 1x: the frame counts (0 painted, 1 missed, 2 longest gap, 4 the 95th-percentile gap by
+   nearest rank, both in tenths of a ms between the vblanks the frames made, 0 with no gap yet;
+   5 the 95th-percentile gap by the frame time aimed for, the measure before; 3 resets). */
 static int sg_test_frames(int which) {
     switch (which) {
         case 0: return sg_fr_painted;
         case 1: return sg_fr_missed;
         case 2: return (int) (sg_fr_longest / 100);
+        case 4: return sg_fr_p95(sg_fr_gaps, sg_fr_gap_count);
+        case 5: return sg_fr_p95(sg_fr_aim_gaps, sg_fr_aim_gap_count);
         default:
             sg_fr_painted = 0; sg_fr_missed = 0; sg_fr_longest = 0; sg_fr_last_painted = 0;
+            sg_fr_last_made = 0; sg_fr_gap_count = 0; sg_fr_aim_gap_count = 0;
             return 0;
     }
 }

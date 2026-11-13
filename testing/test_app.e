@@ -142,6 +142,14 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_reduced_motion_completes_every_animation_at_once, "reduced_motion_completes_every_animation_at_once")
 				run_test (agent t.test_a_new_opacity_animation_replaces_the_old_one, "a_new_opacity_animation_replaces_the_old_one")
 				run_test (agent t.test_the_clock_ticks_only_while_something_runs, "the_clock_ticks_only_while_something_runs")
+				run_test (agent t.test_show_animated_reveals_on_the_manual_clock, "show_animated_reveals_on_the_manual_clock")
+				run_test (agent t.test_hide_animated_stays_shown_until_the_end, "hide_animated_stays_shown_until_the_end")
+				run_test (agent t.test_a_show_turns_a_hide_around, "a_show_turns_a_hide_around")
+				run_test (agent t.test_reduced_motion_shows_and_hides_at_once, "reduced_motion_shows_and_hides_at_once")
+				run_test (agent t.test_the_toolkit_shows_the_reveal_and_the_focus_leaves, "the_toolkit_shows_the_reveal_and_the_focus_leaves")
+				run_test (agent t.test_every_effect_shows_its_share_in_both_stacks, "every_effect_shows_its_share_in_both_stacks")
+				run_test (agent t.test_opacity_and_a_fade_multiply, "opacity_and_a_fade_multiply")
+				run_test (agent t.test_reveals_at_a_window_content_and_fades_elsewhere, "reveals_at_a_window_content_and_fades_elsewhere")
 				run_test (agent t.test_opacity_is_shown_and_zero_takes_no_pointer, "opacity_is_shown_and_zero_takes_no_pointer")
 				run_test (agent t.test_the_real_clock_paints_every_frame, "the_real_clock_paints_every_frame")
 				run_test (agent t.test_code_editor_bracket_pairs, "code_editor_bracket_pairs")
@@ -210,9 +218,10 @@ feature {NONE} -- Initialization
 		end
 
 	run_test (a_test: PROCEDURE; a_name: STRING)
-			-- Run one test; any exception (contract or otherwise) fails it.
+			-- Run one test; any exception (contract or otherwise) fails it. A failed test's open
+			-- windows are closed after it, so the tests that follow don't depend on how it failed.
 		local
-			l_retried: BOOLEAN
+			l_retried, l_cleaned: BOOLEAN
 		do
 			if attached only as al_only and then not a_name.has_substring (al_only.to_string_8) then
 					-- not asked for
@@ -220,24 +229,47 @@ feature {NONE} -- Initialization
 				a_test.call (Void)
 				print ("  PASS: " + a_name + "%N")
 				passed := passed + 1
+			elseif not l_cleaned then
+				l_cleaned := True
+				close_left_open
 			end
 		rescue
-			print ("  FAIL: " + a_name + "%N")
-			if attached (create {EXCEPTION_MANAGER}).last_exception as al_e then
-				if attached al_e.tag as al_tag then
-					print ("        tag: " + al_tag.to_string_8 + "%N")
+			if not l_retried then
+				print ("  FAIL: " + a_name + "%N")
+				if attached (create {EXCEPTION_MANAGER}).last_exception as al_e then
+					if attached al_e.tag as al_tag then
+						print ("        tag: " + al_tag.to_string_8 + "%N")
+					end
+					if attached al_e.description as al_why then
+						print ("        why: " + al_why.to_string_8 + "%N")
+					end
+					if attached (create {EXECUTION_ENVIRONMENT}).item ("GUI_TRACE") and then attached al_e.trace as al_trace then
+							-- GUI_TRACE=1: where it failed
+						print (al_trace.to_string_8 + "%N")
+					end
 				end
-				if attached al_e.description as al_why then
-					print ("        why: " + al_why.to_string_8 + "%N")
-				end
-				if attached (create {EXECUTION_ENVIRONMENT}).item ("GUI_TRACE") and then attached al_e.trace as al_trace then
-						-- GUI_TRACE=1: where it failed
-					print (al_trace.to_string_8 + "%N")
+				failed := failed + 1
+				l_retried := True
+			else
+				print ("        (closing what it left open failed too)%N")
+			end
+			retry
+		end
+
+	close_left_open
+			-- Close every window a failed test left open, and put the animation test settings
+			-- back. A window left open keeps the focus later tests need (2026-11-12: one failure
+			-- left a window open and five later tests failed after it).
+		do
+			across application.windows.twin as ic loop
+				if not ic.is_closed then
+					ic.close
 				end
 			end
-			failed := failed + 1
-			l_retried := True
-			retry
+			application.animation_clock.set_manual (False)
+			application.clear_reduces_motion_for_tests
+		ensure
+			none_left: application.windows.is_empty
 		end
 
 	only: detachable STRING_32
