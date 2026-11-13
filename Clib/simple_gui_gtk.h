@@ -2902,8 +2902,127 @@ static void sg_name_tab(GtkNotebook *nb, GtkWidget *page, const char *title) {
     }
 }
 
+/* ---------- 1x-c: page switches. Every page of tabs, and of pages (a notebook with no tabs),
+   sits in an SgSwitch frame. When a notebook switches page, sg_on_switch_page (run before the
+   switch) keeps a still image of the outgoing page; the shared clock's frames (sg_pages_frame)
+   then have the new page's frame draw the switch: a true cross-fade of the still and the live
+   page, or both sliding together (a later page in from the trailing side, mirrored under right
+   to left), clipped to the page. Only the live page takes input: the still is a picture (the
+   contract allows it, MACMINI's review). The notebook's own switch has no animation. */
+typedef struct { GtkWidget parent_instance; GtkWidget *child; GdkPaintable *still; int kind; int forward; double fraction; } SgSwitch;
+typedef struct { GtkWidgetClass parent_class; } SgSwitchClass;
+
+static void sg_switch_measure(GtkWidget *w, GtkOrientation o, int for_size, int *mn, int *nat, int *mnb, int *natb) {
+    SgSwitch *sw = (SgSwitch *) w;
+    *mn = 0; *nat = 0; *mnb = -1; *natb = -1;
+    if (sw->child && gtk_widget_get_visible(sw->child)) gtk_widget_measure(sw->child, o, for_size, mn, nat, mnb, natb);
+}
+static void sg_switch_allocate(GtkWidget *w, int width, int height, int baseline) {
+    SgSwitch *sw = (SgSwitch *) w;
+    if (sw->child && gtk_widget_get_visible(sw->child)) gtk_widget_allocate(sw->child, width, height, baseline, NULL);
+}
+static void sg_switch_snapshot(GtkWidget *w, GtkSnapshot *s) {
+    SgSwitch *sw = (SgSwitch *) w;
+    int width = gtk_widget_get_width(w), height = gtk_widget_get_height(w);
+    double f = sw->fraction, sign;
+    graphene_rect_t clip;
+    graphene_point_t at;
+    if (!sw->child) return;
+    if (!sw->still || f >= 1.0) { gtk_widget_snapshot_child(w, sw->child, s); return; }
+    if (sw->kind == 1) {
+        gtk_snapshot_push_cross_fade(s, f);
+        gdk_paintable_snapshot(sw->still, GDK_SNAPSHOT(s), width, height);
+        gtk_snapshot_pop(s);
+        gtk_widget_snapshot_child(w, sw->child, s);
+        gtk_snapshot_pop(s);
+    } else {
+        sign = (sw->forward != (gtk_widget_get_direction(w) == GTK_TEXT_DIR_RTL)) ? 1.0 : -1.0;
+        graphene_rect_init(&clip, 0, 0, (float) width, (float) height);
+        gtk_snapshot_push_clip(s, &clip);
+        gtk_snapshot_save(s);
+        graphene_point_init(&at, (float) (- sign * width * f), 0);
+        gtk_snapshot_translate(s, &at);
+        gdk_paintable_snapshot(sw->still, GDK_SNAPSHOT(s), width, height);
+        gtk_snapshot_restore(s);
+        gtk_snapshot_save(s);
+        graphene_point_init(&at, (float) (sign * width * (1.0 - f)), 0);
+        gtk_snapshot_translate(s, &at);
+        gtk_widget_snapshot_child(w, sw->child, s);
+        gtk_snapshot_restore(s);
+        gtk_snapshot_pop(s);
+    }
+}
+static void sg_switch_drop_still(SgSwitch *sw) {
+    if (sw->still) { g_object_unref(sw->still); sw->still = NULL; }
+    sw->fraction = 1.0;
+}
+static void sg_switch_dispose(GObject *o) {
+    SgSwitch *sw = (SgSwitch *) o;
+    sg_switch_drop_still(sw);
+    if (sw->child) { gtk_widget_unparent(sw->child); sw->child = NULL; }
+    G_OBJECT_CLASS(g_type_class_peek_parent(G_OBJECT_GET_CLASS(o)))->dispose(o);
+}
+static void sg_switch_class_init(gpointer klass, gpointer data) {
+    GtkWidgetClass *wc = GTK_WIDGET_CLASS(klass);
+    (void) data;
+    wc->measure = sg_switch_measure;
+    wc->size_allocate = sg_switch_allocate;
+    wc->snapshot = sg_switch_snapshot;
+    G_OBJECT_CLASS(klass)->dispose = sg_switch_dispose;
+}
+static void sg_switch_init(GTypeInstance *inst, gpointer klass) {
+    SgSwitch *sw = (SgSwitch *) inst;
+    (void) klass;
+    sw->child = NULL; sw->still = NULL; sw->kind = 0; sw->forward = 1; sw->fraction = 1.0;
+    gtk_widget_set_overflow(GTK_WIDGET(inst), GTK_OVERFLOW_HIDDEN);
+}
+static GType sg_switch_type(void) {
+    GType t = g_type_from_name("SgSwitch");
+    if (!t) {
+        GTypeInfo info;
+        memset(&info, 0, sizeof info);
+        info.class_size = sizeof(SgSwitchClass);
+        info.class_init = sg_switch_class_init;
+        info.instance_size = sizeof(SgSwitch);
+        info.instance_init = sg_switch_init;
+        t = g_type_register_static(GTK_TYPE_WIDGET, "SgSwitch", &info, 0);
+    }
+    return t;
+}
+static int sg_is_switch(GtkWidget *w) { return w && G_TYPE_CHECK_INSTANCE_TYPE(w, sg_switch_type()); }
+static GtkWidget *sg_switch_new(GtkWidget *child) {
+    SgSwitch *sw = (SgSwitch *) g_object_new(sg_switch_type(), NULL);
+    sw->child = child;
+    gtk_widget_set_parent(child, GTK_WIDGET(sw));
+    return GTK_WIDGET(sw);
+}
+/* Show every page of `nb' alone again: the switch ended or was cut short. */
+static void sg_switch_end(GtkNotebook *nb) {
+    int i, n = gtk_notebook_get_n_pages(nb);
+    for (i = 0; i < n; i++) {
+        GtkWidget *p = gtk_notebook_get_nth_page(nb, i);
+        if (sg_is_switch(p) && ((SgSwitch *) p)->still) {
+            sg_switch_drop_still((SgSwitch *) p);
+            gtk_widget_queue_draw(p);
+        }
+    }
+    g_object_set_data(G_OBJECT(nb), "sg-still", NULL);
+}
+
 static void sg_on_switch_page(GtkNotebook *nb, GtkWidget *page, guint num, gpointer d) {
+    int cur = gtk_notebook_get_current_page(nb);
     (void) page; (void) d;
+    /* 1x-c: before the switch, a still image of the page leaving */
+    if (cur >= 0 && (guint) cur != num) {
+        GtkWidget *old = gtk_notebook_get_nth_page(nb, cur);
+        if (old && gtk_widget_get_mapped(old)) {
+            GdkPaintable *live = gtk_widget_paintable_new(old);
+            GdkPaintable *still = gdk_paintable_get_current_image(live);
+            g_object_unref(live);
+            g_object_set_data_full(G_OBJECT(nb), "sg-still", still, g_object_unref);
+        }
+        if (sg_is_switch(old)) sg_switch_drop_still((SgSwitch *) old);
+    }
     if (!sg_quiet) sg_push(13, sg_id_of(nb), (int) num + 1, 0);
 }
 static int sg_tabs(void) {
@@ -2913,15 +3032,54 @@ static int sg_tabs(void) {
     return sg_reg(nb, 11);
 }
 static void sg_tabs_extend(int tabs, int page, const char *title) {
+    GtkWidget *frame = sg_switch_new(sg_w[page]);
     sg_quiet++;
-    gtk_notebook_append_page(GTK_NOTEBOOK(sg_w[tabs]), sg_w[page], gtk_label_new(title));
-    sg_name_tab(GTK_NOTEBOOK(sg_w[tabs]), sg_w[page], title);
+    gtk_notebook_append_page(GTK_NOTEBOOK(sg_w[tabs]), frame, gtk_label_new(title));
+    sg_name_tab(GTK_NOTEBOOK(sg_w[tabs]), frame, title);
     sg_quiet--;
 }
 static void sg_tabs_select(int tabs, int page) {
     sg_quiet++;
     gtk_notebook_set_current_page(GTK_NOTEBOOK(sg_w[tabs]), page - 1);
     sg_quiet--;
+    sg_switch_end(GTK_NOTEBOOK(sg_w[tabs]));   /* at once ends any switch (1x-c) */
+}
+/* 1x-c: one frame of the switch from page `from' to page `to' (1-based) of tabs or pages `id'. */
+static void sg_pages_frame(int id, int from, int to, int kind, double f) {
+    GtkWidget *w = sg_w[id], *page;
+    GtkNotebook *nb;
+    GdkPaintable *still;
+    SgSwitch *sw;
+    if (!w || !GTK_IS_NOTEBOOK(w)) return;   /* its window has closed */
+    nb = GTK_NOTEBOOK(w);
+    if (gtk_notebook_get_current_page(nb) != to - 1) {
+        sg_quiet++;
+        gtk_notebook_set_current_page(nb, to - 1);
+        sg_quiet--;
+    }
+    page = gtk_notebook_get_nth_page(nb, to - 1);
+    still = (GdkPaintable *) g_object_get_data(G_OBJECT(nb), "sg-still");
+    if (!sg_is_switch(page)) return;
+    if (f >= 1.0 || !still) { sg_switch_end(nb); return; }
+    sw = (SgSwitch *) page;
+    if (sw->still != still) {
+        if (sw->still) g_object_unref(sw->still);
+        sw->still = (GdkPaintable *) g_object_ref(still);
+    }
+    sw->kind = kind;
+    sw->forward = to > from;
+    sw->fraction = f;
+    gtk_widget_queue_draw(page);
+}
+/* Tests, 1x-c: how far the switch shown on tabs or pages `id' has got; 1 when none; -1 otherwise. */
+static double sg_test_transition_shown(int id) {
+    GtkWidget *w = sg_w[id], *page;
+    int cur;
+    if (!w || !GTK_IS_NOTEBOOK(w)) return -1.0;
+    cur = gtk_notebook_get_current_page(GTK_NOTEBOOK(w));
+    page = cur >= 0 ? gtk_notebook_get_nth_page(GTK_NOTEBOOK(w), cur) : NULL;
+    if (sg_is_switch(page) && ((SgSwitch *) page)->still) return ((SgSwitch *) page)->fraction;
+    return 1.0;
 }
 /* 1t: 0 none (no strip), 1 top, 2 bottom, 3 left, 4 right. */
 static void sg_tabs_set_position(int tabs, int position) {
