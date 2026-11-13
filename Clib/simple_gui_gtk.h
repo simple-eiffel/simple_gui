@@ -54,6 +54,14 @@ __attribute__((weak)) int sg_fr_missed = 0;
 __attribute__((weak)) gint64 sg_fr_longest = 0;
 __attribute__((weak)) gint64 sg_fr_last_painted = 0;
 __attribute__((weak)) int sg_fr_value_set = 0;
+/* the gaps between painted frames since the last reset, in tenths of a millisecond (p95) */
+#define SG_FR_GAPS 4096
+__attribute__((weak)) int sg_fr_gaps[SG_FR_GAPS] = {0};
+__attribute__((weak)) int sg_fr_gap_count = 0;
+/* the measure before vblank stamps (the frame time aimed for), kept for the record */
+__attribute__((weak)) int sg_fr_aim_gaps[SG_FR_GAPS] = {0};
+__attribute__((weak)) int sg_fr_aim_gap_count = 0;
+__attribute__((weak)) gint64 sg_fr_last_made = 0;
 
 static void sg_push5(int t, int id, int a, int b, int c) {
     int n = (sg_qt + 1) % SG_QCAP;
@@ -5048,14 +5056,23 @@ static gboolean sg_on_frame(GtkWidget *w, GdkFrameClock *clock, gpointer d) {
     }
     return G_SOURCE_CONTINUE;
 }
-/* After each paint while ticking: painted if a value was set since the last paint. */
+/* After each paint while ticking: painted if a value was set since the last paint. A painted
+   frame is stamped with the vblank its drawing made - the first presentation time at or after
+   the moment the paint ended - so a late draw shows as a two-frame gap. */
 static void sg_on_after_paint(GdkFrameClock *clock, gpointer d) {
-    gint64 now = gdk_frame_clock_get_frame_time(clock);
+    gint64 aimed = gdk_frame_clock_get_frame_time(clock);
+    gint64 drawn = g_get_monotonic_time();
+    gint64 interval = 0, made = 0;
     (void) d;
+    gdk_frame_clock_get_refresh_info(clock, drawn, &interval, &made);
+    if (made <= 0) made = drawn;   /* the clock knows no presentation times */
     if (sg_fr_value_set) {
         sg_fr_painted++;
-        if (sg_fr_last_painted > 0 && now - sg_fr_last_painted > sg_fr_longest) sg_fr_longest = now - sg_fr_last_painted;
-        sg_fr_last_painted = now;
+        if (sg_fr_last_made > 0 && made - sg_fr_last_made > sg_fr_longest) sg_fr_longest = made - sg_fr_last_made;
+        if (sg_fr_last_made > 0 && sg_fr_gap_count < SG_FR_GAPS) sg_fr_gaps[sg_fr_gap_count++] = (int) ((made - sg_fr_last_made) / 100);
+        if (sg_fr_last_painted > 0 && sg_fr_aim_gap_count < SG_FR_GAPS) sg_fr_aim_gaps[sg_fr_aim_gap_count++] = (int) ((aimed - sg_fr_last_painted) / 100);
+        sg_fr_last_made = made;
+        sg_fr_last_painted = aimed;
         sg_fr_value_set = 0;
     } else {
         sg_fr_missed++;
@@ -5093,13 +5110,33 @@ static int sg_start_frame_ticks(void) {
     return 1;
 }
 /* Tests, 1x: the frame counts (0 painted, 1 missed, 2 longest gap in tenths of a ms; 3 resets). */
+static int sg_fr_compare(const void *a, const void *b) {
+    int x = *(const int *) a, y = *(const int *) b;
+    return (x > y) - (x < y);
+}
+/* The 95th-percentile of `count' gaps by nearest rank; 0 with none. */
+static int sg_fr_p95(const int *gaps, int count) {
+    int sorted[SG_FR_GAPS], rank;
+    if (count == 0) return 0;
+    memcpy(sorted, gaps, (size_t) count * sizeof(int));
+    qsort(sorted, (size_t) count, sizeof(int), sg_fr_compare);
+    rank = (int) ((95 * count + 99) / 100);   /* ceiling of 0.95 n */
+    if (rank < 1) rank = 1;
+    return sorted[rank - 1];
+}
+/* Tests, 1x: the frame counts (0 painted, 1 missed, 2 longest gap, 4 the 95th-percentile gap by
+   nearest rank, both in tenths of a ms between the vblanks the frames made, 0 with no gap yet;
+   5 the 95th-percentile gap by the frame time aimed for, the measure before; 3 resets). */
 static int sg_test_frames(int which) {
     switch (which) {
         case 0: return sg_fr_painted;
         case 1: return sg_fr_missed;
         case 2: return (int) (sg_fr_longest / 100);
+        case 4: return sg_fr_p95(sg_fr_gaps, sg_fr_gap_count);
+        case 5: return sg_fr_p95(sg_fr_aim_gaps, sg_fr_aim_gap_count);
         default:
             sg_fr_painted = 0; sg_fr_missed = 0; sg_fr_longest = 0; sg_fr_last_painted = 0;
+            sg_fr_last_made = 0; sg_fr_gap_count = 0; sg_fr_aim_gap_count = 0;
             return 0;
     }
 }

@@ -2693,13 +2693,25 @@ feature -- The remaining controls (1j)
 			-- 1x-a's real-clock count (the spec: before 1x-a merges, on all three): ten 200 ms
 			-- fades back and forth on the real clock, through event 62 and GUI_APPLICATION.
 			-- Where the backend can tell when a frame shows, it counts the frames whose value
-			-- was set in time (painted) and those that missed; at most 1 in 20 may miss and no
-			-- gap between painted frames may pass 50 ms. The counts are printed for the record.
+			-- was set in time (painted) and those that missed. At most 1 in 20 may miss; the
+			-- 95th-percentile gap between painted frames may not pass 25 ms (1.5 frames at 60
+			-- Hz: what a user sees), and the single longest gap not 100 ms (one gap is ruled by
+			-- the compositor's own hitches: a plain C spike on Windows' DwmFlush, none of our
+			-- code, reached 47 ms). EIF-GROUP, 2026-11-12: the same on all three; if any
+			-- platform's 95th percentile sits near 25 ms, say so rather than widen it. The
+			-- counts, the longest gap included, are printed for the record. Gaps are between the
+			-- vblanks the frames made: a draw that ends late takes the next vblank (EIF-GROUP,
+			-- 2026-11-12); the measure before (tick or aimed time, `test_frames (5)') is printed
+			-- beside it. Every value is read before the checks: a backend without 5 resets on it.
+			-- Linux: the 95th percentile is printed and logged but does not fail (Larry,
+			-- 2026-11-13): Linux runs in WSLg, whose remote compositor's timing varies run to run
+			-- (17 to 32 ms on the same build; the GTK renderer is not the cause), and no native
+			-- Linux desktop is available to measure on. Every other check still holds there.
 		local
 			l_window: GUI_WINDOW
 			l_label: GUI_LABEL
 			l_done: CELL [INTEGER]
-			l_rounds: INTEGER
+			l_rounds, l_painted, l_missed, l_longest, l_p95, l_before: INTEGER
 		do
 			if backend.test_frames (3) = -1 then
 					-- no frame ticks to count on this backend yet (its 1x half brings them)
@@ -2726,11 +2738,24 @@ feature -- The remaining controls (1j)
 				assert ("ten fades ran", l_done.item >= 10)
 				assert ("nothing running", not app.animation_clock.is_running)
 				if backend.test_frames (0) /= -1 then
-					print ("    real clock: painted " + backend.test_frames (0).out + ", missed " + backend.test_frames (1).out
-						+ ", longest gap " + (backend.test_frames (2) // 10).out + "." + (backend.test_frames (2) \\ 10).out + " ms%N")
-					assert ("frames painted", backend.test_frames (0) > 0)
-					assert ("at most 1 in 20 missed", backend.test_frames (1) * 20 <= backend.test_frames (0))
-					assert ("no gap past 50 ms", backend.test_frames (2) <= 500)
+					l_painted := backend.test_frames (0)
+					l_missed := backend.test_frames (1)
+					l_longest := backend.test_frames (2)
+					l_p95 := backend.test_frames (4)
+					l_before := backend.test_frames (5)
+					print ("    real clock: painted " + l_painted.out + ", missed " + l_missed.out
+						+ ", 95th-percentile gap " + (l_p95 // 10).out + "." + (l_p95 \\ 10).out
+						+ " ms, longest gap " + (l_longest // 10).out + "." + (l_longest \\ 10).out
+						+ " ms (by vblank made; by tick or aimed time the 95th was " + (l_before // 10).out + "."
+						+ (l_before \\ 10).out + " ms)%N")
+					assert ("frames painted", l_painted > 0)
+					assert ("at most 1 in 20 missed", l_missed * 20 <= l_painted)
+					if {PLATFORM}.is_unix and not {PLATFORM}.is_mac then
+						print ("    Linux (WSLg): the 95th percentile is reported, not gated%N")
+					else
+						assert ("95th-percentile gap at most 25 ms", l_p95 <= 250)
+					end
+					assert ("no gap past 100 ms", l_longest <= 1000)
 				end
 				app.clear_reduces_motion_for_tests
 				l_window.close
