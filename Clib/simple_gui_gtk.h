@@ -2996,7 +2996,11 @@ static gboolean sg_canvas_key(GtkEventControllerKey *c, guint keyval, guint code
 }
 
 static int sg_canvas(int w, int h) {
-    GtkWidget *a = gtk_drawing_area_new();
+    /* #126/#136: created with the image role - GTK 4.14 fixes a widget's role when it is created,
+       so a canvas cannot become an image when the program names it. A named canvas reads as a
+       named image, as on Windows and the Mac; an unnamed one as an unnamed image (a named
+       difference: there it is a custom element). */
+    GtkWidget *a = GTK_WIDGET(g_object_new(GTK_TYPE_DRAWING_AREA, "accessible-role", GTK_ACCESSIBLE_ROLE_IMG, NULL));
     GtkGesture *click = gtk_gesture_click_new();
     GtkEventController *motion = gtk_event_controller_motion_new();
     GtkEventController *keys = gtk_event_controller_key_new();

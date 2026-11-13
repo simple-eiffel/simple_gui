@@ -273,6 +273,11 @@ static int sga_gdk_key(NSEvent *e)
 	sga_push(9, sga_id_of(self), (int)s.width, (int)s.height, 0);
 	[self setNeedsDisplay:YES];
 }
+/* #126: a canvas a program has named is an image to screen readers (VoiceOver lands on it, and
+   it reads as the focus when it has the keys); an unnamed one stays out of the tree, as before. */
+- (BOOL)isAccessibilityElement { return [[self accessibilityLabel] length] > 0; }
+- (NSAccessibilityRole)accessibilityRole { return [[self accessibilityLabel] length] > 0 ? NSAccessibilityImageRole : [super accessibilityRole]; }
+- (BOOL)isAccessibilityEnabled { return YES; }   /* a plain view says disabled, which VoiceOver reads as "dimmed" */
 @end
 
 /* ------------------------------------------------ targets and delegates */
@@ -6121,7 +6126,6 @@ int sga_canvas(int a_width, int a_height)
 	   the window keeps the size the program asked for. */
 	[c setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
 	[c setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationVertical];
-	[c setAccessibilityRole:NSAccessibilityImageRole];
 	return sga_keep(c);
 }
 

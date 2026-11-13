@@ -117,6 +117,12 @@ feature -- Access
 	window: GUI_WINDOW
 			-- The preview's own window.
 
+feature -- Access (#126)
+
+	canvas: GUI_CANVAS
+			-- The page's drawing surface. Its accessible label names the page ("Page 1 of 3"),
+			-- so screen readers announce it as an image.
+
 feature -- Showing
 
 	run_modal (a_parent: detachable GUI_WINDOW): INTEGER
@@ -235,7 +241,6 @@ feature {NONE} -- Drawing
 	printer: SIMPLE_PDF_PRINTER
 			-- Draws the pages.
 
-	canvas: GUI_CANVAS
 	previous_button, next_button: GUI_BUTTON
 	page_label: GUI_LABEL
 	zoom_choice: GUI_SEGMENTED
@@ -326,6 +331,8 @@ feature {NONE} -- Drawing
 			-- The page label and which buttons can be pressed.
 		do
 			page_label.set_text ("Page " + page.out + " of " + page_count.out)
+				-- #126: the page itself is named for screen readers, as an image
+			canvas.set_accessible_label (page_label.text)
 			if page > 1 then previous_button.enable else previous_button.disable end
 			if page < page_count then next_button.enable else next_button.disable end
 		end
