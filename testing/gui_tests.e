@@ -3248,13 +3248,13 @@ feature -- The remaining controls (1j)
 			l_pages.select_page (2)
 			assert ("page 2 at once", l_pages.selected_index = 2 and not l_pages.is_switching)
 			assert ("not said yet", l_told.is_empty)
-			driver.wait (100)
+			wait_for_told (l_told, 1)
 			assert ("said on the next turn", l_told.count = 1 and then l_told.first = 2)
 			app.set_reduces_motion_for_tests (True)
 			l_pages.set_page_transition (l_pages.Transition_crossfade)
 			l_pages.select_page (3)
 			assert ("reduced: page 3 at once", l_pages.selected_index = 3 and not l_pages.is_switching)
-			driver.wait (100)
+			wait_for_told (l_told, 2)
 			assert ("said once more", l_told.count = 2 and then l_told.last = 3)
 			app.clear_reduces_motion_for_tests
 			l_window.close
@@ -7888,6 +7888,18 @@ feature {NONE} -- Fixtures
 		do
 			create Result.make (2)
 			a_pages.page_changed_actions.extend (agent (a_told: ARRAYED_LIST [INTEGER]; p: INTEGER) do a_told.extend (p) end (Result, ?))
+		end
+
+	wait_for_told (a_told: ARRAYED_LIST [INTEGER]; a_count: INTEGER)
+			-- Turn the loop, firing timers, until `a_told' holds `a_count' pages or about a second
+			-- has passed (a zero-length switch tells its end on the queue's next turn).
+		local
+			i: INTEGER
+		do
+			from i := 1 until a_told.count >= a_count or i > 100 loop
+				driver.wait (10)
+				i := i + 1
+			end
 		end
 
 	end_manual_clock
