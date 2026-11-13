@@ -73,6 +73,12 @@ void sga_tabs_extend(int a_tabs, int a_page, const char *a_title);   /* the firs
 void sga_tabs_select(int a_tabs, int a_page);   /* 1-based; no event */
 int sga_tabs_selected(int a_tabs);   /* 1-based; 0 none */
 void sga_tabs_set_title(int a_tabs, int a_page, const char *a_title);
+int sga_pages(void);   /* 1x-c: pages one at a time, no tab strip */
+void sga_pages_extend(int a_pages, int a_page);   /* the first page added is shown */
+void sga_pages_select(int a_pages, int a_page);   /* 1-based, at once */
+int sga_pages_selected(int a_pages);   /* 1-based; 0 none */
+void sga_pages_transition_frame(int a_id, int a_from, int a_to, int a_kind, double a_fraction);   /* pages or tabs */
+double sga_test_transition_shown(int a_id);
 int sga_list(void);
 void sga_list_extend(int a_id, const char *a_text);
 void sga_list_wipe_out(int a_id);

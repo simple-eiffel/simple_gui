@@ -334,6 +334,7 @@ static NSString *sga_row_title(id a_row) { return [a_row isKindOfClass:[SGARichR
 static int sga_tab_page(NSTabView *t, NSInteger an_item);
 static void sga_grid_user_select(int a_id, int i, BOOL an_extend);   /* 1v-a */
 static void sga_tabs_titles_follow(NSTabView *t);   /* 1t: a side strip follows its tab view */
+static void sga_switch_will_select(NSTabView *t);   /* 1x-c: the page a user's tab choice leaves */
 static NSView *sga_rich_cell(NSTableView *t, SGARichRow *a_row, NSInteger a_model);
 static BOOL sga_suggest_key(int a_id, SEL a_command);   /* 1p */
 static void sga_suggest_end(int a_id);   /* 1p */
@@ -351,6 +352,7 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 - (void)activated:(id)a_sender { sga_push(3, sga_id_of(a_sender), 0, 0, 0); }
 - (void)menuItem:(NSMenuItem *)a_item { sga_push(5, 0, (int)[a_item tag], 0, 0); }
 - (void)toggled:(NSButton *)a_box { sga_push(12, sga_id_of(a_box), [a_box state] == NSControlStateValueOn ? 1 : 0, 0, 0); }
+- (void)tabView:(NSTabView *)a_tabs willSelectTabViewItem:(NSTabViewItem *)an_item { (void)an_item; if (!s_suppress) sga_switch_will_select(a_tabs); }
 - (void)tabView:(NSTabView *)a_tabs didSelectTabViewItem:(NSTabViewItem *)an_item { sga_tabs_titles_follow(a_tabs); if (!s_suppress) sga_push(13, sga_id_of(a_tabs), sga_tab_page(a_tabs, [a_tabs indexOfTabViewItem:an_item]), 0, 0); }
 - (void)controlTextDidChange:(NSNotification *)n { if (!s_suppress) sga_push(2, sga_id_of([n object]), 0, 0, 0); }
 /* 1p: leaving a field ends its editing (29), when validation on commit checks it. */
@@ -1583,8 +1585,10 @@ void sga_tabs_extend(int a_tabs, int a_page, const char *a_title)
 	[[t.widthAnchor constraintGreaterThanOrEqualToConstant:l_fit.width + l_dw] setActive:YES];
 	[[t.heightAnchor constraintGreaterThanOrEqualToConstant:l_fit.height + l_dh] setActive:YES];
 }
+static void sga_switch_end(int a_id);
 void sga_tabs_select(int a_tabs, int a_page)
 {
+	sga_switch_end(a_tabs);
 	s_suppress++;
 	NSTabView *t = sga_get(a_tabs);
 	[t selectTabViewItemAtIndex:sga_tab_item(t, a_page)];
@@ -1600,6 +1604,213 @@ int sga_tabs_selected(int a_tabs)
 void sga_tabs_set_title(int a_tabs, int a_page, const char *a_title)
 {
 	{ NSTabView *t = sga_get(a_tabs); [[t tabViewItemAtIndex:sga_tab_item(t, a_page)] setLabel:sga_string(a_title)]; sga_tabs_titles_follow(t); }
+}
+
+/* ------------------------------------------------- pages, and switching (1x-c) */
+
+/* Pages: a host view of our own (not a tabless NSTabView). Every page is pinned inside it, so
+   the host keeps room for the largest; only the selected one is shown. */
+@interface SGAPages : NSView
+{
+@public
+	NSMutableArray<NSView *> *pages;
+	int shown;   /* 1-based; 0 none */
+}
+@end
+@implementation SGAPages
+- (BOOL)isFlipped { return YES; }
+@end
+
+int sga_pages(void)
+{
+	SGAPages *h = [[SGAPages alloc] initWithFrame:NSZeroRect];
+	h->pages = [NSMutableArray array];
+	[h setWantsLayer:YES];
+	[[h layer] setMasksToBounds:YES];   /* a slide stays inside */
+	return sga_keep(h);
+}
+
+void sga_pages_extend(int a_pages, int a_page)
+{
+	SGAPages *h = sga_get(a_pages);
+	NSView *v = sga_get(a_page);
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[h addSubview:v];
+	sga_pin_page(v, h);
+	[h->pages addObject:v];
+	if (h->shown == 0) h->shown = 1;
+	[v setHidden:(NSInteger)[h->pages count] != h->shown];
+}
+
+static void sga_pages_show(SGAPages *h, int a_page)
+{
+	if (a_page < 1 || a_page > (int)[h->pages count]) return;
+	h->shown = a_page;
+	for (NSUInteger i = 0; i < [h->pages count]; i++) [h->pages[i] setHidden:(int)i + 1 != a_page];
+}
+
+void sga_pages_select(int a_pages, int a_page)
+{
+	sga_switch_end(a_pages);
+	sga_pages_show(sga_get(a_pages), a_page);
+}
+
+int sga_pages_selected(int a_pages)
+{
+	SGAPages *h = sga_get(a_pages);
+	return [h isKindOfClass:[SGAPages class]] ? h->shown : 0;
+}
+
+/* A switch shown: the page left behind as a still image and the new page as one, over the live
+   new page, which is already selected and laid out in its place. The cover draws both and lets
+   every press through to the new page beneath (only it takes input). Shared code sends each
+   frame; at 1 the cover goes. A tab the user chooses is swapped by NSTabView before the first
+   frame, so the page it leaves is caught as it goes (sga_switch_will_select). */
+@interface SGASwitchCover : NSView
+{
+@public
+	CALayer *from_layer, *to_layer;
+	int from, to, kind;
+	double fraction;
+}
+@end
+@implementation SGASwitchCover
+- (BOOL)isFlipped { return YES; }
+- (NSView *)hitTest:(NSPoint)p { (void)p; return nil; }
+- (BOOL)isAccessibilityElement { return NO; }
+@end
+
+static NSMutableDictionary<NSNumber *, SGASwitchCover *> *s_switches;
+static CGImageRef s_left_image;   /* the page a user's tab choice left, caught as it went */
+static int s_left_tabs, s_left_page;
+static double s_left_at;
+
+/* The view showing the selected page of `a_id', whole: the pages host itself (a page may not
+   fill it), or the selected tab's holder. */
+static NSView *sga_switch_page_view(id o)
+{
+	if ([o isKindOfClass:[SGAPages class]]) return o;
+	if ([o isKindOfClass:[NSTabView class]]) return [[(NSTabView *)o selectedTabViewItem] view];
+	return nil;
+}
+
+static CGImageRef sga_switch_snapshot(NSView *v)   /* +1, or NULL */
+{
+	if (!v || ![v window] || NSIsEmptyRect([v bounds])) return NULL;
+	NSBitmapImageRep *r = [v bitmapImageRepForCachingDisplayInRect:[v bounds]];
+	if (!r) return NULL;
+	[v cacheDisplayInRect:[v bounds] toBitmapImageRep:r];
+	return CGImageRetain([r CGImage]);
+}
+
+static void sga_switch_will_select(NSTabView *t)
+{
+	if (![t isKindOfClass:[SGATabs class]]) return;
+	if (s_left_image) CGImageRelease(s_left_image);
+	s_left_image = sga_switch_snapshot(sga_switch_page_view(t));
+	s_left_tabs = sga_id_of(t);
+	s_left_page = sga_tabs_selected(s_left_tabs);
+	s_left_at = CACurrentMediaTime();
+}
+
+static void sga_switch_end(int a_id)
+{
+	SGASwitchCover *c = s_switches[@(a_id)];
+	if (!c) return;
+	[c removeFromSuperview];
+	[s_switches removeObjectForKey:@(a_id)];
+}
+
+static void sga_switch_select(id o, int a_id, int a_page)
+{
+	if ([o isKindOfClass:[SGAPages class]]) sga_pages_show(o, a_page);
+	else {
+		NSTabView *t = o;
+		s_suppress++;
+		if (sga_tabs_selected(a_id) != a_page) [t selectTabViewItemAtIndex:sga_tab_item(t, a_page)];
+		s_suppress--;
+	}
+}
+
+static CALayer *sga_switch_layer(CGImageRef a_image, NSRect a_bounds, CGFloat a_scale)
+{
+	CALayer *l = [CALayer layer];
+	[l setAnchorPoint:CGPointZero];
+	[l setFrame:NSRectToCGRect(a_bounds)];
+	[l setContentsScale:a_scale];
+	[l setContentsGravity:kCAGravityResize];
+	if (a_image) [l setContents:(__bridge id)a_image];
+	return l;
+}
+
+void sga_pages_transition_frame(int a_id, int a_from, int a_to, int a_kind, double a_fraction)
+{
+	id o = sga_get(a_id);
+	if (![o isKindOfClass:[NSView class]] || ![(NSView *)o window]) { sga_switch_end(a_id); return; }   /* its window has closed */
+	if (!s_switches) s_switches = [NSMutableDictionary dictionary];
+	SGASwitchCover *c = s_switches[@(a_id)];
+	if (!c || c->from != a_from || c->to != a_to || c->kind != a_kind) {
+		sga_switch_end(a_id);
+			/* the page left: caught as the user's tab choice left it, or shown now */
+		CGImageRef l_from = NULL;
+		if (s_left_image && s_left_tabs == a_id && s_left_page == a_from && CACurrentMediaTime() - s_left_at < 1.0) {
+			l_from = s_left_image;
+			s_left_image = NULL;
+		}
+		else {
+			if (s_left_image && s_left_tabs == a_id) { CGImageRelease(s_left_image); s_left_image = NULL; }
+			l_from = sga_switch_snapshot(sga_switch_page_view(o));
+		}
+		sga_switch_select(o, a_id, a_to);
+		NSView *l_page = sga_switch_page_view(o);
+		[[l_page window] layoutIfNeeded];
+		CGImageRef l_to = sga_switch_snapshot(l_page);
+		NSView *l_parent = o;
+		NSRect l_area = l_page ? [l_page convertRect:[l_page bounds] toView:l_parent] : [l_parent bounds];
+		CGFloat l_scale = [[l_parent window] backingScaleFactor];
+		c = [[SGASwitchCover alloc] initWithFrame:l_area];
+		c->from = a_from; c->to = a_to; c->kind = a_kind;
+		[c setWantsLayer:YES];
+		CALayer *l_root = [c layer];
+		[l_root setMasksToBounds:YES];
+		__block CGColorRef l_back = NULL;
+		[[c effectiveAppearance] performAsCurrentDrawingAppearance:^{ l_back = CGColorRetain([[NSColor windowBackgroundColor] CGColor]); }];
+		[l_root setBackgroundColor:l_back];
+		CGColorRelease(l_back);
+		NSRect l_bounds = NSMakeRect(0, 0, NSWidth(l_area), NSHeight(l_area));
+		c->from_layer = sga_switch_layer(l_from, l_bounds, l_scale);
+		c->to_layer = sga_switch_layer(l_to, l_bounds, l_scale);
+		[l_root addSublayer:c->from_layer];
+		[l_root addSublayer:c->to_layer];
+		if (l_from) CGImageRelease(l_from);
+		if (l_to) CGImageRelease(l_to);
+		[l_parent addSubview:c positioned:NSWindowAbove relativeTo:nil];
+		s_switches[@(a_id)] = c;
+	}
+	double f = a_fraction < 0 ? 0 : a_fraction > 1 ? 1 : a_fraction;
+	c->fraction = f;
+	[CATransaction begin];
+	[CATransaction setDisableActions:YES];
+	if (a_kind == 1) {
+		[c->from_layer setOpacity:(float)(1.0 - f)];
+		[c->to_layer setOpacity:(float)f];
+	}
+	else {
+			/* forward comes in from the trailing side, back from the leading; mirrored right to left */
+		CGFloat w = NSWidth([c bounds]);
+		CGFloat l_dir = (a_to > a_from ? 1 : -1) * ([c userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft ? -1 : 1);
+		[c->from_layer setPosition:CGPointMake(-l_dir * f * w, 0)];
+		[c->to_layer setPosition:CGPointMake(l_dir * (1.0 - f) * w, 0)];
+	}
+	[CATransaction commit];
+	if (f >= 1.0) sga_switch_end(a_id);
+}
+
+/* How far the switch shown on `a_id' has got; 1 when none shows. */
+double sga_test_transition_shown(int a_id)
+{
+	SGASwitchCover *c = s_switches[@(a_id)];
+	return c ? c->fraction : 1.0;
 }
 
 /* 1w: a field whose style names a selection color edits through its own field editor, which
