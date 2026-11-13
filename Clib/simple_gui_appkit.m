@@ -6126,7 +6126,6 @@ int sga_canvas(int a_width, int a_height)
 	   the window keeps the size the program asked for. */
 	[c setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
 	[c setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationVertical];
-	[c setAccessibilityRole:NSAccessibilityImageRole];
 	return sga_keep(c);
 }
 
