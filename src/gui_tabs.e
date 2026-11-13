@@ -3,13 +3,14 @@ note
 		Pages shown one at a time under a row of tabs (NSTabView, GtkNotebook, SW_NOTEBOOK).
 		Pages are 1-based; `select_page' never fires `page_changed_actions', a user's choice
 		does. The tabs follow the base direction: right to left, the first tab is at the right.
+		A switch, by code or by the user, shows `page_transition' (1x-c, GUI_PAGE_SWITCHER).
 	]"
 
 class
 	GUI_TABS
 
 inherit
-	GUI_CONTAINER
+	GUI_PAGE_SWITCHER
 		redefine
 			dispatch
 		end
@@ -48,7 +49,7 @@ feature -- Access
 			-- The page shown, or 0 when there are no pages.
 		do
 			Result := backend.tabs_selected (id)
-		ensure
+		ensure then
 			in_range: 0 <= Result and Result <= count
 		end
 
@@ -71,6 +72,9 @@ feature -- Element change
 			titles.extend (a_title.to_string_32)
 			l_c := backend.to_c (a_title)
 			backend.tabs_extend (id, a_page.id, l_c.item)
+			if count = 1 then
+				shown_page := 1
+			end
 		ensure
 			parent_set: a_page.parent = Current
 			last: children.last = a_page and page_title (count).same_string_general (a_title)
@@ -83,7 +87,9 @@ feature -- Element change
 			gui_thread: is_gui_thread
 			valid: 1 <= i and i <= count
 		do
-			backend.tabs_select (id, i)
+			if i /= shown_page then
+				start_switch (shown_page, i)
+			end
 		ensure
 			shown: selected_index = i
 			no_event: page_changed_actions.fire_count = old page_changed_actions.fire_count
@@ -159,11 +165,22 @@ feature {GUI_APPLICATION} -- Events
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)
 		do
 			if a_type = 13 then
+					-- the toolkit has shown the user's page; the switch's frames run from the
+					-- page shown before
+				if a_a >= 1 and a_a <= count and a_a /= shown_page then
+					start_switch (shown_page, a_a)
+				end
 				page_changed_actions.call ([a_a])
 			end
 		end
 
 feature {NONE} -- Implementation
+
+	show_page_at_once (i: INTEGER)
+			-- Show page `i' alone, with no event.
+		do
+			backend.tabs_select (id, i)
+		end
 
 	titles: ARRAYED_LIST [STRING_32]
 

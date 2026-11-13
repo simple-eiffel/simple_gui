@@ -3514,6 +3514,8 @@ feature -- Path controls, continued
 				quiet := quiet + 1
 				al_t.select_tab (a_page)
 				quiet := quiet - 1
+					-- 1x-c: at once ends any switch being shown
+				al_t.end_transition
 				changed
 			end
 		end
@@ -3770,6 +3772,49 @@ feature -- Path controls, continued
 		do
 			if attached {SW_TABS} widget (a_tabs) as al_t and then a_page >= 1 and then a_page <= al_t.labels.count then
 				al_t.labels.put_i_th (from_c (a_title), a_page)
+				changed
+			end
+		end
+
+	pages: INTEGER
+			-- 1x-c: the drawn page host, an SW_TABS with no strip.
+		do
+			Result := tabs
+			tabs_set_position (Result, 0)
+		end
+
+	pages_extend (a_pages, a_page: INTEGER)
+			-- 1x-c: a page of the host (its tab title is never shown).
+		local
+			l_title: C_STRING
+		do
+			l_title := to_c ("Page")
+			tabs_extend (a_pages, a_page, l_title.item)
+		end
+
+	pages_select (a_pages, a_page: INTEGER)
+			-- 1x-c: as a tab, ending any switch shown.
+		do
+			tabs_select (a_pages, a_page)
+		end
+
+	pages_selected (a_pages: INTEGER): INTEGER
+			-- 1x-c: as a tab.
+		do
+			Result := tabs_selected (a_pages)
+		end
+
+	pages_set_transition_frame (an_id, a_from, a_to, a_kind: INTEGER; a_fraction: REAL_64)
+			-- 1x-c: SW_TABS draws the switch (both pages, crossfaded or slid); the new page is
+			-- selected quietly at the first frame.
+		do
+			if attached {SW_TABS} widget (an_id) as al_t and then a_from <= al_t.pages.count and then a_to <= al_t.pages.count then
+				if al_t.selected_index /= a_to then
+					quiet := quiet + 1
+					al_t.select_tab (a_to)
+					quiet := quiet - 1
+				end
+				al_t.show_transition (a_from, a_kind, a_fraction)
 				changed
 			end
 		end
@@ -5113,6 +5158,16 @@ feature -- Appearance
 		do
 			if attached widget (an_id) as al_w and then attached open_window as al_win then
 				al_win.yield_focus (al_w)
+			end
+		end
+
+	test_transition_shown (an_id: INTEGER): REAL_64
+			-- 1x-c: the switch SW_TABS draws (1 when none); -1 for anything else.
+		do
+			if attached {SW_TABS} widget (an_id) as al_t then
+				Result := al_t.transition_fraction
+			else
+				Result := -1.0
 			end
 		end
 

@@ -293,6 +293,33 @@ feature -- Controls
 		alias "sga_tabs_set_title($a_tabs, $a_page, (const char *) $a_title);"
 		end
 
+	pages: INTEGER
+			-- 1x-c: a host view of our own, the pages pinned inside it, one shown.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_pages();"
+		end
+
+	pages_extend (a_pages, a_page: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_pages_extend($a_pages, $a_page);"
+		end
+
+	pages_select (a_pages, a_page: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_pages_select($a_pages, $a_page);"
+		end
+
+	pages_selected (a_pages: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_pages_selected($a_pages);"
+		end
+
+	pages_set_transition_frame (an_id, a_from, a_to, a_kind: INTEGER; a_fraction: REAL_64)
+			-- 1x-c: the page left and the new one as still images over the live new page.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_pages_transition_frame($an_id, $a_from, $a_to, $a_kind, $a_fraction);"
+		end
+
 	list: INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_list();"
@@ -1866,6 +1893,11 @@ feature -- Common widget state
 	widget_yield_focus (an_id: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_yield_focus($an_id);"
+		end
+
+	test_transition_shown (an_id: INTEGER): REAL_64
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_transition_shown($an_id);"
 		end
 
 	test_reveal_shown (an_id: INTEGER): REAL_64
