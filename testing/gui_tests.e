@@ -3978,27 +3978,27 @@ feature -- The remaining controls (1j)
 			settle_window
 			l_code.set_completion_words (<<"print", "Precursor", "sprint", "deferred", "do">>)
 			focus_editor (l_code)
-			driver.type_code (l_code, "p")
+			type_settled (l_code, "p")
 			assert ("not after one character", not l_code.is_completing and not driver.are_completions_shown (l_code))
-			driver.type_code (l_code, "r")
+			type_settled (l_code, "r")
 			assert ("after two: " + l_code.completion_count.out, l_code.is_completing and driver.are_completions_shown (l_code))
 			assert ("three rows: " + l_code.completion_count.out, l_code.completion_count = 3)
 			assert ("starting with it first, in order", l_code.completion_label (1).same_string ("print")
 				and l_code.completion_label (2).same_string ("Precursor"))
 			assert ("then holding it", l_code.completion_label (3).same_string ("sprint"))
 			assert ("the first highlighted", l_code.completion_selected = 1)
-			driver.type_code (l_code, "e")
+			type_settled (l_code, "e")
 			assert ("narrowed: " + l_code.completion_count.out, l_code.completion_count = 1
 				and l_code.completion_label (1).same_string ("Precursor"))
-			driver.type_code (l_code, {STRING_32} "%/8/")
+			type_settled (l_code, {STRING_32} "%/8/")
 			assert ("widened: " + l_code.completion_count.out, l_code.completion_count = 3)
-			driver.type_code (l_code, {STRING_32} "%/8/%/8/")
+			type_settled (l_code, {STRING_32} "%/8/%/8/")
 			assert ("closed with the word gone", not l_code.is_completing and not driver.are_completions_shown (l_code))
 			assert ("the text is empty again", l_code.text.is_empty)
-			driver.type_code (l_code, "zz")
+			type_settled (l_code, "zz")
 			assert ("no list without offers", not l_code.is_completing and not driver.are_completions_shown (l_code))
 			l_code.set_text ("")
-			driver.press_completion_key (l_code, 0)
+			press_settled (l_code, 0)
 			assert ("Control+Space on no word offers all five: " + l_code.completion_count.out,
 				l_code.completion_count = 5 and driver.are_completions_shown (l_code))
 			l_window.close
@@ -4031,17 +4031,17 @@ feature -- The remaining controls (1j)
 					a_list.extend (a_text)
 				end (?, l_accepted))
 			focus_editor (l_code)
-			driver.type_code (l_code, "pr")
-			driver.press_completion_key (l_code, 2)
+			type_settled (l_code, "pr")
+			press_settled (l_code, 2)
 			assert ("Down: selected " + l_code.completion_selected.out + " of " + l_code.completion_count.out + ", shown " + driver.are_completions_shown (l_code).out, l_code.completion_selected = 2)
-			driver.press_completion_key (l_code, 4)
+			press_settled (l_code, 4)
 			assert ("Page Down stops at the last", l_code.completion_selected = 3)
-			driver.press_completion_key (l_code, 3)
+			press_settled (l_code, 3)
 			assert ("Page Up stops at the first", l_code.completion_selected = 1)
-			driver.press_completion_key (l_code, 1)
+			press_settled (l_code, 1)
 			assert ("Up stops at the first", l_code.completion_selected = 1)
-			driver.press_completion_key (l_code, 2)
-			driver.press_completion_key (l_code, 5)
+			press_settled (l_code, 2)
+			press_settled (l_code, 5)
 			assert ("Return accepted Precursor: " + l_code.text.to_string_8, l_code.text.same_string ("Precursor"))
 			assert ("closed", not l_code.is_completing and not driver.are_completions_shown (l_code))
 			assert ("the caret after it", l_code.caret_line = 1 and l_code.caret_column = 10)
@@ -4049,19 +4049,19 @@ feature -- The remaining controls (1j)
 			driver.invoke_menu (l_undo)
 			assert ("one undo step back to the word: " + l_code.text.to_string_8, l_code.text.same_string ("pr"))
 			l_code.set_text ("")
-			driver.type_code (l_code, "pr")
-			driver.press_completion_row (l_code, 3)
+			type_settled (l_code, "pr")
+			press_row_settled (l_code, 3)
 			assert ("a click accepted sprint: " + l_code.text.to_string_8, l_code.text.same_string ("sprint"))
 			assert ("told again", l_accepted.count = 2 and l_accepted [2].same_string ("sprint"))
 			l_code.set_text ("")
-			driver.type_code (l_code, "sp")
+			type_settled (l_code, "sp")
 			assert ("open for sp", l_code.is_completing)
-			driver.press_completion_key (l_code, 6)
+			press_settled (l_code, 6)
 			assert ("Escape closed it", not l_code.is_completing and not driver.are_completions_shown (l_code))
 			assert ("and typed nothing: " + l_code.text.to_string_8, l_code.text.same_string ("sp"))
-			driver.type_code (l_code, "r")
+			type_settled (l_code, "r")
 			assert ("open again for spr", l_code.is_completing)
-			driver.type_code (l_code, "(")
+			type_settled (l_code, "(")
 			assert ("( closed it", not l_code.is_completing and not driver.are_completions_shown (l_code))
 			assert ("and was typed: " + l_code.text.to_string_8, l_code.text.same_string ("spr("))
 			l_window.close
@@ -7652,6 +7652,39 @@ feature {NONE} -- Fixtures
 			Result.show
 			l_field.set_text ("hello from Eiffel")
 			l_list.select_row (2)
+		end
+
+	type_settled (a_code: GUI_CODE_EDITOR; a_text: READABLE_STRING_GENERAL)
+			-- #138: type `a_text', then let the completion list settle.
+		do
+			driver.type_code (a_code, a_text)
+			settle_completion (a_code)
+		end
+
+	press_settled (a_code: GUI_CODE_EDITOR; a_key: INTEGER)
+			-- #138: press completion key `a_key', then let the list settle.
+		do
+			driver.press_completion_key (a_code, a_key)
+			settle_completion (a_code)
+		end
+
+	press_row_settled (a_code: GUI_CODE_EDITOR; a_row: INTEGER)
+			-- #138: click row `a_row', then let the list settle.
+		do
+			driver.press_completion_row (a_code, a_row)
+			settle_completion (a_code)
+		end
+
+	settle_completion (a_code: GUI_CODE_EDITOR)
+			-- #138: wait (about 1 s at most) until the list shown agrees with the editor - shown
+			-- while it completes, hidden while it doesn't (GTK maps or unmaps its popup a frame later).
+		local
+			i: INTEGER
+		do
+			from i := 1 until i > 30 or else driver.are_completions_shown (a_code) = a_code.is_completing loop
+				app.process_events (30)
+				i := i + 1
+			end
 		end
 
 	focus_editor (a_code: GUI_CODE_EDITOR)
