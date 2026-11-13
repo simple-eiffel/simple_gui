@@ -2703,6 +2703,10 @@ feature -- The remaining controls (1j)
 			-- vblanks the frames made: a draw that ends late takes the next vblank (EIF-GROUP,
 			-- 2026-11-12); the measure before (tick or aimed time, `test_frames (5)') is printed
 			-- beside it. Every value is read before the checks: a backend without 5 resets on it.
+			-- Linux: the 95th percentile is printed and logged but does not fail (Larry,
+			-- 2026-11-13): Linux runs in WSLg, whose remote compositor's timing varies run to run
+			-- (17 to 32 ms on the same build; the GTK renderer is not the cause), and no native
+			-- Linux desktop is available to measure on. Every other check still holds there.
 		local
 			l_window: GUI_WINDOW
 			l_label: GUI_LABEL
@@ -2746,7 +2750,11 @@ feature -- The remaining controls (1j)
 						+ (l_before \\ 10).out + " ms)%N")
 					assert ("frames painted", l_painted > 0)
 					assert ("at most 1 in 20 missed", l_missed * 20 <= l_painted)
-					assert ("95th-percentile gap at most 25 ms", l_p95 <= 250)
+					if {PLATFORM}.is_unix and not {PLATFORM}.is_mac then
+						print ("    Linux (WSLg): the 95th percentile is reported, not gated%N")
+					else
+						assert ("95th-percentile gap at most 25 ms", l_p95 <= 250)
+					end
 					assert ("no gap past 100 ms", l_longest <= 1000)
 				end
 				app.clear_reduces_motion_for_tests
