@@ -252,6 +252,7 @@ feature -- Windows and containers
 				l_col.set_gap (scaled (a_spacing))
 				Result := register (l_col)
 				margins.force (scaled (Stack_margin), Result)
+				stack_ids.force (True, Result)
 			else
 				create l_row.make
 				l_row.set_padding (scaled (Stack_margin))
@@ -260,6 +261,7 @@ feature -- Windows and containers
 				l_row.set_cross_axis ({SW_ROW}.Cross_stretch)
 				Result := register (l_row)
 				margins.force (scaled (Stack_margin), Result)
+				stack_ids.force (True, Result)
 			end
 		end
 
@@ -5062,38 +5064,96 @@ feature -- Appearance
 		end
 
 	widget_set_reveal (an_id, a_effect: INTEGER; a_fraction: REAL_64; a_takes_input: BOOLEAN)
-			-- 1x-b interface: not shown yet (this platform's half).
+			-- 1x-b: simple_widgets shows the widget revealed (a fade multiplies its alpha, a
+			-- slide or grow takes that share of its natural size and draws clipped in it),
+			-- passing pointer hits to its parent without `a_takes_input'.
+		local
+			l_effect: INTEGER
 		do
+			if is_frame_ticking then
+					-- noted before `changed', which renders at once
+				frame_value_pending := True
+				frame_value_mark := frames_rendered_total
+			end
+			l_effect := a_effect
+			if l_effect > 1 and then not reveals_in_place (an_id) then
+					-- the rule on all three: slides and grow reveal in a stack or as a window's
+					-- content; elsewhere they fade
+				l_effect := 1
+			end
+			if attached widget (an_id) as al_w then
+				al_w.set_reveal (l_effect, a_fraction, a_takes_input)
+				changed
+			end
+		end
+
+	reveals_in_place (an_id: INTEGER): BOOLEAN
+			-- Do slides and grow reveal widget `an_id' - in a stack, or as a window's content?
+			-- Elsewhere they fade, as on GTK and AppKit (PROD and MACMINI, 2026-11-12).
+		do
+			if window_content.has_item (an_id) then
+				Result := True
+			elseif attached widget (an_id) as al_w and then attached al_w.parent as al_p then
+				Result := stack_ids.has (items.index_of (al_p, 1))
+			end
+		end
+
+	stack_ids: HASH_TABLE [BOOLEAN, INTEGER]
+			-- The ids of the widgets `stack' made.
+		once ("OBJECT")
+			create Result.make (16)
 		end
 
 	widget_yield_focus (an_id: INTEGER)
-			-- 1x-b interface: not yet (this platform's half).
+			-- 1x-b: the main window's focus leaves the widget for the next in its ring.
 		do
+			if attached widget (an_id) as al_w and then attached open_window as al_win then
+				al_win.yield_focus (al_w)
+			end
 		end
 
 	test_reveal_shown (an_id: INTEGER): REAL_64
-			-- 1x-b: not read yet (this platform's half): -1.
+			-- 1x-b: the reveal simple_widgets shows the widget at; -1 when it is gone.
 		do
-			Result := -1.0
+			if attached widget (an_id) as al_w then
+				Result := al_w.reveal
+			else
+				Result := -1.0
+			end
 		end
 
 	test_extent (an_id: INTEGER; a_vertical: BOOLEAN): INTEGER
-			-- 1x-b: not read yet (this platform's half): -1.
+			-- 1x-b: the height (`a_vertical') or width the widget was laid out at; -1 when gone.
 		do
-			Result := -1
+			if attached widget (an_id) as al_w then
+				if a_vertical then
+					Result := al_w.height.rounded
+				else
+					Result := al_w.width.rounded
+				end
+			else
+				Result := -1
+			end
 		end
 
 	test_has_focus (an_id: INTEGER): INTEGER
-			-- 1x-b: not read yet (this platform's half): -1.
+			-- 1x-b: does the main window's focus sit on the widget or inside it? -1 when gone.
 		do
-			Result := -1
+			if attached widget (an_id) as al_w and then attached open_window as al_win then
+				if attached al_win.focused as al_f and then al_win.is_within (al_f, al_w) then
+					Result := 1
+				end
+			else
+				Result := -1
+			end
 		end
 
 	test_opacity_shown (an_id: INTEGER): REAL_64
-			-- 1x: the opacity simple_widgets paints the widget at; -1 when it is gone.
+			-- 1x: the opacity simple_widgets paints the widget at, a fade's share included; -1
+			-- when it is gone.
 		do
 			if attached widget (an_id) as al_w then
-				Result := al_w.opacity
+				Result := al_w.painted_opacity
 			else
 				Result := -1.0
 			end
