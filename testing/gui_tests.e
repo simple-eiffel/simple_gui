@@ -234,6 +234,11 @@ feature -- Tests
 			l_warm := process_bytes
 			from i := 1 until i > 30 loop
 				open_and_close_a_canvas_window
+				if i \\ 5 = 0 then
+						-- the path, for telling a steady residue from the heap growing once
+					l_memory.full_collect
+					print ("    after " + i.out + ": " + (process_bytes // 1048576).out + " MB%N")
+				end
 				i := i + 1
 			end
 			l_memory.full_collect
