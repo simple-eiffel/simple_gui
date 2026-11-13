@@ -5066,6 +5066,10 @@ static void sg_on_after_paint(GdkFrameClock *clock, gpointer d) {
     (void) d;
     gdk_frame_clock_get_refresh_info(clock, drawn, &interval, &made);
     if (made <= 0) made = drawn;   /* the clock knows no presentation times */
+    /* a stale estimate (WSLg, after a compositor hiccup): more than 3 refresh periods past the
+       paint's end is not a vblank this frame can make; stamp the paint's end, as Windows does
+       when DWM gives no timing (Larry, 2026-11-13: one such stamp read as a 3.6 s gap) */
+    if (made - drawn > 3 * (interval > 0 ? interval : 16667)) made = drawn;
     if (sg_fr_value_set) {
         sg_fr_painted++;
         if (sg_fr_last_made > 0 && made - sg_fr_last_made > sg_fr_longest) sg_fr_longest = made - sg_fr_last_made;
