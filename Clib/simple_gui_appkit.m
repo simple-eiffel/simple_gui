@@ -790,7 +790,34 @@ void sga_window_set_content(int a_window, int a_child)
    the keys reach it). It does not bring the program forward over others: an inactive program's
    key window becomes key when the person comes to it. */
 void sga_window_show(int a_window) { [(NSWindow *)sga_get(a_window) makeKeyAndOrderFront:nil]; sga_pills_sync(); }
-void sga_window_close(int a_window) { [(NSWindow *)sga_get(a_window) orderOut:nil]; }
+/* A closed window is gone for good (GUI_WINDOW.close; nothing is called on it after). Let go
+   of what it holds, so a program that opens and closes windows stays flat (2026-11-13: each
+   closed window kept its views, their layers and its canvases' images, about 14 MB a window):
+   the canvases' images and every layer's contents are released, the views leave the window,
+   and the window itself is closed (its backing store goes) and dropped from the id table. */
+static void sga_let_go_of_views(NSView *a_view)
+{
+	if ([a_view isKindOfClass:[SGACanvas class]]) {
+		SGACanvas *c = (SGACanvas *)a_view;
+		if (c->image) CGImageRelease(c->image);
+		c->image = NULL;
+	}
+	[[a_view layer] setContents:nil];
+	for (NSView *l_sub in [a_view subviews]) sga_let_go_of_views(l_sub);
+}
+
+void sga_window_close(int a_window)
+{
+	NSWindow *w = sga_get(a_window);
+	if (![w isKindOfClass:[NSWindow class]]) return;
+	[w orderOut:nil];
+	sga_let_go_of_views([w contentView]);
+	[s_content_bottom removeObjectForKey:@(a_window)];
+	[w setContentView:[[NSView alloc] initWithFrame:NSZeroRect]];
+	[w close];
+	s_objects[a_window] = nil;
+	sga_pills_sync();
+}
 void sga_window_set_title(int a_window, const char *a_title) { [(NSWindow *)sga_get(a_window) setTitle:sga_string(a_title)]; }
 
 /* A container: a flipped wrapper holding a stack or grid inside leading, top,
