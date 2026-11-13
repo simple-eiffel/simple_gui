@@ -5047,7 +5047,11 @@ __attribute__((weak)) double sg_fade_of[SG_MAX] = {0};
 __attribute__((weak)) int sg_fade_set[SG_MAX] = {0};
 __attribute__((weak)) int sg_blocked[SG_MAX] = {0};
 
-typedef struct { GtkWidget parent_instance; GtkWidget *child; int effect; double fraction; } SgReveal;
+typedef struct { GtkWidget parent_instance; GtkWidget *child; int effect; double fraction; int in_place; } SgReveal;
+/* Tests, 1x-b: the last size each widget was seen allocated (its slot), for the moments GTK
+   has not laid it out again yet. */
+__attribute__((weak)) int sg_last_w[SG_MAX] = {0};
+__attribute__((weak)) int sg_last_h[SG_MAX] = {0};
 typedef struct { GtkWidgetClass parent_class; } SgRevealClass;
 
 static double sg_opacity_value(int id) { return sg_opacity_set[id] ? sg_opacity_of[id] : 1.0; }
@@ -5072,6 +5076,7 @@ static void sg_reveal_measure(GtkWidget *w, GtkOrientation o, int for_size, int 
     if (r->child && gtk_widget_get_visible(r->child)) gtk_widget_measure(r->child, o, -1, &cmin, &cnat, NULL, NULL);
     (void) for_size;
     shares = (o == GTK_ORIENTATION_HORIZONTAL) ? sg_reveal_shares_width(r->effect) : sg_reveal_shares_height(r->effect);
+    if (r->in_place) shares = 0;   /* a window's content: it moves in clipped, taking its full space */
     if (shares) {
         *mn = (int) (cnat * r->fraction + 0.5);
         *nat = *mn;
@@ -5095,7 +5100,18 @@ static void sg_reveal_allocate(GtkWidget *w, int width, int height, int baseline
         gtk_widget_measure(r->child, GTK_ORIENTATION_VERTICAL, fw, &cmin, &cnat, NULL, NULL);
         fh = cnat > height ? cnat : height;
     }
-    switch (r->effect) {
+    if (r->in_place && r->effect >= 2 && r->effect <= 5) {
+        /* a window's content: full size, moved in by the part not yet shown, clipped */
+        int hidden_h = (int) ((1.0 - r->fraction) * fh + 0.5), hidden_w = (int) ((1.0 - r->fraction) * fw + 0.5);
+        switch (r->effect) {
+            case 2: oy = - hidden_h; break;
+            case 3: oy = hidden_h; break;
+            default:
+                from_left = (r->effect == 4) != (gtk_widget_get_direction(w) == GTK_TEXT_DIR_RTL);
+                ox = from_left ? - hidden_w : hidden_w;
+                break;
+        }
+    } else switch (r->effect) {
         case 2: oy = height - fh; break;                          /* from the top */
         case 3: oy = 0; break;                                    /* from the bottom */
         case 4: case 5:
@@ -5156,12 +5172,20 @@ static GType sg_reveal_type(void) {
 
 /* The wrapper around widget `id' while a slide or grow is part way; NULL when it cannot be
    wrapped (its parent is neither a box nor a window). */
+/* Is `w' a window's content (sg_window_set_content puts it in the window's middle box)? */
+static int sg_is_window_content(GtkWidget *w) {
+    GtkRoot *root = gtk_widget_get_root(w);
+    return root && GTK_IS_WINDOW(root) && g_object_get_data(G_OBJECT(root), "sg-content") == (gpointer) w;
+}
+
 static SgReveal *sg_reveal_wrap(int id) {
     GtkWidget *w = sg_w[id], *parent, *prev, *rv;
     SgReveal *r;
+    int in_place;
     if (!w) return NULL;
     r = (SgReveal *) g_object_get_data(G_OBJECT(w), "sg-reveal");
     if (r) return r;
+    in_place = sg_is_window_content(w);   /* asked before it leaves its place */
     parent = gtk_widget_get_parent(w);
     if (!parent || !(GTK_IS_BOX(parent) || GTK_IS_WINDOW(parent))) return NULL;
     rv = GTK_WIDGET(g_object_new(sg_reveal_type(), NULL));
@@ -5178,6 +5202,7 @@ static SgReveal *sg_reveal_wrap(int id) {
     }
     r = (SgReveal *) rv;
     r->child = w;
+    r->in_place = (in_place || GTK_IS_WINDOW(parent)) ? 1 : 0;
     gtk_widget_set_parent(w, rv);
     g_object_unref(w);
     g_object_set_data(G_OBJECT(w), "sg-reveal", r);
@@ -5258,23 +5283,40 @@ static double sg_test_reveal_shown(int id) {
     return r ? r->fraction : sg_fade_value(id);
 }
 
-/* Tests, 1x-b: the space the widget takes along an axis: its wrapper's measured size while
-   wrapped (GTK lays out on the next frame), else its allocation, or its natural size before
-   GTK has laid it out again; -1 when gone. */
+/* Tests, 1x-b: the space the widget takes along an axis: in a box while wrapped, the share its
+   wrapper asks for (GTK lays out on the next frame); else its allocation; before GTK has laid it
+   out again, a window's content keeps its slot, a filling child across a box takes the box's
+   size, anything else its natural size; -1 when gone. */
 static int sg_test_extent(int id, int vertical) {
     SgReveal *r;
-    int mn = 0, nat = 0;
-    if (!sg_w[id]) return -1;
-    r = (SgReveal *) g_object_get_data(G_OBJECT(sg_w[id]), "sg-reveal");
-    if (r) {
-        gtk_widget_measure(GTK_WIDGET(r), vertical ? GTK_ORIENTATION_VERTICAL : GTK_ORIENTATION_HORIZONTAL, -1, &mn, &nat, NULL, NULL);
+    GtkWidget *w = sg_w[id], *slot, *parent;
+    GtkOrientation o = vertical ? GTK_ORIENTATION_VERTICAL : GTK_ORIENTATION_HORIZONTAL;
+    int mn = 0, nat = 0, last, box, margins;
+    if (!w) return -1;
+    r = (SgReveal *) g_object_get_data(G_OBJECT(w), "sg-reveal");
+    slot = r ? GTK_WIDGET(r) : w;
+    nat = vertical ? gtk_widget_get_height(slot) : gtk_widget_get_width(slot);
+    if (nat > 0 && (!r || r->in_place)) {
+        if (vertical) sg_last_h[id] = nat; else sg_last_w[id] = nat;
+    }
+    last = vertical ? sg_last_h[id] : sg_last_w[id];
+    if (r && !r->in_place) {
+        /* in a box: the share its wrapper asks for (GTK lays it out on the next frame) */
+        gtk_widget_measure(slot, o, -1, &mn, &nat, NULL, NULL);
         return nat;
     }
-    nat = vertical ? gtk_widget_get_height(sg_w[id]) : gtk_widget_get_width(sg_w[id]);
-    if (nat <= 0) {
-        /* just put back from its wrapper: GTK lays it out on the next frame; its natural
-           size is the space it takes */
-        gtk_widget_measure(sg_w[id], vertical ? GTK_ORIENTATION_VERTICAL : GTK_ORIENTATION_HORIZONTAL, -1, &mn, &nat, NULL, NULL);
+    if (nat > 0) return nat;
+    /* not laid out again yet (just shown, or put back from its wrapper) */
+    parent = gtk_widget_get_parent(slot);
+    if ((r || sg_is_window_content(w)) && last > 0) return last;   /* a window's content keeps its slot */
+    gtk_widget_measure(w, o, -1, &mn, &nat, NULL, NULL);
+    if (parent && GTK_IS_BOX(parent) && gtk_orientable_get_orientation(GTK_ORIENTABLE(parent)) != o
+            && (vertical ? gtk_widget_get_valign(w) : gtk_widget_get_halign(w)) == GTK_ALIGN_FILL) {
+        /* across a box a filling child takes the box's size, less its margins */
+        box = vertical ? gtk_widget_get_height(parent) : gtk_widget_get_width(parent);
+        margins = vertical ? gtk_widget_get_margin_top(w) + gtk_widget_get_margin_bottom(w)
+                           : gtk_widget_get_margin_start(w) + gtk_widget_get_margin_end(w);
+        if (box - margins > nat) nat = box - margins;
     }
     return nat;
 }
