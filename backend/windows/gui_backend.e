@@ -1295,6 +1295,34 @@ feature -- Controls
 			end
 		end
 
+	scroll_area_x (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_SCROLL_AREA} widget (an_id) as al_s then
+				Result := (al_s.scroll_x / dpi).rounded.max (0)
+			end
+		end
+
+	scroll_area_y (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_SCROLL_AREA} widget (an_id) as al_s then
+				Result := (al_s.scroll_y / dpi).rounded.max (0)
+			end
+		end
+
+	scroll_area_max_x (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_SCROLL_AREA} widget (an_id) as al_s then
+				Result := (al_s.max_scroll_x / dpi).floor.max (0)
+			end
+		end
+
+	scroll_area_max_y (an_id: INTEGER): INTEGER
+		do
+			if attached {SW_SCROLL_AREA} widget (an_id) as al_s then
+				Result := (al_s.max_scroll / dpi).floor.max (0)
+			end
+		end
+
 	image: INTEGER
 			-- An empty picture until a file or an image file's bytes are given.
 		local

@@ -1508,7 +1508,41 @@ feature -- Common widget state
 		end
 
 	scroll_area_scroll_to (an_id, a_x, a_y: INTEGER)
+			-- Scroll area `an_id''s content point (`a_x', `a_y') to its top left, at once, as far
+			-- as it goes.
 		deferred
+		end
+
+	scroll_area_x (an_id: INTEGER): INTEGER
+			-- How far scroll area `an_id' is scrolled from its content's left edge now, in
+			-- logical pixels, after any clamping (1x-d: a toolkit's rubber band answers 0 or the end).
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	scroll_area_y (an_id: INTEGER): INTEGER
+			-- How far scroll area `an_id' is scrolled from its content's top edge now, in logical
+			-- pixels, after any clamping.
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	scroll_area_max_x (an_id: INTEGER): INTEGER
+			-- The furthest `scroll_area_x' goes: the content's width less the visible width, in
+			-- logical pixels (0 when the content fits).
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	scroll_area_max_y (an_id: INTEGER): INTEGER
+			-- The furthest `scroll_area_y' goes: the content's height less the visible height, in
+			-- logical pixels (0 when the content fits).
+		deferred
+		ensure
+			not_negative: Result >= 0
 		end
 
 	image: INTEGER
