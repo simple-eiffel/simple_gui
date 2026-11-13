@@ -5149,10 +5149,11 @@ feature -- Appearance
 		end
 
 	test_opacity_shown (an_id: INTEGER): REAL_64
-			-- 1x: the opacity simple_widgets paints the widget at; -1 when it is gone.
+			-- 1x: the opacity simple_widgets paints the widget at, a fade's share included; -1
+			-- when it is gone.
 		do
 			if attached widget (an_id) as al_w then
-				Result := al_w.opacity
+				Result := al_w.painted_opacity
 			else
 				Result := -1.0
 			end
