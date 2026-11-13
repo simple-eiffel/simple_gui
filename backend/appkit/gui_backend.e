@@ -294,39 +294,30 @@ feature -- Controls
 		end
 
 	pages: INTEGER
-			-- 1x-c interface: a tabless tabs control until this platform's half.
-		do
-			Result := tabs
-			tabs_set_position (Result, 0)
+			-- 1x-c: a host view of our own, the pages pinned inside it, one shown.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_pages();"
 		end
 
 	pages_extend (a_pages, a_page: INTEGER)
-			-- 1x-c interface: as a tab (this platform's half replaces it).
-		local
-			l_title: C_STRING
-		do
-			l_title := to_c ("Page")
-			tabs_extend (a_pages, a_page, l_title.item)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_pages_extend($a_pages, $a_page);"
 		end
 
 	pages_select (a_pages, a_page: INTEGER)
-			-- 1x-c interface: as a tab.
-		do
-			tabs_select (a_pages, a_page)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_pages_select($a_pages, $a_page);"
 		end
 
 	pages_selected (a_pages: INTEGER): INTEGER
-			-- 1x-c interface: as a tab.
-		do
-			Result := tabs_selected (a_pages)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_pages_selected($a_pages);"
 		end
 
 	pages_set_transition_frame (an_id, a_from, a_to, a_kind: INTEGER; a_fraction: REAL_64)
-			-- 1x-c interface: no frames yet (this platform's half); the new page at once.
-		do
-			if tabs_selected (an_id) /= a_to then
-				tabs_select (an_id, a_to)
-			end
+			-- 1x-c: the page left and the new one as still images over the live new page.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_pages_transition_frame($an_id, $a_from, $a_to, $a_kind, $a_fraction);"
 		end
 
 	list: INTEGER
@@ -1905,9 +1896,8 @@ feature -- Common widget state
 		end
 
 	test_transition_shown (an_id: INTEGER): REAL_64
-			-- 1x-c: not read yet (this platform's half): -1.
-		do
-			Result := -1.0
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_transition_shown($an_id);"
 		end
 
 	test_reveal_shown (an_id: INTEGER): REAL_64
