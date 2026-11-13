@@ -302,6 +302,13 @@ void sga_stop_frame_ticks(void);
 double sga_test_opacity_shown(int a_id);
 int sga_test_pointer_reaches(int a_id);
 int sga_test_frames(int a_which);
+
+/* 1x-b: animated show and hide */
+void sga_set_reveal(int a_id, int a_effect, double a_fraction, int a_takes_input);
+void sga_yield_focus(int a_id);
+double sga_test_reveal_shown(int a_id);
+int sga_test_extent(int a_id, int a_vertical);
+int sga_test_has_focus(int a_id);
 const char *sga_test_style_value(int a_id, const char *a_key);
 void sga_test_set_high_contrast(int a_on);
 void sga_test_pick(int a_source, int a_row);
