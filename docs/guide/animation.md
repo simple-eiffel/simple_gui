@@ -99,9 +99,9 @@ Click **Save**. Over 200 milliseconds the notice slides down from the top edge o
 
 | | Linux (GTK 4) | macOS (AppKit) | Windows (simple_widgets) |
 |---|---|---|---|
-| Frame pacing | GTK's frame clock | The view's display link | The compositor (DWM), on a helper thread; a high-resolution timer when DWM gives no frame |
+| Frame pacing | GTK's frame clock | The screen's display link (the key window's screen, else the main one); a 1/60-second timer when there is no screen | The compositor (DWM), on a helper thread; a high-resolution timer when DWM gives no frame |
 | Opacity | `gtk_widget_set_opacity`; at 0 the widget takes no pointer input | `alphaValue`; the backend stops clicks at 0 | Drawn at that alpha; at 0 a click goes to its container |
-| Slides and grow | A reveal container wraps the widget while it animates, then lets it go | The stack's slot, or the window content's edge constraints | Drawn moved and clipped, or scaled about the middle |
+| Slides and grow | A reveal container wraps the widget while it animates, then lets it go | The stack's slot, or the window content's edge constraints; grow scales a snapshot | Drawn moved and clipped, or scaled about the middle |
 | Reduced motion | GTK's `gtk-enable-animations` | System Settings, Accessibility, Display, Reduce motion | Windows' "Show animations" setting |
 | Looks or behaves differently | Nothing intended: one shared clock decides every value, and the shared tests check each effect, its share of space and its opacity on all three. | Same. | Same. |
 
