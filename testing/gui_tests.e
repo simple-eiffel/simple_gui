@@ -2911,6 +2911,168 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_every_effect_shows_its_share_in_both_stacks
+			-- 1x-b: each of the six effects, in a vertical and a horizontal stack, half way
+			-- through a show: the toolkit shows half; a slide along the stack takes half its
+			-- space, one across the stack keeps the stack's size, a fade keeps the full space;
+			-- and at the end each is whole, in its full space, at full opacity. Parts a backend
+			-- can't read yet (-1) are left out.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_label, l_other: GUI_LABEL
+			l_effect, l_full, l_full_across, l_half: INTEGER
+			l_vertical, l_along: BOOLEAN
+		do
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			across {ARRAY [BOOLEAN]} <<True, False>> as ic_vertical loop
+				l_vertical := ic_vertical
+				create l_window.make ("Effects", 360, 240)
+				if l_vertical then create l_stack.make_vertical else create l_stack.make_horizontal end
+				create l_label.make ("Effect")
+				create l_other.make ("Neighbor")
+				l_stack.extend (l_label)
+				l_stack.extend (l_other)
+				l_window.set_content (l_stack)
+				l_window.show
+				settle_window
+				l_full := backend.test_extent (l_label.id, l_vertical)
+				l_full_across := backend.test_extent (l_label.id, not l_vertical)
+				from l_effect := l_label.Effect_fade until l_effect > l_label.Effect_grow loop
+					l_label.hide
+					l_label.show_animated (l_effect)
+					app.animation_clock.step (100)
+					if backend.test_reveal_shown (l_label.id) /= -1.0 then
+						assert ("half shown, effect " + l_effect.out, (backend.test_reveal_shown (l_label.id) - 0.5).abs < 0.02)
+					end
+					if l_full > 0 and then backend.test_extent (l_label.id, l_vertical) /= -1 then
+						l_half := backend.test_extent (l_label.id, l_vertical)
+						l_along := (l_effect = l_label.Effect_grow)
+							or (l_vertical and (l_effect = l_label.Effect_slide_from_top or l_effect = l_label.Effect_slide_from_bottom))
+							or (not l_vertical and (l_effect = l_label.Effect_slide_from_leading or l_effect = l_label.Effect_slide_from_trailing))
+						if l_along then
+							assert ("half the space along the stack, effect " + l_effect.out + ": " + l_half.out + " of " + l_full.out,
+								(l_half - l_full // 2).abs <= 2)
+						else
+							assert ("the full space, effect " + l_effect.out + ": " + l_half.out + " of " + l_full.out,
+								(l_half - l_full).abs <= 2)
+						end
+					end
+					app.animation_clock.step (100)
+					assert ("whole, effect " + l_effect.out, l_label.reveal = 1.0)
+					if l_full > 0 and then backend.test_extent (l_label.id, l_vertical) /= -1 then
+						assert ("full space at the end, effect " + l_effect.out, (backend.test_extent (l_label.id, l_vertical) - l_full).abs <= 2)
+						assert ("full space across at the end, effect " + l_effect.out, (backend.test_extent (l_label.id, not l_vertical) - l_full_across).abs <= 2)
+					end
+					if backend.test_opacity_shown (l_label.id) /= -1.0 then
+						assert ("opaque at the end, effect " + l_effect.out, backend.test_opacity_shown (l_label.id) = 1.0)
+					end
+					l_effect := l_effect + 1
+				end
+				l_window.close
+			end
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+		end
+
+	test_reveals_at_a_window_content_and_fades_elsewhere
+			-- 1x-b, the rule on all three: slides and grow reveal in stacks and as a window's
+			-- content; elsewhere (a grid cell here) they fade. As the content the window keeps
+			-- its size (the content moves in, clipped); in a grid the cell keeps its space and
+			-- the widget fades. Half way the toolkit shows half; at the end all is whole.
+		local
+			l_window: GUI_WINDOW
+			l_grid: GUI_GRID
+			l_label, l_cell: GUI_LABEL
+			l_effect, l_full_w, l_full_h: INTEGER
+		do
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			create l_window.make ("Content", 300, 160)
+			create l_label.make ("The window's content")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			l_full_w := backend.test_extent (l_label.id, False)
+			l_full_h := backend.test_extent (l_label.id, True)
+			from l_effect := l_label.Effect_slide_from_top until l_effect > l_label.Effect_grow loop
+				l_label.hide
+				l_label.show_animated (l_effect)
+				app.animation_clock.step (100)
+				if backend.test_reveal_shown (l_label.id) /= -1.0 then
+					assert ("content half shown, effect " + l_effect.out, (backend.test_reveal_shown (l_label.id) - 0.5).abs < 0.02)
+				end
+				if l_full_h > 0 and then backend.test_extent (l_label.id, True) /= -1 then
+					assert ("the window keeps its size, effect " + l_effect.out,
+						(backend.test_extent (l_label.id, True) - l_full_h).abs <= 2 and (backend.test_extent (l_label.id, False) - l_full_w).abs <= 2)
+				end
+				app.animation_clock.step (100)
+				assert ("content whole, effect " + l_effect.out, l_label.reveal = 1.0)
+				if backend.test_opacity_shown (l_label.id) /= -1.0 then
+					assert ("content opaque at the end, effect " + l_effect.out, backend.test_opacity_shown (l_label.id) = 1.0)
+				end
+				l_effect := l_effect + 1
+			end
+			l_window.close
+			create l_window.make ("Grid", 300, 160)
+			create l_grid.make
+			create l_cell.make ("In a cell")
+			l_grid.put (l_cell, 1, 1)
+			l_grid.put (create {GUI_LABEL}.make ("Beside it"), 1, 2)
+			l_window.set_content (l_grid)
+			l_window.show
+			settle_window
+			l_full_h := backend.test_extent (l_cell.id, True)
+			l_cell.hide
+			l_cell.show_animated (l_cell.Effect_slide_from_top)
+			app.animation_clock.step (100)
+			if backend.test_opacity_shown (l_cell.id) /= -1.0 then
+				assert ("a grid cell fades: half seen", (backend.test_opacity_shown (l_cell.id) - 0.5).abs < 0.02)
+			end
+			if l_full_h > 0 and then backend.test_extent (l_cell.id, True) /= -1 then
+				assert ("a grid cell keeps its space", (backend.test_extent (l_cell.id, True) - l_full_h).abs <= 2)
+			end
+			app.animation_clock.step (100)
+			if backend.test_opacity_shown (l_cell.id) /= -1.0 then
+				assert ("a grid cell opaque at the end", backend.test_opacity_shown (l_cell.id) = 1.0)
+			end
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_opacity_and_a_fade_multiply
+			-- 1x-b: what shows is the opacity times the fade's reveal: at opacity 0.5, a fade
+			-- half way shows 0.25, and at its end 0.5 again.
+		local
+			l_window: GUI_WINDOW
+			l_label: GUI_LABEL
+		do
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			create l_window.make ("Multiply", 240, 120)
+			create l_label.make ("Half seen")
+			l_window.set_content (l_label)
+			l_window.show
+			settle_window
+			l_label.set_opacity (0.5)
+			l_label.hide
+			l_label.show_animated (l_label.Effect_fade)
+			app.animation_clock.step (100)
+			if backend.test_opacity_shown (l_label.id) /= -1.0 then
+				assert ("a quarter half way: " + backend.test_opacity_shown (l_label.id).out, (backend.test_opacity_shown (l_label.id) - 0.25).abs < 0.01)
+			end
+			app.animation_clock.step (100)
+			if backend.test_opacity_shown (l_label.id) /= -1.0 then
+				assert ("the opacity at the end", (backend.test_opacity_shown (l_label.id) - 0.5).abs < 0.01)
+			end
+			assert ("the opacity kept", l_label.opacity = 0.5)
+			app.animation_clock.set_manual (False)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
 	test_the_toolkit_shows_the_reveal_and_the_focus_leaves
 			-- 1x-b, where the toolkit can tell (each platform's half): half way through a slide
 			-- the toolkit shows half, the widget takes about half its space along the slide,
