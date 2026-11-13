@@ -3,6 +3,11 @@ note
 		A Cairo drawing area. The program renders a finished image at device scale and
 		`present's it (the shell_present rule); the backend only shows it. Absolute
 		placement is allowed here and nowhere else.
+
+		Screen readers: named with `set_accessible_label', a canvas reads as an image ("img") on
+		every platform (#126). Unnamed, it reads as an unnamed image on GTK but as a custom element
+		on Windows and the Mac - a named platform difference: GTK 4.14 fixes a widget's role when it
+		is created, so every GTK canvas is created as an image.
 	]"
 
 class

@@ -205,6 +205,13 @@ feature -- Tests
 			assert ("a real scale", l_canvas.scale > 0.0 and l_canvas.scale <= l_canvas.scale_factor)
 			assert ("pixel width is width times scale", l_canvas.pixel_width = (l_canvas.width * l_canvas.scale).rounded)
 			assert ("sized", l_canvas.width > 0 and l_canvas.height > 0)
+				-- unnamed: the named difference (#136) - GTK creates every canvas as an image (its role
+				-- is fixed at creation); Windows and the Mac name a canvas an image only once named
+			if {PLATFORM}.is_unix and not {PLATFORM}.is_mac then
+				assert ("GTK: an unnamed canvas is an image: " + l_canvas.accessible_role.to_string_8, l_canvas.accessible_role.same_string ("img"))
+			else
+				assert ("an unnamed canvas is not an image: " + l_canvas.accessible_role.to_string_8, not l_canvas.accessible_role.same_string ("img"))
+			end
 			l_window.close
 		end
 
