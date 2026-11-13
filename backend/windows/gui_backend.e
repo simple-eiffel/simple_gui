@@ -3511,6 +3511,8 @@ feature -- Path controls, continued
 				quiet := quiet + 1
 				al_t.select_tab (a_page)
 				quiet := quiet - 1
+					-- 1x-c: at once ends any switch being shown
+				al_t.end_transition
 				changed
 			end
 		end
@@ -3772,14 +3774,14 @@ feature -- Path controls, continued
 		end
 
 	pages: INTEGER
-			-- 1x-c interface: a tabless tabs control until this platform's half.
+			-- 1x-c: the drawn page host, an SW_TABS with no strip.
 		do
 			Result := tabs
 			tabs_set_position (Result, 0)
 		end
 
 	pages_extend (a_pages, a_page: INTEGER)
-			-- 1x-c interface: as a tab (this platform's half replaces it).
+			-- 1x-c: a page of the host (its tab title is never shown).
 		local
 			l_title: C_STRING
 		do
@@ -3788,22 +3790,29 @@ feature -- Path controls, continued
 		end
 
 	pages_select (a_pages, a_page: INTEGER)
-			-- 1x-c interface: as a tab.
+			-- 1x-c: as a tab, ending any switch shown.
 		do
 			tabs_select (a_pages, a_page)
 		end
 
 	pages_selected (a_pages: INTEGER): INTEGER
-			-- 1x-c interface: as a tab.
+			-- 1x-c: as a tab.
 		do
 			Result := tabs_selected (a_pages)
 		end
 
 	pages_set_transition_frame (an_id, a_from, a_to, a_kind: INTEGER; a_fraction: REAL_64)
-			-- 1x-c interface: no frames yet (this platform's half); the new page at once.
+			-- 1x-c: SW_TABS draws the switch (both pages, crossfaded or slid); the new page is
+			-- selected quietly at the first frame.
 		do
-			if tabs_selected (an_id) /= a_to then
-				tabs_select (an_id, a_to)
+			if attached {SW_TABS} widget (an_id) as al_t and then a_from <= al_t.pages.count and then a_to <= al_t.pages.count then
+				if al_t.selected_index /= a_to then
+					quiet := quiet + 1
+					al_t.select_tab (a_to)
+					quiet := quiet - 1
+				end
+				al_t.show_transition (a_from, a_kind, a_fraction)
+				changed
 			end
 		end
 
@@ -5150,9 +5159,13 @@ feature -- Appearance
 		end
 
 	test_transition_shown (an_id: INTEGER): REAL_64
-			-- 1x-c: not read yet (this platform's half): -1.
+			-- 1x-c: the switch SW_TABS draws (1 when none); -1 for anything else.
 		do
-			Result := -1.0
+			if attached {SW_TABS} widget (an_id) as al_t then
+				Result := al_t.transition_fraction
+			else
+				Result := -1.0
+			end
 		end
 
 	test_reveal_shown (an_id: INTEGER): REAL_64

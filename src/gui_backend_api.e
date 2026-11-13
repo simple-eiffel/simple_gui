@@ -1087,7 +1087,8 @@ feature -- Controls
 		end
 
 	tabs_select (a_tabs, a_page: INTEGER)
-			-- Show page `a_page' (1-based) WITHOUT a page-changed event.
+			-- Show page `a_page' (1-based) WITHOUT a page-changed event. At once: it ends any
+			-- switch being shown (1x-c).
 		deferred
 		end
 
@@ -1115,7 +1116,7 @@ feature -- Controls
 		end
 
 	pages_select (a_pages, a_page: INTEGER)
-			-- Show page `a_page' (1-based) alone, at once.
+			-- Show page `a_page' (1-based) alone, at once, ending any switch being shown.
 		require
 			positive: a_page >= 1
 		deferred
@@ -1138,6 +1139,8 @@ feature -- Controls
 			-- it shows alone, as `pages_select' or `tabs_select' leaves it. Only the new page
 			-- takes input during the switch. Shared code sends every frame; the toolkit's own
 			-- transitions stay off. A frame for a widget whose window has closed does nothing.
+			-- The outgoing page may be shown as a still image during the switch (AppKit's tabs
+			-- have swapped their views before the user's choice reaches us; MACMINI's review).
 		require
 			known_kind: a_kind = 1 or a_kind = 2
 			pages_given: a_from >= 1 and a_to >= 1 and a_from /= a_to
