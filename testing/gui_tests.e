@@ -2706,7 +2706,10 @@ feature -- The remaining controls (1j)
 			-- Linux: the 95th percentile is printed and logged but does not fail (Larry,
 			-- 2026-11-13): Linux runs in WSLg, whose remote compositor's timing varies run to run
 			-- (17 to 32 ms on the same build; the GTK renderer is not the cause), and no native
-			-- Linux desktop is available to measure on. Every other check still holds there.
+			-- Linux desktop is available to measure on. Every other check still holds there,
+			-- the longest gap included: a GTK estimate more than 3 refresh periods past a paint's
+			-- end is stale (one read as a 3.6 s gap in WSLg, 2026-11-13), so the frame is stamped
+			-- with the paint's end instead, as Windows does when DWM gives no timing.
 		local
 			l_window: GUI_WINDOW
 			l_label: GUI_LABEL
