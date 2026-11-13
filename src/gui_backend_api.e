@@ -2437,10 +2437,14 @@ feature -- Styles (1w)
 	test_frames (a_which: INTEGER): INTEGER
 			-- Tests only, 1x: the frames counted since the last reset, where the toolkit can
 			-- tell when a frame shows: `a_which' 0 painted (a value set before its frame's
-			-- target time), 1 missed, 2 the longest gap between painted frames in tenths of a
-			-- millisecond; 3 resets. -1 where frames can't be counted yet.
+			-- target time), 1 missed, 2 the longest gap between painted frames, 4 the
+			-- 95th-percentile gap between painted frames (nearest rank), both in tenths of a
+			-- millisecond (0 with no gap yet), between the vblanks the frames made (a draw that
+			-- ends after its vblank takes the next); 5 the 95th-percentile gap by the measure
+			-- before vblank stamps (tick or aimed time; for the record); 3 resets. -1 where
+			-- frames can't be counted yet.
 		require
-			known_question: a_which >= 0 and a_which <= 3
+			known_question: a_which >= 0 and a_which <= 5
 		deferred
 		end
 

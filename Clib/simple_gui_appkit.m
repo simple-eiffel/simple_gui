@@ -11988,11 +11988,29 @@ static double s_tick_target;        /* the latest tick's target time (when its f
 static double s_frame_counted;      /* the target of the frame last counted */
 static int s_frames_painted, s_frames_missed;
 static double s_frame_painted_last, s_frame_gap_longest;
+#define SGA_FRAME_GAPS 8192
+static double s_frame_gaps[SGA_FRAME_GAPS];   /* the gaps between the vblanks painted frames made, ms (tests) */
+static int s_frame_gap_count;
+static double s_frame_tick_gaps[SGA_FRAME_GAPS];   /* the gaps by target time, the measure before (tests) */
+static int s_frame_tick_gap_count;
+static double s_tick_period;        /* the display's refresh period, s */
+static double s_stamp_target;       /* a painted frame's target, waiting for its drawing to end; 0 none */
+static double s_frame_vblank_last;  /* the vblank the last painted frame made */
+static CFRunLoopObserverRef s_draw_observer;
 
 @implementation SGAFrameClock
 - (void)tick:(id)a_source
 {
-	s_tick_target = [a_source isKindOfClass:[CADisplayLink class]] ? [(CADisplayLink *)a_source targetTimestamp] : CACurrentMediaTime() + 1.0 / 60;
+	if ([a_source isKindOfClass:[CADisplayLink class]]) {
+		CADisplayLink *l_link = a_source;
+		s_tick_target = [l_link targetTimestamp];
+		double l_period = [l_link targetTimestamp] - [l_link timestamp];
+		s_tick_period = l_period > 0.001 ? l_period : 1.0 / 60;
+	}
+	else {
+		s_tick_target = CACurrentMediaTime() + 1.0 / 60;
+		s_tick_period = 1.0 / 60;
+	}
 	if (s_tick_queued) return;
 	if (!sga_push(62, 0, 0, 0, 0)) return;
 	s_tick_queued = 1;
@@ -12011,16 +12029,38 @@ static int sga_frame_tick_read(void)
 	return l_ms < 0 ? 0 : l_ms;
 }
 
+/* A painted frame's drawing has ended (Core Animation has committed it): stamp it with the
+   vblank it made, the first at or after now. A draw that ends after its target takes the next
+   vblank, so a late frame shows as a two-frame gap (EIF-GROUP, 2026-11-12). */
+static void sga_frame_drawn(CFRunLoopObserverRef a_observer, CFRunLoopActivity a_activity, void *a_info)
+{
+	if (s_stamp_target <= 0) return;
+	double l_end = CACurrentMediaTime();
+	double l_vblank = s_stamp_target;
+	if (l_end > l_vblank) l_vblank += ceil((l_end - l_vblank) / s_tick_period) * s_tick_period;
+	s_stamp_target = 0;
+	if (s_frame_vblank_last > 0) {
+		double l_gap = (l_vblank - s_frame_vblank_last) * 1000.0;
+		s_frame_gap_longest = fmax(s_frame_gap_longest, l_gap);
+		if (s_frame_gap_count < SGA_FRAME_GAPS) s_frame_gaps[s_frame_gap_count++] = l_gap;
+	}
+	s_frame_vblank_last = l_vblank;
+}
+
 /* A value was set for the frame being drawn: count it as painted when it is set before that
-   frame's target time, else missed (the first value set for each frame only). */
+   frame's target time, else missed (the first value set for each frame only). A painted frame
+   waits for its drawing to end to be stamped (`sga_frame_drawn'); its gap by target time, the
+   measure before, is kept for the record. */
 static void sga_frame_value_set(void)
 {
 	if (!s_frame_link && !s_frame_timer) return;
 	if (s_tick_target <= 0 || s_tick_target == s_frame_counted) return;
 	s_frame_counted = s_tick_target;
 	if (CACurrentMediaTime() < s_tick_target) {
-		if (s_frame_painted_last > 0) s_frame_gap_longest = fmax(s_frame_gap_longest, (s_tick_target - s_frame_painted_last) * 1000.0);
+		if (s_frame_painted_last > 0 && s_frame_tick_gap_count < SGA_FRAME_GAPS)
+			s_frame_tick_gaps[s_frame_tick_gap_count++] = (s_tick_target - s_frame_painted_last) * 1000.0;
 		s_frame_painted_last = s_tick_target;
+		s_stamp_target = s_tick_target;
 		s_frames_painted++;
 	}
 	else s_frames_missed++;
@@ -12032,6 +12072,12 @@ void sga_start_frame_ticks(void)
 	if (!s_frame_clock) s_frame_clock = [SGAFrameClock new];
 	s_tick_last = CACurrentMediaTime();
 	s_tick_queued = 0;
+	s_tick_period = 1.0 / 60;
+	if (!s_draw_observer) {
+			/* after Core Animation's commit (order 2000000), so the drawing has ended */
+		s_draw_observer = CFRunLoopObserverCreate(NULL, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, 2100000, sga_frame_drawn, NULL);
+		CFRunLoopAddObserver(CFRunLoopGetMain(), s_draw_observer, kCFRunLoopCommonModes);
+	}
 	NSScreen *l_screen = [[NSApp keyWindow] screen] ?: [NSScreen mainScreen];
 	if (l_screen && [l_screen respondsToSelector:@selector(displayLinkWithTarget:selector:)]) {
 		s_frame_link = [l_screen displayLinkWithTarget:s_frame_clock selector:@selector(tick:)];
@@ -12048,6 +12094,12 @@ void sga_stop_frame_ticks(void)
 	[s_frame_link invalidate]; s_frame_link = nil;
 	[s_frame_timer invalidate]; s_frame_timer = nil;
 	s_tick_target = 0;
+	s_stamp_target = 0;
+	if (s_draw_observer) {
+		CFRunLoopRemoveObserver(CFRunLoopGetMain(), s_draw_observer, kCFRunLoopCommonModes);
+		CFRelease(s_draw_observer);
+		s_draw_observer = NULL;
+	}
 }
 
 /* Tests */
@@ -12073,16 +12125,42 @@ int sga_test_pointer_reaches(int a_id)
 	return l_hit && [l_hit isDescendantOf:v] ? 1 : 0;
 }
 
+static int sga_compare_doubles(const void *x, const void *y)
+{
+	double a = *(const double *)x, b = *(const double *)y;
+	return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/* The 95th-percentile of `a_count' gaps (ms) by nearest rank, in tenths of a millisecond; 0
+   with none. */
+static int sga_percentile_95(const double *a_gaps, int a_count)
+{
+	if (!a_count) return 0;
+	double *l_sorted = malloc(sizeof(double) * (size_t)a_count);
+	if (!l_sorted) return 0;
+	memcpy(l_sorted, a_gaps, sizeof(double) * (size_t)a_count);
+	qsort(l_sorted, (size_t)a_count, sizeof(double), sga_compare_doubles);
+	int l_index = (int)ceil(0.95 * a_count) - 1;   /* nearest rank */
+	int l_result = (int)lround(l_sorted[l_index < 0 ? 0 : l_index] * 10.0);
+	free(l_sorted);
+	return l_result;
+}
+
 /* The frames counted since the last reset: which 0 painted, 1 missed, 2 the longest gap
-   between painted frames in tenths of a millisecond; 3 resets them. */
+   between painted frames and 4 the 95th-percentile gap, both in tenths of a millisecond (0
+   with no gap yet) between the vblanks the frames made; 5 the 95th-percentile gap by target
+   time, the measure before (for the record); 3 resets them. */
 int sga_test_frames(int a_which)
 {
 	switch (a_which) {
 	case 0: return s_frames_painted;
 	case 1: return s_frames_missed;
 	case 2: return (int)lround(s_frame_gap_longest * 10.0);
+	case 4: return sga_percentile_95(s_frame_gaps, s_frame_gap_count);
+	case 5: return sga_percentile_95(s_frame_tick_gaps, s_frame_tick_gap_count);
 	default:
 		s_frames_painted = 0; s_frames_missed = 0; s_frame_gap_longest = 0; s_frame_painted_last = 0; s_frame_counted = 0;
+		s_frame_gap_count = 0; s_frame_tick_gap_count = 0; s_stamp_target = 0; s_frame_vblank_last = 0;
 		return 0;
 	}
 }

@@ -5193,8 +5193,11 @@ feature -- Appearance
 
 	test_frames (a_which: INTEGER): INTEGER
 			-- 1x: frames counted at each tick: painted when a value set since the tick before
-			-- was rendered before this one, missed when not; the longest gap between painted
-			-- frames in tenths of a millisecond; 3 resets.
+			-- was rendered before this one, missed when not; 2 the longest gap between painted
+			-- frames and 4 their 95th-percentile gap (nearest rank; 0 with none yet), both in
+			-- tenths of a millisecond, each frame stamped with the compositor vblank it made
+			-- (the first at or after its drawing ended); 5 the 95th-percentile gap by tick
+			-- time, the measure before vblank stamps (for the record); 3 resets.
 		do
 			inspect a_which
 			when 0 then
@@ -5203,12 +5206,103 @@ feature -- Appearance
 				Result := frames_missed
 			when 2 then
 				Result := frames_longest_gap
+			when 4 then
+				Result := percentile_95 (frame_gaps)
+			when 5 then
+				Result := percentile_95 (frame_tick_gaps)
 			else
 				frames_painted := 0
 				frames_missed := 0
 				frames_longest_gap := 0
 				frames_last_painted_ms := 0
+				frames_last_vblank_ms := 0.0
+				frame_gaps.wipe_out
+				frame_tick_gaps.wipe_out
 			end
+		end
+
+	percentile_95 (a_gaps: ARRAYED_LIST [INTEGER]): INTEGER
+			-- The 95th-percentile of `a_gaps' by nearest rank; 0 when empty.
+		local
+			l_sorted: ARRAYED_LIST [INTEGER]
+			i, j, l_v: INTEGER
+		do
+			if not a_gaps.is_empty then
+				l_sorted := a_gaps.twin
+					-- insertion sort: a run holds about 130 gaps
+				from i := 2 until i > l_sorted.count loop
+					l_v := l_sorted.i_th (i)
+					from j := i - 1 until j < 1 or else l_sorted.i_th (j) <= l_v loop
+						l_sorted.put_i_th (l_sorted.i_th (j), j + 1)
+						j := j - 1
+					end
+					l_sorted.put_i_th (l_v, j + 1)
+					i := i + 1
+				end
+				Result := l_sorted.i_th ((0.95 * l_sorted.count).ceiling.max (1))
+			end
+		ensure
+			none_is_zero: a_gaps.is_empty implies Result = 0
+		end
+
+	frame_tick_gaps: ARRAYED_LIST [INTEGER]
+			-- The gaps between painted frames by tick time, in tenths of a millisecond (the
+			-- measure before vblank stamps, kept for the record).
+		once ("OBJECT")
+			create Result.make (256)
+		end
+
+	note_frame_drawn
+			-- A window finished drawing a frame now.
+		do
+			last_draw_end_ms := c_now_ms
+		end
+
+	last_draw_end_ms: REAL_64
+			-- When a window last finished drawing a frame (high-resolution milliseconds).
+
+	frames_last_vblank_ms: REAL_64
+			-- The vblank the last painted frame made.
+
+	c_now_ms: REAL_64
+			-- Now, in the high-resolution milliseconds the frame stamps use.
+		external "C inline use %"simple_shell.h%""
+		alias "return shell_now_ms();"
+		end
+
+	c_vblank_made (a_ms: REAL_64): REAL_64
+			-- The first compositor vblank at or after `a_ms' (high-resolution milliseconds): the
+			-- vblank a frame whose drawing ended then made. `a_ms' itself when the compositor
+			-- gives no timing. DwmGetCompositionTimingInfo is loaded at run time (the ISE target
+			-- predates it); with no window it gives the compositor's own timing (Windows 8.1 on).
+		external "C inline use %"simple_shell.h%", <dwmapi.h>, <math.h>"
+		alias "[
+			typedef HRESULT (WINAPI *sg_dwm_timing_fn)(HWND, DWM_TIMING_INFO*);
+			static sg_dwm_timing_fn l_timing = 0;
+			static int l_looked = 0;
+			DWM_TIMING_INFO l_info;
+			LARGE_INTEGER l_freq;
+			double l_vblank, l_period;
+			if (!l_looked) {
+				HMODULE l_dwm = LoadLibraryW(L"dwmapi.dll");
+				l_looked = 1;
+				if (l_dwm) l_timing = (sg_dwm_timing_fn)(void*)GetProcAddress(l_dwm, "DwmGetCompositionTimingInfo");
+			}
+			if (!l_timing) return $a_ms;
+			ZeroMemory(&l_info, sizeof(l_info));
+			l_info.cbSize = sizeof(l_info);
+			if (FAILED(l_timing(NULL, &l_info)) || l_info.qpcRefreshPeriod == 0) return $a_ms;
+			QueryPerformanceFrequency(&l_freq);
+			l_vblank = (double)l_info.qpcVBlank * 1000.0 / (double)l_freq.QuadPart;
+			l_period = (double)l_info.qpcRefreshPeriod * 1000.0 / (double)l_freq.QuadPart;
+			return l_vblank + ceil(($a_ms - l_vblank) / l_period) * l_period;
+		]"
+		end
+
+	frame_gaps: ARRAYED_LIST [INTEGER]
+			-- The gaps between painted frames since the last reset, in tenths of a millisecond.
+		once ("OBJECT")
+			create Result.make (256)
 		end
 
 	frames_painted, frames_missed, frames_longest_gap: INTEGER
@@ -5235,15 +5329,26 @@ feature -- Appearance
 
 	count_frame
 			-- A tick: count the value set since the tick before as painted or missed.
+			-- A painted frame is stamped with the vblank its drawing made: a draw that ends
+			-- after a vblank takes the next one, so a late frame shows as a two-frame gap.
 		local
 			l_now: INTEGER_64
+			l_vblank: REAL_64
+			l_gap: INTEGER
 		do
 			if frame_value_pending then
 				l_now := clock.milliseconds
 				if frames_rendered_total > frame_value_mark then
 					frames_painted := frames_painted + 1
+					l_vblank := c_vblank_made (last_draw_end_ms)
+					if frames_last_vblank_ms > 0.0 then
+						l_gap := ((l_vblank - frames_last_vblank_ms) * 10.0).rounded
+						frames_longest_gap := frames_longest_gap.max (l_gap)
+						frame_gaps.extend (l_gap)
+					end
+					frames_last_vblank_ms := l_vblank
 					if frames_last_painted_ms > 0 then
-						frames_longest_gap := frames_longest_gap.max (((l_now - frames_last_painted_ms) * 10).to_integer_32)
+						frame_tick_gaps.extend (((l_now - frames_last_painted_ms) * 10).to_integer_32)
 					end
 					frames_last_painted_ms := l_now
 				else
