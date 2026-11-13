@@ -49,6 +49,8 @@ feature -- Access
 			-- The page shown, or 0 when there are no pages.
 		do
 			Result := backend.tabs_selected (id)
+		ensure then
+			in_range: 0 <= Result and Result <= count
 		end
 
 	page_changed_actions: GUI_ACTIONS [TUPLE [page: INTEGER]]
