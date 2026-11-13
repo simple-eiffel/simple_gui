@@ -717,6 +717,43 @@ int sga_window(const char *a_title, int a_width, int a_height)
 /* Each window's content bottom constraint, by window id: it ends above a status bar. */
 static NSMutableDictionary<NSNumber *, NSLayoutConstraint *> *s_content_bottom;
 
+/* 1x-b: a window's content reveals in place. The window keeps its size; a slide moves the content
+   in from its edge (its four edge constraints shift together, the window clips it) and grow
+   shows a scaled picture. Kept per content view. */
+@interface SGAContentPlace : NSObject
+{
+@public
+	NSView *child, *content;
+	NSArray<NSLayoutConstraint *> *edges;   /* leading, trailing, top, bottom */
+	CGFloat base[4];
+	int effect;
+	double w, h, fraction;
+	CALayer *snapshot;
+}
+@end
+@implementation SGAContentPlace
+@end
+static NSMutableDictionary<NSValue *, SGAContentPlace *> *s_content_places;   /* content view -> its place */
+
+static void sga_content_place_keep(NSView *a_child, NSView *a_content, NSLayoutConstraint *a_bottom)
+{
+	if (!s_content_places) s_content_places = [NSMutableDictionary dictionary];
+	NSLayoutConstraint *l_lead = nil, *l_trail = nil, *l_top = nil;
+	for (NSLayoutConstraint *k in [a_content constraints]) {
+		if ([k firstItem] != a_child) continue;
+		if ([k firstAttribute] == NSLayoutAttributeLeading) l_lead = k;
+		else if ([k firstAttribute] == NSLayoutAttributeTrailing) l_trail = k;
+		else if ([k firstAttribute] == NSLayoutAttributeTop) l_top = k;
+	}
+	if (!l_lead || !l_trail || !l_top || !a_bottom) return;
+	SGAContentPlace *p = [SGAContentPlace new];
+	p->child = a_child; p->content = a_content;
+	p->edges = @[l_lead, l_trail, l_top, a_bottom];
+	for (int i = 0; i < 4; i++) p->base[i] = [p->edges[i] constant];
+	p->fraction = 1.0;
+	s_content_places[[NSValue valueWithNonretainedObject:a_child]] = p;
+}
+
 void sga_window_set_content(int a_window, int a_child)
 {
 	NSWindow *w = sga_get(a_window);
@@ -740,6 +777,7 @@ void sga_window_set_content(int a_window, int a_child)
 		l_bottom]];
 	if (!s_content_bottom) s_content_bottom = [NSMutableDictionary dictionary];
 	s_content_bottom[@(a_window)] = l_bottom;
+	sga_content_place_keep(v, l_content, l_bottom);
 	sga_pills_sync();
 }
 
@@ -862,6 +900,17 @@ int sga_stack(int a_vertical, int a_spacing)
 	BOOL vertical;
 	BOOL natural;   /* a button: keeps its natural size on the main axis too */
 	BOOL stretches; /* takes a share of the stack's spare room */
+	/* 1x-b: a slide or grow in progress. The placing constraints are off; the child is held at
+	   its full size (reveal_w x reveal_h) and pinned to the edge it slides from, while the slot
+	   takes `reveal_fraction' of that size and clips. */
+	int reveal_effect;                       /* 0 none, else GUI_WIDGET's Effect_ constant */
+	double reveal_w, reveal_h, reveal_fraction;
+	NSMutableArray<NSLayoutConstraint *> *revealing;
+	NSLayoutConstraint *reveal_width, *reveal_height;   /* the slot's share, set each step */
+	NSLayoutConstraint *reveal_offset;      /* across the stack: the child's offset, set each step */
+	BOOL reveal_offset_along_x;
+	double reveal_offset_sign, reveal_offset_base;
+	CALayer *snapshot;                       /* grow: a picture of the child, scaled */
 }
 @end
 @implementation SGASlot
@@ -11566,20 +11615,355 @@ static void sga_guard_hit_test(Class a_class)
 	[s_hit_wrapped addObject:l_key];
 }
 
-void sga_set_opacity(int a_id, double a_opacity)
+/* 1x: a widget's opacity and (1x-b) its fade, kept apart; what shows is their product, and it
+   takes pointer input while that opacity is above 0 and its reveal takes input. */
+static double s_opacity[SGA_MAX];      /* 1 - the opacity set, so 0 means opaque (the default) */
+static double s_fade_out[SGA_MAX];     /* 1 - the fade's reveal */
+static char s_no_input[SGA_MAX];       /* a reveal without input (a hide running) */
+
+static SGAContentPlace *sga_content_place_of(NSView *v);
+
+static void sga_show_alpha(int a_id)
 {
+	if (a_id <= 0 || a_id >= SGA_MAX) return;
 	id o = sga_get(a_id);
+	double l_opacity = 1.0 - s_opacity[a_id];
+	double l_alpha = l_opacity * (1.0 - s_fade_out[a_id]);
+	BOOL l_input = l_opacity > 0.0 && !s_no_input[a_id];
 	if (!s_transparent) s_transparent = [NSHashTable weakObjectsHashTable];
-	sga_frame_value_set();
 	if ([o isKindOfClass:[NSWindow class]]) {
-		[(NSWindow *)o setAlphaValue:a_opacity];
-		[(NSWindow *)o setIgnoresMouseEvents:a_opacity <= 0.0];
+		[(NSWindow *)o setAlphaValue:l_alpha];
+		[(NSWindow *)o setIgnoresMouseEvents:!l_input];
 	}
 	else if ([o isKindOfClass:[NSView class]]) {
-		[(NSView *)o setAlphaValue:a_opacity];
-		if (a_opacity <= 0.0) { sga_guard_hit_test([o class]); [s_transparent addObject:o]; }
+		SGASlot *l_slot = sga_slot_of(o);
+		SGAContentPlace *l_place = l_slot ? nil : sga_content_place_of(o);
+		CALayer *l_picture = l_slot ? l_slot->snapshot : l_place ? l_place->snapshot : nil;
+		/* while a grow shows its picture, the child itself stays out of sight */
+		[(NSView *)o setAlphaValue:l_picture ? 0.0 : l_alpha];
+		[l_picture setOpacity:(float)l_alpha];
+		if (!l_input) { sga_guard_hit_test([o class]); [s_transparent addObject:o]; }
 		else [s_transparent removeObject:o];
 	}
+}
+
+void sga_set_opacity(int a_id, double a_opacity)
+{
+	if (a_id <= 0 || a_id >= SGA_MAX) return;
+	sga_frame_value_set();
+	s_opacity[a_id] = 1.0 - a_opacity;
+	sga_show_alpha(a_id);
+}
+
+/* ---- 1x-b: animated show and hide */
+
+static double sga_device_round(NSView *v, double a_points)
+{
+	double k = [[v window] backingScaleFactor] ?: 2.0;
+	return round(a_points * k) / k;
+}
+
+/* The slot back as it was: its placing constraints on, no clipping, no picture. */
+static void sga_slot_reveal_end(SGASlot *a_slot)
+{
+	if (!a_slot->reveal_effect) return;
+	[NSLayoutConstraint deactivateConstraints:a_slot->revealing];
+	a_slot->revealing = nil; a_slot->reveal_width = nil; a_slot->reveal_height = nil; a_slot->reveal_offset = nil;
+	[NSLayoutConstraint activateConstraints:a_slot->placing];
+	[a_slot setClipsToBounds:NO];
+	[CATransaction begin]; [CATransaction setDisableActions:YES];
+	[a_slot->snapshot removeFromSuperlayer];
+	[CATransaction commit];
+	a_slot->snapshot = nil;
+	a_slot->reveal_effect = 0;
+	a_slot->reveal_fraction = 1.0;
+}
+
+/* The share of the full size shown, rounded to device pixels: along the stack's axis the slot
+   takes that share of the space; across it (the stack owns that size) the child moves in from
+   its edge inside the clipped slot. Grow: the picture's frame, centered. */
+static void sga_slot_reveal_step(SGASlot *a_slot, double f)
+{
+	a_slot->reveal_fraction = f;
+	if (a_slot->reveal_width) [a_slot->reveal_width setConstant:sga_device_round(a_slot, f * a_slot->reveal_w)];
+	if (a_slot->reveal_height) [a_slot->reveal_height setConstant:sga_device_round(a_slot, f * a_slot->reveal_h)];
+	if (a_slot->reveal_offset) {
+		double l_full = a_slot->reveal_offset_along_x ? a_slot->reveal_w : a_slot->reveal_h;
+		[a_slot->reveal_offset setConstant:a_slot->reveal_offset_base + sga_device_round(a_slot, a_slot->reveal_offset_sign * (1.0 - f) * l_full)];
+	}
+	if (a_slot->reveal_effect == 6) {
+		NSView *c = a_slot->child;
+		if (!a_slot->snapshot && ![c isHidden] && a_slot->reveal_w > 0 && a_slot->reveal_h > 0) {
+			/* the child at its full size, drawn once; the picture is what grows */
+			[c setFrameSize:NSMakeSize(a_slot->reveal_w, a_slot->reveal_h)];
+			[c layoutSubtreeIfNeeded];
+			NSBitmapImageRep *l_rep = [c bitmapImageRepForCachingDisplayInRect:[c bounds]];
+			if (l_rep) {
+				[c cacheDisplayInRect:[c bounds] toBitmapImageRep:l_rep];
+				[a_slot setWantsLayer:YES];
+				CALayer *l = [CALayer layer];
+				[l setContents:(__bridge id)[l_rep CGImage]];
+				[l setContentsGravity:kCAGravityResize];
+				[l setContentsScale:[[a_slot window] backingScaleFactor] ?: 2.0];
+				[CATransaction begin]; [CATransaction setDisableActions:YES];
+				[[a_slot layer] addSublayer:l];
+				[CATransaction commit];
+				a_slot->snapshot = l;
+			}
+		}
+		if (a_slot->snapshot) {
+			/* the slot's size this frame: the share along the stack, the stack's across it */
+			double sw = a_slot->reveal_width ? f * a_slot->reveal_w : NSWidth([a_slot bounds]);
+			double sh = a_slot->reveal_height ? f * a_slot->reveal_h : NSHeight([a_slot bounds]);
+			double pw = f * a_slot->reveal_w, ph = f * a_slot->reveal_h;
+			[CATransaction begin]; [CATransaction setDisableActions:YES];
+			[a_slot->snapshot setFrame:CGRectMake(sga_device_round(a_slot, (sw - pw) / 2), sga_device_round(a_slot, (sh - ph) / 2),
+				sga_device_round(a_slot, pw), sga_device_round(a_slot, ph))];
+			[CATransaction commit];
+		}
+	}
+}
+
+/* Begin a slide or grow in `a_slot': hold the child at its full size and pin it to the edge it
+   slides from (grow: the middle). Along the stack's axis the slot's size is stepped; across it
+   the child's offset is. Full = the size it has when shown, else its natural (fitting) size. */
+static void sga_slot_reveal_begin(SGASlot *a_slot, int a_effect)
+{
+	NSView *c = a_slot->child;
+	NSView *l_content = [[c window] contentView];
+	/* A show starts hidden: measure the place the layout gives it by unhiding it for the
+	   layout pass alone, then hiding it again, before anything is drawn. */
+	BOOL l_was_hidden = [c isHidden] || [a_slot isHidden];
+	BOOL l_child_hidden = [c isHidden], l_slot_hidden = [a_slot isHidden];
+	if (l_was_hidden && l_content) { [c setHidden:NO]; [a_slot setHidden:NO]; }
+	[l_content layoutSubtreeIfNeeded];
+	NSSize l_fit = [c fittingSize];
+	/* constraints work on alignment rectangles; a label's frame overhangs its own */
+	NSRect l_frame = [c alignmentRectForFrame:[c frame]];
+	NSRect l_slot_frame = [a_slot frame];
+	if (l_was_hidden && l_content) { [c setHidden:l_child_hidden]; [a_slot setHidden:l_slot_hidden]; [l_content layoutSubtreeIfNeeded]; }
+	BOOL l_shown = l_frame.size.width > 0 && l_frame.size.height > 0;
+	double w = l_shown ? l_frame.size.width : l_fit.width;
+	double h = l_shown ? l_frame.size.height : l_fit.height;
+	if (w <= 0) w = NSWidth(l_slot_frame);
+	if (h <= 0) h = NSHeight(l_slot_frame);
+	/* leading and trailing mirror under right-to-left: 4 then comes in from the right */
+	int l_edge = a_effect;
+	if ((a_effect == 4 || a_effect == 5) && [c userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft) l_edge = a_effect == 4 ? 5 : 4;
+	a_slot->reveal_effect = a_effect;
+	a_slot->reveal_w = w; a_slot->reveal_h = h;
+	[NSLayoutConstraint deactivateConstraints:a_slot->placing];
+	NSMutableArray *k = [NSMutableArray array];
+	[k addObject:[c.widthAnchor constraintEqualToConstant:w]];
+	[k addObject:[c.heightAnchor constraintEqualToConstant:h]];
+	BOOL l_main_y = a_slot->vertical;
+	a_slot->reveal_width = nil; a_slot->reveal_height = nil; a_slot->reveal_offset = nil;
+	double x0 = l_shown ? l_frame.origin.x : 0, y0 = l_shown ? l_frame.origin.y : 0;   /* the slot is flipped */
+	if (l_edge == 6) {
+		if (l_main_y) { a_slot->reveal_height = [a_slot.heightAnchor constraintEqualToConstant:h]; [k addObject:a_slot->reveal_height]; }
+		else { a_slot->reveal_width = [a_slot.widthAnchor constraintEqualToConstant:w]; [k addObject:a_slot->reveal_width]; }
+		[k addObjectsFromArray:@[[c.centerXAnchor constraintEqualToAnchor:a_slot.centerXAnchor], [c.centerYAnchor constraintEqualToAnchor:a_slot.centerYAnchor]]];
+	}
+	else {
+		BOOL l_along_y = l_edge == 2 || l_edge == 3;
+		BOOL l_from_start = l_edge == 2 || l_edge == 4;   /* from the top, or from the left */
+		if (l_along_y == l_main_y) {
+			/* along the stack: the slot takes the share, the child pinned to the far edge */
+			if (l_along_y) {
+				a_slot->reveal_height = [a_slot.heightAnchor constraintEqualToConstant:h]; [k addObject:a_slot->reveal_height];
+				[k addObject:l_from_start ? [c.bottomAnchor constraintEqualToAnchor:a_slot.bottomAnchor] : [c.topAnchor constraintEqualToAnchor:a_slot.topAnchor]];
+				[k addObject:[c.leftAnchor constraintEqualToAnchor:a_slot.leftAnchor constant:x0]];
+			} else {
+				a_slot->reveal_width = [a_slot.widthAnchor constraintEqualToConstant:w]; [k addObject:a_slot->reveal_width];
+				[k addObject:l_from_start ? [c.rightAnchor constraintEqualToAnchor:a_slot.rightAnchor] : [c.leftAnchor constraintEqualToAnchor:a_slot.leftAnchor]];
+				[k addObject:[c.topAnchor constraintEqualToAnchor:a_slot.topAnchor constant:y0]];
+			}
+		} else {
+			/* across the stack (it owns that size): the child moves in from its edge, clipped;
+			   along the stack the slot keeps the child's full size */
+			[k addObject:l_main_y ? [a_slot.heightAnchor constraintEqualToConstant:h] : [a_slot.widthAnchor constraintEqualToConstant:w]];
+			a_slot->reveal_offset_along_x = !l_along_y;
+			a_slot->reveal_offset_sign = l_from_start ? -1.0 : 1.0;
+			a_slot->reveal_offset_base = l_along_y ? y0 : x0;
+			if (l_along_y) {
+				a_slot->reveal_offset = [c.topAnchor constraintEqualToAnchor:a_slot.topAnchor constant:y0];
+				[k addObject:[c.leftAnchor constraintEqualToAnchor:a_slot.leftAnchor constant:x0]];
+			} else {
+				a_slot->reveal_offset = [c.leftAnchor constraintEqualToAnchor:a_slot.leftAnchor constant:x0];
+				[k addObject:[c.topAnchor constraintEqualToAnchor:a_slot.topAnchor constant:y0]];
+			}
+			[k addObject:a_slot->reveal_offset];
+		}
+	}
+	/* across the stack the slot keeps the size it had (the stack's own constraints still win);
+	   without the placing constraints nothing else holds it */
+	double l_across = l_main_y ? (l_shown ? NSWidth(l_slot_frame) : w) : (l_shown ? NSHeight(l_slot_frame) : h);
+	NSLayoutConstraint *l_keep = l_main_y ? [a_slot.widthAnchor constraintEqualToConstant:l_across] : [a_slot.heightAnchor constraintEqualToConstant:l_across];
+	[l_keep setPriority:NSLayoutPriorityRequired - 1];
+	[k addObject:l_keep];
+	a_slot->revealing = k;
+	[a_slot setClipsToBounds:YES];
+	[NSLayoutConstraint activateConstraints:k];
+}
+
+static SGAContentPlace *sga_content_place_of(NSView *v)
+{
+	SGAContentPlace *p = s_content_places ? s_content_places[[NSValue valueWithNonretainedObject:v]] : nil;
+	return p && [v superview] == p->content ? p : nil;
+}
+
+static void sga_content_reveal_end(SGAContentPlace *p)
+{
+	if (!p->effect) return;
+	for (int i = 0; i < 4; i++) [p->edges[i] setConstant:p->base[i]];
+	[CATransaction begin]; [CATransaction setDisableActions:YES];
+	[p->snapshot removeFromSuperlayer];
+	[CATransaction commit];
+	p->snapshot = nil; p->effect = 0; p->fraction = 1.0;
+}
+
+static void sga_content_reveal(SGAContentPlace *p, int a_effect, double f)
+{
+	NSView *c = p->child;
+	if (!p->effect) {
+		[[p->content window] layoutIfNeeded];
+		NSRect r = [c alignmentRectForFrame:[c frame]];
+		p->w = NSWidth(r); p->h = NSHeight(r);
+		p->effect = a_effect;
+	}
+	p->fraction = f;
+	int l_edge = a_effect;
+	if ((a_effect == 4 || a_effect == 5) && [c userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft) l_edge = a_effect == 4 ? 5 : 4;
+	double dx = 0, dy = 0;   /* the content view is flipped: y grows down */
+	if (l_edge == 2) dy = -(1.0 - f) * p->h; else if (l_edge == 3) dy = (1.0 - f) * p->h;
+	else if (l_edge == 4) dx = -(1.0 - f) * p->w; else if (l_edge == 5) dx = (1.0 - f) * p->w;
+	dx = sga_device_round(c, dx); dy = sga_device_round(c, dy);
+	[p->edges[0] setConstant:p->base[0] + dx]; [p->edges[1] setConstant:p->base[1] + dx];
+	[p->edges[2] setConstant:p->base[2] + dy]; [p->edges[3] setConstant:p->base[3] + dy];
+	if (l_edge == 6) {
+		if (!p->snapshot && ![c isHidden] && p->w > 0 && p->h > 0) {
+			[c layoutSubtreeIfNeeded];
+			NSBitmapImageRep *l_rep = [c bitmapImageRepForCachingDisplayInRect:[c bounds]];
+			if (l_rep) {
+				[c cacheDisplayInRect:[c bounds] toBitmapImageRep:l_rep];
+				[p->content setWantsLayer:YES];
+				CALayer *l = [CALayer layer];
+				[l setContents:(__bridge id)[l_rep CGImage]];
+				[l setContentsGravity:kCAGravityResize];
+				[l setContentsScale:[[c window] backingScaleFactor] ?: 2.0];
+				[CATransaction begin]; [CATransaction setDisableActions:YES];
+				[[p->content layer] addSublayer:l];
+				[CATransaction commit];
+				p->snapshot = l;
+			}
+		}
+		if (p->snapshot) {
+			NSRect r = [c frame];
+			double pw = f * NSWidth(r), ph = f * NSHeight(r);
+			/* the layer's y runs up: place it by the child's frame in the layer's own terms */
+			NSRect l_in_layer = [p->content convertRectToLayer:NSMakeRect(NSMidX(r) - pw / 2, NSMidY(r) - ph / 2, pw, ph)];
+			[CATransaction begin]; [CATransaction setDisableActions:YES];
+			[p->snapshot setFrame:l_in_layer];
+			[CATransaction commit];
+		}
+	}
+}
+
+/* 1x-b: show widget `a_id' revealed to `a_fraction' under `a_effect' (1 fade, 2-5 slides from
+   top, bottom, leading, trailing, 6 grow), with or without pointer input. A fade multiplies
+   the opacity; a slide or grow works in the widget's stack slot. A widget outside a stack has
+   no slot to slide in, so there every effect shows as a fade (said in the PR). A change of
+   effect undoes the old one first. */
+void sga_set_reveal(int a_id, int a_effect, double a_fraction, int a_takes_input)
+{
+	if (a_id <= 0 || a_id >= SGA_MAX) return;
+	id o = sga_get(a_id);
+	sga_frame_value_set();
+	s_no_input[a_id] = a_takes_input ? 0 : 1;
+	SGASlot *l_slot = [o isKindOfClass:[NSView class]] ? sga_slot_of(o) : nil;
+	SGAContentPlace *l_place = !l_slot && [o isKindOfClass:[NSView class]] ? sga_content_place_of(o) : nil;
+	if (l_place) {
+		if (a_effect < 2 || a_fraction >= 1.0 || (l_place->effect && l_place->effect != a_effect)) sga_content_reveal_end(l_place);
+		if (a_effect >= 2 && a_effect <= 6 && a_fraction < 1.0) { s_fade_out[a_id] = 0.0; sga_content_reveal(l_place, a_effect, a_fraction); }
+		else s_fade_out[a_id] = a_effect >= 2 ? 0.0 : 1.0 - a_fraction;
+		sga_show_alpha(a_id);
+		return;
+	}
+	BOOL l_in_slot = l_slot && a_effect >= 2 && a_effect <= 6;
+	if (l_slot && (!l_in_slot || a_fraction >= 1.0 || (l_slot->reveal_effect && l_slot->reveal_effect != a_effect
+		&& !((a_effect == 4 || a_effect == 5) && (l_slot->reveal_effect == 4 || l_slot->reveal_effect == 5)))))
+		sga_slot_reveal_end(l_slot);
+	if (l_in_slot && a_fraction < 1.0) {
+		s_fade_out[a_id] = 0.0;
+		if (!l_slot->reveal_effect) sga_slot_reveal_begin(l_slot, a_effect);
+		sga_slot_reveal_step(l_slot, a_fraction);
+	}
+	else s_fade_out[a_id] = l_in_slot ? 0.0 : 1.0 - a_fraction;
+	sga_show_alpha(a_id);
+}
+
+/* 1x-b: when the keyboard focus is in widget `a_id', move it to the next key view outside it
+   (the window itself when there is none), as hiding it at once would. */
+static NSView *sga_focused_view(NSWindow *w)
+{
+	id r = [w firstResponder];
+	if ([r isKindOfClass:[NSTextView class]] && [(NSTextView *)r isFieldEditor] && [[(NSTextView *)r delegate] isKindOfClass:[NSView class]])
+		r = (NSView *)[(NSTextView *)r delegate];
+	return [r isKindOfClass:[NSView class]] ? r : nil;
+}
+
+void sga_yield_focus(int a_id)
+{
+	id o = sga_get(a_id);
+	if (![o isKindOfClass:[NSView class]]) return;
+	NSView *v = o; NSWindow *w = [v window];
+	NSView *f = w ? sga_focused_view(w) : nil;
+	if (!f || !(f == v || [f isDescendantOf:v])) return;
+	NSView *n = [f nextValidKeyView];
+	for (int i = 0; n && i < 256 && (n == v || [n isDescendantOf:v]); i++) n = [n nextValidKeyView];
+	if (!n || n == f || [n isDescendantOf:v] || ![w makeFirstResponder:n]) [w makeFirstResponder:nil];
+}
+
+/* Tests, 1x-b */
+
+double sga_test_reveal_shown(int a_id)
+{
+	if (a_id <= 0 || a_id >= SGA_MAX) return -1.0;
+	id o = sga_get(a_id);
+	SGASlot *l_slot = [o isKindOfClass:[NSView class]] ? sga_slot_of(o) : nil;
+	if (l_slot && l_slot->reveal_effect) {
+		[[[o window] contentView] layoutSubtreeIfNeeded];
+		if (l_slot->reveal_offset) {
+			double l_full = l_slot->reveal_offset_along_x ? l_slot->reveal_w : l_slot->reveal_h;
+			return l_full > 0 ? fmax(0.0, fmin(1.0, 1.0 - fabs([l_slot->reveal_offset constant] - l_slot->reveal_offset_base) / l_full)) : -1.0;
+		}
+		double l_full = l_slot->reveal_height ? l_slot->reveal_h : l_slot->reveal_w;
+		double l_now = l_slot->reveal_height ? NSHeight([l_slot frame]) : NSWidth([l_slot frame]);
+		return l_full > 0 ? fmax(0.0, fmin(1.0, l_now / l_full)) : -1.0;
+	}
+	SGAContentPlace *l_place = !l_slot && [o isKindOfClass:[NSView class]] ? sga_content_place_of(o) : nil;
+	if (l_place && l_place->effect) return l_place->fraction;
+	return 1.0 - s_fade_out[a_id];
+}
+
+/* The space widget `a_id' takes in its parent's layout, in points (its slot in a stack). */
+int sga_test_extent(int a_id, int a_vertical)
+{
+	id o = sga_get(a_id);
+	if (![o isKindOfClass:[NSView class]] || ![o window]) return -1;
+	[[[o window] contentView] layoutSubtreeIfNeeded];
+	NSView *v = sga_slot_of(o) ?: (NSView *)o;
+	if ([v isHidden]) return 0;
+	return (int)lround(a_vertical ? NSHeight([v frame]) : NSWidth([v frame]));
+}
+
+int sga_test_has_focus(int a_id)
+{
+	id o = sga_get(a_id);
+	if ([o isKindOfClass:[NSWindow class]]) return [(NSWindow *)o isKeyWindow] ? 1 : 0;
+	if (![o isKindOfClass:[NSView class]] || ![o window]) return 0;
+	NSView *f = sga_focused_view([o window]);
+	return f && (f == o || [f isDescendantOf:o]) ? 1 : 0;
 }
 
 int sga_motion_reduced(void)
