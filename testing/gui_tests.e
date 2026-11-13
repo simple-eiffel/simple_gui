@@ -3977,7 +3977,7 @@ feature -- The remaining controls (1j)
 			l_window.show
 			settle_window
 			l_code.set_completion_words (<<"print", "Precursor", "sprint", "deferred", "do">>)
-			driver.focus (l_code)
+			focus_editor (l_code)
 			driver.type_code (l_code, "p")
 			assert ("not after one character", not l_code.is_completing and not driver.are_completions_shown (l_code))
 			driver.type_code (l_code, "r")
@@ -4030,7 +4030,7 @@ feature -- The remaining controls (1j)
 				do
 					a_list.extend (a_text)
 				end (?, l_accepted))
-			driver.focus (l_code)
+			focus_editor (l_code)
 			driver.type_code (l_code, "pr")
 			driver.press_completion_key (l_code, 2)
 			assert ("Down: selected " + l_code.completion_selected.out + " of " + l_code.completion_count.out + ", shown " + driver.are_completions_shown (l_code).out, l_code.completion_selected = 2)
@@ -7652,6 +7652,21 @@ feature {NONE} -- Fixtures
 			Result.show
 			l_field.set_text ("hello from Eiffel")
 			l_list.select_row (2)
+		end
+
+	focus_editor (a_code: GUI_CODE_EDITOR)
+			-- #138: give `a_code' the focus and wait (about 2 s at most) until it holds it. Alone,
+			-- a test's window is the first a fresh process opens, and on GTK (WSLg) it may not be
+			-- mapped or focused yet when the first keys arrive; in a full run earlier tests had
+			-- warmed that up. -1 (no such hook yet) waits for nothing.
+		local
+			i: INTEGER
+		do
+			driver.focus (a_code)
+			from i := 1 until i > 60 or else backend.test_has_focus (a_code.id) /= 0 loop
+				app.process_events (30)
+				i := i + 1
+			end
 		end
 
 	settle_window
