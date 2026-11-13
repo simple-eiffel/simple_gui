@@ -212,6 +212,9 @@ feature -- Windows and containers
 				al_w.close
 				al_w.shell_turn_pending
 			end
+			if attached windows.item (a_window) as al_w and then not al_w.is_window_open then
+				let_go_of_window (a_window, al_w)
+			end
 		end
 
 	window_set_title (a_window: INTEGER; a_title: POINTER)
@@ -7524,6 +7527,58 @@ feature {NONE} -- Implementation
 			Result := items.count
 		ensure
 			numbered: Result = items.count
+		end
+
+	let_go_of_window (a_window: INTEGER; a_w: GUI_SW_WINDOW)
+			-- Window `a_window' is gone for good (`GUI_WINDOW.close'): free what C holds for it -
+			-- its back buffer and its canvases' presented images, which no collector frees - and
+			-- drop its entries, so a program that opens and closes windows stays flat (2026-11-13:
+			-- every closed window kept them all).
+		require
+			closed: not a_w.is_window_open
+		local
+			l_tops: ARRAYED_LIST [SW_WIDGET]
+		do
+			a_w.release_back_buffer
+			create l_tops.make (3)
+			across <<window_content, window_toolbar, window_status_bar>> as ic loop
+				if ic.has (a_window) and then attached widget (ic.item (a_window)) as al_top then
+					l_tops.extend (al_top)
+				end
+			end
+			across presented.current_keys as ic loop
+				if attached widget (ic) as al_w and then is_under_any (al_w, l_tops) then
+					if attached {SW_CANVAS} al_w as al_c then
+						al_c.forget_image
+					end
+					c_surface_destroy (presented.item (ic))
+					presented.remove (ic)
+					drawn_timers.remove (ic)
+				end
+			end
+			windows.remove (a_window)
+			window_content.remove (a_window)
+			window_toolbar.remove (a_window)
+			window_status_bar.remove (a_window)
+			window_direction.remove (a_window)
+			fullscreen_saves.remove (a_window)
+			if open_window = a_w then
+				open_window := Void
+			end
+		ensure
+			gone: not windows.has (a_window)
+			released: a_w.frame_surface.width = 1 and a_w.frame_surface.height = 1
+		end
+
+	is_under_any (a_widget: SW_WIDGET; a_tops: LIST [SW_WIDGET]): BOOLEAN
+			-- Is `a_widget' one of `a_tops' or inside one of them?
+		local
+			l_at: detachable SW_WIDGET
+		do
+			from l_at := a_widget until l_at = Void or Result loop
+				Result := a_tops.has (l_at)
+				l_at := l_at.parent
+			end
 		end
 
 	widget (an_id: INTEGER): detachable SW_WIDGET

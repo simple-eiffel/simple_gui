@@ -2969,6 +2969,15 @@ static void sg_canvas_draw(GtkDrawingArea *a, cairo_t *cr, int w, int h, gpointe
     cairo_paint(cr);
     cairo_restore(cr);
 }
+/* The canvas is gone (its window closed): its presented image goes with it (2026-11-13: every
+   closed canvas kept its last image). GTK calls this when it disposes the drawing area. */
+static void sg_canvas_image_drop(gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    if (sg_canvas_image[id]) {
+        cairo_surface_destroy(sg_canvas_image[id]);
+        sg_canvas_image[id] = NULL;
+    }
+}
 static void sg_canvas_resized(GtkDrawingArea *a, int w, int h, gpointer d) { (void) a; sg_push(9, GPOINTER_TO_INT(d), w, h); }
 static int sg_mods(GdkModifierType m) {
     return ((m & GDK_SHIFT_MASK) ? 1 : 0) | ((m & GDK_CONTROL_MASK) ? 2 : 0) | ((m & GDK_ALT_MASK) ? 4 : 0) | ((m & GDK_SUPER_MASK) ? 8 : 0);
@@ -3007,7 +3016,7 @@ static int sg_canvas(int w, int h) {
     int id = sg_reg(a, 8);
     gtk_drawing_area_set_content_width(GTK_DRAWING_AREA(a), w);
     gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(a), h);
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(a), sg_canvas_draw, GINT_TO_POINTER(id), NULL);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(a), sg_canvas_draw, GINT_TO_POINTER(id), sg_canvas_image_drop);
     g_signal_connect(a, "resize", G_CALLBACK(sg_canvas_resized), GINT_TO_POINTER(id));
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);   /* every button, not just the primary */
     g_signal_connect(click, "pressed", G_CALLBACK(sg_canvas_pressed), GINT_TO_POINTER(id));
@@ -3127,7 +3136,7 @@ static int sg_drawn(int w, int h) {
     gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(a), h);
     gtk_widget_set_hexpand(a, TRUE);
     gtk_widget_set_vexpand(a, TRUE);
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(a), sg_canvas_draw, GINT_TO_POINTER(id), NULL);
+    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(a), sg_canvas_draw, GINT_TO_POINTER(id), sg_canvas_image_drop);
     g_signal_connect(a, "resize", G_CALLBACK(sg_canvas_resized), GINT_TO_POINTER(id));
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
     g_signal_connect(click, "pressed", G_CALLBACK(sg_drawn_pressed), GINT_TO_POINTER(id));

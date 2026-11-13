@@ -38,6 +38,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_menu_item_runs_its_agent, "menu_item_runs_its_agent")
 				run_test (agent t.test_accessibility_tree_has_roles_and_labels, "accessibility_tree_has_roles_and_labels")
 				run_test (agent t.test_canvas_presents_an_image, "canvas_presents_an_image")
+				run_test (agent t.test_closed_windows_give_their_memory_back, "closed_windows_give_their_memory_back")
 				run_test (agent t.test_dark_mode_switch_fires_and_reads, "dark_mode_switch_fires_and_reads")
 				run_test (agent t.test_snapshots_light_and_dark, "snapshots_light_and_dark")
 				run_test (agent t.test_worker_message_arrives_through_mailbox_and_wake, "worker_message_arrives_through_mailbox_and_wake")

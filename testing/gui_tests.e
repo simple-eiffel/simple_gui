@@ -215,6 +215,34 @@ feature -- Tests
 			l_window.close
 		end
 
+	test_closed_windows_give_their_memory_back
+			-- Open and close a window holding a canvas with an image, again and again: memory stays
+			-- flat (2026-11-13: on Windows every closed window kept its back buffer and its canvas's
+			-- image, megabytes each, and GTK kept the image). Before the fix 30 windows grew it by
+			-- about 150 MB.
+		local
+			i: INTEGER
+			l_warm, l_after: INTEGER_64
+			l_memory: MEMORY
+		do
+			create l_memory
+			from i := 1 until i > 5 loop
+				open_and_close_a_canvas_window
+				i := i + 1
+			end
+			l_memory.full_collect
+			l_warm := process_bytes
+			from i := 1 until i > 30 loop
+				open_and_close_a_canvas_window
+				i := i + 1
+			end
+			l_memory.full_collect
+			l_after := process_bytes
+			print ("  memory: " + (l_warm // 1048576).out + " MB after 5 windows, " + (l_after // 1048576).out + " MB after 30 more%N")
+			assert ("the system reports memory", l_warm > 0 and l_after > 0)
+			assert ("flat: 30 windows grew it " + ((l_after - l_warm) // 1048576).out + " MB", l_after - l_warm < 24 * 1048576)
+		end
+
 	test_dark_mode_switch_fires_and_reads
 		local
 			l_before: INTEGER
@@ -7710,6 +7738,35 @@ feature {NONE} -- Fixtures
 				app.process_events (30)
 				i := i + 1
 			end
+		end
+
+	open_and_close_a_canvas_window
+			-- A 1000 by 700 window with a canvas showing a 900 by 600 image, opened and closed.
+		local
+			l_window: GUI_WINDOW
+			l_canvas: GUI_CANVAS
+			l_image: CAIRO_SURFACE
+		do
+			create l_window.make ("Memory", 1000, 700)
+			create l_canvas.make (900, 600)
+			l_window.set_content (l_canvas)
+			l_window.show
+			settle_window
+			create l_image.make (l_canvas.pixel_width.max (1), l_canvas.pixel_height.max (1))
+			l_canvas.present (l_image)
+				-- the program's own reference; the backend keeps its own
+			l_image.destroy
+			driver.pump_until_idle (50)
+			l_window.close
+			driver.pump_until_idle (50)
+		end
+
+	process_bytes: INTEGER_64
+			-- The memory this process holds: private bytes on Windows, resident elsewhere.
+		external
+			"C inline use %"simple_gui_memory.h%""
+		alias
+			"return (EIF_INTEGER_64) sg_process_bytes();"
 		end
 
 	settle_window
