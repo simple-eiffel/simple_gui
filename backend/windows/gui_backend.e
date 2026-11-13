@@ -7360,6 +7360,18 @@ feature {NONE} -- State
 
 feature {GUI_SW_WINDOW} -- Themes
 
+	window_kit: SW_SHAPING
+			-- The one text-shaping kit every window shares, as SW_SHAPING is meant (one
+			-- simple_shaping per processor): a kit per window loaded its own fonts, about a
+			-- megabyte, and no close gave them back (2026-11-13: a program with a menu grew
+			-- by that much for every window it opened and closed).
+		once ("OBJECT")
+			Result := font_kit
+			Result.set_theme_faces (themed (False))
+		ensure
+			the_backend_s: Result = font_kit
+		end
+
 	themed (a_dark: BOOLEAN): SW_THEME
 			-- A light or dark theme at the desktop's scale (150% draws everything half again as
 			-- large): simple_widgets lays out in device pixels.
