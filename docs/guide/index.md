@@ -8,6 +8,7 @@ Start with **[Getting started](getting-started.md)**: the application, a window,
 - [Getting started](getting-started.md): application, window, loop, mailbox
 - [Window](window.md): title, content, toolbar, status bar, closing
 - [Common features](widget.md): enabling, showing, size, accessibility, tooltips, context menus, direction
+- [Animation](animation.md): opacity, animated show and hide, reduced motion
 - [Label](label.md): text the user reads
 - [Button](button.md): an action
 - [Icons and badges](icons-and-badges.md): icon names, button styles, badges, a busy button
