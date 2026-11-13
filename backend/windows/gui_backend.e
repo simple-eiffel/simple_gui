@@ -4735,8 +4735,9 @@ feature -- Every widget
 feature -- Canvas
 
 	canvas (a_width, a_height: INTEGER): INTEGER
+			-- A GUI_SW_CANVAS: an image to screen readers once named (#126).
 		local
-			l_c: SW_CANVAS
+			l_c: GUI_SW_CANVAS
 		do
 			create l_c.make (a_height.max (1).to_double)
 			l_c := l_c.with_min_size (a_width.max (1).to_double, a_height.max (1).to_double)
