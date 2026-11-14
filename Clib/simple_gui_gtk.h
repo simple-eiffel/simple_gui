@@ -4788,23 +4788,70 @@ static GtkAdjustment *sg_scroller_adjustment(int id) {
     if (!sg_w[id] || !GTK_IS_SCROLLED_WINDOW(sg_w[id])) return NULL;
     return gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sg_w[id]));
 }
+/* The content's own height, never the visible height it fills (GTK's adjustment upper is at
+   least the page, so content that still fits would never be seen to grow): the content's
+   natural height at the width it has. */
+static int sg_scroller_extent(int id) {
+    GtkWidget *c, *in;
+    int w, nat = 0;
+    if (!sg_w[id] || !GTK_IS_SCROLLED_WINDOW(sg_w[id])) return 0;
+    c = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(sg_w[id]));
+    in = c && GTK_IS_VIEWPORT(c) ? gtk_viewport_get_child(GTK_VIEWPORT(c)) : c;
+    if (!in || !gtk_widget_get_visible(in)) return 0;
+    w = gtk_widget_get_width(c);
+    gtk_widget_measure(in, GTK_ORIENTATION_VERTICAL, w > 0 ? w : -1, NULL, &nat, NULL, NULL);
+    return nat > 0 ? nat : 0;
+}
+/* A change in a watched scroller's extent is a report (65) too, even while all of it fits and
+   the adjustment stays put: read after each frame a window paints, as sizes are (1y). */
+#define SG_SCROLL_WATCH_MAX 256
+__attribute__((weak)) int sg_scroll_watch_id[SG_SCROLL_WATCH_MAX] = {0};
+__attribute__((weak)) int sg_scroll_watch_extent[SG_SCROLL_WATCH_MAX] = {0};
+__attribute__((weak)) int sg_scroll_watch_n = 0;
+static void sg_scroll_extent_report(GdkFrameClock *fc, gpointer d) {
+    int i;
+    (void) fc; (void) d;
+    for (i = 0; i < sg_scroll_watch_n; i++) {
+        int id = sg_scroll_watch_id[i], e;
+        if (!sg_w[id]) {   /* gone: its place goes to the last */
+            sg_scroll_watch_n--;
+            sg_scroll_watch_id[i] = sg_scroll_watch_id[sg_scroll_watch_n];
+            sg_scroll_watch_extent[i] = sg_scroll_watch_extent[sg_scroll_watch_n];
+            i--;
+            continue;
+        }
+        e = sg_scroller_extent(id);
+        if (e != sg_scroll_watch_extent[i]) {
+            sg_scroll_watch_extent[i] = e;
+            if (!sg_scroll_pending[id]) { sg_scroll_pending[id] = 1; sg_push(65, id, 0, 0); }
+        }
+    }
+}
+static void sg_scroll_extent_clock(GtkWidget *w, gpointer d) {
+    GdkFrameClock *fc = gtk_widget_get_frame_clock(w);
+    (void) d;
+    if (fc && !g_object_get_data(G_OBJECT(fc), "sg-scroll-extent-watch")) {
+        g_object_set_data(G_OBJECT(fc), "sg-scroll-extent-watch", GINT_TO_POINTER(1));
+        g_signal_connect(fc, "after-paint", G_CALLBACK(sg_scroll_extent_report), NULL);
+    }
+}
 static void sg_scroller_watch(int id, int on) {
     GtkAdjustment *v = sg_scroller_adjustment(id);
     if (!v || !on || g_object_get_data(G_OBJECT(sg_w[id]), "sg-scroll-watch")) return;
     g_signal_connect(v, "value-changed", G_CALLBACK(sg_on_scroller_changed), GINT_TO_POINTER(id));
     g_signal_connect(v, "changed", G_CALLBACK(sg_on_scroller_changed), GINT_TO_POINTER(id));
     g_object_set_data(G_OBJECT(sg_w[id]), "sg-scroll-watch", GINT_TO_POINTER(1));
+    if (sg_scroll_watch_n < SG_SCROLL_WATCH_MAX) {
+        sg_scroll_watch_id[sg_scroll_watch_n] = id;
+        sg_scroll_watch_extent[sg_scroll_watch_n] = 0;
+        sg_scroll_watch_n++;
+        g_signal_connect(sg_w[id], "realize", G_CALLBACK(sg_scroll_extent_clock), NULL);
+        if (gtk_widget_get_realized(sg_w[id])) sg_scroll_extent_clock(sg_w[id], NULL);
+    }
     sg_on_scroller_changed(v, GINT_TO_POINTER(id));
 }
 static int sg_scroller_y(int id) { sg_scroll_pending[id] = 0; return sg_scroll_area_offset(id, 1); }
 static int sg_scroller_max_y(int id) { return sg_scroll_area_max(id, 1); }
-static int sg_scroller_extent(int id) {
-    GtkAdjustment *v = sg_scroller_adjustment(id);
-    double e;
-    if (!v) return 0;
-    e = gtk_adjustment_get_upper(v) - gtk_adjustment_get_lower(v);
-    return e > 0 ? (int) (e + 0.5) : 0;
-}
 /* Tests: the user drags the bar to y (GTK clamps it). */
 static void sg_test_scroller_scroll_to(int id, int y) {
     GtkAdjustment *v = sg_scroller_adjustment(id);
