@@ -4118,11 +4118,13 @@ feature -- The remaining controls (1j)
 			create l_window.make ("More", 300, 240)
 			create l_list.make
 			l_list.set_near_end_distance (100)
-			l_list.near_end_actions.extend (agent load_ten (l_list))
+				-- two rows a load, so filling takes several loads whatever a row's height (ten rows
+				-- of WSLg Wayland's taller rows went past the distance in one)
+			l_list.near_end_actions.extend (agent load_two (l_list))
 			l_window.set_content (l_list)
 			l_window.show
 			settle_window
-			from i := 1 until i > 30 or else l_list.max_scroll_y - l_list.scroll_y > 100 loop
+			from i := 1 until i > 80 or else l_list.max_scroll_y - l_list.scroll_y > 100 loop
 				let_layout_settle
 				i := i + 1
 			end
@@ -4137,6 +4139,45 @@ feature -- The remaining controls (1j)
 			let_layout_settle
 			assert ("more at the end: " + l_list.count.out, l_list.count > l_after_fill)
 			l_window.close
+		end
+
+	test_a_scroll_area_near_end_rearms_as_its_content_grows
+			-- 1y-d: a scroll area whose content still fits is at its end; each growth of the content
+			-- (its own height, not the visible height it is shown in) arms near-end again, so a
+			-- loader keeps filling until the end is past the distance.
+		local
+			l_window: GUI_WINDOW
+			l_area: GUI_SCROLL_AREA
+			l_stack: GUI_STACK
+			i: INTEGER
+		do
+			create l_window.make ("Grows", 300, 240)
+			create l_area.make
+			create l_stack.make_vertical
+			l_stack.extend (create {GUI_LABEL}.make ("Line 1"))
+			l_area.set_content (l_stack)
+			l_area.set_near_end_distance (100)
+			l_area.near_end_actions.extend (agent add_two_lines (l_stack))
+			l_window.set_content (l_area)
+			l_window.show
+			settle_window
+			from i := 1 until i > 80 or else l_area.max_scroll_y - l_area.scroll_y > 100 loop
+				let_layout_settle
+				i := i + 1
+			end
+			assert ("filled past the distance: " + l_stack.count.out + " lines, " + (l_area.max_scroll_y - l_area.scroll_y).out + " left",
+				l_area.max_scroll_y - l_area.scroll_y > 100)
+			assert ("in several loads: " + l_area.near_end_actions.fire_count.out, l_area.near_end_actions.fire_count >= 2)
+			l_window.close
+		end
+
+	add_two_lines (a_stack: GUI_STACK)
+			-- A slow loader for a scroll area: two more lines, up to 200.
+		do
+			if a_stack.count < 200 then
+				a_stack.extend (create {GUI_LABEL}.make ("Line " + (a_stack.count + 1).out))
+				a_stack.extend (create {GUI_LABEL}.make ("Line " + (a_stack.count + 1).out))
+			end
 		end
 
 	test_a_scroll_header_hides_going_down_and_returns_going_up
@@ -9010,17 +9051,12 @@ feature {NONE} -- Fixtures
 			end
 		end
 
-	load_ten (a_list: GUI_LIST)
-			-- Infinite scroll's loader in the tests: ten more rows, up to 400.
-		local
-			i, l_first: INTEGER
+	load_two (a_list: GUI_LIST)
+			-- A slow loader: two more rows, up to 400.
 		do
 			if a_list.count < 400 then
-				l_first := a_list.count + 1
-				from i := 0 until i = 10 loop
-					a_list.extend ("Loaded " + (l_first + i).out)
-					i := i + 1
-				end
+				a_list.extend ("Loaded " + (a_list.count + 1).out)
+				a_list.extend ("Loaded " + (a_list.count + 1).out)
 			end
 		end
 
