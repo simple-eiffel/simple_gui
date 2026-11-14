@@ -2610,6 +2610,49 @@ feature -- Appearance
 		alias "sga_set_dark($a_on ? 1 : 0);"
 		end
 
+feature -- Monitors (1z-c)
+
+	monitor_size_units (a_monitors: SHELL_MONITORS; a_index: INTEGER): REAL_64
+			-- 1z-c: simple_shell's fields share one space, the main screen's pixels (points
+			-- times its backingScaleFactor), so its scale gives points, for every monitor.
+		do
+			Result := primary_units (a_monitors)
+		end
+
+	monitor_position_units (a_monitors: SHELL_MONITORS; a_index: INTEGER): REAL_64
+			-- 1z-c: the same: x and y in points of the arrangement, from the main screen's corner.
+		do
+			Result := primary_units (a_monitors)
+		end
+
+	window_monitor_index (a_window: INTEGER; a_monitors: SHELL_MONITORS): INTEGER
+			-- 1z-c: [window screen]'s place in [NSScreen screens], simple_shell's order; 0 when
+			-- the window has no screen (not yet shown, or wholly off every screen).
+		do
+			Result := c_window_monitor (a_window)
+			if not a_monitors.valid_index (Result) then
+				Result := 0
+			end
+		end
+
+	primary_units (a_monitors: SHELL_MONITORS): REAL_64
+			-- The main screen's scale, as simple_shell measured it; 1 with no monitor.
+		do
+			if a_monitors.valid_index (a_monitors.primary_index) and then a_monitors.scale (a_monitors.primary_index) > 0 then
+				Result := a_monitors.scale (a_monitors.primary_index) / 100
+			else
+				Result := 1
+			end
+		ensure
+			positive: Result > 0
+		end
+
+	c_window_monitor (a_window: INTEGER): INTEGER
+			-- 1z-c: 1-based place of window `a_window''s screen in [NSScreen screens]; 0 if none.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_window_monitor ($a_window);"
+		end
+
 feature -- Test driver
 
 	test_click (an_id: INTEGER)
