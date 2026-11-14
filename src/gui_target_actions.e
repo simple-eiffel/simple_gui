@@ -1,7 +1,7 @@
 note
 	description: "[
-		Agents a widget runs when something from another program is dropped on it (1q-b): the
-		first agent tells the widget it now takes such drops, so it can say so to the toolkit.
+		Agents a widget runs whose first agent the widget must hear of, so it can tell the
+		toolkit: drops from another program (1q-b) and size reports (1y).
 	]"
 
 class

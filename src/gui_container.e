@@ -10,6 +10,8 @@ inherit
 			cascade_direction
 		end
 
+	GUI_BREAKING
+
 feature -- Access
 
 	children: ARRAYED_LIST [GUI_WIDGET]

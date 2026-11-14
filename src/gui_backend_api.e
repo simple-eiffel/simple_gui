@@ -143,6 +143,12 @@ feature -- Windows and containers
 		deferred
 		end
 
+	stack_set_vertical (a_stack: INTEGER; a_on: BOOLEAN)
+			-- 1y: make stack `a_stack' a column (`a_on') or a row, its children kept in order with
+			-- their stretching and alignment.
+		deferred
+		end
+
 	stack_set_alignment (a_stack, an_alignment: INTEGER)
 			-- Cross-axis alignment for the stack's children, existing and later:
 			-- 0 fill, 1 start, 2 center, 3 end.
@@ -1981,6 +1987,14 @@ feature -- Common widget state
 	widget_yield_focus (an_id: INTEGER)
 			-- 1x-b: when the keyboard focus is on `an_id' or inside it, move it on to the next
 			-- focusable widget outside it, as hiding the widget at once would.
+		deferred
+		end
+
+	widget_watch_size (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y: while `a_on', push event 9 (a, b = width, height in logical pixels, as `width'
+			-- and `height' answer) for widget or window `an_id' after the toolkit's layout
+			-- whenever its size changed: never during layout, at most once a turn of the queue,
+			-- with the final size, and only once it has a size (both above 0).
 		deferred
 		end
 

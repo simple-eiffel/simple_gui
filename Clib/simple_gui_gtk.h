@@ -443,7 +443,24 @@ static void sg_stack_extend(int stack, int child, int stretch) {
     if (sg_is_vertical(stack)) gtk_widget_set_vexpand(c, stretch ? TRUE : FALSE);
     else gtk_widget_set_hexpand(c, stretch ? TRUE : FALSE);
     if (stored) sg_stack_align_child(stack, child, stored - 1);
+    g_object_set_data(G_OBJECT(c), "sg-stack-stretch", GINT_TO_POINTER(stretch ? 1 : 0));
     gtk_box_append(GTK_BOX(sg_w[stack]), c);
+}
+/* 1y: a column into a row and back. A stretching child's expand moves to the new main axis, and
+   each child's cross-axis alignment to the new cross axis (the old one goes back to fill). */
+static void sg_stack_set_vertical(int stack, int on) {
+    GtkWidget *b = sg_w[stack], *c;
+    if (!b || sg_is_vertical(stack) == (on ? 1 : 0)) return;
+    gtk_orientable_set_orientation(GTK_ORIENTABLE(b), on ? GTK_ORIENTATION_VERTICAL : GTK_ORIENTATION_HORIZONTAL);
+    for (c = gtk_widget_get_first_child(b); c; c = gtk_widget_get_next_sibling(c)) {
+        GtkAlign cross = on ? gtk_widget_get_valign(c) : gtk_widget_get_halign(c);
+        if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(c), "sg-stack-stretch"))) {
+            gtk_widget_set_vexpand(c, on ? TRUE : FALSE);
+            gtk_widget_set_hexpand(c, on ? FALSE : TRUE);
+        }
+        if (on) { gtk_widget_set_valign(c, GTK_ALIGN_FILL); gtk_widget_set_halign(c, cross); }
+        else { gtk_widget_set_halign(c, GTK_ALIGN_FILL); gtk_widget_set_valign(c, cross); }
+    }
 }
 /* The stack's alignment for its children, existing and later. */
 static void sg_stack_set_alignment(int stack, int a) {
@@ -3200,6 +3217,49 @@ static int sg_scale_factor(int id) { return gtk_widget_get_scale_factor(sg_w[id]
 /* 0 for a slot that went empty (a drawn view destroyed with its window). */
 static int sg_width(int id) { return sg_w[id] ? gtk_widget_get_width(sg_w[id]) : 0; }
 static int sg_height(int id) { return sg_w[id] ? gtk_widget_get_height(sg_w[id]) : 0; }
+/* ---------- 1y: size reports. After each frame a window paints (its frame clock's after-paint,
+   so after layout), every watched widget's size is read, and event 9 (a, b = width, height, as
+   sg_width and sg_height answer) is pushed for each one that changed and has a size. The list
+   is shared by every C file this header is compiled into (weak), as sg_opacity_of is. */
+#define SG_WATCH_MAX 256
+__attribute__((weak)) int sg_watch_id[SG_WATCH_MAX] = {0};
+__attribute__((weak)) int sg_watch_w[SG_WATCH_MAX] = {0};
+__attribute__((weak)) int sg_watch_h[SG_WATCH_MAX] = {0};
+__attribute__((weak)) int sg_watch_n = 0;
+static void sg_watch_report(GdkFrameClock *fc, gpointer d) {
+    int i;
+    (void) fc; (void) d;
+    for (i = 0; i < sg_watch_n; i++) {
+        int id = sg_watch_id[i], w, h;
+        if (!sg_w[id]) continue;
+        w = sg_width(id); h = sg_height(id);
+        if (w > 0 && h > 0 && (w != sg_watch_w[i] || h != sg_watch_h[i])) {
+            sg_watch_w[i] = w; sg_watch_h[i] = h;
+            sg_push(9, id, w, h);
+        }
+    }
+}
+/* Once per frame clock: report after its paints. */
+static void sg_watch_clock(GtkWidget *w, gpointer d) {
+    GdkFrameClock *fc = gtk_widget_get_frame_clock(w);
+    (void) d;
+    if (fc && !g_object_get_data(G_OBJECT(fc), "sg-watch")) {
+        g_object_set_data(G_OBJECT(fc), "sg-watch", GINT_TO_POINTER(1));
+        g_signal_connect(fc, "after-paint", G_CALLBACK(sg_watch_report), NULL);
+    }
+}
+static void sg_widget_watch_size(int id, int on) {
+    int i;
+    for (i = 0; i < sg_watch_n && sg_watch_id[i] != id; i++) ;
+    if (on && i == sg_watch_n && sg_watch_n < SG_WATCH_MAX && sg_w[id]) {
+        sg_watch_id[i] = id; sg_watch_w[i] = 0; sg_watch_h[i] = 0; sg_watch_n++;
+        g_signal_connect(sg_w[id], "realize", G_CALLBACK(sg_watch_clock), NULL);
+        if (gtk_widget_get_realized(sg_w[id])) sg_watch_clock(sg_w[id], NULL);
+    } else if (!on && i < sg_watch_n) {
+        sg_watch_n--;
+        sg_watch_id[i] = sg_watch_id[sg_watch_n]; sg_watch_w[i] = sg_watch_w[sg_watch_n]; sg_watch_h[i] = sg_watch_h[sg_watch_n];
+    }
+}
 /* Keep a reference to `image' (a cairo_surface_t) and redraw. The caller keeps its own reference. */
 static void sg_canvas_present(int id, void *image) {
     if (sg_canvas_image[id]) cairo_surface_destroy(sg_canvas_image[id]);
