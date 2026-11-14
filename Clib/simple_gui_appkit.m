@@ -716,6 +716,21 @@ int sga_window(const char *a_title, int a_width, int a_height)
 	return sga_keep(w);
 }
 
+/* 1x-e: the window's content becomes `a_width' x `a_height' points, at once, its top left kept
+   (AppKit's frame origin is the bottom left, so it moves by the height change), constrained to
+   the screen as AppKit does. Nothing while full screen. Before show, the size it opens at. */
+void sga_window_set_size(int a_window, int a_width, int a_height)
+{
+	NSWindow *w = sga_get(a_window);
+	if (![w isKindOfClass:[NSWindow class]] || ([w styleMask] & NSWindowStyleMaskFullScreen)) return;
+	NSRect l_old = [w frame];
+	NSRect l_new = [w frameRectForContentRect:NSMakeRect(0, 0, a_width, a_height)];
+	l_new.origin = NSMakePoint(NSMinX(l_old), NSMaxY(l_old) - NSHeight(l_new));
+	if ([w screen]) l_new = [w constrainFrameRect:l_new toScreen:[w screen]];
+	[w setFrame:l_new display:[w isVisible] animate:NO];
+	[[w contentView] layoutSubtreeIfNeeded];
+}
+
 @interface SGAStatus : NSTextField
 @end
 @implementation SGAStatus
@@ -3469,13 +3484,16 @@ void sga_group_box_set_content(int a_id, int a_child)
 	NSButton *triangle;
 	NSButton *title;
 	NSView *content;
+	SGASlot *slot;   /* 1x-e: the content's slot, so it reveals in place and the expander grows */
 }
 @end
 @implementation SGAExpander
+/* Expanded, the slot shows unless the content itself is hidden (a slide-open starts hidden);
+   collapsed, it is hidden whatever the content's own state. */
 - (void)show:(BOOL)a_on
 {
 	[triangle setState:a_on ? NSControlStateValueOn : NSControlStateValueOff];
-	[content setHidden:!a_on];
+	[slot setHidden:!a_on || [content isHidden]];
 }
 - (void)toggled:(id)a_sender
 {
@@ -3515,10 +3533,29 @@ void sga_expander_set_content(int a_id, int a_child)
 	SGAExpander *e = sga_get(a_id);
 	NSView *v = sga_get(a_child);
 	BOOL l_on = [e->triangle state] == NSControlStateValueOn;
-	if (e->content) [e removeArrangedSubview:e->content], [e->content removeFromSuperview];
+	if (e->slot) {
+		[e->content removeFromSuperview];
+		[e removeArrangedSubview:e->slot]; [e->slot removeFromSuperview];
+		[s_slots removeObjectForKey:[NSValue valueWithNonretainedObject:e->content]];
+	}
+	/* 1x-e: the content sits in a slot as a stack child does (sga_stack_extend), leading and
+	   at its natural width, so a slide from the top takes its share of the height. */
+	SGASlot *l_slot = [[SGASlot alloc] init];
+	if (!s_slots) s_slots = [NSMutableDictionary dictionary];
+	l_slot->child = v;
+	l_slot->placing = [NSMutableArray array];
+	l_slot->vertical = YES;
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[l_slot addSubview:v];
+	sga_keep_natural_size(v, 0);
+	[v setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationVertical];
+	[l_slot setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationVertical];
+	s_slots[[NSValue valueWithNonretainedObject:v]] = l_slot;
 	e->content = v;
-	[e addArrangedSubview:v];
-	[[v.trailingAnchor constraintLessThanOrEqualToAnchor:e.trailingAnchor] setActive:YES];
+	e->slot = l_slot;
+	[e addArrangedSubview:l_slot];
+	[[l_slot.widthAnchor constraintEqualToAnchor:e.widthAnchor] setActive:YES];
+	sga_place(l_slot, 1);
 	[e show:l_on];
 }
 
@@ -6210,6 +6247,10 @@ void sga_set_visible(int a_id, int a_on)
 		[(NSView *)o setHidden:a_on == 0];
 		/* In a stack the slot goes too, so no gap is left. */
 		if ([o isKindOfClass:[NSView class]] && sga_slot_of(o)) [sga_slot_of(o) setHidden:a_on == 0];
+		/* 1x-e: an expander's content shown while it is collapsed stays out of sight */
+		NSView *l_holder = [sga_slot_of(o) superview];
+		if (a_on && [l_holder isKindOfClass:[SGAExpander class]] && [((SGAExpander *)l_holder)->triangle state] != NSControlStateValueOn)
+			[sga_slot_of(o) setHidden:YES];
 	}
 }
 

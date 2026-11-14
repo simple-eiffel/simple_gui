@@ -89,6 +89,11 @@ feature -- Windows and containers
 		alias "sga_window_set_title($a_window, (const char *) $a_title);"
 		end
 
+	window_set_size (a_window, a_width, a_height: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_window_set_size($a_window, $a_width, $a_height);"
+		end
+
 	window_install_shortcuts (a_window: INTEGER; a_spec: POINTER)
 			-- Nothing to do on the Mac: menu items carry their own key equivalents.
 		do
