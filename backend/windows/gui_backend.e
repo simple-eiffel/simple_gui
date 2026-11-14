@@ -1780,6 +1780,130 @@ feature -- Controls
 			create Result.make (8)
 		end
 
+	scroller_watch (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y-d: windows report watched scrollers after each event and frame
+			-- (`report_crossings' calls `report_scrollers').
+		do
+			if a_on then
+				if not scroll_watch.has (an_id) then
+					scroll_watch.force ([-1, -1, -1], an_id)
+				end
+			else
+				scroll_watch.remove (an_id)
+			end
+		end
+
+	scroller_y (an_id: INTEGER): INTEGER
+		do
+			if attached widget (an_id) as al_w and then attached scroll_bar_of (al_w) then
+				Result := (sw_scroll_y (al_w) / dpi).rounded.max (0)
+			end
+		end
+
+	scroller_max_y (an_id: INTEGER): INTEGER
+		do
+			if attached widget (an_id) as al_w and then attached scroll_bar_of (al_w) as al_b then
+				Result := (al_b.max_scroll / dpi).floor.max (0)
+			end
+		end
+
+	scroller_extent (an_id: INTEGER): INTEGER
+		do
+			if attached widget (an_id) as al_w and then attached scroll_bar_of (al_w) as al_b then
+				Result := (al_b.content / dpi).rounded.max (0)
+			end
+		end
+
+	test_scroller_scroll_to (an_id, a_y: INTEGER)
+			-- As the user: a scroll area's bar is dragged there; a list, table, tree or grid view
+			-- is wheeled toward it a notch at a time until it gets there or stops moving.
+		local
+			l_target, l_before: REAL_64
+			l_notches: INTEGER
+			l_moved: BOOLEAN
+		do
+			if attached {SW_SCROLL_AREA} widget (an_id) as al_s then
+				al_s.scroll_to (a_y * dpi)
+			elseif attached widget (an_id) as al_w and then attached scroll_bar_of (al_w) then
+				l_target := a_y * dpi
+				from l_moved := True until not l_moved or l_notches > 2000
+					or (sw_scroll_y (al_w) - l_target).abs < 1.0
+				loop
+					l_before := sw_scroll_y (al_w)
+					if l_before < l_target then
+						l_moved := al_w.handle_wheel (-120) and sw_scroll_y (al_w) /= l_before and sw_scroll_y (al_w) < l_target
+					else
+						l_moved := al_w.handle_wheel (120) and sw_scroll_y (al_w) /= l_before and sw_scroll_y (al_w) > l_target
+					end
+					l_notches := l_notches + 1
+				end
+			end
+			changed
+			report_crossings
+		end
+
+	report_scrollers
+			-- After an event or a frame: event 65 for each watched scroller whose offset, furthest
+			-- offset or content's extent changed.
+		local
+			l_changes: ARRAYED_LIST [INTEGER]
+			l_y, l_max, l_extent: INTEGER
+		do
+			create l_changes.make (0)
+			across scroll_watch as ic loop
+				l_y := scroller_y (@ic.key)
+				l_max := scroller_max_y (@ic.key)
+				l_extent := scroller_extent (@ic.key)
+				if l_y /= ic.y or l_max /= ic.max or l_extent /= ic.extent then
+					ic.y := l_y
+					ic.max := l_max
+					ic.extent := l_extent
+					l_changes.extend (@ic.key)
+				end
+			end
+			across l_changes as ic loop
+				push (65, ic, 0, 0, 0)
+			end
+		end
+
+	scroll_watch: HASH_TABLE [TUPLE [y, max, extent: INTEGER], INTEGER]
+			-- The watched scrollers and their last reported numbers, by id (1y-d).
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	scroll_bar_of (a_w: SW_WIDGET): detachable SW_VSCROLLBAR
+			-- The vertical bar of a scroll area, list, table, tree or grid view (Void: none).
+		do
+			if attached {SW_SCROLL_AREA} a_w as al then
+				Result := al.bar
+			elseif attached {SW_LIST} a_w as al then
+				Result := al.bar
+			elseif attached {SW_DATA_GRID [ARRAY [STRING_32]]} a_w as al then
+				Result := al.bar
+			elseif attached {SW_TREE [INTEGER]} a_w as al then
+				Result := al.bar
+			elseif attached {SW_GRID_VIEW} a_w as al then
+				Result := al.bar
+			end
+		end
+
+	sw_scroll_y (a_w: SW_WIDGET): REAL_64
+			-- The vertical offset of a widget `scroll_bar_of' knows, in device pixels.
+		do
+			if attached {SW_SCROLL_AREA} a_w as al then
+				Result := al.scroll_y
+			elseif attached {SW_LIST} a_w as al then
+				Result := al.scroll_y
+			elseif attached {SW_DATA_GRID [ARRAY [STRING_32]]} a_w as al then
+				Result := al.scroll_y
+			elseif attached {SW_TREE [INTEGER]} a_w as al then
+				Result := al.scroll_y
+			elseif attached {SW_GRID_VIEW} a_w as al then
+				Result := al.scroll_y
+			end
+		end
+
 	widget_watch_pointer (an_id: INTEGER; a_on: BOOLEAN)
 			-- 1y-c: windows report crossings after each event and frame (`report_crossings').
 		do
@@ -1827,6 +1951,7 @@ feature -- Controls
 			l_changes: ARRAYED_LIST [TUPLE [id: INTEGER; inside: BOOLEAN]]
 			l_now: BOOLEAN
 		do
+			report_scrollers
 			create l_changes.make (0)
 			across pointer_watch as ic loop
 				if not pointer_held.has (@ic.key) and then attached widget (@ic.key) as al_w then

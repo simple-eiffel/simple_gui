@@ -599,6 +599,11 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 					if attached widgets.item (l_id) as al_widget then
 						al_widget.take_focus_report (l_a = 1)
 					end
+				when 65 then
+						-- 1y-d: a scroller's offset, furthest offset or content may have changed
+					if attached {GUI_SCROLLING} widgets.item (l_id) as al_scroller then
+						al_scroller.take_scroll_report
+					end
 				when 62 then
 						-- 1x: a frame tick, `l_a' milliseconds after the last one
 					animation_clock.frame_tick (l_a.max (0))

@@ -12672,6 +12672,111 @@ void sga_widget_watch_pointer(int a_id, int a_on)
 	}
 }
 
+/* ------------------------------------------- 1y-d: tied to scrolling */
+
+/* The NSScrollView of a scrolling widget: a scroll area is one; a list, table, tree, tree table
+   or grid view holds its rows in one (the core's enclosing scroll view, else the first inside). */
+static NSScrollView *sga_scroller_of(int a_id)
+{
+	id o = sga_get(a_id);
+	if ([o isKindOfClass:[NSScrollView class]]) return o;
+	id c = sga_core(a_id);
+	if ([c isKindOfClass:[NSScrollView class]]) return c;
+	if ([c isKindOfClass:[NSView class]] && [(NSView *)c enclosingScrollView]) return [(NSView *)c enclosingScrollView];
+	if (![o isKindOfClass:[NSView class]]) return nil;
+	NSMutableArray<NSView *> *l_queue = [NSMutableArray arrayWithObject:o];
+	while ([l_queue count] > 0) {
+		NSView *v = l_queue[0]; [l_queue removeObjectAtIndex:0];
+		if ([v isKindOfClass:[NSScrollView class]]) return (NSScrollView *)v;
+		[l_queue addObjectsFromArray:[v subviews]];
+	}
+	return nil;
+}
+
+/* Vertical offset, furthest offset and content height, in points. The clip view's own insets
+   count: a table's header sits above the rows, so at the top its clip origin is minus the
+   header's height. The offset is clamped to 0..max, as 1x-d's are, so a rubber band reads as
+   the edge it springs back to. The content height is the rows' own: a table's (or grid's) frame
+   is never shorter than the visible area, nor is a scroll area's child, so while the content
+   still fits it would not grow as it is added to, and shared code re-arms the near end on a
+   growing content height (event 65 on any change, even while everything fits). */
+static void sga_scroller_measure(int a_id, int *a_y, int *a_max, int *an_extent)
+{
+	*a_y = 0; *a_max = 0; *an_extent = 0;
+	NSScrollView *s = sga_scroller_of(a_id);
+	if (!s) return;
+	NSClipView *c = [s contentView];
+	NSEdgeInsets i = [c contentInsets];
+	NSView *d = [s documentView];
+	double l_seen = NSHeight([c bounds]) - i.top - i.bottom;
+	double l_frame = NSHeight([d frame]);
+	double l_extent = l_frame;
+	if ([d isKindOfClass:[NSTableView class]]) {
+		NSInteger n = [(NSTableView *)d numberOfRows];
+		l_extent = n > 0 ? NSMaxY([(NSTableView *)d rectOfRow:n - 1]) : 0;
+	} else if ([d isKindOfClass:[NSCollectionView class]] && [(NSCollectionView *)d collectionViewLayout])
+		l_extent = [[(NSCollectionView *)d collectionViewLayout] collectionViewContentSize].height;
+	else if ([d isKindOfClass:[SGAWrapper class]] && [[d subviews] count] == 1)
+		/* a scroll area: its child fills the visible height too, so its own fitting height */
+		l_extent = MAX(NSHeight([[d subviews][0] frame]) > l_seen + 0.5 ? NSHeight([[d subviews][0] frame]) : 0, ceil([[d subviews][0] fittingSize].height));
+	double l_max = MAX(0, l_frame - l_seen);
+	double y = MIN(MAX(0, NSMinY([c bounds]) + i.top), l_max);
+	*a_y = (int)lround(y); *a_max = (int)lround(l_max); *an_extent = (int)lround(MAX(0, l_extent));
+}
+
+int sga_scroller_y(int a_id) { int y, m, e; sga_scroller_measure(a_id, &y, &m, &e); return y; }
+int sga_scroller_max_y(int a_id) { int y, m, e; sga_scroller_measure(a_id, &y, &m, &e); return m; }
+int sga_scroller_extent(int a_id) { int y, m, e; sga_scroller_measure(a_id, &y, &m, &e); return e; }
+
+/* Event 65: after each turn of the run loop (so after layout), a watched scroller whose offset,
+   furthest offset or content height changed reports once. */
+static char s_scroller_watched[SGA_MAX];
+static int s_scroller_told[SGA_MAX][3];
+static CFRunLoopObserverRef s_scroller_observer;
+
+static void sga_scrollers_check(CFRunLoopObserverRef a_observer, CFRunLoopActivity a_activity, void *a_info)
+{
+	(void)a_observer; (void)a_activity; (void)a_info;
+	for (int i = 1; i <= s_count && i < SGA_MAX; i++) {
+		if (!s_scroller_watched[i]) continue;
+		if (!s_objects[i]) { s_scroller_watched[i] = 0; continue; }
+		int y, m, e;
+		sga_scroller_measure(i, &y, &m, &e);
+		if (y != s_scroller_told[i][0] || m != s_scroller_told[i][1] || e != s_scroller_told[i][2]) {
+			s_scroller_told[i][0] = y; s_scroller_told[i][1] = m; s_scroller_told[i][2] = e;
+			sga_push(65, i, y, 0, 0);
+		}
+	}
+}
+
+void sga_scroller_watch(int a_id, int a_on)
+{
+	if (a_id <= 0 || a_id >= SGA_MAX) return;
+	s_scroller_watched[a_id] = a_on ? 1 : 0;
+	/* The first turn after a watch begins reports once, laid out: shared code looks at the end
+	   then, though nothing may change after (a scroll area whose content already fits). */
+	if (a_on) { s_scroller_told[a_id][0] = -1; s_scroller_told[a_id][1] = -1; s_scroller_told[a_id][2] = -1; }
+	if (a_on && !s_scroller_observer) {
+		s_scroller_observer = CFRunLoopObserverCreate(NULL, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, 2100003, sga_scrollers_check, NULL);
+		CFRunLoopAddObserver(CFRunLoopGetMain(), s_scroller_observer, kCFRunLoopCommonModes);
+	}
+}
+
+/* Tests: scroll as a wheel does, the clip view moved within its bounds and the scroll view told,
+   so the scroller and its bars follow. */
+void sga_test_scroller_scroll_to(int a_id, int a_y)
+{
+	NSScrollView *s = sga_scroller_of(a_id);
+	if (!s) return;
+	NSClipView *c = [s contentView];
+	[s layoutSubtreeIfNeeded];
+	NSRect r = [c bounds];
+	r.origin.y = a_y - [c contentInsets].top;
+	r = [c constrainBoundsRect:r];
+	[c scrollToPoint:r.origin];
+	[s reflectScrolledClipView:c];
+}
+
 /* Tests: the pointer crossing as the toolkit reports it. */
 void sga_test_pointer_crossing(int a_id, int a_inside)
 {

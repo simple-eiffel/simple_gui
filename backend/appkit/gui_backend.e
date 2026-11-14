@@ -2387,6 +2387,31 @@ feature -- Canvas
 		alias "sga_widget_watch_size($an_id, $a_on ? 1 : 0);"
 		end
 
+	scroller_watch (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_scroller_watch($an_id, $a_on ? 1 : 0);"
+		end
+
+	scroller_y (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_scroller_y($an_id);"
+		end
+
+	scroller_max_y (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_scroller_max_y($an_id);"
+		end
+
+	scroller_extent (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_scroller_extent($an_id);"
+		end
+
+	test_scroller_scroll_to (an_id, a_y: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_scroller_scroll_to($an_id, $a_y);"
+		end
+
 	widget_watch_pointer (an_id: INTEGER; a_on: BOOLEAN)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_widget_watch_pointer($an_id, $a_on ? 1 : 0);"

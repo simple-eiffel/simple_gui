@@ -4078,6 +4078,171 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_a_list_reports_its_scroll_and_fraction
+			-- 1y-d: a list tells its watchers each new offset, and its fraction runs from 0 at the
+			-- top to 1 at the end.
+		local
+			l_window: GUI_WINDOW
+			l_list: GUI_LIST
+			l_told: ARRAYED_LIST [INTEGER]
+		do
+			create l_window.make ("Scroll", 300, 220)
+			l_list := long_list (100)
+			create l_told.make (4)
+			l_list.scroll_actions.extend (agent (a_told: ARRAYED_LIST [INTEGER]; y: INTEGER) do a_told.extend (y) end (l_told, ?))
+			l_window.set_content (l_list)
+			l_window.show
+			settle_window
+			let_layout_settle
+			assert ("it scrolls: " + l_list.max_scroll_y.out, l_list.max_scroll_y > 300)
+			assert ("at the top", l_list.scroll_y = 0 and l_list.scroll_fraction = 0.0)
+			driver.scroll_to_as_user (l_list, 200)
+			let_layout_settle
+			assert ("scrolled: " + l_list.scroll_y.out, l_list.scroll_y >= 150)
+			assert ("told the offset", not l_told.is_empty and then l_told.last = l_list.scroll_y)
+			assert ("part way: " + l_list.scroll_fraction.out, l_list.scroll_fraction > 0.0 and l_list.scroll_fraction < 1.0)
+			driver.scroll_to_as_user (l_list, 100000)
+			let_layout_settle
+			assert ("at the end: " + l_list.scroll_y.out + " of " + l_list.max_scroll_y.out, l_list.scroll_y = l_list.max_scroll_y and l_list.scroll_fraction = 1.0)
+			l_window.close
+		end
+
+	test_near_end_fills_a_short_list_and_loads_more_at_the_end
+			-- 1y-d: an empty list near its end at once keeps asking for more as each load arrives,
+			-- until it reaches past the distance; at the end it asks once more.
+		local
+			l_window: GUI_WINDOW
+			l_list: GUI_LIST
+			l_after_fill, i: INTEGER
+		do
+			create l_window.make ("More", 300, 240)
+			create l_list.make
+			l_list.set_near_end_distance (100)
+				-- two rows a load, so filling takes several loads whatever a row's height (ten rows
+				-- of WSLg Wayland's taller rows went past the distance in one)
+			l_list.near_end_actions.extend (agent load_two (l_list))
+			l_window.set_content (l_list)
+			l_window.show
+			settle_window
+			from i := 1 until i > 80 or else l_list.max_scroll_y - l_list.scroll_y > 100 loop
+				let_layout_settle
+				i := i + 1
+			end
+			l_after_fill := l_list.count
+			assert ("filled past the distance: " + l_list.count.out + " rows, " + (l_list.max_scroll_y - l_list.scroll_y).out + " left",
+				l_list.max_scroll_y - l_list.scroll_y > 100)
+			assert ("in several loads: " + l_list.near_end_actions.fire_count.out, l_list.near_end_actions.fire_count >= 2)
+			let_layout_settle
+			assert ("then it waits", l_list.count = l_after_fill)
+			driver.scroll_to_as_user (l_list, 100000)
+			let_layout_settle
+			let_layout_settle
+			assert ("more at the end: " + l_list.count.out, l_list.count > l_after_fill)
+			l_window.close
+		end
+
+	test_a_scroll_area_near_end_rearms_as_its_content_grows
+			-- 1y-d: a scroll area whose content still fits is at its end; each growth of the content
+			-- (its own height, not the visible height it is shown in) arms near-end again, so a
+			-- loader keeps filling until the end is past the distance.
+		local
+			l_window: GUI_WINDOW
+			l_area: GUI_SCROLL_AREA
+			l_stack: GUI_STACK
+			i: INTEGER
+		do
+			create l_window.make ("Grows", 300, 240)
+			create l_area.make
+			create l_stack.make_vertical
+			l_stack.extend (create {GUI_LABEL}.make ("Line 1"))
+			l_area.set_content (l_stack)
+			l_area.set_near_end_distance (100)
+			l_area.near_end_actions.extend (agent add_two_lines (l_stack))
+			l_window.set_content (l_area)
+			l_window.show
+			settle_window
+			from i := 1 until i > 80 or else l_area.max_scroll_y - l_area.scroll_y > 100 loop
+				let_layout_settle
+				i := i + 1
+			end
+			assert ("filled past the distance: " + l_stack.count.out + " lines, " + (l_area.max_scroll_y - l_area.scroll_y).out + " left",
+				l_area.max_scroll_y - l_area.scroll_y > 100)
+			assert ("in several loads: " + l_area.near_end_actions.fire_count.out, l_area.near_end_actions.fire_count >= 2)
+			l_window.close
+		end
+
+	add_two_lines (a_stack: GUI_STACK)
+			-- A slow loader for a scroll area: two more lines, up to 200.
+		do
+			if a_stack.count < 200 then
+				a_stack.extend (create {GUI_LABEL}.make ("Line " + (a_stack.count + 1).out))
+				a_stack.extend (create {GUI_LABEL}.make ("Line " + (a_stack.count + 1).out))
+			end
+		end
+
+	test_a_scroll_header_hides_going_down_and_returns_going_up
+			-- 1y-d: a hiding header slides away when the list scrolls down past the threshold and
+			-- back when it scrolls up; a compacting one says compact past its distance and full
+			-- above it.
+		local
+			l_window: GUI_WINDOW
+			l_column: GUI_STACK
+			l_title: GUI_LABEL
+			l_list: GUI_LIST
+			l_hiding, l_compacting: GUI_SCROLL_HEADER
+		do
+			create l_window.make ("Header", 300, 300)
+			create l_column.make_vertical
+			create l_title.make ("A title")
+			l_list := long_list (100)
+			l_column.extend (l_title)
+			l_column.extend_stretching (l_list)
+			l_window.set_content (l_column)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (True)
+			create l_hiding.make_hiding (l_title, l_list)
+			create l_compacting.make_compacting (l_title, l_list, 50)
+			driver.scroll_to_as_user (l_list, 200)
+			let_layout_settle
+			assert ("hidden going down", l_hiding.is_hidden and not l_title.is_shown)
+			assert ("compact past its distance", l_compacting.is_compact and l_compacting.compact_actions.fire_count = 1)
+			driver.scroll_to_as_user (l_list, 100)
+			let_layout_settle
+			assert ("back going up", not l_hiding.is_hidden and l_title.is_shown)
+			driver.scroll_to_as_user (l_list, 0)
+			let_layout_settle
+			assert ("full at the top", not l_compacting.is_compact and l_compacting.full_actions.fire_count = 1)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_a_scroll_progress_bar_follows
+			-- 1y-d: a scroll progress bar reads 0 at the top and 100 at the end.
+		local
+			l_window: GUI_WINDOW
+			l_column: GUI_STACK
+			l_list: GUI_LIST
+			l_bar: GUI_SCROLL_PROGRESS
+		do
+			create l_window.make ("Progress", 300, 300)
+			create l_column.make_vertical
+			l_list := long_list (100)
+			create l_bar.make (l_list)
+			l_column.extend (l_bar)
+			l_column.extend_stretching (l_list)
+			l_window.set_content (l_column)
+			l_window.show
+			settle_window
+			let_layout_settle
+			assert ("0 at the top", l_bar.value = 0)
+			assert ("named", l_bar.accessible_label.same_string ("Scroll position"))
+			driver.scroll_to_as_user (l_list, 100000)
+			let_layout_settle
+			assert ("100 at the end: " + l_bar.value.out, l_bar.value = 100)
+			l_window.close
+		end
+
 	test_the_clock_ticks_only_while_something_runs
 			-- 1x: a real clock asks for frame ticks when an animation starts and stops them
 			-- when the last one ends, so an idle program never wakes at the display rate.
@@ -8707,6 +8872,27 @@ feature {NONE} -- Fixtures
 				end
 			end
 			Result := l_tops.count
+		end
+
+	long_list (a_rows: INTEGER): GUI_LIST
+			-- A list of `a_rows' rows, "Row 1" on.
+		local
+			i: INTEGER
+		do
+			create Result.make
+			from i := 1 until i > a_rows loop
+				Result.extend ("Row " + i.out)
+				i := i + 1
+			end
+		end
+
+	load_two (a_list: GUI_LIST)
+			-- A slow loader: two more rows, up to 400.
+		do
+			if a_list.count < 400 then
+				a_list.extend ("Loaded " + (a_list.count + 1).out)
+				a_list.extend ("Loaded " + (a_list.count + 1).out)
+			end
 		end
 
 	let_layout_settle

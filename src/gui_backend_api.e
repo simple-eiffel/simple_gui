@@ -2130,6 +2130,42 @@ feature -- Common widget state
 		deferred
 		end
 
+	scroller_watch (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y-d: while `a_on', push event 65 for scrolling widget `an_id' (a scroll area, list,
+			-- table, tree, tree table or grid view) when its vertical offset, its furthest offset
+			-- or its content's extent changed, at most once a turn of the queue.
+		deferred
+		end
+
+	scroller_y (an_id: INTEGER): INTEGER
+			-- 1y-d: how far scrolling widget `an_id' is scrolled down, in logical pixels.
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	scroller_max_y (an_id: INTEGER): INTEGER
+			-- 1y-d: the furthest `scroller_y' goes (0 when the content fits).
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	scroller_extent (an_id: INTEGER): INTEGER
+			-- 1y-d: the content's height in logical pixels, whether or not it scrolls.
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	test_scroller_scroll_to (an_id, a_y: INTEGER)
+			-- Tests, 1y-d: scroll widget `an_id' to `a_y' as the user would (straight to the
+			-- toolkit), clamped to what it can.
+		require
+			not_negative: a_y >= 0
+		deferred
+		end
+
 	widget_watch_pointer (an_id: INTEGER; a_on: BOOLEAN)
 			-- 1y-c: while `a_on', push event 63 for widget `an_id' when the pointer comes over it
 			-- or one of its children (a = 1) and when it leaves them all (a = 0); moving from the
