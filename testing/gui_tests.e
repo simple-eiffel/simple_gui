@@ -3906,13 +3906,14 @@ feature -- The remaining controls (1j)
 		local
 			l_window: GUI_WINDOW
 			l_column, l_row: GUI_STACK
-			l_outside, l_inside: GUI_BUTTON
+			l_outside, l_inside: GUI_TEXT_FIELD
 		do
+				-- text fields: they take the focus on every platform (Windows' drawn buttons do not yet)
 			create l_window.make ("Inside", 400, 200)
 			create l_column.make_vertical
 			create l_row.make_horizontal
-			create l_outside.make ("Outside")
-			create l_inside.make ("Inside")
+			create l_outside.make
+			create l_inside.make
 			l_row.extend (l_inside)
 			l_column.extend (l_outside)
 			l_column.extend (l_row)
@@ -3947,7 +3948,7 @@ feature -- The remaining controls (1j)
 		local
 			l_window: GUI_WINDOW
 			l_column, l_row: GUI_STACK
-			l_other: GUI_BUTTON
+			l_other, l_note: GUI_TEXT_FIELD
 			l_title: GUI_LABEL
 			l_delete: GUI_BUTTON
 			l_place: INTEGER
@@ -3955,10 +3956,12 @@ feature -- The remaining controls (1j)
 			create l_window.make ("Hover", 400, 200)
 			create l_column.make_vertical
 			create l_row.make_horizontal
-			create l_other.make ("Elsewhere")
+			create l_other.make
 			create l_title.make ("A row")
+			create l_note.make
 			create l_delete.make ("Delete")
 			l_row.extend (l_title)
+			l_row.extend (l_note)
 			l_row.extend (l_delete)
 			l_column.extend (l_other)
 			l_column.extend (l_row)
@@ -3977,9 +3980,9 @@ feature -- The remaining controls (1j)
 			assert ("shown on hover", l_delete.opacity = 1.0)
 			driver.pointer_leave (l_row)
 			assert ("hidden after", l_delete.opacity = 0.0)
-			l_delete.focus
+			l_note.focus
 			let_layout_settle
-			assert ("shown when the focus reaches it", l_delete.opacity = 1.0)
+			assert ("shown when the focus comes inside the row", l_delete.opacity = 1.0)
 			l_other.focus
 			let_layout_settle
 			assert ("hidden when it leaves", l_delete.opacity = 0.0)
@@ -4020,7 +4023,7 @@ feature -- The remaining controls (1j)
 			assert ("the fill covers it", near (l_veil.width, ow) and near (l_veil.height, oh))
 			assert ("the badge at the top trailing corner: " + l_badge.x.out + "+" + l_badge.width.out + " vs " + (ox + ow).out,
 				near (l_badge.x + l_badge.width, ox + ow) and near (l_badge.y, oy))
-			assert ("the button at its margin: " + l_button.x.out + " " + (l_button.y + l_button.height).out,
+			assert ("the button at its margin: " + l_button.x.out + "," + l_button.y.out + " " + l_button.width.out + "x" + l_button.height.out + " in " + ox.out + "," + oy.out + " " + ow.out + "x" + oh.out,
 				near (l_button.x, ox + 10) and near (l_button.y + l_button.height, oy + oh - 10))
 			assert ("passes input", l_overlay.passes_input (l_veil) and not l_overlay.passes_input (l_button))
 			l_overlay.set_overlay_offset (l_button, 30, -20)
