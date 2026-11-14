@@ -3243,13 +3243,21 @@ G_GNUC_END_IGNORE_DEPRECATIONS
 
 /* ---------- position in the window's content (logical pixels, y down) ---------- */
 
-static int sg_point(int id, int want_y) {
+/* Spec #74: a widget's x, y, width and height are the box the user sees, its border box (where
+   CSS draws its background and border: a button's bezel, an entry's frame), from one
+   gtk_widget_compute_bounds against the window's content. gtk_widget_get_width answers the
+   content box, inside padding and border, which put a padded button's box off by its padding. */
+static int sg_box(int id, int which, graphene_rect_t *b) {
     GtkWidget *w = sg_w[id];
-    GtkRoot *root = gtk_widget_get_root(w);
+    GtkRoot *root = w ? gtk_widget_get_root(w) : NULL;
     GtkWidget *content = root ? g_object_get_data(G_OBJECT(root), "sg-content") : NULL;
-    graphene_point_t src = GRAPHENE_POINT_INIT(0, 0), dst;
-    if (!content || !gtk_widget_compute_point(w, content, &src, &dst)) return 0;
-    return (int) (want_y ? dst.y : dst.x);
+    (void) which;
+    return w && content && !GTK_IS_WINDOW(w) && gtk_widget_compute_bounds(w, content, b);
+}
+static int sg_point(int id, int want_y) {
+    graphene_rect_t b;
+    if (!sg_box(id, 0, &b)) return 0;
+    return (int) floor((want_y ? b.origin.y : b.origin.x) + 0.5);
 }
 static int sg_x(int id) { return sg_point(id, 0); }
 static int sg_y(int id) { return sg_point(id, 1); }
@@ -3619,8 +3627,17 @@ static int sg_canvas(int w, int h) {
 }
 static int sg_scale_factor(int id) { return gtk_widget_get_scale_factor(sg_w[id]); }
 /* 0 for a slot that went empty (a drawn view destroyed with its window). */
-static int sg_width(int id) { return sg_w[id] ? gtk_widget_get_width(sg_w[id]) : 0; }
-static int sg_height(int id) { return sg_w[id] ? gtk_widget_get_height(sg_w[id]) : 0; }
+/* The border box's size (spec #74); a window, or a widget not yet in one, answers its own size. */
+static int sg_width(int id) {
+    graphene_rect_t b;
+    if (sg_box(id, 0, &b)) return (int) floor(b.size.width + 0.5);
+    return sg_w[id] ? gtk_widget_get_width(sg_w[id]) : 0;
+}
+static int sg_height(int id) {
+    graphene_rect_t b;
+    if (sg_box(id, 0, &b)) return (int) floor(b.size.height + 0.5);
+    return sg_w[id] ? gtk_widget_get_height(sg_w[id]) : 0;
+}
 /* ---------- 1y: size reports. After each frame a window paints (its frame clock's after-paint,
    so after layout), every watched widget's size is read, and event 9 (a, b = width, height, as
    sg_width and sg_height answer) is pushed for each one that changed and has a size. The list
