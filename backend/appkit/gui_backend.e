@@ -2412,6 +2412,41 @@ feature -- Canvas
 		alias "sga_test_scroller_scroll_to($an_id, $a_y);"
 		end
 
+	list_set_sections (an_id: INTEGER; a_starts, a_titles: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_list_set_sections($an_id, (const char *) $a_starts, (const char *) $a_titles);"
+		end
+
+	table_set_sections (an_id: INTEGER; a_starts, a_titles: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_table_set_sections($an_id, (const char *) $a_starts, (const char *) $a_titles);"
+		end
+
+	list_set_sticky_headers (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_list_set_sticky_headers($an_id, $a_on ? 1 : 0);"
+		end
+
+	table_set_sticky_headers (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_table_set_sticky_headers($an_id, $a_on ? 1 : 0);"
+		end
+
+	scroll_area_set_sticky (an_id, a_child: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_scroll_area_set_sticky($an_id, $a_child, $a_on ? 1 : 0);"
+		end
+
+	test_pinned_header (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_pinned_header($an_id);"
+		end
+
+	test_pinned_header_y (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_pinned_header_y($an_id);"
+		end
+
 	widget_watch_pointer (an_id: INTEGER; a_on: BOOLEAN)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_widget_watch_pointer($an_id, $a_on ? 1 : 0);"
