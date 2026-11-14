@@ -1780,6 +1780,175 @@ feature -- Controls
 			create Result.make (8)
 		end
 
+	widget_watch_pointer (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y-c: windows report crossings after each event and frame (`report_crossings').
+		do
+			if a_on then
+				if not pointer_watch.has (an_id) then
+					pointer_watch.force (False, an_id)
+				end
+			else
+				pointer_watch.remove (an_id)
+			end
+		end
+
+	widget_watch_focus (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if a_on then
+				if not focus_watch.has (an_id) then
+					focus_watch.force (False, an_id)
+				end
+			else
+				focus_watch.remove (an_id)
+			end
+		end
+
+	test_pointer_crossing (an_id: INTEGER; a_inside: BOOLEAN)
+			-- The pointer comes over widget `an_id' or leaves it, as a test says: held as the
+			-- test says (the real pointer is not asked about it) until the test's leave.
+		do
+			if a_inside then
+				pointer_held.force (True, an_id)
+			else
+				pointer_held.remove (an_id)
+			end
+			if pointer_watch.has (an_id) and then pointer_watch.item (an_id) /= a_inside then
+				pointer_watch.force (a_inside, an_id)
+				push (63, an_id, a_inside.to_integer, 0, 0)
+			end
+		end
+
+	report_crossings
+			-- After an event, a focus change or a frame: event 63 for each watched widget the
+			-- pointer came over or left, 64 for each the keyboard focus came into or left. Inside
+			-- means the widget under the pointer (or the focused one) is it or one of its children,
+			-- in the main window or a floating one.
+		local
+			l_changes: ARRAYED_LIST [TUPLE [id: INTEGER; inside: BOOLEAN]]
+			l_now: BOOLEAN
+		do
+			create l_changes.make (0)
+			across pointer_watch as ic loop
+				if not pointer_held.has (@ic.key) and then attached widget (@ic.key) as al_w then
+					l_now := across window_pointers as p some holds (al_w, p) end
+					if l_now /= ic then
+						l_changes.extend ([@ic.key, l_now])
+					end
+				end
+			end
+			across l_changes as ic loop
+				pointer_watch.force (ic.inside, ic.id)
+				push (63, ic.id, ic.inside.to_integer, 0, 0)
+			end
+			l_changes.wipe_out
+			across focus_watch as ic loop
+				if attached widget (@ic.key) as al_w then
+					l_now := across window_focuses as f some holds (al_w, f) end
+					if l_now /= ic then
+						l_changes.extend ([@ic.key, l_now])
+					end
+				end
+			end
+			across l_changes as ic loop
+				focus_watch.force (ic.inside, ic.id)
+				push (64, ic.id, ic.inside.to_integer, 0, 0)
+			end
+		end
+
+	window_pointers: ARRAYED_LIST [SW_WIDGET]
+			-- The widget under the pointer in each open window that has one.
+		do
+			create Result.make (2)
+			if attached open_window as al_w and then al_w.is_window_open and then attached al_w.pointer_widget as al_h then
+				Result.extend (al_h)
+			end
+			across floats as ic loop
+				if ic.is_open and then attached ic.hovered as al_h then
+					Result.extend (al_h)
+				end
+			end
+		end
+
+	window_focuses: ARRAYED_LIST [SW_WIDGET]
+			-- The focused widget in each open window that has one.
+		do
+			create Result.make (2)
+			if attached open_window as al_w and then al_w.is_window_open and then attached al_w.focused as al_f then
+				Result.extend (al_f)
+			end
+			across floats as ic loop
+				if ic.is_open and then attached ic.focused as al_f then
+					Result.extend (al_f)
+				end
+			end
+		end
+
+	holds (a_outer, a_inner: SW_WIDGET): BOOLEAN
+			-- Is `a_inner' `a_outer' or inside it?
+		local
+			l_up: detachable SW_WIDGET
+		do
+			from l_up := a_inner until Result or l_up = Void loop
+				Result := l_up = a_outer
+				l_up := l_up.parent
+			end
+		end
+
+	pointer_watch, focus_watch: HASH_TABLE [BOOLEAN, INTEGER]
+			-- The watched widgets, by id, and whether the pointer (the focus) is inside each as
+			-- last reported (1y-c).
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	pointer_held: HASH_TABLE [BOOLEAN, INTEGER]
+			-- Widgets a test put the pointer over, held until the test's leave.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	overlay: INTEGER
+		do
+			Result := register (create {SW_OVERLAY}.make)
+		end
+
+	overlay_set_base (an_overlay, a_child: INTEGER)
+		do
+			if attached {SW_OVERLAY} widget (an_overlay) as al_o and then attached widget (a_child) as al_c then
+				al_o.set_base (al_c)
+			end
+		end
+
+	overlay_extend (an_overlay, a_child, a_place: INTEGER)
+		do
+			if attached {SW_OVERLAY} widget (an_overlay) as al_o and then attached widget (a_child) as al_c then
+				al_o.put_layer (al_c, a_place)
+			end
+		end
+
+	overlay_set_place (an_overlay, a_child, a_place, a_margin: INTEGER)
+		do
+			if attached {SW_OVERLAY} widget (an_overlay) as al_o and then attached widget (a_child) as al_c and then al_o.is_layer (al_c) then
+				al_o.set_layer_place (al_c, a_place, scaled (a_margin))
+				changed
+			end
+		end
+
+	overlay_set_offset (an_overlay, a_child, a_dx, a_dy: INTEGER)
+		do
+			if attached {SW_OVERLAY} widget (an_overlay) as al_o and then attached widget (a_child) as al_c and then al_o.is_layer (al_c) then
+				al_o.set_layer_offset (al_c, scaled (a_dx), scaled (a_dy))
+				changed
+			end
+		end
+
+	overlay_set_passes_input (an_overlay, a_child: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_OVERLAY} widget (an_overlay) as al_o and then attached widget (a_child) as al_c and then al_o.is_layer (al_c) then
+				al_o.set_layer_passes_input (al_c, a_on)
+			end
+		end
+
 	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)
 			-- 1x: simple_widgets paints the widget at that alpha; at 0 a hit passes to its
 			-- parent.
@@ -3108,6 +3277,7 @@ feature -- Controls
 			if not l_done then
 				test_focus (an_id)
 			end
+			report_crossings
 		end
 
 	test_press_chevron (an_id, a_part: INTEGER)
