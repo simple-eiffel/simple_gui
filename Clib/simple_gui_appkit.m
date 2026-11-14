@@ -12613,6 +12613,250 @@ void sga_yield_focus(int a_id)
 	if (!n || n == f || [n isDescendantOf:v] || ![w makeFirstResponder:n]) [w makeFirstResponder:nil];
 }
 
+/* ------------------------------------------- 1y-c: pointer and focus inside */
+
+/* The pointer: a tracking area on the watched view, over its visible rectangle, in every window
+   whether active or not (as Windows and GTK report it), during drags too. It is a rectangle, so
+   moving from the view onto a child is no leave. Its owner is a small object of ours, so any
+   view can be watched without a class of its own. Event 63, a = 1 entered, 0 left. */
+static char s_pointer_inside[SGA_MAX];
+
+@interface SGAPointerWatch : NSObject
+{
+@public
+	int id_;
+	NSTrackingArea *area;
+}
+@end
+@implementation SGAPointerWatch
+- (void)mouseEntered:(NSEvent *)a_event
+{
+	(void)a_event;
+	if (s_pointer_inside[id_]) return;
+	s_pointer_inside[id_] = 1;
+	sga_push(63, id_, 1, 0, 0);
+}
+- (void)mouseExited:(NSEvent *)a_event
+{
+	(void)a_event;
+	if (!s_pointer_inside[id_]) return;
+	s_pointer_inside[id_] = 0;
+	sga_push(63, id_, 0, 0, 0);
+}
+@end
+
+static NSMutableDictionary<NSNumber *, SGAPointerWatch *> *s_pointer_watches;
+
+void sga_widget_watch_pointer(int a_id, int a_on)
+{
+	if (a_id <= 0 || a_id >= SGA_MAX) return;
+	NSView *v = sga_get(a_id);
+	if (![v isKindOfClass:[NSView class]]) return;
+	if (!s_pointer_watches) s_pointer_watches = [NSMutableDictionary dictionary];
+	SGAPointerWatch *l_old = s_pointer_watches[@(a_id)];
+	if (l_old) { [v removeTrackingArea:l_old->area]; [s_pointer_watches removeObjectForKey:@(a_id)]; }
+	s_pointer_inside[a_id] = 0;
+	if (!a_on) return;
+	SGAPointerWatch *p = [SGAPointerWatch new];
+	p->id_ = a_id;
+	p->area = [[NSTrackingArea alloc] initWithRect:NSZeroRect
+		options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect | NSTrackingEnabledDuringMouseDrag
+		owner:p userInfo:nil];
+	[v addTrackingArea:p->area];
+	s_pointer_watches[@(a_id)] = p;
+	/* already under the pointer: as GTK does, that counts as entered */
+	NSWindow *w = [v window];
+	if (w && ![v isHiddenOrHasHiddenAncestor]) {
+		NSPoint l_at = [v convertPoint:[w mouseLocationOutsideOfEventStream] fromView:nil];
+		if (NSPointInRect(l_at, [v visibleRect])) [p mouseEntered:nil];
+	}
+}
+
+/* Tests: the pointer crossing as the toolkit reports it. */
+void sga_test_pointer_crossing(int a_id, int a_inside)
+{
+	if (a_id <= 0 || a_id >= SGA_MAX) return;
+	if ((s_pointer_inside[a_id] != 0) == (a_inside != 0)) return;
+	s_pointer_inside[a_id] = a_inside ? 1 : 0;
+	sga_push(63, a_id, a_inside ? 1 : 0, 0, 0);
+}
+
+/* The keyboard focus: AppKit says nothing when the first responder changes, so after each turn
+   of the run loop (when events have been handled) each watched view checks whether its window's
+   focus (a field editor counted as its field) is it or inside it, and reports a change. Event
+   64, a = 1 came inside, 0 left. */
+static char s_focus_watched[SGA_MAX], s_focus_within[SGA_MAX];
+static CFRunLoopObserverRef s_focus_observer;
+
+static void sga_focus_check(CFRunLoopObserverRef a_observer, CFRunLoopActivity a_activity, void *a_info)
+{
+	(void)a_observer; (void)a_activity; (void)a_info;
+	for (int i = 1; i <= s_count && i < SGA_MAX; i++) {
+		if (!s_focus_watched[i]) continue;
+		id o = s_objects[i];
+		if (![o isKindOfClass:[NSView class]]) { s_focus_watched[i] = 0; continue; }
+		NSView *v = o; NSWindow *w = [v window];
+		NSView *f = w ? sga_focused_view(w) : nil;
+		char l_within = f && (f == v || [f isDescendantOf:v]) ? 1 : 0;
+		if (l_within != s_focus_within[i]) { s_focus_within[i] = l_within; sga_push(64, i, l_within, 0, 0); }
+	}
+}
+
+void sga_widget_watch_focus(int a_id, int a_on)
+{
+	if (a_id <= 0 || a_id >= SGA_MAX) return;
+	s_focus_watched[a_id] = a_on ? 1 : 0;
+	s_focus_within[a_id] = 0;
+	if (a_on && !s_focus_observer) {
+		s_focus_observer = CFRunLoopObserverCreate(NULL, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, 2100002, sga_focus_check, NULL);
+		CFRunLoopAddObserver(CFRunLoopGetMain(), s_focus_observer, kCFRunLoopCommonModes);
+	}
+	if (a_on) sga_focus_check(NULL, 0, NULL);
+}
+
+/* ------------------------------------------- 1y-c: overlay */
+
+/* An overlay: the base fills it and gives it its size; each overlay child sits in a holder of
+   ours above it, later ones higher, clipped to the overlay. A holder is the child's natural size,
+   never more than the overlay less twice the margin (the child is clipped to it if it cannot
+   shrink, so it never enlarges the overlay). Places are worked out on the screen's own left and
+   right, so leading and trailing mirror under right to left while the offset does not. A holder
+   never takes the pointer itself, and lets it through entirely when it passes input. */
+@interface SGAOverlayHolder : NSView
+{
+@public
+	NSView *child;
+	int place, margin, dx, dy;
+	BOOL passes;
+	NSArray<NSLayoutConstraint *> *placing;
+}
+@end
+@implementation SGAOverlayHolder
+- (BOOL)isFlipped { return YES; }
+- (NSView *)hitTest:(NSPoint)a_point
+{
+	if (passes || [child isHidden]) return nil;
+	NSView *r = [super hitTest:a_point];
+	return r == self ? nil : r;
+}
+@end
+
+@interface SGAOverlay : NSView
+@end
+@implementation SGAOverlay
+- (BOOL)isFlipped { return YES; }
+- (void)place:(SGAOverlayHolder *)h
+{
+	[NSLayoutConstraint deactivateConstraints:h->placing ?: @[]];
+	NSMutableArray *k = [NSMutableArray array];
+	CGFloat m = h->margin, x = h->dx, y = h->dy;
+	if (h->place == 10) {
+		[k addObjectsFromArray:@[[h.leftAnchor constraintEqualToAnchor:self.leftAnchor constant:m + x],
+			[h.rightAnchor constraintEqualToAnchor:self.rightAnchor constant:-m + x],
+			[h.topAnchor constraintEqualToAnchor:self.topAnchor constant:m + y],
+			[h.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-m + y]]];
+	} else {
+		int l_column = (h->place - 1) % 3, l_row = (h->place - 1) / 3;
+		if (l_column != 1 && [self userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft) l_column = 2 - l_column;
+		[k addObject:l_column == 0 ? [h.leftAnchor constraintEqualToAnchor:self.leftAnchor constant:m + x]
+			: l_column == 1 ? [h.centerXAnchor constraintEqualToAnchor:self.centerXAnchor constant:x]
+			: [h.rightAnchor constraintEqualToAnchor:self.rightAnchor constant:-m + x]];
+		[k addObject:l_row == 0 ? [h.topAnchor constraintEqualToAnchor:self.topAnchor constant:m + y]
+			: l_row == 1 ? [h.centerYAnchor constraintEqualToAnchor:self.centerYAnchor constant:y]
+			: [h.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-m + y]];
+		[k addObject:[h.widthAnchor constraintLessThanOrEqualToAnchor:self.widthAnchor constant:-2 * m]];
+		[k addObject:[h.heightAnchor constraintLessThanOrEqualToAnchor:self.heightAnchor constant:-2 * m]];
+		NSLayoutConstraint *l_w = [h.widthAnchor constraintEqualToConstant:0], *l_h = [h.heightAnchor constraintEqualToConstant:0];
+		[l_w setPriority:49]; [l_h setPriority:49];   /* hug the child's natural size */
+		[k addObjectsFromArray:@[l_w, l_h]];
+	}
+	h->placing = k;
+	[NSLayoutConstraint activateConstraints:k];
+}
+- (SGAOverlayHolder *)holderOf:(NSView *)a_child
+{
+	for (NSView *v in [self subviews]) if ([v isKindOfClass:[SGAOverlayHolder class]] && ((SGAOverlayHolder *)v)->child == a_child) return (SGAOverlayHolder *)v;
+	return nil;
+}
+- (void)setUserInterfaceLayoutDirection:(NSUserInterfaceLayoutDirection)a_direction
+{
+	BOOL l_changed = a_direction != [self userInterfaceLayoutDirection];
+	[super setUserInterfaceLayoutDirection:a_direction];
+	if (l_changed) for (NSView *v in [self subviews]) if ([v isKindOfClass:[SGAOverlayHolder class]]) [self place:(SGAOverlayHolder *)v];
+}
+@end
+
+/* Constraints place alignment rectangles, and a label's frame overhangs its own by a little on
+   each side; an overlay pins frames, so the base's frame is the overlay's and a child's is its
+   holder's (nothing of it clipped). */
+static NSArray<NSLayoutConstraint *> *sga_pin_frame(NSView *v, NSView *a_to, NSLayoutPriority a_far)
+{
+	NSEdgeInsets i = [v alignmentRectInsets];
+	NSLayoutConstraint *l_right = [v.rightAnchor constraintEqualToAnchor:a_to.rightAnchor constant:-i.right];
+	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:a_to.bottomAnchor constant:-i.bottom];
+	[l_right setPriority:a_far]; [l_bottom setPriority:a_far];
+	return @[[v.leftAnchor constraintEqualToAnchor:a_to.leftAnchor constant:i.left],
+		[v.topAnchor constraintEqualToAnchor:a_to.topAnchor constant:i.top], l_right, l_bottom];
+}
+
+int sga_overlay(void)
+{
+	SGAOverlay *o = [[SGAOverlay alloc] init];
+	[o setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[o setClipsToBounds:YES];
+	return sga_keep(o);
+}
+
+void sga_overlay_set_base(int an_overlay, int a_child)
+{
+	SGAOverlay *o = sga_get(an_overlay);
+	NSView *v = sga_get(a_child);
+	for (NSView *l_old in [[o subviews] copy]) if (![l_old isKindOfClass:[SGAOverlayHolder class]]) [l_old removeFromSuperview];
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[o addSubview:v positioned:NSWindowBelow relativeTo:nil];
+	[NSLayoutConstraint activateConstraints:sga_pin_frame(v, o, NSLayoutPriorityRequired)];
+}
+
+void sga_overlay_extend(int an_overlay, int a_child, int a_place)
+{
+	SGAOverlay *o = sga_get(an_overlay);
+	NSView *v = sga_get(a_child);
+	SGAOverlayHolder *h = [[SGAOverlayHolder alloc] init];
+	[h setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[h setClipsToBounds:YES];
+	h->child = v; h->place = a_place;
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[h addSubview:v];
+	[NSLayoutConstraint activateConstraints:sga_pin_frame(v, h, NSLayoutPriorityRequired - 1)];
+	[o addSubview:h];
+	[o place:h];
+}
+
+void sga_overlay_set_place(int an_overlay, int a_child, int a_place, int a_margin)
+{
+	SGAOverlay *o = sga_get(an_overlay);
+	SGAOverlayHolder *h = [o holderOf:sga_get(a_child)];
+	if (!h) return;
+	h->place = a_place; h->margin = a_margin;
+	[o place:h];
+}
+
+void sga_overlay_set_offset(int an_overlay, int a_child, int a_dx, int a_dy)
+{
+	SGAOverlay *o = sga_get(an_overlay);
+	SGAOverlayHolder *h = [o holderOf:sga_get(a_child)];
+	if (!h) return;
+	sga_frame_value_set();
+	h->dx = a_dx; h->dy = a_dy;
+	[o place:h];
+}
+
+void sga_overlay_set_passes_input(int an_overlay, int a_child, int a_on)
+{
+	SGAOverlayHolder *h = [(SGAOverlay *)sga_get(an_overlay) holderOf:sga_get(a_child)];
+	if (h) h->passes = a_on != 0;
+}
+
 /* Tests, 1x-b */
 
 double sga_test_reveal_shown(int a_id)
