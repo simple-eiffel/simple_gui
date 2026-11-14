@@ -3385,6 +3385,44 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_a_label_in_a_scroll_area_keeps_its_natural_width
+			-- A long label in a vertical stack in a scroll area gets its natural width (the same
+			-- text's width in a row, where nothing narrows it), and the area scrolls across to
+			-- it; a shorter label beside it in the stack doesn't pull it narrower.
+		local
+			l_window, l_wide: GUI_WINDOW
+			l_area: GUI_SCROLL_AREA
+			l_rows, l_row: GUI_STACK
+			l_long, l_measure: GUI_LABEL
+		do
+			create l_wide.make ("Natural", 900, 120)
+			create l_row.make_horizontal
+			create l_measure.make (Long_label_text)
+			l_row.extend (l_measure)
+			l_wide.set_content (l_row)
+			l_wide.show
+			settle_window
+			create l_window.make ("Scroll", 240, 200)
+			create l_area.make
+			create l_rows.make_vertical
+			l_rows.extend (create {GUI_LABEL}.make ("Short"))
+			create l_long.make (Long_label_text)
+			l_rows.extend (l_long)
+			l_rows.extend (create {GUI_LABEL}.make ("Short"))
+			l_area.set_content (l_rows)
+			l_window.set_content (l_area)
+			l_window.show
+			settle_window
+			assert ("measured in a row: " + l_measure.width.out, l_measure.width > 240)
+			assert ("its natural width in the area: " + l_long.width.out + " of " + l_measure.width.out, l_long.width >= l_measure.width - 2)
+			assert ("the area scrolls across: " + l_area.max_scroll_x.out, l_area.max_scroll_x > 0)
+			l_window.close
+			l_wide.close
+		end
+
+	Long_label_text: STRING = "A label far longer than its window is wide, so its area scrolls across"
+			-- The long label's text.
+
 	test_the_users_scroll_stops_a_smooth_scroll
 			-- 1x-d: the user's own scroll during a smooth scroll stands; the smooth scroll stops
 			-- there and never says it arrived. `scroll_to' stops one the same way.

@@ -1022,6 +1022,18 @@ static void sga_place(SGASlot *a_slot, int a_alignment)
 				[c.topAnchor constraintGreaterThanOrEqualToAnchor:a_slot.topAnchor]]]; break;
 		}
 	}
+	/* A child that fills across is as wide (tall) as its slot whatever it hugs, so its hugging
+	   across only pulls the stack's shared width down: below its own resistance to narrowing, the
+	   widest filling child's natural width wins, as GTK gives a box its widest child's. AppKit's
+	   label hugs 251 and gives way at 248 (SGALabel), so a short label would truncate a long one
+	   wherever nothing holds the width open (a scroll area's content). An aligned child keeps its
+	   own hugging: it holds the child to its size against the pull below. */
+	{
+		NSLayoutConstraintOrientation l_across = a_slot->vertical ? NSLayoutConstraintOrientationHorizontal : NSLayoutConstraintOrientationVertical;
+		NSLayoutPriority l_own = a_slot->hug[a_slot->vertical ? 0 : 1];
+		NSLayoutPriority l_give = [c contentCompressionResistancePriorityForOrientation:l_across];
+		if (l_own > 0) [c setContentHuggingPriority:a_alignment == 0 && l_own >= l_give ? l_give - 1 : l_own forOrientation:l_across];
+	}
 	/* Unless it fills, the child does not reach across the whole slot; this weak pull makes
 	   the stack hug its tallest (or widest) child instead of growing without limit. */
 	if (a_alignment != 0) {
@@ -3878,6 +3890,8 @@ void sga_expander_set_content(int a_id, int a_child)
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
 	[l_slot addSubview:v];
 	sga_keep_natural_size(v, 0);
+	l_slot->hug[0] = [v contentHuggingPriorityForOrientation:NSLayoutConstraintOrientationHorizontal];   /* sga_place reads them */
+	l_slot->hug[1] = [v contentHuggingPriorityForOrientation:NSLayoutConstraintOrientationVertical];
 	[v setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationVertical];
 	[l_slot setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationVertical];
 	s_slots[[NSValue valueWithNonretainedObject:v]] = l_slot;
