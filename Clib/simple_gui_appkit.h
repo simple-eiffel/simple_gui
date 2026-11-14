@@ -32,6 +32,7 @@ void sga_window_set_content(int a_window, int a_child);
 void sga_window_show(int a_window);
 void sga_window_close(int a_window);
 void sga_window_set_title(int a_window, const char *a_title);
+void sga_window_set_size(int a_window, int a_width, int a_height);
 int sga_stack(int a_vertical, int a_spacing);
 void sga_stack_extend(int a_stack, int a_child, int a_stretch);
 void sga_stack_set_spacing(int a_stack, int a_spacing);
