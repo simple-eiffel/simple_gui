@@ -1451,6 +1451,111 @@ feature -- Controls
 			Result := register (l_s)
 		end
 
+	flow_box (a_line_gap, a_sibling_gap: INTEGER): INTEGER
+			-- An SW_FLOW_BOX, 12 clear around it as around a stack.
+		local
+			l_box: SW_FLOW_BOX
+		do
+			create l_box.make
+			l_box.set_padding (scaled (Stack_margin))
+			l_box.set_gaps (scaled (a_line_gap), scaled (a_sibling_gap))
+			Result := register (l_box)
+			margins.force (scaled (Stack_margin), Result)
+		end
+
+	flow_box_extend (a_box, a_child: INTEGER)
+		do
+			if attached {SW_FLOW_BOX} widget (a_box) as al_box and then attached widget (a_child) as al_child then
+				al_box.put (al_child)
+			end
+		end
+
+	flow_box_set_spacing (a_box, a_line_gap, a_sibling_gap: INTEGER)
+		do
+			if attached {SW_FLOW_BOX} widget (a_box) as al_box then
+				al_box.set_gaps (scaled (a_line_gap), scaled (a_sibling_gap))
+				changed
+			end
+		end
+
+	flow_box_set_maximum_per_line (a_box, a_count: INTEGER)
+		do
+			if attached {SW_FLOW_BOX} widget (a_box) as al_box then
+				al_box.set_maximum_per_line (a_count)
+				changed
+			end
+		end
+
+	flow_box_set_homogeneous (a_box: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_FLOW_BOX} widget (a_box) as al_box then
+				al_box.set_homogeneous (a_on)
+				changed
+			end
+		end
+
+	columns (a_count, a_minimum_width, a_row_gap, a_column_gap: INTEGER): INTEGER
+			-- A GUI_SW_COLUMNS, 12 clear around it as around a stack.
+		local
+			l_cols: GUI_SW_COLUMNS
+		do
+			create l_cols.make (a_count)
+			l_cols.set_padding (scaled (Stack_margin))
+			l_cols.set_gaps (scaled (a_row_gap), scaled (a_column_gap))
+			Result := register (l_cols)
+			margins.force (scaled (Stack_margin), Result)
+		end
+
+	columns_extend (a_columns, a_child: INTEGER)
+		do
+			if attached {GUI_SW_COLUMNS} widget (a_columns) as al_cols and then attached widget (a_child) as al_child then
+				al_cols.extend_child (al_child)
+			end
+		end
+
+	columns_set_count (a_columns, a_count: INTEGER)
+		do
+			if attached {GUI_SW_COLUMNS} widget (a_columns) as al_cols then
+				al_cols.set_count (a_count)
+				changed
+			end
+		end
+
+	columns_set_spacing (a_columns, a_row_gap, a_column_gap: INTEGER)
+		do
+			if attached {GUI_SW_COLUMNS} widget (a_columns) as al_cols then
+				al_cols.set_gaps (scaled (a_row_gap), scaled (a_column_gap))
+				changed
+			end
+		end
+
+	columns_set_minimum_width (a_columns, a_width: INTEGER)
+			-- Nothing to keep here: SW lays the columns out at the width given, and the
+			-- preferred width is one column's.
+		do
+		end
+
+	aspect_frame (a_ratio: REAL_64): INTEGER
+		do
+			Result := register (create {GUI_SW_ASPECT_FRAME}.make (a_ratio))
+		end
+
+	aspect_set_ratio (a_frame: INTEGER; a_ratio: REAL_64)
+		do
+			if attached {GUI_SW_ASPECT_FRAME} widget (a_frame) as al_f then
+				al_f.set_ratio (a_ratio)
+				changed
+			end
+		end
+
+	aspect_set_content (a_frame, a_child: INTEGER)
+		do
+			if attached {GUI_SW_ASPECT_FRAME} widget (a_frame) as al_f and then attached widget (a_child) as al_c then
+				al_f.put (al_c)
+				changed
+			end
+		end
+
 	group_box (a_title: POINTER): INTEGER
 		do
 			Result := register (create {SW_GROUP}.make_titled (from_c (a_title)))

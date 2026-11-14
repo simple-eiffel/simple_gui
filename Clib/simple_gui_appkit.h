@@ -39,6 +39,19 @@ void sga_stack_set_spacing(int a_stack, int a_spacing);
 void sga_stack_set_alignment(int a_stack, int a_alignment);   /* 0 fill, 1 start, 2 center, 3 end */
 void sga_stack_align_child(int a_stack, int a_child, int a_alignment);
 void sga_stack_set_vertical(int a_stack, int a_on);
+int sga_flow_box(int a_line_gap, int a_sibling_gap);
+void sga_flow_box_extend(int a_box, int a_child);
+void sga_flow_box_set_spacing(int a_box, int a_line_gap, int a_sibling_gap);
+void sga_flow_box_set_maximum_per_line(int a_box, int a_count);
+void sga_flow_box_set_homogeneous(int a_box, int a_on);
+int sga_columns(int a_count, int a_minimum_width, int a_row_gap, int a_column_gap);
+void sga_columns_extend(int a_columns, int a_child);
+void sga_columns_set_count(int a_columns, int a_count);
+void sga_columns_set_spacing(int a_columns, int a_row_gap, int a_column_gap);
+void sga_columns_set_minimum_width(int a_columns, int a_width);
+int sga_aspect_frame(double a_ratio);
+void sga_aspect_set_ratio(int a_frame, double a_ratio);
+void sga_aspect_set_content(int a_frame, int a_child);
 int sga_grid(void);
 void sga_grid_set_homogeneous_columns(int a_grid, int a_on);
 void sga_grid_set_stretching_column(int a_grid, int a_column);   /* 1-based; 0 none */

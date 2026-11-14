@@ -104,6 +104,71 @@ feature -- Windows and containers
 		alias "sg_stack_set_spacing($a_stack, $a_spacing);"
 		end
 
+	flow_box (a_line_gap, a_sibling_gap: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_flow_box($a_line_gap, $a_sibling_gap);"
+		end
+
+	flow_box_extend (a_box, a_child: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_flow_box_extend($a_box, $a_child);"
+		end
+
+	flow_box_set_spacing (a_box, a_line_gap, a_sibling_gap: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_flow_box_set_spacing($a_box, $a_line_gap, $a_sibling_gap);"
+		end
+
+	flow_box_set_maximum_per_line (a_box, a_count: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_flow_box_set_maximum_per_line($a_box, $a_count);"
+		end
+
+	flow_box_set_homogeneous (a_box: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_flow_box_set_homogeneous($a_box, $a_on ? 1 : 0);"
+		end
+
+	columns (a_count, a_minimum_width, a_row_gap, a_column_gap: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_columns($a_count, $a_minimum_width, $a_row_gap, $a_column_gap);"
+		end
+
+	columns_extend (a_columns, a_child: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_columns_extend($a_columns, $a_child);"
+		end
+
+	columns_set_count (a_columns, a_count: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_columns_set_count($a_columns, $a_count);"
+		end
+
+	columns_set_spacing (a_columns, a_row_gap, a_column_gap: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_columns_set_spacing($a_columns, $a_row_gap, $a_column_gap);"
+		end
+
+	columns_set_minimum_width (a_columns, a_width: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_columns_set_minimum_width($a_columns, $a_width);"
+		end
+
+	aspect_frame (a_ratio: REAL_64): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_aspect_frame($a_ratio);"
+		end
+
+	aspect_set_ratio (a_frame: INTEGER; a_ratio: REAL_64)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_aspect_set_ratio($a_frame, $a_ratio);"
+		end
+
+	aspect_set_content (a_frame, a_child: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_aspect_set_content($a_frame, $a_child);"
+		end
+
 	stack_set_vertical (a_stack: INTEGER; a_on: BOOLEAN)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_stack_set_vertical($a_stack, $a_on ? 1 : 0);"

@@ -472,6 +472,254 @@ static void sg_stack_set_alignment(int stack, int a) {
 }
 static void sg_stack_set_spacing(int stack, int s) { gtk_box_set_spacing(GTK_BOX(sg_w[stack]), s); }
 
+/* ---------- 1y-b: flow box (kind 59), columns (kind 60), aspect frame (kind 61).
+   The flow box is GTK's own GtkFlowBox with no selection; its child wrappers take no focus,
+   so Tab goes to the children's own widgets. SgColumns and SgAspect are containers of our own:
+   GtkGrid asks for all its columns as its minimum width, and GtkAspectFrame does not make its
+   height follow its width. Their types are registered by hand, looked up by name first, as
+   SgReveal's is (this header is compiled into many C files). */
+static int sg_flow_box(int line_gap, int sibling_gap) {
+    GtkWidget *f = gtk_flow_box_new();
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(f), GTK_SELECTION_NONE);
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(f), 1);
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(f), 10000);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(f), line_gap);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(f), sibling_gap);
+    gtk_widget_set_margin_start(f, 12); gtk_widget_set_margin_end(f, 12);
+    gtk_widget_set_margin_top(f, 12); gtk_widget_set_margin_bottom(f, 12);
+    return sg_reg(f, 59);
+}
+static void sg_flow_box_extend(int box, int child) {
+    GtkWidget *wrapper;
+    gtk_flow_box_append(GTK_FLOW_BOX(sg_w[box]), sg_w[child]);
+    wrapper = gtk_widget_get_parent(sg_w[child]);
+    if (wrapper) gtk_widget_set_focusable(wrapper, FALSE);
+}
+static void sg_flow_box_set_spacing(int box, int line_gap, int sibling_gap) {
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(sg_w[box]), line_gap);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(sg_w[box]), sibling_gap);
+}
+static void sg_flow_box_set_maximum_per_line(int box, int n) {
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(sg_w[box]), n > 0 ? n : 10000);
+}
+static void sg_flow_box_set_homogeneous(int box, int on) {
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(sg_w[box]), on ? TRUE : FALSE);
+}
+
+/* Both containers' heights follow their widths: GTK must measure them for a width. */
+static GtkSizeRequestMode sg_height_for_width(GtkWidget *w) { (void) w; return GTK_SIZE_REQUEST_HEIGHT_FOR_WIDTH; }
+
+typedef struct { GtkWidget parent_instance; int count, min_width, row_gap, col_gap; } SgColumns;
+typedef struct { GtkWidgetClass parent_class; } SgColumnsClass;
+
+/* The column width at `width', and the visible children. */
+static int sg_columns_cell_width(SgColumns *c, int width) {
+    int cols = c->count < 1 ? 1 : c->count;
+    int cw = (width - c->col_gap * (cols - 1)) / cols;
+    return cw < 1 ? 1 : cw;
+}
+static int sg_columns_natural_width(SgColumns *c) {
+    GtkWidget *ch;
+    int widest = 0, cmin, cnat, cols = c->count < 1 ? 1 : c->count;
+    for (ch = gtk_widget_get_first_child(GTK_WIDGET(c)); ch; ch = gtk_widget_get_next_sibling(ch)) {
+        if (!gtk_widget_get_visible(ch)) continue;
+        gtk_widget_measure(ch, GTK_ORIENTATION_HORIZONTAL, -1, &cmin, &cnat, NULL, NULL);
+        if (cnat > widest) widest = cnat;
+    }
+    return widest * cols + c->col_gap * (cols - 1);
+}
+/* A child's height in a cell `cw' wide (never narrower than its own minimum). */
+static void sg_columns_child_height(GtkWidget *ch, int cw, int *mn, int *nat) {
+    int wmin, wnat;
+    gtk_widget_measure(ch, GTK_ORIENTATION_HORIZONTAL, -1, &wmin, &wnat, NULL, NULL);
+    gtk_widget_measure(ch, GTK_ORIENTATION_VERTICAL, cw > wmin ? cw : wmin, mn, nat, NULL, NULL);
+}
+static void sg_columns_measure(GtkWidget *w, GtkOrientation o, int for_size, int *mn, int *nat, int *mnb, int *natb) {
+    SgColumns *c = (SgColumns *) w;
+    GtkWidget *ch;
+    int cols = c->count < 1 ? 1 : c->count, i = 0, row_min = 0, row_nat = 0, total_min = 0, total_nat = 0, rows = 0;
+    *mnb = -1; *natb = -1;
+    if (o == GTK_ORIENTATION_HORIZONTAL) {
+        int widest_min = 0, cmin, cnat;
+        for (ch = gtk_widget_get_first_child(w); ch; ch = gtk_widget_get_next_sibling(ch)) {
+            if (!gtk_widget_get_visible(ch)) continue;
+            gtk_widget_measure(ch, GTK_ORIENTATION_HORIZONTAL, -1, &cmin, &cnat, NULL, NULL);
+            if (cmin > widest_min) widest_min = cmin;
+        }
+        *mn = widest_min;                       /* one column: the window can always narrow */
+        *nat = sg_columns_natural_width(c);
+        if (*nat < *mn) *nat = *mn;
+        return;
+    }
+    {
+        int cw = sg_columns_cell_width(c, for_size > 0 ? for_size : sg_columns_natural_width(c));
+        for (ch = gtk_widget_get_first_child(w); ch; ch = gtk_widget_get_next_sibling(ch)) {
+            int hmin, hnat;
+            if (!gtk_widget_get_visible(ch)) continue;
+            sg_columns_child_height(ch, cw, &hmin, &hnat);
+            if (hmin > row_min) row_min = hmin;
+            if (hnat > row_nat) row_nat = hnat;
+            i++;
+            if (i % cols == 0) {
+                total_min += row_min; total_nat += row_nat; rows++;
+                row_min = 0; row_nat = 0;
+            }
+        }
+        if (i % cols != 0) { total_min += row_min; total_nat += row_nat; rows++; }
+        if (rows > 1) { total_min += c->row_gap * (rows - 1); total_nat += c->row_gap * (rows - 1); }
+        *mn = total_min; *nat = total_nat;
+    }
+}
+static void sg_columns_allocate(GtkWidget *w, int width, int height, int baseline) {
+    SgColumns *c = (SgColumns *) w;
+    int cols = c->count < 1 ? 1 : c->count, cw = sg_columns_cell_width(c, width), y = 0, k, n;
+    int rtl = gtk_widget_get_direction(w) == GTK_TEXT_DIR_RTL;
+    GtkWidget *row[256], *ch = gtk_widget_get_first_child(w);
+    (void) height; (void) baseline;
+    if (cols > 256) cols = 256;
+    while (ch) {
+        int row_h = 0, hmin, hnat;
+        for (n = 0; ch && n < cols; ch = gtk_widget_get_next_sibling(ch)) {
+            if (!gtk_widget_get_visible(ch)) continue;
+            row[n++] = ch;
+        }
+        for (k = 0; k < n; k++) {
+            sg_columns_child_height(row[k], cw, &hmin, &hnat);
+            if (hnat > row_h) row_h = hnat;
+        }
+        for (k = 0; k < n; k++) {
+            GtkAllocation a;
+            int wmin, wnat;
+            gtk_widget_measure(row[k], GTK_ORIENTATION_HORIZONTAL, -1, &wmin, &wnat, NULL, NULL);
+            a.x = k * (cw + c->col_gap);
+            if (rtl) a.x = width - a.x - cw;
+            a.y = y; a.width = cw > wmin ? cw : wmin; a.height = row_h;
+            gtk_widget_size_allocate(row[k], &a, -1);
+        }
+        if (n > 0) y += row_h + c->row_gap;
+    }
+}
+static void sg_columns_dispose(GObject *o) {
+    GtkWidget *ch;
+    while ((ch = gtk_widget_get_first_child(GTK_WIDGET(o))) != NULL) gtk_widget_unparent(ch);
+    G_OBJECT_CLASS(g_type_class_peek_parent(G_OBJECT_GET_CLASS(o)))->dispose(o);
+}
+static void sg_columns_class_init(gpointer klass, gpointer data) {
+    GtkWidgetClass *wc = GTK_WIDGET_CLASS(klass);
+    (void) data;
+    wc->measure = sg_columns_measure;
+    wc->size_allocate = sg_columns_allocate;
+    wc->get_request_mode = sg_height_for_width;
+    G_OBJECT_CLASS(klass)->dispose = sg_columns_dispose;
+}
+static GType sg_columns_type(void) {
+    GType t = g_type_from_name("SgColumns");
+    if (!t) {
+        GTypeInfo info;
+        memset(&info, 0, sizeof info);
+        info.class_size = sizeof(SgColumnsClass);
+        info.class_init = sg_columns_class_init;
+        info.instance_size = sizeof(SgColumns);
+        t = g_type_register_static(GTK_TYPE_WIDGET, "SgColumns", &info, 0);
+    }
+    return t;
+}
+static int sg_columns(int count, int min_width, int row_gap, int col_gap) {
+    GtkWidget *w = GTK_WIDGET(g_object_new(sg_columns_type(), NULL));
+    SgColumns *c = (SgColumns *) w;
+    c->count = count; c->min_width = min_width; c->row_gap = row_gap; c->col_gap = col_gap;
+    gtk_widget_set_margin_start(w, 12); gtk_widget_set_margin_end(w, 12);
+    gtk_widget_set_margin_top(w, 12); gtk_widget_set_margin_bottom(w, 12);
+    return sg_reg(w, 60);
+}
+static void sg_columns_extend(int id, int child) {
+    gtk_widget_set_parent(sg_w[child], sg_w[id]);
+    gtk_widget_queue_resize(sg_w[id]);
+}
+static void sg_columns_set_count(int id, int count) {
+    ((SgColumns *) sg_w[id])->count = count;
+    gtk_widget_queue_resize(sg_w[id]);
+}
+static void sg_columns_set_spacing(int id, int row_gap, int col_gap) {
+    SgColumns *c = (SgColumns *) sg_w[id];
+    c->row_gap = row_gap; c->col_gap = col_gap;
+    gtk_widget_queue_resize(sg_w[id]);
+}
+static void sg_columns_set_minimum_width(int id, int min_width) {
+    ((SgColumns *) sg_w[id])->min_width = min_width;
+    gtk_widget_queue_resize(sg_w[id]);
+}
+
+typedef struct { GtkWidget parent_instance; GtkWidget *child; double ratio; } SgAspect;
+typedef struct { GtkWidgetClass parent_class; } SgAspectClass;
+
+static void sg_aspect_measure(GtkWidget *w, GtkOrientation o, int for_size, int *mn, int *nat, int *mnb, int *natb) {
+    SgAspect *a = (SgAspect *) w;
+    int cmin = 0, cnat = 0;
+    *mnb = -1; *natb = -1;
+    if (a->child && gtk_widget_get_visible(a->child)) gtk_widget_measure(a->child, GTK_ORIENTATION_HORIZONTAL, -1, &cmin, &cnat, NULL, NULL);
+    if (o == GTK_ORIENTATION_HORIZONTAL) {
+        *mn = cmin; *nat = cnat;
+    } else {
+        int width = for_size > 0 ? for_size : cnat;
+        *mn = (int) (width / a->ratio + 0.5);   /* the height follows the width */
+        *nat = *mn;
+    }
+}
+static void sg_aspect_allocate(GtkWidget *w, int width, int height, int baseline) {
+    SgAspect *a = (SgAspect *) w;
+    GtkAllocation al;
+    double fw = width, fh = width / a->ratio;
+    (void) baseline;
+    if (!a->child || !gtk_widget_get_visible(a->child)) return;
+    if (fh > height) { fh = height; fw = fh * a->ratio; }
+    al.width = (int) (fw + 0.5); al.height = (int) (fh + 0.5);
+    al.x = (width - al.width) / 2; al.y = (height - al.height) / 2;
+    gtk_widget_size_allocate(a->child, &al, -1);
+}
+static void sg_aspect_dispose(GObject *o) {
+    SgAspect *a = (SgAspect *) o;
+    if (a->child) { gtk_widget_unparent(a->child); a->child = NULL; }
+    G_OBJECT_CLASS(g_type_class_peek_parent(G_OBJECT_GET_CLASS(o)))->dispose(o);
+}
+static void sg_aspect_class_init(gpointer klass, gpointer data) {
+    GtkWidgetClass *wc = GTK_WIDGET_CLASS(klass);
+    (void) data;
+    wc->measure = sg_aspect_measure;
+    wc->size_allocate = sg_aspect_allocate;
+    wc->get_request_mode = sg_height_for_width;
+    G_OBJECT_CLASS(klass)->dispose = sg_aspect_dispose;
+}
+static GType sg_aspect_type(void) {
+    GType t = g_type_from_name("SgAspect");
+    if (!t) {
+        GTypeInfo info;
+        memset(&info, 0, sizeof info);
+        info.class_size = sizeof(SgAspectClass);
+        info.class_init = sg_aspect_class_init;
+        info.instance_size = sizeof(SgAspect);
+        t = g_type_register_static(GTK_TYPE_WIDGET, "SgAspect", &info, 0);
+    }
+    return t;
+}
+static int sg_aspect_frame(double ratio) {
+    GtkWidget *w = GTK_WIDGET(g_object_new(sg_aspect_type(), NULL));
+    ((SgAspect *) w)->ratio = ratio;
+    gtk_widget_set_overflow(w, GTK_OVERFLOW_HIDDEN);
+    return sg_reg(w, 61);
+}
+static void sg_aspect_set_ratio(int id, double ratio) {
+    ((SgAspect *) sg_w[id])->ratio = ratio;
+    gtk_widget_queue_resize(sg_w[id]);
+}
+static void sg_aspect_set_content(int id, int child) {
+    SgAspect *a = (SgAspect *) sg_w[id];
+    if (a->child) gtk_widget_unparent(a->child);
+    a->child = sg_w[child];
+    gtk_widget_set_parent(a->child, sg_w[id]);
+    gtk_widget_queue_resize(sg_w[id]);
+}
+
 static int sg_grid(void) {
     GtkWidget *g = gtk_grid_new();
     /* 12 clear around it, as around a stack */

@@ -1167,6 +1167,275 @@ void sga_stack_align_child(int a_stack, int a_child, int a_alignment)
 
 void sga_stack_set_spacing(int a_stack, int a_spacing) { [(NSStackView *)s_inner[a_stack] setSpacing:a_spacing]; }
 
+/* ------------------------------------------- 1y-b: flow box, columns, aspect frame */
+
+/* Views of our own that place their children by frame in `layout' (the children size by their
+   own fitting size, the container by its width). Their height follows their width, so each
+   reports it as its intrinsic height, asked again whenever its width changes; its intrinsic
+   width is the narrowest it allows, held only weakly against being made wider. Children in
+   reading order, mirrored under right to left; hidden ones take no room. */
+@interface SGAPlacer : NSView
+{
+@public
+	CGFloat line_gap, sibling_gap;
+	CGFloat placed_width;   /* the width the last intrinsic height was worked out for */
+	NSArray<NSValue *> *placed_sizes;   /* the children's fitting sizes it last placed by */
+}
+- (CGFloat)heightFor:(CGFloat)a_width placing:(BOOL)a_place;
+- (CGFloat)narrowest;
+@end
+@implementation SGAPlacer
+- (BOOL)isFlipped { return YES; }
+- (CGFloat)heightFor:(CGFloat)a_width placing:(BOOL)a_place { (void)a_width; (void)a_place; return 0; }
+- (CGFloat)narrowest { return 0; }
+- (NSArray<NSView *> *)placed
+{
+	NSMutableArray *r = [NSMutableArray array];
+	for (NSView *v in [self subviews]) if (![v isHidden]) [r addObject:v];
+	return r;
+}
+- (NSRect)mirrored:(NSRect)a_rect in:(CGFloat)a_width
+{
+	if ([self userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft) a_rect.origin.x = a_width - NSMaxX(a_rect);
+	return a_rect;
+}
+- (NSSize)intrinsicContentSize
+{
+	CGFloat w = NSWidth([self bounds]);
+	if (w <= 0) w = [self narrowest];
+	placed_width = w;
+	return NSMakeSize([self narrowest], [self heightFor:w placing:NO]);
+}
+- (void)setFrameSize:(NSSize)a_size
+{
+	[super setFrameSize:a_size];
+	if (fabs(a_size.width - placed_width) > 0.5) [self invalidateIntrinsicContentSize];
+}
+- (void)layout
+{
+	[super layout];
+	placed_sizes = [self childSizes];
+	[self heightFor:NSWidth([self bounds]) placing:YES];
+}
+- (NSArray<NSValue *> *)childSizes
+{
+	NSMutableArray *r = [NSMutableArray array];
+	for (NSView *v in [self placed]) [r addObject:[NSValue valueWithSize:[v fittingSize]]];
+	return r;
+}
+- (void)didAddSubview:(NSView *)a_view { [super didAddSubview:a_view]; [self changed]; }
+- (void)willRemoveSubview:(NSView *)a_view { [super willRemoveSubview:a_view]; [self changed]; }
+- (void)changed { [self invalidateIntrinsicContentSize]; [self setNeedsLayout:YES]; }
+@end
+
+/* A child that changes its own size (a label given new text, a child shown or hidden) is
+   placed again in the same frame, as GTK's queue_resize does: just before Core Animation's
+   commit lays the window out, each placer in a window compares its children's fitting sizes
+   with those it last placed by, and on a difference asks for its size and placement again.
+   Only placers on screen are looked at, and only their own children. */
+static NSHashTable<SGAPlacer *> *s_placers;
+static CFRunLoopObserverRef s_placer_observer;
+
+static void sga_placers_check(CFRunLoopObserverRef a_observer, CFRunLoopActivity a_activity, void *a_info)
+{
+	(void)a_observer; (void)a_activity; (void)a_info;
+	for (SGAPlacer *p in [s_placers allObjects])
+		if ([p window] && ![p isHiddenOrHasHiddenAncestor] && ![[p childSizes] isEqualToArray:p->placed_sizes ?: @[]]) [p changed];
+}
+
+static void sga_placer_watch(SGAPlacer *p)
+{
+	if (!s_placers) s_placers = [NSHashTable weakObjectsHashTable];
+	[s_placers addObject:p];
+	if (!s_placer_observer) {
+		s_placer_observer = CFRunLoopObserverCreate(NULL, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, 1999000, sga_placers_check, NULL);
+		CFRunLoopAddObserver(CFRunLoopGetMain(), s_placer_observer, kCFRunLoopCommonModes);
+	}
+}
+
+static void sga_placer_init(SGAPlacer *p)
+{
+	[p setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[p setContentCompressionResistancePriority:NSLayoutPriorityRequired - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[p setContentHuggingPriority:NSLayoutPriorityRequired - 1 forOrientation:NSLayoutConstraintOrientationVertical];
+	[p setContentCompressionResistancePriority:NSLayoutPriorityRequired - 1 forOrientation:NSLayoutConstraintOrientationVertical];
+	sga_placer_watch(p);
+}
+
+static void sga_placer_add(SGAPlacer *p, NSView *v)
+{
+	[v removeFromSuperview];
+	[v setTranslatesAutoresizingMaskIntoConstraints:YES];
+	[v setAutoresizingMask:NSViewNotSizable];
+	[p addSubview:v];
+}
+
+/* A flow box: children at their natural sizes (homogeneous: all as wide as the widest), as many
+   a line as fit (and at most `per_line' when it is above 0), each line as tall as its tallest. */
+@interface SGAFlow : SGAPlacer
+{
+@public
+	int per_line;
+	BOOL homogeneous;
+}
+@end
+@implementation SGAFlow
+- (CGFloat)widestOf:(NSArray<NSView *> *)a_views
+{
+	CGFloat r = 0;
+	for (NSView *v in a_views) r = MAX(r, [v fittingSize].width);
+	return ceil(r);
+}
+- (CGFloat)narrowest { return [self widestOf:[self placed]]; }
+- (CGFloat)heightFor:(CGFloat)a_width placing:(BOOL)a_place
+{
+	NSArray<NSView *> *l_views = [self placed];
+	CGFloat l_same = homogeneous ? [self widestOf:l_views] : 0;
+	CGFloat x = 0, y = 0, l_line_height = 0;
+	int l_on_line = 0;
+	for (NSView *v in l_views) {
+		NSSize s = [v fittingSize];
+		CGFloat w = homogeneous ? l_same : ceil(s.width), h = ceil(s.height);
+		if (l_on_line > 0 && (x + sibling_gap + w > a_width || (per_line > 0 && l_on_line >= per_line))) {
+			y += l_line_height + line_gap; x = 0; l_line_height = 0; l_on_line = 0;
+		}
+		if (l_on_line > 0) x += sibling_gap;
+		if (a_place) [v setFrame:[self mirrored:NSMakeRect(x, y, w, h) in:a_width]];
+		x += w; l_line_height = MAX(l_line_height, h); l_on_line++;
+	}
+	return l_views.count > 0 ? y + l_line_height : 0;
+}
+@end
+
+int sga_flow_box(int a_line_gap, int a_sibling_gap)
+{
+	SGAFlow *f = [[SGAFlow alloc] init];
+	f->line_gap = a_line_gap; f->sibling_gap = a_sibling_gap;
+	sga_placer_init(f);
+	return sga_wrap(f, 12);
+}
+
+void sga_flow_box_extend(int a_box, int a_child) { sga_placer_add(s_inner[a_box], sga_get(a_child)); }
+
+void sga_flow_box_set_spacing(int a_box, int a_line_gap, int a_sibling_gap)
+{
+	SGAFlow *f = s_inner[a_box];
+	f->line_gap = a_line_gap; f->sibling_gap = a_sibling_gap;
+	[f changed];
+}
+
+void sga_flow_box_set_maximum_per_line(int a_box, int a_count) { SGAFlow *f = s_inner[a_box]; f->per_line = a_count; [f changed]; }
+void sga_flow_box_set_homogeneous(int a_box, int a_on) { SGAFlow *f = s_inner[a_box]; f->homogeneous = a_on != 0; [f changed]; }
+
+/* Columns: `count' equal columns (the width less the gaps, shared), filled row by row; every
+   cell of a row as tall as the row's tallest. The narrowest is one column of `minimum'. */
+@interface SGAColumns : SGAPlacer
+{
+@public
+	int count;
+	CGFloat minimum;
+}
+@end
+@implementation SGAColumns
+- (CGFloat)narrowest { return minimum; }
+- (CGFloat)heightFor:(CGFloat)a_width placing:(BOOL)a_place
+{
+	NSArray<NSView *> *l_views = [self placed];
+	int n = MAX(1, count);
+	CGFloat l_column = MAX(0, (a_width - (n - 1) * sibling_gap) / n);
+	CGFloat y = 0;
+	for (NSUInteger l_first = 0; l_first < l_views.count; l_first += n) {
+		NSUInteger l_end = MIN(l_views.count, l_first + n);
+		CGFloat l_row = 0;
+		for (NSUInteger i = l_first; i < l_end; i++) l_row = MAX(l_row, ceil([l_views[i] fittingSize].height));
+		if (a_place)
+			for (NSUInteger i = l_first; i < l_end; i++) {
+				CGFloat x = (i - l_first) * (l_column + sibling_gap);
+				[l_views[i] setFrame:[self mirrored:NSMakeRect(round(x), y, round(x + l_column) - round(x), l_row) in:a_width]];
+			}
+		y += l_row + (l_end < l_views.count ? line_gap : 0);
+	}
+	return y;
+}
+@end
+
+int sga_columns(int a_count, int a_minimum_width, int a_row_gap, int a_column_gap)
+{
+	SGAColumns *c = [[SGAColumns alloc] init];
+	c->count = a_count; c->minimum = a_minimum_width;
+	c->line_gap = a_row_gap; c->sibling_gap = a_column_gap;
+	sga_placer_init(c);
+	return sga_wrap(c, 12);
+}
+
+void sga_columns_extend(int a_columns, int a_child) { sga_placer_add(s_inner[a_columns], sga_get(a_child)); }
+void sga_columns_set_count(int a_columns, int a_count) { SGAColumns *c = s_inner[a_columns]; c->count = a_count; [c changed]; }
+
+void sga_columns_set_spacing(int a_columns, int a_row_gap, int a_column_gap)
+{
+	SGAColumns *c = s_inner[a_columns];
+	c->line_gap = a_row_gap; c->sibling_gap = a_column_gap;
+	[c changed];
+}
+
+void sga_columns_set_minimum_width(int a_columns, int a_width) { SGAColumns *c = s_inner[a_columns]; c->minimum = a_width; [c changed]; }
+
+/* An aspect frame: its height is its width over `ratio' (a constraint just below required, so
+   a parent that cannot give that height wins); its content gets the largest rectangle of the
+   ratio that fits, centered. No margin. */
+@interface SGAAspect : NSView
+{
+@public
+	double ratio;
+	NSLayoutConstraint *tie;
+	NSView *content;
+}
+@end
+@implementation SGAAspect
+- (BOOL)isFlipped { return YES; }
+- (void)layout
+{
+	[super layout];
+	if (!content) return;
+	NSSize b = [self bounds].size;
+	CGFloat w = b.width, h = ratio > 0 ? w / ratio : b.height;
+	if (h > b.height) { h = b.height; w = h * ratio; }
+	[content setFrame:NSMakeRect(round((b.width - w) / 2), round((b.height - h) / 2), round(w), round(h))];
+}
+- (void)tieTo:(double)a_ratio
+{
+	ratio = a_ratio;
+	[tie setActive:NO];
+	tie = [self.heightAnchor constraintEqualToAnchor:self.widthAnchor multiplier:1.0 / a_ratio];
+	[tie setPriority:NSLayoutPriorityRequired - 1];
+	[tie setActive:YES];
+	[self setNeedsLayout:YES];
+}
+@end
+
+int sga_aspect_frame(double a_ratio)
+{
+	SGAAspect *a = [[SGAAspect alloc] init];
+	[a setTranslatesAutoresizingMaskIntoConstraints:NO];
+	[a tieTo:a_ratio];
+	return sga_keep(a);
+}
+
+void sga_aspect_set_ratio(int a_frame, double a_ratio) { [(SGAAspect *)sga_get(a_frame) tieTo:a_ratio]; }
+
+void sga_aspect_set_content(int a_frame, int a_child)
+{
+	SGAAspect *a = sga_get(a_frame);
+	NSView *v = sga_get(a_child);
+	[a->content removeFromSuperview];
+	[v removeFromSuperview];
+	[v setTranslatesAutoresizingMaskIntoConstraints:YES];
+	[v setAutoresizingMask:NSViewNotSizable];
+	a->content = v;
+	[a addSubview:v];
+	[a setNeedsLayout:YES];
+}
+
 int sga_grid(void)
 {
 	NSGridView *g = [NSGridView gridViewWithNumberOfColumns:0 rows:0];

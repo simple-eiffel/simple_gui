@@ -96,7 +96,7 @@ ec_linux.sh test -config simple_gui.ecf -target simple_gui_tests
 ```
 
 **Which display the suite runs on (Linux):**
-- **While fixing:** use a hidden X11 display, so nothing shows on the desktop. Start it with `Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &` (`sudo apt install xvfb`), then run the suite with `GDK_BACKEND=x11 DISPLAY=:99` and `WAYLAND_DISPLAY` unset. These runs are for iterating.
+- **While fixing:** use a hidden X11 display, so nothing shows on the desktop. Start it with `Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp -nolisten unix &` (`sudo apt install xvfb`; under WSLg `/tmp/.X11-unix` is read-only, so it listens on the abstract socket only), then run the suite with `GDK_BACKEND=x11 DISPLAY=:99 SIMPLE_GUI_TEST_NO_WM=1` and `WAYLAND_DISPLAY` unset (Xvfb has no window manager, so `fullscreen_toggles` reports a skip). These runs are for iterating.
 - **The merge gate:** one run on the real Wayland display (WSLg under WSL). It shows windows on the desktop, so ask before it runs.
 
 ## Build (Windows)
