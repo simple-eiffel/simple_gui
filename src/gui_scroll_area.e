@@ -15,6 +15,11 @@ class
 inherit
 	GUI_SINGLE_CONTAINER
 
+	GUI_SCROLLING
+		redefine
+			scroll_y, max_scroll_y
+		end
+
 create
 	make
 
@@ -47,7 +52,7 @@ feature -- Access
 			-- How far the content is scrolled from its top edge, in logical pixels.
 		do
 			Result := backend.scroll_area_y (id)
-		ensure
+		ensure then
 			not_negative: Result >= 0
 		end
 
@@ -65,7 +70,7 @@ feature -- Access
 			-- the content fits).
 		do
 			Result := backend.scroll_area_max_y (id)
-		ensure
+		ensure then
 			not_negative: Result >= 0
 		end
 
@@ -197,10 +202,52 @@ feature {NONE} -- Smooth scrolling
 			stopped: not is_scrolling_smoothly
 		end
 
+feature -- Sticky children (1y-e)
+
+	is_sticky (a_widget: GUI_WIDGET): BOOLEAN
+			-- Does `a_widget' stay at the top of the visible part while its part is in view?
+		do
+			Result := sticky_children.has (a_widget)
+		end
+
+	is_in_content_stack (a_widget: GUI_WIDGET): BOOLEAN
+			-- Is `a_widget' a direct child of the vertical GUI_STACK that is the content?
+		do
+			Result := attached {GUI_STACK} content as al_s and then al_s.is_vertical
+				and then al_s.children.has (a_widget)
+		end
+
+	set_sticky (a_widget: GUI_WIDGET; a_on: BOOLEAN)
+			-- Keep `a_widget' at the top of the visible part while its part of the stack is in
+			-- view, the next sticky child pushing it up as it arrives (CSS's `position: sticky'),
+			-- or let it scroll (`a_on' False). Its part runs to the next sticky child, or to the
+			-- end of the stack.
+		require
+			gui_thread: is_gui_thread
+			in_content_stack: is_in_content_stack (a_widget)
+		do
+			if a_on and not is_sticky (a_widget) then
+				sticky_children.extend (a_widget)
+			elseif not a_on then
+				sticky_children.prune_all (a_widget)
+			end
+			backend.scroll_area_set_sticky (id, a_widget.id, a_on)
+		ensure
+			set: is_sticky (a_widget) = a_on
+		end
+
 feature {NONE} -- Implementation
 
+	sticky_children: ARRAYED_LIST [GUI_WIDGET]
+			-- The children set sticky, in the order set.
+		attribute
+			create Result.make (2)
+		end
+
 	backend_set_content (a_child: INTEGER)
+			-- A new content has no sticky children (the backend forgets them too).
 		do
+			sticky_children.wipe_out
 			backend.scroll_area_set_content (id, a_child)
 		end
 

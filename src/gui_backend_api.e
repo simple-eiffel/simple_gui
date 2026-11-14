@@ -2130,6 +2130,91 @@ feature -- Common widget state
 		deferred
 		end
 
+	scroller_watch (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y-d: while `a_on', push event 65 for scrolling widget `an_id' (a scroll area, list,
+			-- table, tree, tree table or grid view) when its vertical offset, its furthest offset
+			-- or its content's extent changed, at most once a turn of the queue.
+		deferred
+		end
+
+	scroller_y (an_id: INTEGER): INTEGER
+			-- 1y-d: how far scrolling widget `an_id' is scrolled down, in logical pixels.
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	scroller_max_y (an_id: INTEGER): INTEGER
+			-- 1y-d: the furthest `scroller_y' goes (0 when the content fits).
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	scroller_extent (an_id: INTEGER): INTEGER
+			-- 1y-d: the content's height in logical pixels, whether or not it scrolls.
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	test_scroller_scroll_to (an_id, a_y: INTEGER)
+			-- Tests, 1y-d: scroll widget `an_id' to `a_y' as the user would (straight to the
+			-- toolkit), clamped to what it can.
+		require
+			not_negative: a_y >= 0
+		deferred
+		end
+
+	list_set_sections (an_id: INTEGER; a_starts, a_titles: POINTER)
+			-- 1y-e: list `an_id''s whole section layout, replacing the last: `a_starts' the first
+			-- rows, ascending and comma-joined ("" for none), `a_titles' the titles joined by
+			-- 0x1F. A start of the row count plus one waits for the next row added. A header
+			-- shows above the first shown row of its section; a section with none shown has none.
+		deferred
+		end
+
+	table_set_sections (an_id: INTEGER; a_starts, a_titles: POINTER)
+			-- 1y-e: as `list_set_sections', for table `an_id'.
+		deferred
+		end
+
+	list_set_sticky_headers (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y-e: pin the header of the section at the top of list `an_id''s visible rows
+			-- (`a_on'), the next pushing it up as it arrives; or let headers scroll away.
+		deferred
+		end
+
+	table_set_sticky_headers (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y-e: as `list_set_sticky_headers', for table `an_id' (below its column titles).
+		deferred
+		end
+
+	scroll_area_set_sticky (an_id, a_child: INTEGER; a_on: BOOLEAN)
+			-- 1y-e: keep `a_child', a direct child of scroll area `an_id''s vertical stack
+			-- content, at the top of the visible part while its part is in view, the next sticky
+			-- child pushing it up; or let it scroll.
+		deferred
+		end
+
+	test_pinned_header (an_id: INTEGER): INTEGER
+			-- Tests, 1y-e: what is pinned at the top of list, table or scroll area `an_id' now,
+			-- read from what the toolkit shows: a list's or table's section number, a scroll
+			-- area's sticky child's id; 0 for nothing.
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
+	test_pinned_header_y (an_id: INTEGER): INTEGER
+			-- Tests, 1y-e: the top of what `test_pinned_header' names, from the top of the
+			-- visible rows (below a table's column titles), in logical pixels: 0 when pinned,
+			-- negative while the next pushes it up.
+		deferred
+		ensure
+			not_positive: Result <= 0
+		end
+
 	widget_watch_pointer (an_id: INTEGER; a_on: BOOLEAN)
 			-- 1y-c: while `a_on', push event 63 for widget `an_id' when the pointer comes over it
 			-- or one of its children (a = 1) and when it leaves them all (a = 0); moving from the

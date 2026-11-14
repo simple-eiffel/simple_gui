@@ -214,6 +214,57 @@ feature -- User actions
 			set: a_combo.text.same_string (a_combo.i_th (i))
 		end
 
+	scroll_to_as_user (a_scrolling: GUI_SCROLLING; a_y: INTEGER)
+			-- 1y-d: the user scrolls `a_scrolling' to `a_y' (wheel or bar), straight to the toolkit.
+		require
+			has_application: has_application
+			not_negative: a_y >= 0
+		do
+			backend.test_scroller_scroll_to (a_scrolling.id, a_y)
+			settle
+		end
+
+	pinned_section (a_sectioned: GUI_SECTIONED): INTEGER
+			-- 1y-e: the section whose header shows pinned at the top of `a_sectioned''s visible
+			-- rows, read from the toolkit; 0 for none.
+		require
+			has_application: has_application
+		do
+			Result := backend.test_pinned_header (a_sectioned.id)
+		ensure
+			in_range: 0 <= Result and Result <= a_sectioned.section_count
+		end
+
+	pinned_child (an_area: GUI_SCROLL_AREA): detachable GUI_WIDGET
+			-- 1y-e: the sticky child shown pinned at the top of `an_area' now, read from the toolkit.
+		require
+			has_application: has_application
+		local
+			l_id: INTEGER
+		do
+			l_id := backend.test_pinned_header (an_area.id)
+			if l_id > 0 and then attached {GUI_STACK} an_area.content as al_s then
+				across al_s.children as ic loop
+					if ic.id = l_id then
+						Result := ic
+					end
+				end
+			end
+		ensure
+			sticky: attached Result as al_r implies an_area.is_sticky (al_r)
+		end
+
+	pinned_y (a_widget: GUI_WIDGET): INTEGER
+			-- 1y-e: the top of what is pinned in list, table or scroll area `a_widget', from the
+			-- top of its visible rows: 0 when pinned, negative while the next pushes it up.
+		require
+			has_application: has_application
+		do
+			Result := backend.test_pinned_header_y (a_widget.id)
+		ensure
+			not_positive: Result <= 0
+		end
+
 	pointer_enter (a_widget: GUI_WIDGET)
 			-- 1y-c: the pointer comes over `a_widget', as the toolkit reports it (watched widgets).
 		require
