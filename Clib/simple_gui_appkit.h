@@ -148,6 +148,14 @@ int sga_scroller_y(int a_id);
 int sga_scroller_max_y(int a_id);
 int sga_scroller_extent(int a_id);
 void sga_test_scroller_scroll_to(int a_id, int a_y);
+/* 1y-e: sections and sticky headers */
+void sga_list_set_sections(int a_id, const char *a_starts, const char *a_titles);
+void sga_table_set_sections(int a_id, const char *a_starts, const char *a_titles);
+void sga_list_set_sticky_headers(int a_id, int a_on);
+void sga_table_set_sticky_headers(int a_id, int a_on);
+void sga_scroll_area_set_sticky(int a_id, int a_child, int a_on);
+int sga_test_pinned_header(int a_id);
+int sga_test_pinned_header_y(int a_id);
 void sga_widget_watch_focus(int a_id, int a_on);
 void sga_test_pointer_crossing(int a_id, int a_inside);
 int sga_overlay(void);
