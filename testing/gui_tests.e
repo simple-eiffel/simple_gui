@@ -3773,6 +3773,126 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_a_flow_box_wraps_as_it_narrows
+			-- 1y-b: a flow box puts its children on more lines as the window narrows, keeps
+			-- reading order, and holds at most `maximum_per_line' a line when asked.
+		local
+			l_window: GUI_WINDOW
+			l_column: GUI_STACK
+			l_flow: GUI_FLOW_BOX
+			l_chips: ARRAYED_LIST [GUI_LABEL]
+			l_chip: GUI_LABEL
+			l_wide_lines, l_narrow_lines, i: INTEGER
+		do
+			create l_window.make ("Flow", 700, 400)
+			create l_column.make_vertical
+			create l_flow.make
+			create l_chips.make (8)
+			from i := 1 until i > 8 loop
+				create l_chip.make ("Chip " + i.out)
+				l_chips.extend (l_chip)
+				l_flow.extend (l_chip)
+				i := i + 1
+			end
+			l_column.extend (l_flow)
+			l_window.set_content (l_column)
+			l_window.show
+			settle_window
+			let_layout_settle
+			l_wide_lines := lines_of (l_chips)
+			assert ("in reading order: " + l_chips.first.x.out + " " + l_chips.i_th (2).x.out,
+				l_chips.first.y < l_chips.i_th (2).y or else l_chips.first.x < l_chips.i_th (2).x)
+			l_window.set_size (220, 400)
+			wait_for_size (l_window, 220, 400)
+			let_layout_settle
+			l_narrow_lines := lines_of (l_chips)
+			assert ("more lines when narrow: " + l_wide_lines.out + " then " + l_narrow_lines.out, l_narrow_lines > l_wide_lines)
+			l_window.set_size (700, 400)
+			wait_for_size (l_window, 700, 400)
+			l_flow.set_maximum_per_line (3)
+			let_layout_settle
+			assert ("three a line: " + lines_of (l_chips).out + " lines", lines_of (l_chips) = 3)
+			l_window.close
+		end
+
+	test_columns_reflow_as_the_window_narrows
+			-- 1y-b: columns go from three to two to one as the window narrows, children fill row
+			-- by row, and the cells of a row are as tall as each other.
+		local
+			l_window: GUI_WINDOW
+			l_columns: GUI_COLUMNS
+			l_cells: ARRAYED_LIST [GUI_LABEL]
+			l_cell: GUI_LABEL
+			i: INTEGER
+		do
+			create l_window.make ("Columns", 700, 400)
+			create l_columns.make (3, 150)
+			create l_cells.make (6)
+			from i := 1 until i > 6 loop
+				if i = 2 then
+					create l_cell.make ("Two%Nlines")
+				else
+					create l_cell.make ("Cell " + i.out)
+				end
+				l_cells.extend (l_cell)
+				l_columns.extend (l_cell)
+				i := i + 1
+			end
+			l_window.set_content (l_columns)
+			l_window.show
+			settle_window
+			wait_for_report (l_columns, 1)
+			let_layout_settle
+			assert ("three at 700: " + l_columns.column_count.out, l_columns.column_count = 3)
+			assert ("a row of three", near (l_cells.i_th (1).y, l_cells.i_th (3).y) and l_cells.i_th (4).y > l_cells.i_th (1).y)
+			assert ("equal heights in a row: " + l_cells.i_th (1).height.out + " " + l_cells.i_th (2).height.out,
+				near (l_cells.i_th (1).height, l_cells.i_th (2).height))
+			assert ("equal widths: " + l_cells.i_th (1).width.out + " " + l_cells.i_th (3).width.out,
+				near (l_cells.i_th (1).width, l_cells.i_th (3).width))
+			l_window.set_size (400, 400)
+			wait_for_size (l_window, 400, 400)
+			wait_for_report (l_columns, 400 - 24)
+			let_layout_settle
+			assert ("two at 400: " + l_columns.column_count.out, l_columns.column_count = 2)
+			assert ("the third on the second row", l_cells.i_th (3).y > l_cells.i_th (1).y and near (l_cells.i_th (3).x, l_cells.i_th (1).x))
+			l_window.set_size (220, 400)
+			wait_for_size (l_window, 220, 400)
+			let_layout_settle
+			let_layout_settle
+			assert ("one at 220: " + l_columns.column_count.out, l_columns.column_count = 1)
+			assert ("all down one column", near (l_cells.i_th (2).x, l_cells.i_th (1).x) and l_cells.i_th (2).y > l_cells.i_th (1).y)
+			assert ("columns_fitting", l_columns.columns_fitting (1000) = 3 and l_columns.columns_fitting (306) = 2 and l_columns.columns_fitting (305) = 1)
+			l_window.close
+		end
+
+	test_an_aspect_frame_keeps_its_ratio
+			-- 1y-b: an aspect frame's height follows its width, and its content keeps the ratio.
+		local
+			l_window: GUI_WINDOW
+			l_column: GUI_STACK
+			l_frame: GUI_ASPECT_FRAME
+			l_picture: GUI_LABEL
+		do
+			create l_window.make ("Aspect", 424, 500)
+			create l_column.make_vertical
+			create l_frame.make (2.0)
+			create l_picture.make ("Picture")
+			l_frame.set_content (l_picture)
+			l_column.extend (l_frame)
+			l_window.set_content (l_column)
+			l_window.show
+			settle_window
+			let_layout_settle
+			assert ("the frame half as tall as wide: " + l_frame.width.out + " x " + l_frame.height.out,
+				l_frame.width > 300 and near (l_frame.height, l_frame.width // 2))
+			assert ("the content at the ratio: " + l_picture.width.out + " x " + l_picture.height.out,
+				near (l_picture.width, 2 * l_picture.height))
+			l_frame.set_ratio (4.0)
+			let_layout_settle
+			assert ("a new ratio: " + l_frame.width.out + " x " + l_frame.height.out, near (l_frame.height, l_frame.width // 4))
+			l_window.close
+		end
+
 	test_the_clock_ticks_only_while_something_runs
 			-- 1x: a real clock asks for frame ticks when an animation starts and stops them
 			-- when the last one ends, so an idle program never wakes at the display rate.
@@ -8382,6 +8502,20 @@ feature {NONE} -- Fixtures
 				driver.wait (10)
 				i := i + 1
 			end
+		end
+
+	lines_of (a_widgets: ARRAYED_LIST [GUI_WIDGET]): INTEGER
+			-- How many different rows `a_widgets' sit on (tops within two pixels count as one).
+		local
+			l_tops: ARRAYED_LIST [INTEGER]
+		do
+			create l_tops.make (4)
+			across a_widgets as ic loop
+				if not across l_tops as t some near (t, ic.y) end then
+					l_tops.extend (ic.y)
+				end
+			end
+			Result := l_tops.count
 		end
 
 	let_layout_settle

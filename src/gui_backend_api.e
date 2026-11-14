@@ -164,6 +164,96 @@ feature -- Windows and containers
 		deferred
 		end
 
+	flow_box (a_line_gap, a_sibling_gap: INTEGER): INTEGER
+			-- 1y-b: an empty flow box: children wrap to new lines, `a_line_gap' between lines and
+			-- `a_sibling_gap' between children on a line, as many a line as fit, natural widths,
+			-- no selection, 12 clear around it as around a stack.
+		require
+			non_negative: a_line_gap >= 0 and a_sibling_gap >= 0
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	flow_box_extend (a_box, a_child: INTEGER)
+		deferred
+		end
+
+	flow_box_set_spacing (a_box, a_line_gap, a_sibling_gap: INTEGER)
+		require
+			non_negative: a_line_gap >= 0 and a_sibling_gap >= 0
+		deferred
+		end
+
+	flow_box_set_maximum_per_line (a_box, a_count: INTEGER)
+			-- At most `a_count' children a line (0: as many as fit).
+		require
+			non_negative: a_count >= 0
+		deferred
+		end
+
+	flow_box_set_homogeneous (a_box: INTEGER; a_on: BOOLEAN)
+			-- Every child as wide as the widest (`a_on').
+		deferred
+		end
+
+	columns (a_count, a_minimum_width, a_row_gap, a_column_gap: INTEGER): INTEGER
+			-- 1y-b: an empty set of `a_count' equal columns, filled row by row, each row as tall as
+			-- its tallest cell; its minimum width is one column of `a_minimum_width'; 12 clear
+			-- around it as around a stack. Shared code sets the count (`columns_set_count').
+		require
+			some_columns: a_count >= 1
+			positive_width: a_minimum_width > 0
+			non_negative: a_row_gap >= 0 and a_column_gap >= 0
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	columns_extend (a_columns, a_child: INTEGER)
+		deferred
+		end
+
+	columns_set_count (a_columns, a_count: INTEGER)
+			-- Lay the children out in `a_count' equal columns from now on.
+		require
+			some_columns: a_count >= 1
+		deferred
+		end
+
+	columns_set_spacing (a_columns, a_row_gap, a_column_gap: INTEGER)
+		require
+			non_negative: a_row_gap >= 0 and a_column_gap >= 0
+		deferred
+		end
+
+	columns_set_minimum_width (a_columns, a_width: INTEGER)
+			-- One column of `a_width' is the narrowest the columns ask for.
+		require
+			positive: a_width > 0
+		deferred
+		end
+
+	aspect_frame (a_ratio: REAL_64): INTEGER
+			-- 1y-b: an empty frame whose height follows its width at `a_ratio' (width over height),
+			-- its content at the largest size of that ratio that fits, centered.
+		require
+			positive: a_ratio > 0.0
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	aspect_set_ratio (a_frame: INTEGER; a_ratio: REAL_64)
+		require
+			positive: a_ratio > 0.0
+		deferred
+		end
+
+	aspect_set_content (a_frame, a_child: INTEGER)
+		deferred
+		end
+
 	grid: INTEGER
 		deferred
 		ensure
