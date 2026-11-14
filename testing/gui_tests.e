@@ -3551,11 +3551,11 @@ feature -- The remaining controls (1j)
 			l_expander.expand_animated
 			assert ("expanded at once, sliding from none", l_expander.is_expanded and l_detail.is_shown and l_detail.reveal = 0.0)
 			app.animation_clock.step (100)
-			driver.pump_until_idle (50)
+			let_layout_settle
 			l_mid := l_expander.height
 			assert ("half revealed: " + l_detail.reveal.out, (l_detail.reveal - 0.5).abs < 1.0e-9)
 			app.animation_clock.step (100)
-			driver.pump_until_idle (50)
+			let_layout_settle
 			l_open := l_expander.height
 			assert ("whole", l_detail.reveal = 1.0 and l_detail.is_shown)
 			assert ("the expander grew with it: " + l_shut.out + " " + l_mid.out + " " + l_open.out,
@@ -3565,7 +3565,7 @@ feature -- The remaining controls (1j)
 			app.animation_clock.step (100)
 			assert ("half way up: " + l_detail.reveal.out, l_expander.is_expanded and (l_detail.reveal - 0.5).abs < 1.0e-9)
 			app.animation_clock.step (100)
-			driver.pump_until_idle (50)
+			let_layout_settle
 			assert ("collapsed at the end", not l_expander.is_expanded and not l_expander.is_collapsing)
 			assert ("the content whole again", l_detail.is_shown and l_detail.reveal = 1.0)
 			assert ("shut again: " + l_expander.height.out, near (l_expander.height, l_shut))
@@ -8192,6 +8192,18 @@ feature {NONE} -- Fixtures
 			"C inline use %"simple_gui_memory.h%""
 		alias
 			"return (EIF_INTEGER_64) sg_process_bytes();"
+		end
+
+	let_layout_settle
+			-- Turn the loop for about 100 ms of real time, so the toolkit lays out what was set
+			-- (GTK on its next frames); a manual animation clock holds still meanwhile.
+		local
+			i: INTEGER
+		do
+			from i := 1 until i > 10 loop
+				driver.wait (10)
+				i := i + 1
+			end
 		end
 
 	near (a, b: INTEGER): BOOLEAN
