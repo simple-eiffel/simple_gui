@@ -198,6 +198,7 @@ static int sga_gdk_key(NSEvent *e)
 	CGImageRef image;
 	NSSize wanted;
 }
+- (void)gesture:(int)a_kind amount:(int)an_amount modifiers:(int)a_modifiers at:(NSPoint)p;   /* 1z-a, event 68 */
 @end
 
 @implementation SGACanvas
@@ -235,6 +236,30 @@ static int sga_gdk_key(NSEvent *e)
 	int l_button = (int)[e buttonNumber] + 1;
 	if (a_kind == 3 && [NSEvent pressedMouseButtons] == 0) l_button = 0;
 	sga_push(7, sga_id_of(self), (int)p.x, (int)p.y, a_kind + l_button * 16 + sga_modifiers([e modifierFlags]) * 256);
+}
+/* 1z-a: a canvas's gestures, event 68: a = kind (1 wheel, 2 magnify) + modifiers << 4; b = the
+   amount (a wheel's in 1/120 of a notch, as Windows' WHEEL_DELTA, positive away from the user as
+   macOS reports it; a magnify's factor x 1000); c = x + y << 16, in the canvas's logical pixels. */
+- (void)gesture:(int)a_kind amount:(int)an_amount modifiers:(int)a_modifiers at:(NSPoint)p
+{
+	int x = (int)MAX(0, MIN(65535, lround(p.x))), y = (int)MAX(0, MIN(65535, lround(p.y)));
+	sga_push(68, sga_id_of(self), a_kind + a_modifiers * 16, an_amount, x + y * 65536);
+}
+/* A mouse's notch is one line, 120; a trackpad's precise deltas are points, 10 to a notch. */
+- (void)scrollWheel:(NSEvent *)e
+{
+	double dy = [e scrollingDeltaY];
+	int l_amount = (int)lround([e hasPreciseScrollingDeltas] ? dy * 12.0 : dy * 120.0);
+	if (l_amount == 0) return;
+	/* an event made from a CGEvent (the test driver's) has no window, and its location is then on
+	   the screen; a user's always has one */
+	NSPoint l_in_window = [e window] ? [e locationInWindow] : [[self window] convertPointFromScreen:[e locationInWindow]];
+	[self gesture:1 amount:l_amount modifiers:sga_modifiers([e modifierFlags]) at:[self convertPoint:l_in_window fromView:nil]];
+}
+- (void)magnifyWithEvent:(NSEvent *)e
+{
+	[self gesture:2 amount:(int)lround((1.0 + [e magnification]) * 1000.0) modifiers:sga_modifiers([e modifierFlags])
+		at:[self convertPoint:[e locationInWindow] fromView:nil]];
 }
 - (void)mouseDown:(NSEvent *)e { [[self window] makeFirstResponder:self]; [self pointer:e kind:1]; }
 - (void)mouseUp:(NSEvent *)e { [self pointer:e kind:2]; }
@@ -13747,3 +13772,61 @@ static int sga_pinned(int a_id, int *a_y)
 }
 int sga_test_pinned_header(int a_id) { int y; return sga_pinned(a_id, &y); }
 int sga_test_pinned_header_y(int a_id) { int y; sga_pinned(a_id, &y); return y; }
+
+/* ------------------------------------------- 1z-a: canvas tests */
+
+/* What canvas `a_id' shows at logical (x, y): the pixel of the image it draws (the one shared code
+   presented), as 0xAARRGGBB with straight alpha; 0 outside or with no image. The image fills the
+   canvas, so a logical point maps to image pixel (x * image width / canvas width). */
+unsigned int sga_test_canvas_pixel(int a_id, int a_x, int a_y)
+{
+	SGACanvas *c = sga_get(a_id);
+	if (![c isKindOfClass:[SGACanvas class]] || !c->image) return 0;
+	NSSize b = [c bounds].size;
+	size_t w = CGImageGetWidth(c->image), h = CGImageGetHeight(c->image);
+	if (b.width <= 0 || b.height <= 0 || a_x < 0 || a_y < 0 || a_x >= b.width || a_y >= b.height) return 0;
+	size_t px = (size_t)((a_x + 0.5) * (double)w / b.width), py = (size_t)((a_y + 0.5) * (double)h / b.height);
+	if (px >= w || py >= h) return 0;
+	unsigned char l_rgba[4] = {0, 0, 0, 0};
+	CGColorSpaceRef l_space = CGImageGetColorSpace(c->image);
+	CGContextRef l_cg = CGBitmapContextCreate(l_rgba, 1, 1, 8, 4, l_space, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+	if (!l_cg) return 0;
+	CGContextSetBlendMode(l_cg, kCGBlendModeCopy);
+	/* draw the image so that pixel (px, py), counted from the top, lands on the 1 x 1 context */
+	CGContextDrawImage(l_cg, CGRectMake(-(CGFloat)px, -(CGFloat)(h - 1 - py), (CGFloat)w, (CGFloat)h), c->image);
+	CGContextRelease(l_cg);
+	unsigned int a = l_rgba[3];
+	unsigned int r = a ? (l_rgba[0] * 255u + a / 2) / a : 0, g = a ? (l_rgba[1] * 255u + a / 2) / a : 0, bl = a ? (l_rgba[2] * 255u + a / 2) / a : 0;
+	return (a << 24) | (MIN(r, 255u) << 16) | (MIN(g, 255u) << 8) | MIN(bl, 255u);
+}
+
+/* As a user: the wheel turned by `an_amount' (1/120 of a notch) over canvas point (x, y) with
+   `a_modifiers', posted to AppKit as a real scroll event (lines, so a notch is 120). */
+void sga_test_canvas_wheel(int a_id, int an_amount, int a_modifiers, int a_x, int a_y)
+{
+	SGACanvas *c = sga_get(a_id);
+	if (![c isKindOfClass:[SGACanvas class]] || ![c window]) return;
+	NSPoint l_window = [c convertPoint:NSMakePoint(a_x, a_y) toView:nil];
+	NSPoint l_screen = [[c window] convertPointToScreen:l_window];
+	CGFloat l_top = NSMaxY([[[NSScreen screens] firstObject] frame]);
+	CGEventRef l_cg = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitLine, 1, (int32_t)lround(an_amount / 120.0));
+	if (!l_cg) return;
+	CGEventSetLocation(l_cg, CGPointMake(l_screen.x, l_top - l_screen.y));
+	CGEventFlags f = 0;
+	if (a_modifiers & 1) f |= kCGEventFlagMaskShift;
+	if (a_modifiers & 2) f |= kCGEventFlagMaskControl;
+	if (a_modifiers & 4) f |= kCGEventFlagMaskAlternate;
+	if (a_modifiers & 8) f |= kCGEventFlagMaskCommand;
+	CGEventSetFlags(l_cg, f);
+	NSEvent *e = [NSEvent eventWithCGEvent:l_cg];
+	CFRelease(l_cg);
+	if (e) [c scrollWheel:e];
+}
+
+/* As a user: a pinch by `a_factor_1000' / 1000 over canvas point (x, y). AppKit has no public way
+   to make a magnify event, so this takes the path `magnifyWithEvent:' takes (a named limit). */
+void sga_test_canvas_magnify(int a_id, int a_factor_1000, int a_x, int a_y)
+{
+	SGACanvas *c = sga_get(a_id);
+	if ([c isKindOfClass:[SGACanvas class]]) [c gesture:2 amount:a_factor_1000 modifiers:0 at:NSMakePoint(a_x, a_y)];
+}

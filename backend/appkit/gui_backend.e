@@ -2407,6 +2407,24 @@ feature -- Canvas
 		alias "return sga_scroller_extent($an_id);"
 		end
 
+	test_canvas_pixel (an_id, a_x, a_y: INTEGER): NATURAL_32
+			-- 1z-a: what canvas `an_id' shows at logical (x, y), 0xAARRGGBB (straight alpha); 0 outside.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_NATURAL_32) sga_test_canvas_pixel ($an_id, $a_x, $a_y);"
+		end
+
+	test_canvas_wheel (an_id, an_amount, a_modifiers, a_x, a_y: INTEGER)
+			-- 1z-a: a user's wheel over canvas `an_id' (1/120 of a notch), through the toolkit.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_canvas_wheel ($an_id, $an_amount, $a_modifiers, $a_x, $a_y);"
+		end
+
+	test_canvas_magnify (an_id, a_factor_1000, a_x, a_y: INTEGER)
+			-- 1z-a: a user's pinch by `a_factor_1000' / 1000 over canvas `an_id'.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_canvas_magnify ($an_id, $a_factor_1000, $a_x, $a_y);"
+		end
+
 	test_scroller_scroll_to (an_id, a_y: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_test_scroller_scroll_to($an_id, $a_y);"

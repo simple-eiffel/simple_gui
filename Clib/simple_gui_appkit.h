@@ -612,3 +612,8 @@ void sga_test_press_chevron(int a_id, int a_part);
 void sga_test_press_path_space(int a_id);
 void sga_widget_focus(int a_id);
 void sga_test_field_escape(int a_id);
+
+/* 1z-a: canvas gestures (event 68) and tests */
+unsigned int sga_test_canvas_pixel(int a_id, int a_x, int a_y);
+void sga_test_canvas_wheel(int a_id, int an_amount, int a_modifiers, int a_x, int a_y);
+void sga_test_canvas_magnify(int a_id, int a_factor_1000, int a_x, int a_y);
