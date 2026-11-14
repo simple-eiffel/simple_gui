@@ -298,17 +298,31 @@ static int s_setting_dark;
    program sees is the model's: the map turns screen rows into model rows and back. */
 static NSMutableDictionary<NSValue *, NSArray<NSNumber *> *> *s_shown;
 static NSArray<NSNumber *> *sga_shown_map(NSTableView *t) { return s_shown[[NSValue valueWithNonretainedObject:t]]; }
+/* 1y-e: with sections, the map also holds each shown section's header row, as minus its section
+   number (from 1), above the first shown row of its section (see sga_with_headers). */
+static NSArray<NSNumber *> *sga_with_headers(NSTableView *t, NSArray<NSNumber *> *a_map);
+static BOOL sga_has_sections(NSTableView *t);
+static NSInteger sga_headers_shown(NSTableView *t);
 static void sga_set_shown_map(NSTableView *t, NSArray<NSNumber *> *a_map)
 {
 	if (!s_shown) s_shown = [NSMutableDictionary dictionary];
+	a_map = sga_with_headers(t, a_map);
 	if (a_map) s_shown[[NSValue valueWithNonretainedObject:t]] = a_map; else [s_shown removeObjectForKey:[NSValue valueWithNonretainedObject:t]];
 }
 /* The model row (from 0) on screen row `a_view', and the screen row of model row `a_model' (-1: hidden). */
 static NSInteger sga_model_row(NSTableView *t, NSInteger a_view)
 {
 	NSArray<NSNumber *> *m = sga_shown_map(t);
-	return !m || a_view < 0 ? a_view : (a_view < (NSInteger)[m count] ? [m[(NSUInteger)a_view] integerValue] : -1);
+	return !m || a_view < 0 ? a_view : (a_view < (NSInteger)[m count] ? MAX(-1, [m[(NSUInteger)a_view] integerValue]) : -1);
 }
+/* 1y-e: the section number (from 1) whose header is screen row `a_view', or 0: a model row. */
+static NSInteger sga_header_at(NSTableView *t, NSInteger a_view)
+{
+	NSArray<NSNumber *> *m = sga_shown_map(t);
+	NSInteger v = m && a_view >= 0 && a_view < (NSInteger)[m count] ? [m[(NSUInteger)a_view] integerValue] : 0;
+	return v < 0 ? -v : 0;
+}
+static NSView *sga_header_cell(NSTableView *t, NSInteger a_section);
 static NSInteger sga_view_row(NSTableView *t, NSInteger a_model)
 {
 	NSArray<NSNumber *> *m = sga_shown_map(t);
@@ -382,6 +396,7 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 - (NSView *)tableView:(NSTableView *)t viewForTableColumn:(NSTableColumn *)c row:(NSInteger)r
 {
 	(void)c;
+	if (sga_header_at(t, r)) return sga_header_cell(t, sga_header_at(t, r));
 	NSInteger l_model = sga_model_row(t, r);
 	id l_row = l_model >= 0 && l_model < (NSInteger)[[self rowsOf:t] count] ? [self rowsOf:t][(NSUInteger)l_model] : @"";
 	if ([l_row isKindOfClass:[SGARichRow class]]) return sga_rich_cell(t, l_row, l_model);
@@ -393,6 +408,9 @@ static NSTextAlignment sga_start_alignment(NSView *a_view)
 	return l_cell;
 }
 - (NSTableRowView *)tableView:(NSTableView *)t rowViewForRow:(NSInteger)r { (void)t; (void)r; return [[SGARowView alloc] init]; }
+/* 1y-e: a section's header is a group row, never selected */
+- (BOOL)tableView:(NSTableView *)t isGroupRow:(NSInteger)r { return sga_header_at(t, r) != 0; }
+- (BOOL)tableView:(NSTableView *)t shouldSelectRow:(NSInteger)r { return sga_header_at(t, r) == 0; }
 - (void)tableViewSelectionDidChange:(NSNotification *)n
 {
 	NSTableView *t = [n object];
@@ -964,10 +982,22 @@ int sga_stack(int a_vertical, int a_spacing)
 	BOOL reveal_offset_along_x;
 	double reveal_offset_sign, reveal_offset_base;
 	CALayer *snapshot;                       /* grow: a picture of the child, scaled */
+	/* 1y-e: a sticky child of a scroll area's stack, moved down its part by `sticky_shift' */
+	BOOL sticky;
+	CGFloat sticky_shift;
 }
 @end
 @implementation SGASlot
 - (BOOL)isFlipped { return YES; }
+/* A sticky child moved down sits partly or wholly outside its slot: it still takes its clicks. */
+- (NSView *)hitTest:(NSPoint)p
+{
+	if (sticky && sticky_shift > 0 && child && ![self isHidden]) {
+		NSView *h = [child hitTest:[self convertPoint:p fromView:[self superview]]];
+		if (h) return h;
+	}
+	return [super hitTest:p];
+}
 @end
 
 static NSMutableDictionary<NSValue *, SGASlot *> *s_slots;   /* child view -> its slot */
@@ -2441,6 +2471,7 @@ static void sga_table_commit(SGAGridTable *t, NSInteger a_model, NSInteger a_col
 }
 - (NSView *)tableView:(NSTableView *)a_table viewForTableColumn:(NSTableColumn *)a_column row:(NSInteger)a_row
 {
+	if (sga_header_at(a_table, a_row)) return sga_header_cell(a_table, sga_header_at(a_table, a_row));
 	NSUInteger k = [[a_table tableColumns] indexOfObject:a_column];
 	NSInteger l_model = sga_model_row(a_table, a_row);
 	NSArray<NSString *> *l_row = l_model < 0 ? nil : source_on ? cache[@(l_model)] : (l_model < (NSInteger)[data count] ? data[(NSUInteger)l_model] : nil);
@@ -2478,6 +2509,8 @@ static void sga_table_commit(SGAGridTable *t, NSInteger a_model, NSInteger a_col
 	return f;
 }
 - (NSTableRowView *)tableView:(NSTableView *)t rowViewForRow:(NSInteger)r { (void)t; (void)r; return [[SGARowView alloc] init]; }
+- (BOOL)tableView:(NSTableView *)t isGroupRow:(NSInteger)r { return sga_header_at(t, r) != 0; }
+- (BOOL)tableView:(NSTableView *)t shouldSelectRow:(NSInteger)r { return sga_header_at(t, r) == 0; }
 - (void)tableViewSelectionDidChange:(NSNotification *)n
 {
 	if (s_suppress) return;
@@ -2597,7 +2630,7 @@ void sga_table_extend(int a_id, const char *a_cells)
 {
 	SGAGridTable *t = s_inner[a_id];
 	[t->data addObject:sga_fields(a_cells)];
-	if ([t->filter length]) sga_table_refilter(t);
+	if ([t->filter length] || sga_has_sections(t)) sga_table_refilter(t);   /* 1y-e: a waiting section's header shows */
 	else { s_suppress++; [t reloadData]; s_suppress--; }
 }
 
@@ -5240,8 +5273,10 @@ static BOOL sga_drag_out_begin(int a_source, int a_row, NSEvent *e)
 	NSView *v = sga_core(a_source);
 	if (!d || ![v isKindOfClass:[NSView class]]) return NO;
 	NSRect r = [v bounds];
-	if (a_row > 0 && [v isKindOfClass:[NSTableView class]] && ![v isKindOfClass:[SGATree class]] && a_row <= [(NSTableView *)v numberOfRows])
-		r = [(NSTableView *)v rectOfRow:a_row - 1];
+	if (a_row > 0 && [v isKindOfClass:[NSTableView class]] && ![v isKindOfClass:[SGATree class]]) {
+		NSInteger l_view = sga_view_row((NSTableView *)v, a_row - 1);   /* a model row: filters and headers (1y-e) move it */
+		if (l_view >= 0 && l_view < [(NSTableView *)v numberOfRows]) r = [(NSTableView *)v rectOfRow:l_view];
+	}
 	r = NSIntersectionRect(r, [v visibleRect]);
 	if (NSIsEmptyRect(r)) r = NSMakeRect(0, 0, 40, 20);
 	NSImage *l_image = sga_drag_image(v, r);
@@ -9108,7 +9143,7 @@ void sga_list_set_filter(int a_id, const char *a_text)
 	sga_list_refilter(t);
 }
 
-int sga_list_shown_count(int a_id) { return (int)[(NSTableView *)s_inner[a_id] numberOfRows]; }
+int sga_list_shown_count(int a_id) { NSTableView *t = s_inner[a_id]; return (int)([t numberOfRows] - sga_headers_shown(t)); }
 
 /* As the user: row `a_row''s check box, its close button. */
 void sga_test_check_row(int a_id, int a_row) { sga_list_user_check(s_inner[a_id], a_row - 1); }
@@ -9240,7 +9275,7 @@ void sga_table_set_shown_rows(int a_id, const char *a_rows)
 	sga_table_refilter(t);
 }
 
-int sga_table_shown_count(int a_id) { return (int)[(NSTableView *)s_inner[a_id] numberOfRows]; }
+int sga_table_shown_count(int a_id) { NSTableView *t = s_inner[a_id]; return (int)([t numberOfRows] - sga_headers_shown(t)); }
 
 /* As the user: `a_text' typed into cell (row, column), then Enter (a check cell takes "1" or
    "0", a choice cell an option); an edit begun there and cancelled with Escape. */
@@ -13343,3 +13378,358 @@ const char *sga_test_style_value(int a_id, const char *a_key)
 	}
 	return sga_return(Kind_style, r ?: @"");
 }
+
+/* ------------------------------------------- 1y-e: sections and sticky headers */
+
+/* The pinned copy of the current section's header: the header's look on a translucent material,
+   a floating subview of the list's scroll view (it does not scroll vertically), set at the visible
+   top, or above it while the next section's header pushes it up. AppKit's own floating group rows
+   never push up (measured on macOS 15: the old header holds at y 0 while the next slides under it,
+   then the two swap with a jump), so the backend pins a copy, as GTK does. It takes no input; the
+   wheel still scrolls the rows. A screen reader reads the header in the table, not this. */
+@interface SGAPinnedHeader : NSView
+{
+@public
+	NSVisualEffectView *body;   /* the header itself: above the pin's top while pushed up, clipped */
+	NSTextField *label;
+	NSInteger section;   /* the section whose header it shows (from 1), 0 none */
+}
+@end
+@implementation SGAPinnedHeader
+- (BOOL)isFlipped { return YES; }
+- (NSView *)hitTest:(NSPoint)p { return [super hitTest:p] ? self : nil; }
+- (void)mouseDown:(NSEvent *)e { (void)e; }
+- (void)rightMouseDown:(NSEvent *)e { (void)e; }
+- (NSMenu *)menuForEvent:(NSEvent *)e { (void)e; return nil; }
+- (BOOL)acceptsFirstMouse:(NSEvent *)e { (void)e; return NO; }
+- (BOOL)isAccessibilityElement { return NO; }
+@end
+
+/* A list's or table's sections, as shared code last sent them (it sends the whole layout again
+   after any change): each section's first model row (from 0; the row count when the section waits
+   for its first row) and its title; whether the current header pins; the screen rows of the
+   headers shown; and the pinned copy. */
+@interface SGASections : NSObject
+{
+@public
+	NSArray<NSNumber *> *first;
+	NSArray<NSString *> *titles;
+	BOOL unpinned;
+	NSArray<NSNumber *> *heads;
+	SGAPinnedHeader *pin;
+	NSRect label_rect;   /* the in-table header's label within its row, once one has been seen */
+}
+@end
+@implementation SGASections
+@end
+
+static NSMutableDictionary<NSValue *, SGASections *> *s_sections;
+static NSHashTable<NSTableView *> *s_sectioned;      /* the tables whose pinned header follows the scrolling */
+static NSHashTable<SGASlot *> *s_sticky_slots;       /* sticky children of scroll areas, by their slots */
+static NSHashTable<NSScrollView *> *s_sticky_areas;
+static CFRunLoopObserverRef s_sticky_observer;
+
+static SGASections *sga_sections(NSTableView *t) { return s_sections[[NSValue valueWithNonretainedObject:t]]; }
+static BOOL sga_has_sections(NSTableView *t) { SGASections *k = sga_sections(t); return k && [k->first count] > 0; }
+static NSInteger sga_headers_shown(NSTableView *t) { SGASections *k = sga_sections(t); return k ? (NSInteger)[k->heads count] : 0; }
+static NSString *sga_section_title(SGASections *k, NSInteger a_section)
+{
+	return k && a_section >= 1 && a_section <= (NSInteger)[k->titles count] ? k->titles[(NSUInteger)a_section - 1] : @"";
+}
+
+/* The shown map with a header row above the first shown row of each section that has one: rows
+   before the first section have none, and neither has a section with no row shown. `a_map' is the
+   filter's (ascending model rows), or nil for every row. A lazy table's sections are out of 1y. */
+static NSArray<NSNumber *> *sga_with_headers(NSTableView *t, NSArray<NSNumber *> *a_map)
+{
+	SGASections *k = sga_sections(t);
+	if (k) k->heads = @[];
+	if (!k || ![k->first count]) return a_map;
+	NSInteger n;
+	if ([t isKindOfClass:[SGAGridTable class]]) {
+		SGAGridTable *g = (SGAGridTable *)t;
+		if (g->source_on) return a_map;
+		n = (NSInteger)[g->data count];
+	} else n = (NSInteger)[[s_target rowsOf:t] count];
+	NSMutableArray<NSNumber *> *m = [NSMutableArray array], *h = [NSMutableArray array];
+	NSInteger l_count = a_map ? (NSInteger)[a_map count] : n, l_shown = -1;
+	NSUInteger s = 0;
+	for (NSInteger i = 0; i < l_count; i++) {
+		NSInteger r = a_map ? [a_map[(NSUInteger)i] integerValue] : i;
+		while (s < [k->first count] && [k->first[s] integerValue] <= r) s++;
+		NSInteger j = (NSInteger)s - 1;   /* the section of row r, from 0; -1 none */
+		if (j >= 0 && j != l_shown) { [h addObject:@([m count])]; [m addObject:@(-(j + 1))]; l_shown = j; }
+		[m addObject:@(r)];
+	}
+	k->heads = h;
+	return m;
+}
+
+static NSTextField *sga_header_label(void)
+{
+	NSTextField *f = [NSTextField labelWithString:@""];
+	[f setFont:[NSFont boldSystemFontOfSize:[NSFont smallSystemFontSize]]];
+	[f setTextColor:[NSColor secondaryLabelColor]];
+	[f setLineBreakMode:NSLineBreakByTruncatingTail];
+	return f;
+}
+
+/* A section's header in the table: a group row's cell. */
+static NSView *sga_header_cell(NSTableView *t, NSInteger a_section)
+{
+	NSTextField *f = [t makeViewWithIdentifier:@"sga_header" owner:s_target];
+	if (!f) { f = sga_header_label(); [f setIdentifier:@"sga_header"]; }
+	[f setStringValue:sga_section_title(sga_sections(t), a_section)];
+	[f setAlignment:sga_start_alignment(t)];
+	return f;
+}
+
+/* Set the pinned copy for where the rows are scrolled now: the last header at or above the visible
+   top is the current one; the next header pushes it up across the copy's own height, and takes
+   over exactly when it reaches the top. */
+static void sga_pin_follow(NSTableView *t)
+{
+	SGASections *k = sga_sections(t);
+	NSScrollView *s = [t enclosingScrollView];
+	if (!k || !s) return;
+	NSClipView *c = [s contentView];
+	CGFloat l_top = [t convertPoint:NSMakePoint(0, NSMinY([c bounds]) + [c contentInsets].top) fromView:c].y;
+	NSInteger l_current = -1, l_next = -1;
+	for (NSUInteger i = 0; i < [k->heads count]; i++) {
+		if (NSMinY([t rectOfRow:[k->heads[i] integerValue]]) <= l_top + 0.5) l_current = (NSInteger)i;
+		else { l_next = (NSInteger)i; break; }
+	}
+	if (k->unpinned || l_current < 0 || [k->heads count] == 0) {
+		if (k->pin) { [k->pin setHidden:YES]; k->pin->section = 0; }
+		return;
+	}
+	if (!k->pin) {
+		SGAPinnedHeader *p = [[SGAPinnedHeader alloc] initWithFrame:NSZeroRect];
+		[p setClipsToBounds:YES];   /* pushed up, it never covers a table's column titles or what is above the rows */
+		p->body = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+		[p->body setMaterial:NSVisualEffectMaterialHeaderView];
+		[p->body setBlendingMode:NSVisualEffectBlendingModeWithinWindow];
+		[p->body setState:NSVisualEffectStateFollowsWindowActiveState];
+		p->label = sga_header_label();
+		[p->label setAccessibilityElement:NO];
+		[p->body addSubview:p->label];
+		[p addSubview:p->body];
+		k->pin = p;
+	}
+	if (![k->pin isDescendantOf:s]) { [k->pin removeFromSuperview]; [s addFloatingSubview:k->pin forAxis:NSEventGestureAxisVertical]; }
+	NSInteger l_row = [k->heads[(NSUInteger)l_current] integerValue];
+	NSRect l_row_rect = [t rectOfRow:l_row];
+	CGFloat h = NSHeight(l_row_rect);
+	CGFloat y = l_next >= 0 ? MIN(0, NSMinY([t rectOfRow:[k->heads[(NSUInteger)l_next] integerValue]]) - l_top - h) : 0;
+	/* the pin holds the part still in view; the header inside it starts y above the visible top */
+	[k->pin setFrame:[[k->pin superview] convertRect:NSMakeRect(0, l_top, NSWidth([t bounds]), MAX(0, h + y)) fromView:t]];
+	[k->pin->body setFrame:NSMakeRect(0, y, NSWidth([k->pin bounds]), h)];
+	/* the label where the table puts it in a header row (once one has been laid out) */
+	for (NSNumber *q in k->heads) {
+		NSView *v = [t viewAtColumn:0 row:[q integerValue] makeIfNecessary:NO];
+		if (v && !NSIsEmptyRect([v frame])) {
+			NSRect r = [t convertRect:[v bounds] fromView:v];
+			NSRect l_its_row = [t rectOfRow:[q integerValue]];
+			k->label_rect = NSMakeRect(NSMinX(r), NSMinY(r) - NSMinY(l_its_row), NSWidth(r), NSHeight(r));
+			break;
+		}
+	}
+	NSRect l_label = k->label_rect;
+	if (NSIsEmptyRect(l_label)) {
+		CGFloat l_inset = [t effectiveStyle] == NSTableViewStyleInset ? 16 : 4;
+		CGFloat l_h = [[k->pin->label cell] cellSize].height;
+		l_label = NSMakeRect(l_inset, floor((h - l_h) / 2), MAX(0, NSWidth([t bounds]) - 2 * l_inset), l_h);
+	}
+	[k->pin->label setFrame:l_label];
+	[k->pin->label setStringValue:sga_section_title(k, -[sga_shown_map(t)[(NSUInteger)l_row] integerValue])];
+	[k->pin->label setAlignment:sga_start_alignment(t)];
+	k->pin->section = -[sga_shown_map(t)[(NSUInteger)l_row] integerValue];
+	[k->pin setHidden:NO];
+}
+
+/* A sticky child's shift down its slot: its top and bottom placing constraints move together, so
+   the slot keeps its size and place in the stack while the child sits lower. */
+static void sga_slot_shift(SGASlot *a_slot, CGFloat a_shift)
+{
+	a_slot->sticky_shift = a_shift;
+	for (NSLayoutConstraint *k in a_slot->placing)
+		if ([k firstItem] == a_slot->child && [k secondItem] == a_slot
+			&& ([k firstAttribute] == NSLayoutAttributeTop || [k firstAttribute] == NSLayoutAttributeBottom)
+			&& fabs([k constant] - a_shift) >= 0.25) [k setConstant:a_shift];
+}
+
+/* Sticky slots go last among their stack's subviews, so they draw over the rows they pass and
+   take clicks first. Other subviews keep their order. */
+static NSComparisonResult sga_sticky_order(NSView *a, NSView *b, void *a_context)
+{
+	NSArray *o = (__bridge NSArray *)a_context;
+	NSUInteger ra = [o indexOfObject:a] + ([a isKindOfClass:[SGASlot class]] && ((SGASlot *)a)->sticky ? 1000000 : 0);
+	NSUInteger rb = [o indexOfObject:b] + ([b isKindOfClass:[SGASlot class]] && ((SGASlot *)b)->sticky ? 1000000 : 0);
+	return ra < rb ? NSOrderedAscending : ra > rb ? NSOrderedDescending : NSOrderedSame;
+}
+static void sga_sticky_raise(NSView *a_stack)
+{
+	NSArray<NSView *> *l_subviews = [a_stack subviews];
+	BOOL l_seen = NO;
+	for (NSView *v in l_subviews) {
+		BOOL l_sticky = [v isKindOfClass:[SGASlot class]] && ((SGASlot *)v)->sticky;
+		if (l_sticky) l_seen = YES;
+		else if (l_seen) { [a_stack sortSubviewsUsingFunction:sga_sticky_order context:(__bridge void *)l_subviews]; return; }
+	}
+}
+
+/* The sticky children of a scroll area's stacks, for where it is scrolled now. A sticky child's
+   part runs from its own slot to the next sticky child's slot, or to the end of the stack's
+   children: it sits at the visible top while its part is in view, never above its own place and
+   never past its part's end, so the next sticky child pushes it up. */
+static void sga_sticky_follow(NSScrollView *s)
+{
+	NSView *l_doc = [s documentView];
+	NSClipView *c = [s contentView];
+	if (!l_doc) return;
+	[l_doc layoutSubtreeIfNeeded];
+	CGFloat l_top = [l_doc convertPoint:NSMakePoint(0, NSMinY([c bounds]) + [c contentInsets].top) fromView:c].y;
+	NSMutableSet<NSStackView *> *l_stacks = [NSMutableSet set];
+	for (SGASlot *a in [s_sticky_slots allObjects])
+		if (a->sticky && [[a superview] isKindOfClass:[NSStackView class]] && [a isDescendantOf:l_doc]) [l_stacks addObject:(NSStackView *)[a superview]];
+	for (NSStackView *l_stack in l_stacks) {
+		NSMutableArray<SGASlot *> *l_sticky = [NSMutableArray array];
+		CGFloat l_end = 0;
+		for (NSView *v in [l_stack arrangedSubviews]) {
+			if ([v isHidden] || ![v isKindOfClass:[SGASlot class]]) continue;
+			l_end = MAX(l_end, NSMaxY([l_doc convertRect:[v bounds] fromView:v]));
+			if (((SGASlot *)v)->sticky) [l_sticky addObject:(SGASlot *)v];
+		}
+		for (NSUInteger i = 0; i < [l_sticky count]; i++) {
+			NSRect r = [l_doc convertRect:[l_sticky[i] bounds] fromView:l_sticky[i]];
+			CGFloat l_part_end = i + 1 < [l_sticky count] ? NSMinY([l_doc convertRect:[l_sticky[i + 1] bounds] fromView:l_sticky[i + 1]]) : l_end;
+			sga_slot_shift(l_sticky[i], MIN(MAX(0, l_top - NSMinY(r)), MAX(0, l_part_end - NSMinY(r) - NSHeight(r))));
+		}
+		sga_sticky_raise(l_stack);
+	}
+}
+
+/* Before Core Animation's commit lays the window out (as the placers' check), each pinned header
+   and sticky child on screen follows the scrolling and any change of the rows or children. */
+static void sga_sticky_check(CFRunLoopObserverRef a_observer, CFRunLoopActivity a_activity, void *a_info)
+{
+	(void)a_observer; (void)a_activity; (void)a_info;
+	for (NSScrollView *s in [s_sticky_areas allObjects]) if ([s window] && ![s isHiddenOrHasHiddenAncestor]) sga_sticky_follow(s);
+	for (NSTableView *t in [s_sectioned allObjects]) if ([t window] && ![t isHiddenOrHasHiddenAncestor]) sga_pin_follow(t);
+}
+static void sga_sticky_observe(void)
+{
+	if (s_sticky_observer) return;
+	s_sticky_observer = CFRunLoopObserverCreate(NULL, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, 1999001, sga_sticky_check, NULL);
+	CFRunLoopAddObserver(CFRunLoopGetMain(), s_sticky_observer, kCFRunLoopCommonModes);
+}
+
+static SGASections *sga_sections_made(NSTableView *t)
+{
+	SGASections *k = sga_sections(t);
+	if (k) return k;
+	if (!s_sections) s_sections = [NSMutableDictionary dictionary];
+	k = [[SGASections alloc] init];
+	k->first = @[]; k->titles = @[]; k->heads = @[];
+	s_sections[[NSValue valueWithNonretainedObject:t]] = k;
+	[t setFloatsGroupRows:NO];   /* the copy pins instead (see SGAPinnedHeader) */
+	if (!s_sectioned) s_sectioned = [NSHashTable weakObjectsHashTable];
+	[s_sectioned addObject:t];
+	sga_sticky_observe();
+	return k;
+}
+
+/* The whole section layout: first rows (from 1) ascending and comma-joined ("" none), titles
+   joined by 0x1F. It replaces the one before. */
+static void sga_set_sections(NSTableView *t, const char *a_starts, const char *a_titles)
+{
+	if (![t isKindOfClass:[NSTableView class]]) return;
+	SGASections *k = sga_sections_made(t);
+	NSMutableArray<NSNumber *> *f = [NSMutableArray array];
+	for (NSString *p in [sga_string(a_starts) componentsSeparatedByString:@","]) {
+		NSString *q = [p stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+		if ([q length]) [f addObject:@([q integerValue] - 1)];
+	}
+	k->first = f;
+	k->titles = [f count] ? sga_fields(a_titles) : @[];
+	if ([t isKindOfClass:[SGAGridTable class]]) sga_table_refilter((SGAGridTable *)t);
+	else sga_list_refilter(t);
+	sga_pin_follow(t);
+}
+
+void sga_list_set_sections(int a_id, const char *a_starts, const char *a_titles) { sga_set_sections(s_inner[a_id], a_starts, a_titles); }
+void sga_table_set_sections(int a_id, const char *a_starts, const char *a_titles) { sga_set_sections(s_inner[a_id], a_starts, a_titles); }
+
+static void sga_set_sticky_headers(NSTableView *t, int a_on)
+{
+	if (![t isKindOfClass:[NSTableView class]]) return;
+	sga_sections_made(t)->unpinned = !a_on;
+	sga_pin_follow(t);
+}
+void sga_list_set_sticky_headers(int a_id, int a_on) { sga_set_sticky_headers(s_inner[a_id], a_on); }
+void sga_table_set_sticky_headers(int a_id, int a_on) { sga_set_sticky_headers(s_inner[a_id], a_on); }
+
+/* `a_child', a direct child of the vertical stack that is scroll area `a_id''s content, sticks
+   (or no longer does). */
+void sga_scroll_area_set_sticky(int a_id, int a_child, int a_on)
+{
+	NSScrollView *s = sga_get(a_id);
+	SGASlot *l_slot = sga_slot_of(sga_get(a_child));
+	if (![s isKindOfClass:[NSScrollView class]] || !l_slot) return;
+	if (!s_sticky_slots) s_sticky_slots = [NSHashTable weakObjectsHashTable];
+	if (!s_sticky_areas) s_sticky_areas = [NSHashTable weakObjectsHashTable];
+	l_slot->sticky = a_on != 0;
+	if (a_on) [s_sticky_slots addObject:l_slot];
+	else { [s_sticky_slots removeObject:l_slot]; sga_slot_shift(l_slot, 0); }
+	[s_sticky_areas addObject:s];
+	sga_sticky_observe();
+	sga_sticky_follow(s);
+}
+
+/* Tests, read from the views on screen: the section whose header is pinned at the visible top of
+   list or table `a_id' (or the sticky child of scroll area `a_id' held there), 0 none; and the
+   top of that header (or child) less the visible top: 0 pinned, below 0 while pushed up. */
+static int sga_pinned(int a_id, int *a_y)
+{
+	*a_y = 0;
+	id o = sga_get(a_id), c = sga_core(a_id);
+	if ([c isKindOfClass:[NSTableView class]]) {
+		NSTableView *t = c;
+		NSScrollView *s = [t enclosingScrollView];
+		SGASections *k = sga_sections(t);
+		if (!k || !s) return 0;
+		if ([t window]) [[[t window] contentView] layoutSubtreeIfNeeded];
+		sga_pin_follow(t);
+		SGAPinnedHeader *p = k->pin;
+		if (!p || [p isHidden] || ![p superview] || p->section <= 0) return 0;
+		NSClipView *l_clip = [s contentView];
+		NSRect r = [l_clip convertRect:[p->body bounds] fromView:p->body];
+		*a_y = (int)lround(NSMinY(r) - (NSMinY([l_clip bounds]) + [l_clip contentInsets].top));
+		return (int)p->section;
+	}
+	if ([o isKindOfClass:[NSScrollView class]]) {
+		NSScrollView *s = o;
+		NSView *l_doc = [s documentView];
+		NSClipView *l_clip = [s contentView];
+		if ([s window]) [[[s window] contentView] layoutSubtreeIfNeeded];
+		sga_sticky_follow(s);
+		[l_doc layoutSubtreeIfNeeded];
+		CGFloat l_top = [l_doc convertPoint:NSMakePoint(0, NSMinY([l_clip bounds]) + [l_clip contentInsets].top) fromView:l_clip].y;
+		NSMutableArray<SGASlot *> *l_sticky = [NSMutableArray array];
+		for (SGASlot *a in [s_sticky_slots allObjects]) if (a->sticky && ![a isHiddenOrHasHiddenAncestor] && [a isDescendantOf:l_doc]) [l_sticky addObject:a];
+		[l_sticky sortUsingComparator:^NSComparisonResult(SGASlot *a, SGASlot *b) {
+			CGFloat ya = NSMinY([l_doc convertRect:[a bounds] fromView:a]), yb = NSMinY([l_doc convertRect:[b bounds] fromView:b]);
+			return ya < yb ? NSOrderedAscending : ya > yb ? NSOrderedDescending : NSOrderedSame;
+		}];
+		int l_id = 0;
+		for (SGASlot *a in l_sticky) {
+			CGFloat l_natural = NSMinY([l_doc convertRect:[a bounds] fromView:a]);
+			NSRect r = [l_doc convertRect:[a->child bounds] fromView:a->child];
+			if (l_natural <= l_top + 0.5 && NSMaxY(r) > l_top + 0.5) { l_id = sga_id_of(a->child); *a_y = (int)lround(NSMinY(r) - l_top); }
+		}
+		return l_id;
+	}
+	return 0;
+}
+int sga_test_pinned_header(int a_id) { int y; return sga_pinned(a_id, &y); }
+int sga_test_pinned_header_y(int a_id) { int y; sga_pinned(a_id, &y); return y; }
