@@ -46,8 +46,13 @@ feature -- Element change
 		end
 
 	set_content (a_content: SW_WIDGET)
+			-- Show `a_content' in the section, as `add_section' would place it (its parent is
+			-- this expander, which 1x-e's reveal asks).
 		do
 			sections.first.put (a_content, 2)
+			a_content.set_parent (Current)
+		ensure
+			parented: a_content.parent = Current
 		end
 
 	set_expanded (a_on: BOOLEAN)

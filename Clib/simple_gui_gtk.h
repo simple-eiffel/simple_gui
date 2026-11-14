@@ -304,6 +304,15 @@ static const char *sg_pill_tip_shown(int id) {
 /* ---------- windows and containers ---------- */
 
 static gboolean sg_on_window_help_key(GtkEventControllerKey *k, guint key, guint code, GdkModifierType m, gpointer d);
+/* 1x-e: the window's size as sg_window takes it (GTK applies it on its next frame); nothing
+   while it is full screen or maximized. */
+static void sg_window_set_size(int id, int w, int h) {
+    GtkWindow *win;
+    if (!sg_w[id] || !GTK_IS_WINDOW(sg_w[id])) return;
+    win = GTK_WINDOW(sg_w[id]);
+    if (gtk_window_is_fullscreen(win) || gtk_window_is_maximized(win)) return;
+    gtk_window_set_default_size(win, w, h);
+}
 static int sg_window(const char *title, int w, int h) {
     GtkWidget *win = gtk_window_new();
     int id;
@@ -5238,7 +5247,10 @@ static void sg_timer_start(int id, int ms, int repeat) {
    (from the top: its bottom part first; from the bottom: its top part; leading and trailing
    mirrored under right-to-left; grow: scaled about the middle) and clips it. The widget is
    wrapped when a slide or grow starts and put back when it is whole or fades; a widget whose
-   parent is neither a box nor a window cannot be wrapped and fades instead.
+   parent is neither a box nor a window cannot be wrapped and fades instead. An expander's
+   child (1x-e) is wrapped through gtk_expander_set_child, so the expander's own child is the
+   wrapper while it slides (its internal box is never touched behind its back), and it takes
+   its share of the height: the expander grows and shrinks with it.
    The type is registered by hand, looked up by name first: this header is compiled into many
    C files, each with its own statics, and must not register it twice. */
 
@@ -5379,8 +5391,14 @@ static int sg_is_window_content(GtkWidget *w) {
     return root && GTK_IS_WINDOW(root) && g_object_get_data(G_OBJECT(root), "sg-content") == (gpointer) w;
 }
 
+/* The expander whose own child is `w', or NULL. */
+static GtkWidget *sg_expander_holding(GtkWidget *w) {
+    GtkWidget *e = gtk_widget_get_ancestor(w, GTK_TYPE_EXPANDER);
+    return (e && gtk_expander_get_child(GTK_EXPANDER(e)) == w) ? e : NULL;
+}
+
 static SgReveal *sg_reveal_wrap(int id) {
-    GtkWidget *w = sg_w[id], *parent, *prev, *rv;
+    GtkWidget *w = sg_w[id], *parent, *prev, *rv, *exp;
     SgReveal *r;
     int in_place;
     if (!w) return NULL;
@@ -5388,12 +5406,17 @@ static SgReveal *sg_reveal_wrap(int id) {
     if (r) return r;
     in_place = sg_is_window_content(w);   /* asked before it leaves its place */
     parent = gtk_widget_get_parent(w);
-    if (!parent || !(GTK_IS_BOX(parent) || GTK_IS_WINDOW(parent))) return NULL;
+    exp = sg_expander_holding(w);
+    if (!parent || !(exp || GTK_IS_BOX(parent) || GTK_IS_WINDOW(parent))) return NULL;
     rv = GTK_WIDGET(g_object_new(sg_reveal_type(), NULL));
     gtk_widget_set_hexpand(rv, gtk_widget_get_hexpand(w));
     gtk_widget_set_vexpand(rv, gtk_widget_get_vexpand(w));
     g_object_ref(w);
-    if (GTK_IS_BOX(parent)) {
+    if (exp) {
+        gtk_expander_set_child(GTK_EXPANDER(exp), NULL);
+        gtk_expander_set_child(GTK_EXPANDER(exp), rv);
+        in_place = 0;
+    } else if (GTK_IS_BOX(parent)) {
         prev = gtk_widget_get_prev_sibling(w);
         gtk_box_remove(GTK_BOX(parent), w);
         gtk_box_insert_child_after(GTK_BOX(parent), rv, prev);
@@ -5412,18 +5435,21 @@ static SgReveal *sg_reveal_wrap(int id) {
 
 /* Put widget `id' back where its wrapper stands, and drop the wrapper. */
 static void sg_reveal_unwrap(int id) {
-    GtkWidget *w = sg_w[id], *rv, *parent, *prev;
+    GtkWidget *w = sg_w[id], *rv, *parent, *prev, *exp;
     SgReveal *r;
     if (!w) return;
     r = (SgReveal *) g_object_get_data(G_OBJECT(w), "sg-reveal");
     if (!r) return;
     rv = GTK_WIDGET(r);
     parent = gtk_widget_get_parent(rv);
+    exp = sg_expander_holding(rv);
     g_object_set_data(G_OBJECT(w), "sg-reveal", NULL);
     g_object_ref(w);
     gtk_widget_unparent(w);
     r->child = NULL;
-    if (parent && GTK_IS_BOX(parent)) {
+    if (exp) {
+        gtk_expander_set_child(GTK_EXPANDER(exp), w);
+    } else if (parent && GTK_IS_BOX(parent)) {
         prev = gtk_widget_get_prev_sibling(rv);
         gtk_box_remove(GTK_BOX(parent), rv);
         gtk_box_insert_child_after(GTK_BOX(parent), w, prev);

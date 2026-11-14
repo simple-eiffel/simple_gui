@@ -3450,6 +3450,172 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_a_window_resizes_smoothly_on_the_manual_clock
+			-- 1x-e: a window's size animation is half way at half time and arrives, saying so
+			-- once; `set_size' is at once.
+		local
+			l_window: GUI_WINDOW
+		do
+			create l_window.make ("Size", 400, 300)
+			l_window.set_content (create {GUI_LABEL}.make ("Sizing"))
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			wait_for_size (l_window, 400, 300)
+			assert ("opened at its size: " + size_text (l_window), near (l_window.width, 400) and near (l_window.height, 300))
+			l_window.animate_size (500, 360)
+			assert ("on its way", l_window.is_resizing_smoothly and l_window.size_target_width = 500)
+			app.animation_clock.step (100)
+			wait_for_size (l_window, 450, 330)
+			assert ("half way at half time: " + size_text (l_window), near (l_window.width, 450) and near (l_window.height, 330))
+			assert ("not said yet", l_window.size_finished_actions.fire_count = 0)
+			app.animation_clock.step (100)
+			wait_for_size (l_window, 500, 360)
+			assert ("there: " + size_text (l_window), near (l_window.width, 500) and near (l_window.height, 360))
+			assert ("said once", not l_window.is_resizing_smoothly and l_window.size_finished_actions.fire_count = 1)
+			l_window.set_size (420, 310)
+			wait_for_size (l_window, 420, 310)
+			assert ("set at once: " + size_text (l_window), near (l_window.width, 420) and near (l_window.height, 310))
+			end_manual_clock
+			l_window.close
+		end
+
+	test_a_splitter_divider_moves_smoothly_and_the_user_stops_it
+			-- 1x-e: the divider is half way at half time and arrives, saying so once; the user's
+			-- own move during one stands and stops it, and `set_position' stops one too.
+		local
+			l_window: GUI_WINDOW
+			l_split: GUI_SPLITTER
+		do
+			create l_window.make ("Split", 500, 300)
+			create l_split.make_horizontal
+			l_split.set_first (create {GUI_LABEL}.make ("Left"))
+			l_split.set_second (create {GUI_LABEL}.make ("Right"))
+			l_window.set_content (l_split)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_split.set_position (100)
+			assert ("at 100: " + l_split.position.out, near (l_split.position, 100))
+			l_split.animate_position (300)
+			app.animation_clock.step (100)
+			assert ("half way at half time: " + l_split.position.out, near (l_split.position, 200))
+			app.animation_clock.step (100)
+			assert ("there: " + l_split.position.out, near (l_split.position, 300) and not l_split.is_moving_smoothly)
+			assert ("said once", l_split.position_finished_actions.fire_count = 1)
+			l_split.animate_position (100)
+			app.animation_clock.step (100)
+				-- the user's drag: straight to the toolkit, not through the splitter
+			backend.splitter_set_position (l_split.id, 250)
+			app.animation_clock.step (50)
+			assert ("stopped where the user put it: " + l_split.position.out, not l_split.is_moving_smoothly and near (l_split.position, 250))
+			app.animation_clock.step (200)
+			assert ("the user's stands: " + l_split.position.out, near (l_split.position, 250))
+			l_split.animate_position (100)
+			app.animation_clock.step (50)
+			l_split.set_position (150)
+			assert ("set_position stops it", not l_split.is_moving_smoothly)
+			app.animation_clock.step (200)
+			assert ("and stands: " + l_split.position.out, near (l_split.position, 150))
+			assert ("neither said it arrived", l_split.position_finished_actions.fire_count = 1)
+			end_manual_clock
+			l_window.close
+		end
+
+	test_an_expander_slides_open_and_closed
+			-- 1x-e: an animated expand shows the content at once, sliding down, the expander
+			-- growing with it; an animated collapse keeps it expanded until the end, then the
+			-- content is whole again for the next opening. No toggled event either way; with
+			-- reduced motion both are at once.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_expander: GUI_EXPANDER
+			l_detail: GUI_LABEL
+			l_shut, l_open, l_mid: INTEGER
+		do
+			create l_window.make ("Expander", 320, 300)
+			create l_stack.make_vertical
+			create l_expander.make ("Details")
+			create l_detail.make ("The detail, three lines:%Ntwo%Nthree")
+			l_expander.set_content (l_detail)
+			l_stack.extend (l_expander)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_shut := l_expander.height
+			l_expander.expand_animated
+			assert ("expanded at once, sliding from none", l_expander.is_expanded and l_detail.is_shown and l_detail.reveal = 0.0)
+			app.animation_clock.step (100)
+			let_layout_settle
+			l_mid := l_expander.height
+			assert ("half revealed: " + l_detail.reveal.out, (l_detail.reveal - 0.5).abs < 1.0e-9)
+			app.animation_clock.step (100)
+			let_layout_settle
+			l_open := l_expander.height
+			assert ("whole", l_detail.reveal = 1.0 and l_detail.is_shown)
+			assert ("the expander grew with it: " + l_shut.out + " " + l_mid.out + " " + l_open.out,
+				l_open > l_shut and l_mid > l_shut + (l_open - l_shut) // 4 and l_mid < l_open - (l_open - l_shut) // 4)
+			l_expander.collapse_animated
+			assert ("still expanded, closing", l_expander.is_expanded and l_expander.is_collapsing)
+			app.animation_clock.step (100)
+			assert ("half way up: " + l_detail.reveal.out, l_expander.is_expanded and (l_detail.reveal - 0.5).abs < 1.0e-9)
+			app.animation_clock.step (100)
+			let_layout_settle
+			assert ("collapsed at the end", not l_expander.is_expanded and not l_expander.is_collapsing)
+			assert ("the content whole again", l_detail.is_shown and l_detail.reveal = 1.0)
+			assert ("shut again: " + l_expander.height.out, near (l_expander.height, l_shut))
+			assert ("no toggled event", l_expander.toggle_actions.fire_count = 0)
+			end_manual_clock
+			app.set_reduces_motion_for_tests (True)
+			l_expander.expand_animated
+			assert ("reduced: open at once", l_expander.is_expanded and l_detail.reveal = 1.0)
+			l_expander.collapse_animated
+			assert ("reduced: shut at once", not l_expander.is_expanded and not l_expander.is_collapsing)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_an_expander_slides_at_the_users_clicks_when_asked
+			-- 1x-e: with `animates_toggles' the user's own clicks slide the content too, and
+			-- `toggle_actions' still run at the click.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_expander: GUI_EXPANDER
+			l_detail: GUI_LABEL
+		do
+			create l_window.make ("Expander", 320, 300)
+			create l_stack.make_vertical
+			create l_expander.make ("Details")
+			create l_detail.make ("The detail")
+			l_expander.set_content (l_detail)
+			l_expander.set_animates_toggles (True)
+			l_stack.extend (l_expander)
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			driver.toggle_expander (l_expander)
+			assert ("told at the click", l_expander.toggle_actions.fire_count = 1)
+			assert ("open, sliding: " + l_detail.reveal.out, l_expander.is_expanded and l_detail.reveal < 1.0)
+			app.animation_clock.step (200)
+			assert ("whole", l_detail.reveal = 1.0)
+			driver.toggle_expander (l_expander)
+			assert ("told at the click again", l_expander.toggle_actions.fire_count = 2)
+			assert ("still open, closing", l_expander.is_expanded and l_expander.is_collapsing)
+			app.animation_clock.step (200)
+			driver.pump_until_idle (50)
+			assert ("shut at the end", not l_expander.is_expanded and l_detail.is_shown and l_detail.reveal = 1.0)
+			end_manual_clock
+			l_window.close
+		end
+
 	test_the_clock_ticks_only_while_something_runs
 			-- 1x: a real clock asks for frame ticks when an animation starts and stops them
 			-- when the last one ends, so an idle program never wakes at the display rate.
@@ -8026,6 +8192,42 @@ feature {NONE} -- Fixtures
 			"C inline use %"simple_gui_memory.h%""
 		alias
 			"return (EIF_INTEGER_64) sg_process_bytes();"
+		end
+
+	let_layout_settle
+			-- Turn the loop for about 100 ms of real time, so the toolkit lays out what was set
+			-- (GTK on its next frames); a manual animation clock holds still meanwhile.
+		local
+			i: INTEGER
+		do
+			from i := 1 until i > 10 loop
+				driver.wait (10)
+				i := i + 1
+			end
+		end
+
+	near (a, b: INTEGER): BOOLEAN
+			-- Within two logical pixels (device rounding)?
+		do
+			Result := (a - b).abs <= 2
+		end
+
+	size_text (a_window: GUI_WINDOW): STRING
+			-- "width x height", for a failure's message.
+		do
+			Result := a_window.width.out + " x " + a_window.height.out
+		end
+
+	wait_for_size (a_window: GUI_WINDOW; a_width, a_height: INTEGER)
+			-- Turn the loop until `a_window' reads about `a_width' by `a_height', or about a second
+			-- has passed (GTK applies a size on its next frame; Windows takes it from WM_SIZE).
+		local
+			i: INTEGER
+		do
+			from i := 1 until (near (a_window.width, a_width) and near (a_window.height, a_height)) or i > 100 loop
+				driver.wait (10)
+				i := i + 1
+			end
 		end
 
 	tall_scroll_area: GUI_SCROLL_AREA

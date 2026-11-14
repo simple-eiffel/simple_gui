@@ -232,11 +232,76 @@ feature -- Basic operations
 			gui_thread: is_gui_thread
 			open: not is_closed
 		do
+			stop_size_animation
 			backend.window_close (id)
 			is_closed := True
 			application.window_closed (Current)
 		ensure
 			closed: is_closed
+		end
+
+feature -- Size (1x-e)
+
+	set_size (a_width, a_height: INTEGER)
+			-- Make the window `a_width' by `a_height' logical pixels, as `make' takes them, at
+			-- once, its top left kept, as far as the desktop allows (nothing while it is full
+			-- screen or maximized). A size animation on its way stops.
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+			sized: a_width > 0 and a_height > 0
+		do
+			stop_size_animation
+			backend.window_set_size (id, a_width, a_height)
+		ensure
+			not_resizing: not is_resizing_smoothly
+		end
+
+	animate_size (a_width, a_height: INTEGER)
+			-- Change the window's size to `a_width' by `a_height' (as `set_size') over the
+			-- application's `animation_duration'; at once while motion is reduced or before the
+			-- window is shown. One still on its way is cut short. `size_finished_actions' when it
+			-- arrives.
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+			sized: a_width > 0 and a_height > 0
+		local
+			l_animation: GUI_ANIMATION
+		do
+			stop_size_animation
+			size_target_width := a_width
+			size_target_height := a_height
+			size_from_width := width
+			size_from_height := height
+			if size_from_width <= 0 or size_from_height <= 0 or not is_shown then
+				backend.window_set_size (id, a_width, a_height)
+					-- a zero-length animation: its end comes on the next turn, as a reduced one's does
+				create l_animation.make (1.0, 1.0, 0, {GUI_EASING}.Ease_in_out, agent (a_fraction: REAL_64) do end)
+			else
+				create l_animation.make (0.0, 1.0, application.animation_duration, {GUI_EASING}.Ease_in_out,
+					agent show_size_frame)
+			end
+			l_animation.finished_actions.extend (agent size_animation_ended (l_animation))
+			size_animation := l_animation
+			application.animation_clock.run (l_animation)
+		ensure
+			target_set: size_target_width = a_width and size_target_height = a_height
+		end
+
+	is_resizing_smoothly: BOOLEAN
+			-- Is a size animation on its way?
+		do
+			Result := attached size_animation as al_a and then not al_a.is_finished
+		end
+
+	size_target_width, size_target_height: INTEGER
+			-- The size the size animation started last is going to.
+
+	size_finished_actions: GUI_ACTIONS [TUPLE]
+			-- Run when a size animation arrives; never for one cut short.
+		attribute
+			create Result.make
 		end
 
 feature {GUI_PRINT_JOB} -- Printing (1v-c)
@@ -275,6 +340,41 @@ feature {NONE} -- Implementation
 			-- Each shortcut's action, by its number (from 1).
 
 	shortcuts_installed: BOOLEAN
+
+	size_animation: detachable GUI_ANIMATION
+			-- The size animation started last.
+
+	size_from_width, size_from_height: INTEGER
+			-- Where it started.
+
+	show_size_frame (a_fraction: REAL_64)
+			-- One frame of the size animation.
+		local
+			f: REAL_64
+		do
+			f := a_fraction.max (0.0).min (1.0)
+			backend.window_set_size (id,
+				(size_from_width + (size_target_width - size_from_width) * f).rounded.max (1),
+				(size_from_height + (size_target_height - size_from_height) * f).rounded.max (1))
+		end
+
+	size_animation_ended (a_animation: GUI_ANIMATION)
+			-- `a_animation' has arrived.
+		do
+			if size_animation = a_animation then
+				size_finished_actions.call (Void)
+			end
+		end
+
+	stop_size_animation
+			-- Stop a size animation on its way where it is, without its finished actions.
+		do
+			if attached size_animation as al_a and then not al_a.is_finished then
+				application.animation_clock.cancel (al_a)
+			end
+		ensure
+			stopped: not is_resizing_smoothly
+		end
 
 	cascade_direction
 		do

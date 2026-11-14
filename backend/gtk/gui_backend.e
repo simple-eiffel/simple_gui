@@ -74,6 +74,11 @@ feature -- Windows and containers
 		alias "sg_window_close($a_window);"
 		end
 
+	window_set_size (a_window, a_width, a_height: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_window_set_size($a_window, $a_width, $a_height);"
+		end
+
 	window_set_title (a_window: INTEGER; a_title: POINTER)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_window_set_title($a_window, (const char *) $a_title);"

@@ -222,7 +222,8 @@ feature -- User actions
 			backend.test_toggle_expander (an_expander.id)
 			settle
 		ensure
-			flipped: an_expander.is_expanded /= old an_expander.is_expanded
+				-- a close that slides (1x-e `animates_toggles') stays expanded until its end
+			flipped: an_expander.is_expanded /= old an_expander.is_expanded or an_expander.is_collapsing
 		end
 
 	click_split (a_button: GUI_MENU_BUTTON)

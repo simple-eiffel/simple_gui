@@ -55,6 +55,20 @@ feature -- Access
 	gui_id: INTEGER
 			-- This window's number in `backend'.
 
+feature -- Size (1x-e)
+
+	set_opening_size (a_width, a_height: INTEGER)
+			-- Open at `a_width' by `a_height' device pixels (before the window is open).
+		require
+			not_open: not is_window_open
+			sized: a_width > 0 and a_height > 0
+		do
+			win_w := a_width
+			win_h := a_height
+		ensure
+			set: win_w = a_width and win_h = a_height
+		end
+
 feature -- Operation
 
 	dispatch (a_type, a_x, a_y: INTEGER)
