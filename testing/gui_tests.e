@@ -4118,11 +4118,13 @@ feature -- The remaining controls (1j)
 			create l_window.make ("More", 300, 240)
 			create l_list.make
 			l_list.set_near_end_distance (100)
-			l_list.near_end_actions.extend (agent load_ten (l_list))
+				-- two rows a load, so filling takes several loads whatever a row's height (ten rows
+				-- of WSLg Wayland's taller rows went past the distance in one)
+			l_list.near_end_actions.extend (agent load_two (l_list))
 			l_window.set_content (l_list)
 			l_window.show
 			settle_window
-			from i := 1 until i > 30 or else l_list.max_scroll_y - l_list.scroll_y > 100 loop
+			from i := 1 until i > 80 or else l_list.max_scroll_y - l_list.scroll_y > 100 loop
 				let_layout_settle
 				i := i + 1
 			end
@@ -8845,17 +8847,12 @@ feature {NONE} -- Fixtures
 			end
 		end
 
-	load_ten (a_list: GUI_LIST)
-			-- Infinite scroll's loader in the tests: ten more rows, up to 400.
-		local
-			i, l_first: INTEGER
+	load_two (a_list: GUI_LIST)
+			-- A slow loader: two more rows, up to 400.
 		do
 			if a_list.count < 400 then
-				l_first := a_list.count + 1
-				from i := 0 until i = 10 loop
-					a_list.extend ("Loaded " + (l_first + i).out)
-					i := i + 1
-				end
+				a_list.extend ("Loaded " + (a_list.count + 1).out)
+				a_list.extend ("Loaded " + (a_list.count + 1).out)
 			end
 		end
 
