@@ -16,6 +16,8 @@ inherit
 
 	GUI_SCROLLING
 
+	GUI_SECTIONED
+
 create
 	make
 
@@ -108,6 +110,10 @@ feature -- Element change
 			rows.go_i_th (i)
 			rows.remove
 			backend.list_remove (id, i)
+			if section_count > 0 then
+				take_row_out (i, count + 1)
+				send_sections
+			end
 		ensure
 			one_less: count = old count - 1
 		end
@@ -118,9 +124,14 @@ feature -- Element change
 		do
 			rows.wipe_out
 			backend.list_wipe_out (id)
+			if section_count > 0 then
+				forget_sections
+				send_sections
+			end
 		ensure
 			empty: count = 0
 			none_selected: selected_index = 0
+			no_sections: section_count = 0
 		end
 
 	scroll_to_row (i: INTEGER)
@@ -234,6 +245,9 @@ feature -- Reordering (1q-c)
 			backend.list_wipe_out (id)
 			across rows as ic loop
 				send_row (ic)
+			end
+			if section_count > 0 then
+				send_sections
 			end
 			backend.list_select (id, a_to)
 		ensure
@@ -349,6 +363,7 @@ feature -- Filtering and sorting (1s)
 			-- Keep the rows sorted by title as they are added (and sort them now).
 		require
 			gui_thread: is_gui_thread
+			no_sections: a_on implies section_count = 0
 		do
 			is_sorted_on_extend := a_on
 			is_sort_ascending := a_ascending
@@ -364,6 +379,7 @@ feature -- Filtering and sorting (1s)
 			-- selection stays with its row; no event.
 		require
 			gui_thread: is_gui_thread
+			no_sections: section_count = 0
 		local
 			l_order: ARRAY [INTEGER]
 			l_new: ARRAYED_LIST [GUI_LIST_ROW]
@@ -424,13 +440,35 @@ feature {GUI_APPLICATION} -- Events
 				l_title := rows.i_th (a_a).title
 				rows.go_i_th (a_a)
 				rows.remove
+				if section_count > 0 then
+					take_row_out (a_a, count + 1)
+					send_sections
+				end
 				if attached row_close_actions_made as al_a then
 					al_a.call ([a_a, l_title])
 				end
 			end
 		end
 
+feature -- Sections (1y-e)
+
+	may_start_section: BOOLEAN
+			-- Not while the rows are sorted as they are added.
+		do
+			Result := not is_sorted_on_extend
+		end
+
 feature {NONE} -- Implementation
+
+	backend_set_sections (a_starts, a_titles: POINTER)
+		do
+			backend.list_set_sections (id, a_starts, a_titles)
+		end
+
+	send_sticky (a_on: BOOLEAN)
+		do
+			backend.list_set_sticky_headers (id, a_on)
+		end
 
 	rows: ARRAYED_LIST [GUI_LIST_ROW]
 

@@ -4202,6 +4202,171 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_a_list_pins_its_section_header
+			-- 1y-e: headers are not rows; the header of the section at the top stays pinned, is
+			-- pushed up by the next as it arrives, and gives way to it; a filter leaves only the
+			-- shown sections; sticky off pins nothing; removing rows keeps the sections whole.
+		local
+			l_window: GUI_WINDOW
+			l_list: GUI_LIST
+			i, j, l_y, l_second: INTEGER
+			l_pushed: BOOLEAN
+		do
+			create l_window.make ("Sections", 300, 240)
+			create l_list.make
+			from i := 1 until i > 4 loop
+				l_list.start_section ("Part " + i.out)
+				from j := 1 until j > 12 loop
+					l_list.extend ("Row " + i.out + "." + j.out)
+					j := j + 1
+				end
+				i := i + 1
+			end
+			l_window.set_content (l_list)
+			l_window.show
+			settle_window
+			let_layout_settle
+			assert ("rows only", l_list.count = 48 and l_list.section_count = 4)
+			assert ("part 2 starts at row 13", l_list.section_first_row (2) = 13 and l_list.section_of_row (13) = 2 and l_list.section_of_row (12) = 1)
+			assert ("titled", l_list.section_title (3).same_string ("Part 3"))
+				-- inside part 1 (not at offset 0: a list may pad its top, as the Mac's inset style does)
+			driver.scroll_to_as_user (l_list, 40)
+			let_layout_settle
+			assert ("inside part 1: " + driver.pinned_section (l_list).out, driver.pinned_section (l_list) = 1 and driver.pinned_y (l_list) = 0)
+			from l_y := 48 until l_y > l_list.max_scroll_y or l_second > 0 loop
+				driver.scroll_to_as_user (l_list, l_y)
+				let_layout_settle
+				if driver.pinned_section (l_list) = 2 then
+					l_second := l_y
+				elseif driver.pinned_section (l_list) = 1 and driver.pinned_y (l_list) < 0 then
+					l_pushed := True
+				end
+				l_y := l_y + 8
+			end
+			assert ("part 2 pinned in time", l_second > 0)
+			assert ("part 1 pushed up first", l_pushed)
+			assert ("part 2 pinned at 0: " + driver.pinned_y (l_list).out, driver.pinned_y (l_list) = 0)
+			driver.scroll_to_as_user (l_list, 100000)
+			let_layout_settle
+			assert ("at the end, part 4: " + driver.pinned_section (l_list).out, driver.pinned_section (l_list) = 4)
+			l_list.set_filter ("Row 3.")
+			driver.scroll_to_as_user (l_list, 30)
+			let_layout_settle
+			assert ("filtered: part 3 at the top: " + driver.pinned_section (l_list).out, driver.pinned_section (l_list) = 3)
+			l_list.set_filter ("")
+			l_list.set_sticky_headers (False)
+			let_layout_settle
+			assert ("not sticky: nothing pinned", driver.pinned_section (l_list) = 0 and not l_list.has_sticky_headers)
+			from j := 1 until j > 12 loop
+				l_list.remove_row (13)
+				j := j + 1
+			end
+			assert ("part 2 went with its rows", l_list.section_count = 3 and l_list.section_title (2).same_string ("Part 3") and l_list.section_first_row (2) = 13)
+			l_list.wipe_out
+			assert ("no sections left", l_list.section_count = 0)
+			l_list.start_section ("Waiting")
+			l_list.start_section ("Renamed")
+			assert ("a waiting section renamed", l_list.section_count = 1 and l_list.section_first_row (1) = 1 and l_list.section_title (1).same_string ("Renamed"))
+			l_window.close
+		end
+
+	test_a_table_pins_its_section_header_below_the_titles
+			-- 1y-e: a table's sections, pinned below its column titles, changing at the end and
+			-- following the filter.
+		local
+			l_window: GUI_WINDOW
+			l_table: GUI_TABLE
+			i, j: INTEGER
+		do
+			create l_window.make ("Table sections", 360, 240)
+			create l_table.make (<<"Name", "Size">>)
+			from i := 1 until i > 3 loop
+				l_table.start_section ("Group " + i.out)
+				from j := 1 until j > 15 loop
+					l_table.extend_row (<<"Item " + i.out + "." + j.out, (i * 100 + j).out>>)
+					j := j + 1
+				end
+				i := i + 1
+			end
+			l_window.set_content (l_table)
+			l_window.show
+			settle_window
+			let_layout_settle
+			assert ("rows only", l_table.row_count = 45 and l_table.section_count = 3)
+			driver.scroll_to_as_user (l_table, 40)
+			let_layout_settle
+			assert ("inside group 1: " + driver.pinned_section (l_table).out, driver.pinned_section (l_table) = 1 and driver.pinned_y (l_table) = 0)
+			driver.scroll_to_as_user (l_table, 100000)
+			let_layout_settle
+			assert ("at the end, group 3: " + driver.pinned_section (l_table).out, driver.pinned_section (l_table) = 3 and driver.pinned_y (l_table) = 0)
+			l_table.set_filter ("Item 2.")
+			driver.scroll_to_as_user (l_table, 30)
+			let_layout_settle
+			assert ("filtered: group 2 at the top: " + driver.pinned_section (l_table).out, driver.pinned_section (l_table) = 2)
+			l_table.wipe_out
+			assert ("no sections left", l_table.section_count = 0)
+			l_window.close
+		end
+
+	test_a_sticky_child_stays_at_the_top_while_its_part_is_in_view
+			-- 1y-e: CSS's `position: sticky' in a scroll area: a sticky child stays at the top while
+			-- its part of the stack is in view and the next sticky child pushes it up.
+		local
+			l_window: GUI_WINDOW
+			l_area: GUI_SCROLL_AREA
+			l_stack: GUI_STACK
+			l_a, l_b: GUI_LABEL
+			i, l_y, l_second: INTEGER
+			l_pushed: BOOLEAN
+		do
+			create l_window.make ("Sticky", 300, 200)
+			create l_area.make
+			create l_stack.make_vertical
+			create l_a.make ("Part A")
+			create l_b.make ("Part B")
+			l_stack.extend (l_a)
+			from i := 1 until i > 20 loop
+				l_stack.extend (create {GUI_LABEL}.make ("A line " + i.out))
+				i := i + 1
+			end
+			l_stack.extend (l_b)
+			from i := 1 until i > 20 loop
+				l_stack.extend (create {GUI_LABEL}.make ("B line " + i.out))
+				i := i + 1
+			end
+			l_area.set_content (l_stack)
+			l_area.set_sticky (l_a, True)
+			l_area.set_sticky (l_b, True)
+			l_window.set_content (l_area)
+			l_window.show
+			settle_window
+			let_layout_settle
+			assert ("sticky", l_area.is_sticky (l_a) and l_area.is_sticky (l_b))
+			driver.scroll_to_as_user (l_area, 40)
+			let_layout_settle
+			assert ("scrolled a little, A stays", driver.pinned_child (l_area) = l_a and driver.pinned_y (l_area) = 0)
+			from l_y := 48 until l_y > l_area.max_scroll_y or l_second > 0 loop
+				driver.scroll_to_as_user (l_area, l_y)
+				let_layout_settle
+				if driver.pinned_child (l_area) = l_b then
+					l_second := l_y
+				elseif driver.pinned_child (l_area) = l_a and driver.pinned_y (l_area) < 0 then
+					l_pushed := True
+				end
+				l_y := l_y + 6
+			end
+			assert ("B pinned in time", l_second > 0)
+			assert ("A pushed up first", l_pushed)
+			assert ("B at 0", driver.pinned_y (l_area) = 0)
+			driver.scroll_to_as_user (l_area, 100000)
+			let_layout_settle
+			assert ("at the end, B", driver.pinned_child (l_area) = l_b)
+			l_area.set_sticky (l_b, False)
+			let_layout_settle
+			assert ("B not sticky: A to the end of the stack", driver.pinned_child (l_area) = l_a)
+			l_window.close
+		end
+
 	test_the_clock_ticks_only_while_something_runs
 			-- 1x: a real clock asks for frame ticks when an animation starts and stops them
 			-- when the last one ends, so an idle program never wakes at the display rate.

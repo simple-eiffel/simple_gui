@@ -448,6 +448,8 @@ static void sg_stack_extend(int stack, int child, int stretch) {
 }
 /* 1y: a column into a row and back. A stretching child's expand moves to the new main axis, and
    each child's cross-axis alignment to the new cross axis (the old one goes back to fill). */
+/* 1y-e: the sticky child standing in for stack child `c' (an SgStand), or NULL. */
+static GtkWidget *sg_moved_out(GtkWidget *c) { return g_object_get_data(G_OBJECT(c), "sg-stand-target"); }
 static void sg_stack_set_vertical(int stack, int on) {
     GtkWidget *b = sg_w[stack], *c;
     if (!b || sg_is_vertical(stack) == (on ? 1 : 0)) return;
@@ -467,7 +469,9 @@ static void sg_stack_set_alignment(int stack, int a) {
     GtkWidget *c;
     g_object_set_data(G_OBJECT(sg_w[stack]), "sg-align", GINT_TO_POINTER(a + 1));
     for (c = gtk_widget_get_first_child(sg_w[stack]); c; c = gtk_widget_get_next_sibling(c)) {
+        GtkWidget *t = sg_moved_out(c);   /* 1y-e: a sticky child aligns with its stand */
         if (sg_is_vertical(stack)) gtk_widget_set_halign(c, sg_galign(a)); else gtk_widget_set_valign(c, sg_galign(a));
+        if (t) { if (sg_is_vertical(stack)) gtk_widget_set_halign(t, sg_galign(a)); else gtk_widget_set_valign(t, sg_galign(a)); }
     }
 }
 static void sg_stack_set_spacing(int stack, int s) { gtk_box_set_spacing(GTK_BOX(sg_w[stack]), s); }
@@ -1944,6 +1948,7 @@ static void sg_cell_setup(GtkSignalListItemFactory *fa, GtkListItem *it, gpointe
     gtk_label_set_xalign(GTK_LABEL(l), 0.0);
     gtk_label_set_ellipsize(GTK_LABEL(l), PANGO_ELLIPSIZE_END);
     gtk_list_item_set_child(it, l);
+    g_object_set_data(G_OBJECT(l), "sg-item", it);   /* 1y-e: which row a cell shows, for the pinned header */
 }
 /* 1f, lazy tables: a row not yet answered holds this one-character placeholder. */
 #define SG_UNANSWERED "\x1e"
@@ -2019,13 +2024,164 @@ static void sg_on_table_sorter(GtkSorter *s, GtkSorterChange change, gpointer d)
     }
 }
 static int sg_keep_order(gconstpointer a, gconstpointer b, gpointer d) { (void) a; (void) b; (void) d; return 0; }
+/* ---------- 1y-e: sections in lists and tables. Shared code keeps the sections and sends the
+   whole layout after each change: the first rows ("1,6,14", ascending) and the titles joined
+   by 0x1F. A start one past the last row waits for the next row added. Rows before the first
+   start have no section (0). A header shows above the first shown row of its section. */
+typedef struct { GArray *starts; GPtrArray *titles; } SgSections;
+static void sg_sections_free(gpointer p) {
+    SgSections *s = p;
+    g_array_unref(s->starts);
+    g_ptr_array_unref(s->titles);
+    g_free(s);
+}
+static SgSections *sg_sections_get(int id) { return sg_w[id] ? g_object_get_data(G_OBJECT(sg_w[id]), "sg-sections") : NULL; }
+static SgSections *sg_sections_ensure(int id) {
+    SgSections *s = sg_sections_get(id);
+    if (!s && sg_w[id]) {
+        s = g_new0(SgSections, 1);
+        s->starts = g_array_new(FALSE, FALSE, sizeof(int));
+        s->titles = g_ptr_array_new_with_free_func(g_free);
+        g_object_set_data_full(G_OBJECT(sg_w[id]), "sg-sections", s, sg_sections_free);
+    }
+    return s;
+}
+static void sg_sections_parse(SgSections *s, const char *starts, const char *titles) {
+    gchar **a = g_strsplit(starts, ",", -1), **t = g_strsplit(titles, "\x1f", -1);
+    guint i, nt = g_strv_length(t);
+    g_array_set_size(s->starts, 0);
+    g_ptr_array_set_size(s->titles, 0);
+    if (starts[0])
+        for (i = 0; a[i]; i++) {
+            int v = atoi(a[i]);
+            g_array_append_val(s->starts, v);
+            g_ptr_array_add(s->titles, g_strdup(i < nt ? t[i] : ""));
+        }
+    g_strfreev(a);
+    g_strfreev(t);
+}
+static int sg_sections_count(int id) { SgSections *s = sg_sections_get(id); return s ? (int) s->starts->len : 0; }
+/* The section row `row' (from 1) is in; 0 before the first. */
+static int sg_section_of(SgSections *s, int row) {
+    int i;
+    if (!s) return 0;
+    for (i = (int) s->starts->len - 1; i >= 0; i--)
+        if (g_array_index(s->starts, int, i) <= row) return i + 1;
+    return 0;
+}
+__attribute__((weak)) int sg_section_css_done = 0;
+static GtkWidget *sg_section_header_label(const char *t) {
+    GtkWidget *h = gtk_label_new(t);
+    gtk_label_set_xalign(GTK_LABEL(h), 0.0);
+    gtk_label_set_ellipsize(GTK_LABEL(h), PANGO_ELLIPSIZE_END);
+    gtk_widget_add_css_class(h, "heading");
+    gtk_widget_add_css_class(h, "sg-section-header");
+    if (!sg_section_css_done) {   /* a section header, and the pinned copy's opaque look */
+        GtkCssProvider *p = gtk_css_provider_new();
+        sg_section_css_done = 1;
+        gtk_css_provider_load_from_string(p,
+            "label.sg-section-header { padding: 6px 6px 3px 6px; }"
+            " label.sg-pinned { background-color: @theme_base_color; }");
+        gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(p),
+            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+        g_object_unref(p);
+    }
+    return h;
+}
+
+/* A table's rows with their sections, for its column view's headers: a list model that passes
+   the shown rows through and answers each position's section as a range of positions. */
+typedef struct { GObject parent; GListModel *inner; int id; gulong changed; } SgSecModel;
+typedef struct { GObjectClass parent_class; } SgSecModelClass;
+static GType sg_sec_model_item_type(GListModel *m) { return g_list_model_get_item_type(((SgSecModel *) m)->inner); }
+static guint sg_sec_model_n_items(GListModel *m) { return g_list_model_get_n_items(((SgSecModel *) m)->inner); }
+static gpointer sg_sec_model_get_item(GListModel *m, guint p) { return g_list_model_get_item(((SgSecModel *) m)->inner, p); }
+static void sg_sec_model_list_init(gpointer g, gpointer d) {
+    GListModelInterface *i = g;
+    (void) d;
+    i->get_item_type = sg_sec_model_item_type;
+    i->get_n_items = sg_sec_model_n_items;
+    i->get_item = sg_sec_model_get_item;
+}
+/* The first shown position whose model row is `row' or later (`n' when none). */
+static guint sg_table_first_pos_from(int id, int row, guint n) {
+    GArray *m = sg_table_map(id);
+    guint lo = 0, hi;
+    if (!m) return row - 1 < (int) n ? (guint) (row < 1 ? 0 : row - 1) : n;
+    hi = m->len;
+    while (lo < hi) {
+        guint mid = (lo + hi) / 2;
+        if (g_array_index(m, int, mid) < row) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+}
+static void sg_sec_model_get_section(GtkSectionModel *sm, guint pos, guint *out_start, guint *out_end) {
+    SgSecModel *m = (SgSecModel *) sm;
+    SgSections *s = sg_sections_get(m->id);
+    guint n = g_list_model_get_n_items(m->inner);
+    int sec;
+    if (pos >= n) { *out_start = n; *out_end = G_MAXUINT; return; }
+    if (!s || s->starts->len == 0) { *out_start = 0; *out_end = n; return; }
+    sec = sg_section_of(s, sg_table_row_of(m->id, pos));
+    *out_start = sg_table_first_pos_from(m->id, sec > 0 ? g_array_index(s->starts, int, sec - 1) : 1, n);
+    *out_end = sec < (int) s->starts->len ? sg_table_first_pos_from(m->id, g_array_index(s->starts, int, sec), n) : n;
+    if (*out_start > pos) *out_start = pos;
+    if (*out_end <= pos) *out_end = pos + 1;
+}
+static void sg_sec_model_section_init(gpointer g, gpointer d) {
+    GtkSectionModelInterface *i = g;
+    (void) d;
+    i->get_section = sg_sec_model_get_section;
+}
+static void sg_sec_model_forward(GListModel *inner, guint p, guint r, guint a, gpointer d) {
+    (void) inner;
+    g_list_model_items_changed(G_LIST_MODEL(d), p, r, a);
+}
+static void sg_sec_model_dispose(GObject *o) {
+    SgSecModel *m = (SgSecModel *) o;
+    if (m->inner) {
+        g_signal_handler_disconnect(m->inner, m->changed);
+        g_clear_object(&m->inner);
+    }
+    G_OBJECT_CLASS(g_type_class_peek(G_TYPE_OBJECT))->dispose(o);
+}
+static void sg_sec_model_class_init(gpointer klass, gpointer data) {
+    (void) data;
+    G_OBJECT_CLASS(klass)->dispose = sg_sec_model_dispose;
+}
+static GType sg_sec_model_type(void) {
+    GType t = g_type_from_name("SgSecModel");
+    if (!t) {
+        GTypeInfo info;
+        GInterfaceInfo list = { sg_sec_model_list_init, NULL, NULL }, sections = { sg_sec_model_section_init, NULL, NULL };
+        memset(&info, 0, sizeof info);
+        info.class_size = sizeof(SgSecModelClass);
+        info.class_init = sg_sec_model_class_init;
+        info.instance_size = sizeof(SgSecModel);
+        t = g_type_register_static(G_TYPE_OBJECT, "SgSecModel", &info, 0);
+        g_type_add_interface_static(t, G_TYPE_LIST_MODEL, &list);
+        g_type_add_interface_static(t, GTK_TYPE_SECTION_MODEL, &sections);
+    }
+    return t;
+}
+/* A new reference to `inner' as table `id' shows it: wrapped with its sections when it has any. */
+static GListModel *sg_table_sectioned(int id, GListModel *inner) {
+    SgSecModel *m;
+    if (sg_sections_count(id) == 0) return g_object_ref(inner);
+    m = g_object_new(sg_sec_model_type(), NULL);
+    m->inner = g_object_ref(inner);
+    m->id = id;
+    m->changed = g_signal_connect(inner, "items-changed", G_CALLBACK(sg_sec_model_forward), m);
+    return G_LIST_MODEL(m);
+}
 static void sg_table_use_selection(int id, int multiple) {
     GListModel *rows = sg_table_list(id);
     g_object_set_data(G_OBJECT(sg_w[id]), "sg-multiple-t", GINT_TO_POINTER(multiple));
     GtkSelectionModel *m;
-    if (multiple) m = GTK_SELECTION_MODEL(gtk_multi_selection_new(g_object_ref(rows)));
+    /* 1y-e: with sections, the rows reach the view through their section model */
+    if (multiple) m = GTK_SELECTION_MODEL(gtk_multi_selection_new(sg_table_sectioned(id, rows)));
     else {
-        GtkSingleSelection *s = gtk_single_selection_new(g_object_ref(rows));
+        GtkSingleSelection *s = gtk_single_selection_new(sg_table_sectioned(id, rows));
         gtk_single_selection_set_autoselect(s, FALSE);
         gtk_single_selection_set_can_unselect(s, TRUE);
         m = GTK_SELECTION_MODEL(s);
@@ -4410,7 +4566,10 @@ static void sg_expander_set_expanded(int id, int on) { sg_quiet++; gtk_expander_
 static int sg_expander_is_expanded(int id) { return gtk_expander_get_expanded(GTK_EXPANDER(sg_w[id])) ? 1 : 0; }
 static void sg_single_set_content(int id, int child) {
     switch (sg_kind[id]) {
-    case 27: gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sg_w[id]), sg_w[child]); break;
+    case 27:   /* a new content has no sticky children (1y-e) */
+        g_object_set_data(G_OBJECT(sg_w[id]), "sg-sticky-host", NULL);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sg_w[id]), sg_w[child]);
+        break;
     case 30: gtk_frame_set_child(GTK_FRAME(sg_w[id]), sg_w[child]); break;
     case 31: gtk_expander_set_child(GTK_EXPANDER(sg_w[id]), sg_w[child]); break;
     default: break;
@@ -4809,6 +4968,500 @@ static int sg_scroller_extent(int id) {
 static void sg_test_scroller_scroll_to(int id, int y) {
     GtkAdjustment *v = sg_scroller_adjustment(id);
     if (v) gtk_adjustment_set_value(v, gtk_adjustment_get_lower(v) + y);
+}
+
+/* ---------- 1y-e: sticky children in a scroll area (CSS's position: sticky). A GtkBox lays out
+   its children in their order and draws them in that order, so a child moved to the visible top
+   would lie under the rows scrolling after it. Instead the area's content stack goes into an
+   SgStickyHost (in the viewport), and a sticky child moves out of the stack into the host,
+   above the stack, leaving an SgStand in its place: a widget taking the child's size, so the
+   space stays, as in CSS. Each allocation the host puts the child over its stand, or lower:
+   at the visible top while its part (to the next sticky child, or the stack's end) is in view.
+   Drawn after the stack, it is on top and takes the pointer first. */
+typedef struct { GtkWidget parent; GtkWidget *target; } SgStand;
+typedef struct { GtkWidgetClass parent_class; } SgStandClass;
+static void sg_stand_measure(GtkWidget *w, GtkOrientation o, int for_size, int *min, int *nat, int *mb, int *nb) {
+    SgStand *s = (SgStand *) w;
+    if (s->target) gtk_widget_measure(s->target, o, for_size, min, nat, mb, nb);
+    else *min = *nat = 0;
+}
+static GtkSizeRequestMode sg_stand_request_mode(GtkWidget *w) {
+    SgStand *s = (SgStand *) w;
+    return s->target ? gtk_widget_get_request_mode(s->target) : GTK_SIZE_REQUEST_CONSTANT_SIZE;
+}
+static void sg_stand_class_init(gpointer klass, gpointer data) {
+    GtkWidgetClass *wc = GTK_WIDGET_CLASS(klass);
+    (void) data;
+    wc->measure = sg_stand_measure;
+    wc->get_request_mode = sg_stand_request_mode;
+}
+static GType sg_stand_type(void) {
+    GType t = g_type_from_name("SgStand");
+    if (!t) {
+        GTypeInfo info;
+        memset(&info, 0, sizeof info);
+        info.class_size = sizeof(SgStandClass);
+        info.class_init = sg_stand_class_init;
+        info.instance_size = sizeof(SgStand);
+        t = g_type_register_static(GTK_TYPE_WIDGET, "SgStand", &info, 0);
+    }
+    return t;
+}
+
+typedef struct { GtkWidget parent; GtkWidget *box; GtkAdjustment *adj; } SgStickyHost;
+typedef struct { GtkWidgetClass parent_class; } SgStickyHostClass;
+static void sg_sticky_host_measure(GtkWidget *w, GtkOrientation o, int for_size, int *min, int *nat, int *mb, int *nb) {
+    SgStickyHost *h = (SgStickyHost *) w;
+    if (h->box) gtk_widget_measure(h->box, o, for_size, min, nat, mb, nb);
+    else *min = *nat = 0;
+}
+static GtkSizeRequestMode sg_sticky_host_request_mode(GtkWidget *w) {
+    SgStickyHost *h = (SgStickyHost *) w;
+    return h->box ? gtk_widget_get_request_mode(h->box) : GTK_SIZE_REQUEST_CONSTANT_SIZE;
+}
+static void sg_sticky_host_allocate(GtkWidget *w, int width, int height, int baseline) {
+    SgStickyHost *h = (SgStickyHost *) w;
+    GtkWidget *c, *stands[32];
+    graphene_rect_t sb[32], bb;
+    double top, end_of_stack;
+    int n = 0, i;
+    if (!h->box) return;
+    gtk_widget_allocate(h->box, width, height, baseline, NULL);
+    for (c = gtk_widget_get_first_child(h->box); c && n < 32; c = gtk_widget_get_next_sibling(c)) {
+        SgStand *s = G_TYPE_CHECK_INSTANCE_TYPE(c, sg_stand_type()) ? (SgStand *) c : NULL;
+        if (!s || !s->target || !gtk_widget_get_visible(s->target)) continue;
+        if (!gtk_widget_compute_bounds(c, w, &sb[n])) continue;
+        stands[n++] = c;
+    }
+    top = h->adj ? gtk_adjustment_get_value(h->adj) : 0;
+    end_of_stack = gtk_widget_compute_bounds(h->box, w, &bb) ? bb.origin.y + bb.size.height : height;
+    for (i = 0; i < n; i++) {
+        SgStand *s = (SgStand *) stands[i];
+        double end = i + 1 < n ? sb[i + 1].origin.y : end_of_stack, y = top;
+        GtkAllocation a;
+        int th;
+        if (y > end - sb[i].size.height) y = end - sb[i].size.height;
+        if (y < sb[i].origin.y) y = sb[i].origin.y;
+        g_object_set_data(G_OBJECT(s->target), "sg-natural-y", GINT_TO_POINTER((int) floor(sb[i].origin.y + 0.5) + 1));
+        a.x = (int) floor(sb[i].origin.x + 0.5);
+        a.y = (int) floor(y + 0.5);
+        a.width = (int) floor(sb[i].size.width + 0.5);
+        a.height = (int) floor(sb[i].size.height + 0.5);
+        gtk_widget_size_allocate(s->target, &a, -1);
+        /* the child changed size since the stand last measured it: the stand measures again */
+        gtk_widget_measure(s->target, GTK_ORIENTATION_VERTICAL, a.width, NULL, &th, NULL, NULL);
+        if (th != a.height && !gtk_widget_get_vexpand(stands[i])) gtk_widget_queue_resize(stands[i]);
+    }
+}
+static void sg_sticky_host_dispose(GObject *o) {
+    SgStickyHost *h = (SgStickyHost *) o;
+    GtkWidget *c;
+    while ((c = gtk_widget_get_last_child(GTK_WIDGET(h))) && c != h->box) gtk_widget_unparent(c);
+    g_clear_pointer(&h->box, gtk_widget_unparent);
+    G_OBJECT_CLASS(g_type_class_peek(GTK_TYPE_WIDGET))->dispose(o);
+}
+static void sg_sticky_host_class_init(gpointer klass, gpointer data) {
+    GtkWidgetClass *wc = GTK_WIDGET_CLASS(klass);
+    (void) data;
+    G_OBJECT_CLASS(klass)->dispose = sg_sticky_host_dispose;
+    wc->measure = sg_sticky_host_measure;
+    wc->size_allocate = sg_sticky_host_allocate;
+    wc->get_request_mode = sg_sticky_host_request_mode;
+}
+static GType sg_sticky_host_type(void) {
+    GType t = g_type_from_name("SgStickyHost");
+    if (!t) {
+        GTypeInfo info;
+        memset(&info, 0, sizeof info);
+        info.class_size = sizeof(SgStickyHostClass);
+        info.class_init = sg_sticky_host_class_init;
+        info.instance_size = sizeof(SgStickyHost);
+        t = g_type_register_static(GTK_TYPE_WIDGET, "SgStickyHost", &info, 0);
+    }
+    return t;
+}
+/* Scroll area `id''s sticky host around its content stack `box', put in the first time. */
+static SgStickyHost *sg_sticky_host_ensure(int id, GtkWidget *box) {
+    SgStickyHost *h = g_object_get_data(G_OBJECT(sg_w[id]), "sg-sticky-host");
+    GtkScrolledWindow *sw = GTK_SCROLLED_WINDOW(sg_w[id]);
+    if (h && h->box == box) return h;
+    if (h) return NULL;   /* the content changed under it: set_content clears this first */
+    g_object_ref(box);
+    gtk_scrolled_window_set_child(sw, NULL);
+    h = g_object_new(sg_sticky_host_type(), NULL);
+    h->box = box;
+    h->adj = gtk_scrolled_window_get_vadjustment(sw);
+    gtk_widget_set_parent(box, GTK_WIDGET(h));
+    g_object_unref(box);
+    gtk_scrolled_window_set_child(sw, GTK_WIDGET(h));
+    g_signal_connect_object(h->adj, "value-changed", G_CALLBACK(gtk_widget_queue_allocate), h, G_CONNECT_SWAPPED);
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-sticky-host", h);
+    return h;
+}
+static void sg_scroll_area_set_sticky(int id, int child, int on) {
+    GtkWidget *c = sg_w[child], *parent, *box, *stand;
+    SgStickyHost *h;
+    if (!c || !sg_w[id] || !GTK_IS_SCROLLED_WINDOW(sg_w[id])) return;
+    parent = gtk_widget_get_parent(c);
+    if (on) {
+        if (!parent || !GTK_IS_BOX(parent)) return;   /* already sticky: its parent is the host */
+        box = parent;
+        if (!(h = sg_sticky_host_ensure(id, box))) return;
+        stand = g_object_new(sg_stand_type(), NULL);
+        ((SgStand *) stand)->target = c;
+        g_object_set_data(G_OBJECT(stand), "sg-stand-target", c);
+        gtk_widget_set_hexpand(stand, gtk_widget_get_hexpand(c));
+        gtk_widget_set_vexpand(stand, gtk_widget_get_vexpand(c));
+        gtk_widget_set_halign(stand, gtk_widget_get_halign(c));
+        gtk_widget_set_valign(stand, gtk_widget_get_valign(c));
+        g_object_set_data(G_OBJECT(stand), "sg-stack-stretch", g_object_get_data(G_OBJECT(c), "sg-stack-stretch"));
+        g_object_set_data(G_OBJECT(c), "sg-stand", stand);
+        g_object_ref(c);
+        gtk_box_insert_child_after(GTK_BOX(box), stand, c);
+        gtk_box_remove(GTK_BOX(box), c);
+        gtk_widget_set_parent(c, GTK_WIDGET(h));
+        g_object_unref(c);
+    } else {
+        stand = g_object_get_data(G_OBJECT(c), "sg-stand");
+        h = g_object_get_data(G_OBJECT(sg_w[id]), "sg-sticky-host");
+        if (!stand || !h || parent != GTK_WIDGET(h)) return;
+        g_object_ref(c);
+        gtk_widget_unparent(c);
+        gtk_box_insert_child_after(GTK_BOX(h->box), c, stand);
+        gtk_box_remove(GTK_BOX(h->box), stand);
+        g_object_set_data(G_OBJECT(c), "sg-stand", NULL);
+        g_object_set_data(G_OBJECT(c), "sg-natural-y", NULL);
+        g_object_unref(c);
+    }
+    gtk_widget_queue_resize(GTK_WIDGET(h));
+}
+/* The sticky child pinned in scroll area `id' (its id; 0 for none) and its top from the visible
+   top, read from where it is: the last whose place reached the top. */
+static void sg_sticky_pinned(int id, int *who, int *y) {
+    SgStickyHost *h = sg_w[id] ? g_object_get_data(G_OBJECT(sg_w[id]), "sg-sticky-host") : NULL;
+    GtkWidget *c;
+    double top;
+    int best = -1;
+    *who = 0; *y = 0;
+    if (!h || !h->box) return;
+    top = gtk_adjustment_get_value(h->adj);
+    for (c = gtk_widget_get_first_child(GTK_WIDGET(h)); c; c = gtk_widget_get_next_sibling(c)) {
+        int ny = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(c), "sg-natural-y")) - 1;
+        graphene_rect_t b;
+        if (c == h->box || !gtk_widget_get_visible(c) || ny < 0 || ny <= best) continue;
+        if (ny <= top + 0.5 && gtk_widget_compute_bounds(c, GTK_WIDGET(h), &b)) {
+            int d = (int) floor(b.origin.y - top + 0.5);
+            best = ny;
+            *who = sg_id_of(c);
+            *y = d > 0 ? 0 : d;
+        }
+    }
+}
+
+/* ---------- 1y-e: pinned section headers. GTK's list and column view headers scroll away
+   with their rows, so a list or table with sections gets an SgPinHost between its scrolled
+   window and the view (the list box in a viewport, or the column view): a scrollable widget
+   of our own passing the adjustments through, holding the view and, above it, a copy of the
+   header of the section at the top of the visible rows. The copy is placed each allocation:
+   at the top of the rows, pushed up by the next section's header as it arrives, taking no
+   input. Its title changes on the next frame. */
+typedef struct {
+    GtkWidget parent;
+    GtkWidget *main, *pin;
+    int id, top, y, section, shown, retitle_pending;
+} SgPinHost;
+typedef struct { GtkWidgetClass parent_class; } SgPinHostClass;
+enum { SG_PH_HADJ = 1, SG_PH_VADJ, SG_PH_HPOL, SG_PH_VPOL };
+static const char *sg_ph_props[] = { NULL, "hadjustment", "vadjustment", "hscroll-policy", "vscroll-policy" };
+static void sg_ph_set_property(GObject *o, guint p, const GValue *v, GParamSpec *ps) {
+    SgPinHost *h = (SgPinHost *) o;
+    if (p >= SG_PH_HADJ && p <= SG_PH_VPOL) { if (h->main) g_object_set_property(G_OBJECT(h->main), sg_ph_props[p], v); }
+    else G_OBJECT_WARN_INVALID_PROPERTY_ID(o, p, ps);
+}
+static void sg_ph_get_property(GObject *o, guint p, GValue *v, GParamSpec *ps) {
+    SgPinHost *h = (SgPinHost *) o;
+    if (p >= SG_PH_HADJ && p <= SG_PH_VPOL) {
+        if (h->main) g_object_get_property(G_OBJECT(h->main), sg_ph_props[p], v);
+        else if (p >= SG_PH_HPOL) g_value_set_enum(v, GTK_SCROLL_MINIMUM);
+    } else G_OBJECT_WARN_INVALID_PROPERTY_ID(o, p, ps);
+}
+static void sg_ph_measure(GtkWidget *w, GtkOrientation o, int for_size, int *min, int *nat, int *mb, int *nb) {
+    SgPinHost *h = (SgPinHost *) w;
+    if (h->main) gtk_widget_measure(h->main, o, for_size, min, nat, mb, nb);
+    else *min = *nat = 0;
+}
+static GtkSizeRequestMode sg_ph_request_mode(GtkWidget *w) {
+    SgPinHost *h = (SgPinHost *) w;
+    return h->main ? gtk_widget_get_request_mode(h->main) : GTK_SIZE_REQUEST_CONSTANT_SIZE;
+}
+/* The widget whose children are the rows and headers: the list box, or the column view's list. */
+static GtkWidget *sg_ph_rows_parent(SgPinHost *h) {
+    GtkWidget *c;
+    if (!h->main) return NULL;
+    if (!GTK_IS_COLUMN_VIEW(h->main)) return GTK_WIDGET(sg_list_box(h->id));
+    for (c = gtk_widget_get_first_child(h->main); c; c = gtk_widget_get_next_sibling(c))
+        if (GTK_IS_LIST_VIEW(c)) return c;
+    return NULL;
+}
+/* Child `c' of the rows' parent: its row number (from 1), or 0 for no row. */
+static int sg_ph_row_of(SgPinHost *h, GtkWidget *c) {
+    GtkWidget *cell, *label;
+    GtkListItem *it;
+    guint pos;
+    if (!GTK_IS_COLUMN_VIEW(h->main))
+        return GTK_IS_LIST_BOX_ROW(c) ? gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(c)) + 1 : 0;
+    cell = gtk_widget_get_first_child(c);
+    label = cell ? gtk_widget_get_first_child(cell) : NULL;
+    it = label ? g_object_get_data(G_OBJECT(label), "sg-item") : NULL;
+    if (!it) return 0;
+    pos = gtk_list_item_get_position(it);
+    return pos == GTK_INVALID_LIST_POSITION ? 0 : sg_table_row_of(h->id, pos);
+}
+/* Child `c': the section whose header it is, or 0. */
+static int sg_ph_header_of(SgPinHost *h, GtkWidget *c) {
+    GtkWidget *l = GTK_IS_COLUMN_VIEW(h->main) ? gtk_widget_get_first_child(c) : c;
+    return l ? GPOINTER_TO_INT(g_object_get_data(G_OBJECT(l), "sg-section")) : 0;
+}
+/* The top of the rows in the host: below a table's column titles. */
+static int sg_ph_top(SgPinHost *h) {
+    graphene_rect_t b;
+    GtkWidget *r = GTK_IS_COLUMN_VIEW(h->main) ? sg_ph_rows_parent(h) : NULL;
+    return r && gtk_widget_compute_bounds(r, GTK_WIDGET(h), &b) ? (int) b.origin.y : 0;
+}
+/* What to pin now, from where the rows and headers are: the topmost row at least partly below
+   the top names the section; the first later section's header below pushes it up by as much
+   as it is nearer than the copy's height. */
+static void sg_ph_find(SgPinHost *h, int *sec, int *y) {
+    SgSections *s = sg_sections_get(h->id);
+    GtkWidget *rows = sg_ph_rows_parent(h), *c;
+    graphene_rect_t b;
+    double best = G_MAXDOUBLE, next = G_MAXDOUBLE, top = h->top, next_h = 0;
+    int cur = 0, ph = 0;
+    *sec = 0; *y = 0;
+    if (!s || !rows) return;
+    for (c = gtk_widget_get_first_child(rows); c; c = gtk_widget_get_next_sibling(c)) {
+        int r;
+        if (!gtk_widget_get_mapped(c) || (r = sg_ph_row_of(h, c)) == 0) continue;
+        if (!gtk_widget_compute_bounds(c, GTK_WIDGET(h), &b)) continue;
+        if (b.origin.y + b.size.height > top + 0.5 && b.origin.y < best) { best = b.origin.y; cur = sg_section_of(s, r); }
+    }
+    if (cur == 0) return;
+    for (c = gtk_widget_get_first_child(rows); c; c = gtk_widget_get_next_sibling(c)) {
+        if (!gtk_widget_get_mapped(c) || sg_ph_header_of(h, c) <= cur) continue;
+        if (gtk_widget_compute_bounds(c, GTK_WIDGET(h), &b) && b.origin.y > top - 0.5 && b.origin.y < next) {
+            next = b.origin.y;
+            next_h = b.size.height;
+        }
+    }
+    if (h->pin && gtk_widget_get_visible(h->pin)) gtk_widget_measure(h->pin, GTK_ORIENTATION_VERTICAL, -1, NULL, &ph, NULL, NULL);
+    if (ph <= 0) ph = (int) next_h;
+    *sec = cur;
+    if (next < G_MAXDOUBLE && next - top < ph) *y = (int) floor(next - top - ph + 0.5);
+}
+static gboolean sg_ph_retitle(gpointer d) {
+    SgPinHost *h = d;
+    SgSections *s = sg_sections_get(h->id);
+    h->retitle_pending = 0;
+    if (h->pin) {
+        if (h->section > 0 && s && h->section <= (int) s->titles->len) {
+            gtk_label_set_text(GTK_LABEL(h->pin), g_ptr_array_index(s->titles, h->section - 1));
+            gtk_widget_set_visible(h->pin, TRUE);
+        } else gtk_widget_set_visible(h->pin, FALSE);
+        h->shown = h->section;
+        gtk_widget_queue_allocate(GTK_WIDGET(h));
+    }
+    g_object_unref(h);
+    return G_SOURCE_REMOVE;
+}
+static void sg_ph_allocate(GtkWidget *w, int width, int height, int baseline) {
+    SgPinHost *h = (SgPinHost *) w;
+    int sec = 0, y = 0, ph = 0;
+    if (h->main) gtk_widget_allocate(h->main, width, height, baseline, NULL);
+    if (!h->pin || !sg_w[h->id]) return;   /* the list is going */
+    h->top = sg_ph_top(h);
+    if (!g_object_get_data(G_OBJECT(sg_w[h->id]), "sg-sticky-off")) sg_ph_find(h, &sec, &y);
+    h->section = sec;
+    h->y = y;
+    if (sec != h->shown && !h->retitle_pending) {   /* the title and visibility change outside allocation */
+        h->retitle_pending = 1;
+        g_idle_add(sg_ph_retitle, g_object_ref(h));
+    }
+    if (gtk_widget_get_visible(h->pin)) {
+        GtkAllocation a;
+        gtk_widget_measure(h->pin, GTK_ORIENTATION_VERTICAL, width, NULL, &ph, NULL, NULL);
+        a.x = 0; a.y = h->top + y; a.width = width; a.height = ph;
+        gtk_widget_size_allocate(h->pin, &a, -1);
+    }
+}
+static void sg_ph_dispose(GObject *o) {
+    SgPinHost *h = (SgPinHost *) o;
+    g_clear_pointer(&h->pin, gtk_widget_unparent);
+    g_clear_pointer(&h->main, gtk_widget_unparent);
+    G_OBJECT_CLASS(g_type_class_peek(GTK_TYPE_WIDGET))->dispose(o);
+}
+static void sg_ph_class_init(gpointer klass, gpointer data) {
+    GObjectClass *oc = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *wc = GTK_WIDGET_CLASS(klass);
+    (void) data;
+    oc->set_property = sg_ph_set_property;
+    oc->get_property = sg_ph_get_property;
+    oc->dispose = sg_ph_dispose;
+    g_object_class_override_property(oc, SG_PH_HADJ, "hadjustment");
+    g_object_class_override_property(oc, SG_PH_VADJ, "vadjustment");
+    g_object_class_override_property(oc, SG_PH_HPOL, "hscroll-policy");
+    g_object_class_override_property(oc, SG_PH_VPOL, "vscroll-policy");
+    wc->measure = sg_ph_measure;
+    wc->size_allocate = sg_ph_allocate;
+    wc->get_request_mode = sg_ph_request_mode;
+}
+static GType sg_pin_host_type(void) {
+    GType t = g_type_from_name("SgPinHost");
+    if (!t) {
+        GTypeInfo info;
+        GInterfaceInfo scrollable = { NULL, NULL, NULL };
+        memset(&info, 0, sizeof info);
+        info.class_size = sizeof(SgPinHostClass);
+        info.class_init = sg_ph_class_init;
+        info.instance_size = sizeof(SgPinHost);
+        t = g_type_register_static(GTK_TYPE_WIDGET, "SgPinHost", &info, 0);
+        g_type_add_interface_static(t, GTK_TYPE_SCROLLABLE, &scrollable);
+    }
+    return t;
+}
+static SgPinHost *sg_pin_host(int id) { return sg_w[id] ? g_object_get_data(G_OBJECT(sg_w[id]), "sg-pin-host") : NULL; }
+/* List or table `id''s pin host, put between its scrolled window and its view the first time. */
+static SgPinHost *sg_pin_host_ensure(int id) {
+    SgPinHost *h = sg_pin_host(id);
+    GtkScrolledWindow *sw;
+    GtkWidget *view, *main;
+    GtkAdjustment *v;
+    if (h || !sg_w[id] || !GTK_IS_SCROLLED_WINDOW(sg_w[id])) return h;
+    sw = GTK_SCROLLED_WINDOW(sg_w[id]);
+    if (sg_kind[id] == 7) {
+        view = GTK_WIDGET(sg_list_box(id));
+        g_object_ref(view);
+        gtk_scrolled_window_set_child(sw, NULL);   /* drops the viewport GTK added, keeping the list */
+        main = gtk_viewport_new(NULL, NULL);
+        gtk_viewport_set_scroll_to_focus(GTK_VIEWPORT(main), TRUE);
+        gtk_viewport_set_child(GTK_VIEWPORT(main), view);
+        g_object_unref(view);
+        g_object_ref(main);
+    } else {
+        main = GTK_WIDGET(sg_table_view(id));
+        g_object_ref(main);
+        gtk_scrolled_window_set_child(sw, NULL);
+    }
+    h = g_object_new(sg_pin_host_type(), NULL);
+    h->id = id;
+    h->main = main;
+    gtk_widget_set_parent(main, GTK_WIDGET(h));
+    g_object_unref(main);
+    h->pin = sg_section_header_label("");
+    gtk_widget_add_css_class(h->pin, "sg-pinned");
+    gtk_widget_set_can_target(h->pin, FALSE);
+    gtk_widget_set_visible(h->pin, FALSE);
+    gtk_widget_set_parent(h->pin, GTK_WIDGET(h));
+    gtk_scrolled_window_set_child(sw, GTK_WIDGET(h));
+    v = gtk_scrolled_window_get_vadjustment(sw);
+    g_signal_connect_object(v, "value-changed", G_CALLBACK(gtk_widget_queue_allocate), h, G_CONNECT_SWAPPED);
+    g_signal_connect_object(v, "changed", G_CALLBACK(gtk_widget_queue_allocate), h, G_CONNECT_SWAPPED);
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-pin-host", h);
+    return h;
+}
+
+/* A list's headers: the first shown row of a section carries its title above it. */
+static void sg_list_header(GtkListBoxRow *row, GtkListBoxRow *before, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    SgSections *s = sg_sections_get(id);
+    int sec = sg_section_of(s, gtk_list_box_row_get_index(row) + 1);
+    int prev = before ? sg_section_of(s, gtk_list_box_row_get_index(before) + 1) : -1;
+    GtkWidget *hd = gtk_list_box_row_get_header(row);
+    if (sec > 0 && sec != prev) {
+        const char *t = g_ptr_array_index(s->titles, sec - 1);
+        if (!hd) {
+            hd = sg_section_header_label(t);
+            gtk_list_box_row_set_header(row, hd);
+        } else gtk_label_set_text(GTK_LABEL(hd), t);
+        g_object_set_data(G_OBJECT(hd), "sg-section", GINT_TO_POINTER(sec));
+    } else if (hd) gtk_list_box_row_set_header(row, NULL);
+}
+static void sg_list_set_sections(int id, const char *starts, const char *titles) {
+    SgSections *s = sg_sections_ensure(id);
+    GtkListBox *l = sg_list_box(id);
+    SgPinHost *h;
+    if (!s || !l) return;
+    sg_sections_parse(s, starts, titles);
+    if (!g_object_get_data(G_OBJECT(l), "sg-header-func")) {
+        gtk_list_box_set_header_func(l, sg_list_header, GINT_TO_POINTER(id), NULL);
+        g_object_set_data(G_OBJECT(l), "sg-header-func", GINT_TO_POINTER(1));
+    }
+    h = s->starts->len > 0 ? sg_pin_host_ensure(id) : sg_pin_host(id);
+    gtk_list_box_invalidate_headers(l);
+    if (h) gtk_widget_queue_allocate(GTK_WIDGET(h));
+}
+
+/* A table's headers, from its column view's header factory (GTK 4.12). */
+static void sg_header_setup(GtkSignalListItemFactory *f, GObject *o, gpointer d) {
+    (void) f; (void) d;
+    gtk_list_header_set_child(GTK_LIST_HEADER(o), sg_section_header_label(""));
+}
+static void sg_header_bind(GtkSignalListItemFactory *f, GObject *o, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    SgSections *s = sg_sections_get(id);
+    GtkWidget *l = gtk_list_header_get_child(GTK_LIST_HEADER(o));
+    int sec = sg_section_of(s, sg_table_row_of(id, gtk_list_header_get_start(GTK_LIST_HEADER(o))));
+    (void) f;
+    if (!l) return;
+    gtk_label_set_text(GTK_LABEL(l), sec > 0 ? (const char *) g_ptr_array_index(s->titles, sec - 1) : "");
+    gtk_widget_set_visible(l, sec > 0);
+    g_object_set_data(G_OBJECT(l), "sg-section", GINT_TO_POINTER(sec));
+}
+static void sg_table_set_sections(int id, const char *starts, const char *titles) {
+    SgSections *s = sg_sections_ensure(id);
+    GtkColumnView *v = sg_table_view(id);
+    GArray *m;
+    if (!s || !v) return;
+    sg_sections_parse(s, starts, titles);
+    if (s->starts->len > 0) {
+        if (!gtk_column_view_get_header_factory(v)) {
+            GtkListItemFactory *f = gtk_signal_list_item_factory_new();
+            g_signal_connect(f, "setup", G_CALLBACK(sg_header_setup), GINT_TO_POINTER(id));
+            g_signal_connect(f, "bind", G_CALLBACK(sg_header_bind), GINT_TO_POINTER(id));
+            gtk_column_view_set_header_factory(v, f);
+            g_object_unref(f);
+        }
+        sg_pin_host_ensure(id);
+    } else gtk_column_view_set_header_factory(v, NULL);
+    /* the model again, with or without its sections, keeping the selection */
+    m = sg_table_map(id);
+    sg_table_show(id, m ? g_array_copy(m) : NULL);
+    if (sg_pin_host(id)) gtk_widget_queue_allocate(GTK_WIDGET(sg_pin_host(id)));
+}
+static void sg_sections_set_sticky(int id, int on) {
+    if (!sg_w[id]) return;
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-sticky-off", GINT_TO_POINTER(on ? 0 : 1));
+    if (sg_pin_host(id)) gtk_widget_queue_allocate(GTK_WIDGET(sg_pin_host(id)));
+}
+
+static int sg_test_pinned_header(int id) {
+    SgPinHost *h;
+    int who, y;
+    if (!sg_w[id]) return 0;
+    if (sg_kind[id] == 27) { sg_sticky_pinned(id, &who, &y); return who; }
+    h = sg_pin_host(id);
+    if (!h || !h->pin || !gtk_widget_get_visible(h->pin) || !gtk_widget_get_mapped(h->pin)) return 0;
+    return h->shown;
+}
+static int sg_test_pinned_header_y(int id) {
+    SgPinHost *h;
+    graphene_rect_t b;
+    int who, y;
+    if (!sg_w[id]) return 0;
+    if (sg_kind[id] == 27) { sg_sticky_pinned(id, &who, &y); return y; }
+    h = sg_pin_host(id);
+    if (!h || !h->pin || !gtk_widget_get_visible(h->pin) || !gtk_widget_compute_bounds(h->pin, GTK_WIDGET(h), &b)) return 0;
+    y = (int) floor(b.origin.y - h->top + 0.5);
+    return y > 0 ? 0 : y;
 }
 /* A date picker's value is y*10000 + m*100 + d; a time picker's h*60 + m. */
 static void sg_date_or_time_set(int id, int v) {

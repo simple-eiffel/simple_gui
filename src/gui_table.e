@@ -27,6 +27,11 @@ inherit
 
 	GUI_SCROLLING
 
+	GUI_SECTIONED
+		rename
+			count as row_count
+		end
+
 create
 	make
 
@@ -170,7 +175,12 @@ feature -- Element change
 			row_source := Void
 			source_count := 0
 			backend.table_wipe_out (id)
+			if section_count > 0 then
+				forget_sections
+				send_sections
+			end
 		ensure
+			no_sections: section_count = 0
 			empty: row_count = 0
 			no_source: not has_row_source
 			none_selected: selected_row = 0
@@ -183,6 +193,7 @@ feature -- Element change
 		require
 			gui_thread: is_gui_thread
 			count_ok: a_count >= 0
+			no_sections: section_count = 0
 		do
 			rows.wipe_out
 			row_source := a_cells
@@ -481,7 +492,25 @@ feature {GUI_APPLICATION} -- Events
 			end
 		end
 
+feature -- Sections (1y-e)
+
+	may_start_section: BOOLEAN
+			-- Not for a lazy table (1f): its rows' sections can't be known without a scan.
+		do
+			Result := not has_row_source
+		end
+
 feature {NONE} -- Implementation
+
+	backend_set_sections (a_starts, a_titles: POINTER)
+		do
+			backend.table_set_sections (id, a_starts, a_titles)
+		end
+
+	send_sticky (a_on: BOOLEAN)
+		do
+			backend.table_set_sticky_headers (id, a_on)
+		end
 
 	titles: ARRAYED_LIST [STRING_32]
 
