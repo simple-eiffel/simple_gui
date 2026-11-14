@@ -95,6 +95,10 @@ Needs GTK 4 development files (`sudo apt install libgtk-4-dev` on Ubuntu 24.04) 
 ec_linux.sh test -config simple_gui.ecf -target simple_gui_tests
 ```
 
+**Which display the suite runs on (Linux):**
+- **While fixing:** use a hidden X11 display, so nothing shows on the desktop. Start it with `Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &` (`sudo apt install xvfb`), then run the suite with `GDK_BACKEND=x11 DISPLAY=:99` and `WAYLAND_DISPLAY` unset. These runs are for iterating.
+- **The merge gate:** one run on the real Wayland display (WSLg under WSL). It shows windows on the desktop, so ask before it runs.
+
 ## Build (Windows)
 
 Needs EiffelStudio 25.02 and the simple_* libraries beside this one (`SIMPLE_EIFFEL`); the backend is pure Eiffel over simple_widgets and simple_shell.
