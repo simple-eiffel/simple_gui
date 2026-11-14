@@ -3338,8 +3338,37 @@ void sga_scroll_area_set_content(int a_id, int a_child)
 void sga_scroll_area_scroll_to(int a_id, int a_x, int a_y)
 {
 	NSScrollView *s = sga_get(a_id);
+	[s layoutSubtreeIfNeeded];
 	[[s documentView] scrollPoint:NSMakePoint(a_x, a_y)];
 }
+
+/* 1x-d: the furthest offset on each axis, content size less visible size, never below 0.
+   Layout is settled first so content set a moment ago counts. */
+static NSSize sga_scroll_area_max(int a_id)
+{
+	NSScrollView *s = sga_get(a_id);
+	if (![s isKindOfClass:[NSScrollView class]]) return NSZeroSize;
+	[s layoutSubtreeIfNeeded];
+	NSSize l_doc = [[s documentView] frame].size;
+	NSSize l_seen = [[s contentView] bounds].size;
+	return NSMakeSize(MAX(0, l_doc.width - l_seen.width), MAX(0, l_doc.height - l_seen.height));
+}
+
+/* 1x-d: the offset shown now, clamped to 0..max, so a rubber band or a momentum overshoot
+   reads as the edge it springs back to. The document view is flipped: y grows downward. */
+static NSPoint sga_scroll_area_offset(int a_id)
+{
+	NSScrollView *s = sga_get(a_id);
+	if (![s isKindOfClass:[NSScrollView class]]) return NSZeroPoint;
+	NSSize l_max = sga_scroll_area_max(a_id);
+	NSPoint p = [[s contentView] bounds].origin;
+	return NSMakePoint(MIN(MAX(0, p.x), l_max.width), MIN(MAX(0, p.y), l_max.height));
+}
+
+int sga_scroll_area_x(int a_id) { return (int)lround(sga_scroll_area_offset(a_id).x); }
+int sga_scroll_area_y(int a_id) { return (int)lround(sga_scroll_area_offset(a_id).y); }
+int sga_scroll_area_max_x(int a_id) { return (int)lround(sga_scroll_area_max(a_id).width); }
+int sga_scroll_area_max_y(int a_id) { return (int)lround(sga_scroll_area_max(a_id).height); }
 
 /* An image: an NSImageView that scales the picture down to fit, keeping its proportions. */
 int sga_image(void)

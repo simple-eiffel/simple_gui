@@ -191,6 +191,10 @@ int sga_color_chooser_value(int a_id);
 int sga_scroll_area(void);
 void sga_scroll_area_set_content(int a_id, int a_child);
 void sga_scroll_area_scroll_to(int a_id, int a_x, int a_y);
+int sga_scroll_area_x(int a_id);
+int sga_scroll_area_y(int a_id);
+int sga_scroll_area_max_x(int a_id);
+int sga_scroll_area_max_y(int a_id);
 int sga_image(void);
 int sga_image_set_file(int a_id, const char *a_path);   /* 0: not a picture */
 int sga_image_set_bytes(int a_id, const void *a_bytes, int a_count);   /* PNG and the other formats AppKit reads */
