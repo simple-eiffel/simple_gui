@@ -38,6 +38,7 @@ void sga_stack_extend(int a_stack, int a_child, int a_stretch);
 void sga_stack_set_spacing(int a_stack, int a_spacing);
 void sga_stack_set_alignment(int a_stack, int a_alignment);   /* 0 fill, 1 start, 2 center, 3 end */
 void sga_stack_align_child(int a_stack, int a_child, int a_alignment);
+void sga_stack_set_vertical(int a_stack, int a_on);
 int sga_grid(void);
 void sga_grid_set_homogeneous_columns(int a_grid, int a_on);
 void sga_grid_set_stretching_column(int a_grid, int a_column);   /* 1-based; 0 none */
@@ -127,6 +128,7 @@ double sga_scale(int a_id);   /* device pixels per point */
 int sga_scale_factor(int a_id);   /* sga_scale rounded up */
 int sga_width(int a_id);
 int sga_height(int a_id);
+void sga_widget_watch_size(int a_id, int a_on);
 
 /* Menus: roles 0 none, 1 about, 2 settings, 3 quit, 10 undo, 11 redo, 12 cut, 13 copy,
    14 paste, 15 select all. Shortcuts "primary+O", "primary+shift+Z". */
