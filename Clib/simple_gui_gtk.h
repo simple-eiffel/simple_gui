@@ -4791,7 +4791,7 @@ static GtkAdjustment *sg_scroller_adjustment(int id) {
 /* The content's own height, never the visible height it fills (GTK's adjustment upper is at
    least the page, so content that still fits would never be seen to grow): the content's
    natural height at the width it has. */
-static int sg_scroller_extent(int id) {
+static int sg_scroller_content_height(int id) {
     GtkWidget *c, *in;
     int w, nat = 0;
     if (!sg_w[id] || !GTK_IS_SCROLLED_WINDOW(sg_w[id])) return 0;
@@ -4801,6 +4801,12 @@ static int sg_scroller_extent(int id) {
     w = gtk_widget_get_width(c);
     gtk_widget_measure(in, GTK_ORIENTATION_VERTICAL, w > 0 ? w : -1, NULL, &nat, NULL, NULL);
     return nat > 0 ? nat : 0;
+}
+/* Shared code reads the extent in every report (a scroll area reads its offset through
+   scroll_area_y, not sg_scroller_y), so reading it ends the pending report too. */
+static int sg_scroller_extent(int id) {
+    sg_scroll_pending[id] = 0;
+    return sg_scroller_content_height(id);
 }
 /* A change in a watched scroller's extent is a report (65) too, even while all of it fits and
    the adjustment stays put: read after each frame a window paints, as sizes are (1y). */
@@ -4820,7 +4826,7 @@ static void sg_scroll_extent_report(GdkFrameClock *fc, gpointer d) {
             i--;
             continue;
         }
-        e = sg_scroller_extent(id);
+        e = sg_scroller_content_height(id);
         if (e != sg_scroll_watch_extent[i]) {
             sg_scroll_watch_extent[i] = e;
             if (!sg_scroll_pending[id]) { sg_scroll_pending[id] = 1; sg_push(65, id, 0, 0); }
