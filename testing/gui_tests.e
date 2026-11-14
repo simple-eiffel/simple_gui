@@ -8571,6 +8571,123 @@ feature -- Styles and the theme (1w)
 			assert ("dark gray on white is above it", l_style.contrast_ratio (0x595959, 0xFFFFFF) >= 4.5)
 		end
 
+feature -- App services (1z-c)
+
+	test_open_and_reveal_are_recorded_not_performed
+			-- 1z-c: under the open test mode (the runner keeps it on for the whole suite), opening a
+			-- URL or a file and revealing one are recorded in order and never performed, so no
+			-- browser, file manager or file opens. A reveal of a file that is there is taken; one of
+			-- a missing file is refused.
+		local
+			l_path: STRING_32
+			l_file: PLAIN_TEXT_FILE
+		do
+			app.set_open_test_mode (True)
+			l_path := temporary_file ("simple_gui_reveal_test.txt").name.to_string_32
+			create l_file.make_create_read_write (l_path)
+			l_file.put_string ("reveal me")
+			l_file.close
+			assert ("a URL is taken", app.open_url ("https://www.eiffel.org/"))
+			assert ("a file is taken", app.open_file (l_path))
+			assert ("a file that is there is revealed", app.reveal_file (l_path))
+			assert ("a missing file is not", not app.reveal_file (l_path + {STRING_32} ".missing"))
+			assert ("four recorded", app.test_open_requests.count = 4)
+			assert ("the URL", app.test_open_requests [1].same_string ({STRING_32} "open https://www.eiffel.org/"))
+			assert ("the file", app.test_open_requests [2].same_string ({STRING_32} "open " + l_path))
+			assert ("the reveal", app.test_open_requests [3].same_string ({STRING_32} "reveal " + l_path))
+			assert ("the missing one", app.test_open_requests [4].same_string ({STRING_32} "reveal " + l_path + {STRING_32} ".missing"))
+			l_file.delete
+			app.set_open_test_mode (True)
+			assert ("started empty again", app.test_open_requests.is_empty)
+		end
+
+	test_network_status_answers_at_once_and_tells_changes
+			-- 1z-c: the real question answers at once, never waiting on the network; a change (a
+			-- test's report, standing in for the system) runs `network_changed_actions' on the
+			-- heartbeat, once, with the new answer; with no change, nothing more is told.
+		local
+			l_told: ARRAYED_LIST [BOOLEAN]
+			l_start: REAL_64
+			l_real: BOOLEAN
+			l_agent: PROCEDURE [BOOLEAN]
+			i: INTEGER
+		do
+			l_start := (create {SHELL_DESKTOP}).now_ms
+			l_real := app.is_online
+			assert ("answered within half a second", (create {SHELL_DESKTOP}).now_ms - l_start < 500.0)
+			create l_told.make (2)
+			l_agent := agent (a_told: ARRAYED_LIST [BOOLEAN]; a_online: BOOLEAN) do a_told.extend (a_online) end (l_told, ?)
+			app.network_changed_actions.extend (l_agent)
+			app.report_network_for_tests (not l_real)
+			from i := 1 until l_told.count >= 1 or i > 20 loop
+				driver.wait (100)
+				i := i + 1
+			end
+			assert ("told once", l_told.count = 1)
+			assert ("with the new answer", l_told.first = not l_real)
+			assert ("and asked, the same", app.is_online = not l_real)
+			app.report_network_for_tests (l_real)
+			from i := 1 until l_told.count >= 2 or i > 20 loop
+				driver.wait (100)
+				i := i + 1
+			end
+			assert ("told the change back", l_told.count = 2 and then l_told [2] = l_real)
+			driver.wait (600)
+			assert ("nothing more without a change", l_told.count = 2)
+			app.network_changed_actions.prune (l_agent)
+		end
+
+	test_monitors_have_sizes_work_areas_and_scales
+			-- 1z-c: the monitors' shape, from the real machine: at least one; a primary, which holds
+			-- its work area; each sized, named and scaled at least 1; and a shown window's
+			-- `monitor_index' is one of them.
+		local
+			m: GUI_MONITORS
+			w: GUI_WINDOW
+			i, p: INTEGER
+		do
+			m := app.monitors
+			assert ("a monitor", m.count >= 1)
+			p := m.primary_index
+			assert ("a primary", m.valid_index (p))
+			assert ("the primary holds its work area", m.bounds (p).contains (m.work_area (p)))
+			from i := 1 until i > m.count loop
+				assert ("sized " + i.out, not m.bounds (i).is_empty and not m.work_area (i).is_empty)
+				assert ("named " + i.out, not m.name (i).is_empty)
+				assert ("scaled " + i.out, m.scale (i) >= 1.0)
+				i := i + 1
+			end
+			create w.make ("Monitors", 320, 200)
+			w.set_content (create {GUI_LABEL}.make ("On a monitor"))
+			w.show
+			settle_window
+			assert ("a shown window is on a monitor (" + w.monitor_index.out + ")", m.valid_index (w.monitor_index))
+			w.close
+		end
+
+	test_a_monitor_change_takes_a_new_snapshot_and_tells
+			-- 1z-c: with nothing plugged, unplugged or moved the heartbeat tells nothing; a change
+			-- (event 67, or simple_shell's change count moving) takes a new snapshot and runs
+			-- `changed_actions' once.
+		local
+			m: GUI_MONITORS
+			l_told: CELL [INTEGER]
+			l_agent: PROCEDURE
+			l_count: INTEGER
+		do
+			m := app.monitors
+			l_count := m.count
+			create l_told.put (0)
+			l_agent := agent (a_told: CELL [INTEGER]) do a_told.put (a_told.item + 1) end (l_told)
+			m.changed_actions.extend (l_agent)
+			driver.wait (600)
+			assert ("nothing told without a change", l_told.item = 0)
+			driver.tell_monitors_changed
+			assert ("told once", l_told.item = 1)
+			assert ("a new snapshot", m.count = l_count and m.valid_index (m.primary_index))
+			m.changed_actions.prune (l_agent)
+		end
+
 feature {NONE} -- Fixtures
 
 	new_ruled_editor: GUI_CODE_EDITOR

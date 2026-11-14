@@ -1676,6 +1676,41 @@ feature -- Controls
 		alias "return (EIF_POINTER) sg_w[$a_window];"
 		end
 
+	monitor_size_units (a_monitors: SHELL_MONITORS; a_index: INTEGER): REAL_64
+			-- 1z-c: the monitor's whole scale factor: simple_shell multiplies GDK's logical
+			-- geometry (gdk_monitor_get_geometry) by it, and this gives that geometry back.
+		do
+			Result := c_monitor_scale_factor (a_index - 1).max (1)
+		end
+
+	monitor_position_units (a_monitors: SHELL_MONITORS; a_index: INTEGER): REAL_64
+			-- 1z-c: the same factor, so x and y are as GDK gives them.
+		do
+			Result := c_monitor_scale_factor (a_index - 1).max (1)
+		end
+
+	window_monitor_index (a_window: INTEGER; a_monitors: SHELL_MONITORS): INTEGER
+			-- 1z-c: GDK's monitor at the window's surface, by its place in GDK's list (which is
+			-- simple_shell's order); 0 before the window has a surface.
+		do
+			Result := c_window_monitor (a_window)
+			if not a_monitors.valid_index (Result) then
+				Result := 0
+			end
+		end
+
+	c_monitor_scale_factor (a_index: INTEGER): INTEGER
+			-- 1z-c: monitor `a_index' (from 0)'s whole scale factor.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_monitor_scale_factor($a_index);"
+		end
+
+	c_window_monitor (a_window: INTEGER): INTEGER
+			-- 1z-c: the monitor holding most of window `a_window', from 1; 0 for none.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_window_monitor($a_window);"
+		end
+
 	follow_system_appearance
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_follow_system_appearance();"

@@ -26,6 +26,8 @@ feature {NONE} -- Initialization
 				print ("  SKIP: no display (the toolkit did not start)%N")
 			else
 				create t.make (l_app)
+					-- 1z-c: no test opens a browser, a file manager or a file
+				l_app.set_open_test_mode (True)
 				run_test (agent t.test_label_text_roundtrip, "label_text_roundtrip")
 				run_test (agent t.test_hebrew_and_greek_roundtrip, "hebrew_and_greek_roundtrip")
 				run_test (agent t.test_button_click_fires_agents, "button_click_fires_agents")
@@ -244,6 +246,10 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_font_load_runtime, "font_load_runtime")
 				run_test (agent t.test_high_contrast_drops_colors, "high_contrast_drops_colors")
 				run_test (agent t.test_style_contrast_ratio, "style_contrast_ratio")
+				run_test (agent t.test_open_and_reveal_are_recorded_not_performed, "open_and_reveal_are_recorded_not_performed")
+				run_test (agent t.test_network_status_answers_at_once_and_tells_changes, "network_status_answers_at_once_and_tells_changes")
+				run_test (agent t.test_monitors_have_sizes_work_areas_and_scales, "monitors_have_sizes_work_areas_and_scales")
+				run_test (agent t.test_a_monitor_change_takes_a_new_snapshot_and_tells, "a_monitor_change_takes_a_new_snapshot_and_tells")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
