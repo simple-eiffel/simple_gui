@@ -3999,9 +3999,11 @@ feature -- The remaining controls (1j)
 			l_window: GUI_WINDOW
 			l_overlay: GUI_OVERLAY
 			l_base, l_badge, l_veil: GUI_LABEL
-			l_button: GUI_BUTTON
+			l_button: GUI_LABEL
 			ox, oy, ow, oh: INTEGER
 		do
+				-- labels: GTK reports a padded widget's content box, the others the whole widget
+				-- (a closeout item), so a label's box is the same everywhere
 			create l_window.make ("Overlay", 400, 300)
 			create l_overlay.make
 			create l_base.make ("The picture")
