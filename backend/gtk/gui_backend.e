@@ -1288,6 +1288,26 @@ feature -- Controls
 		alias "sg_scroll_area_scroll_to($an_id, $a_x, $a_y);"
 		end
 
+	scroll_area_x (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_scroll_area_offset($an_id, 0);"
+		end
+
+	scroll_area_y (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_scroll_area_offset($an_id, 1);"
+		end
+
+	scroll_area_max_x (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_scroll_area_max($an_id, 0);"
+		end
+
+	scroll_area_max_y (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_scroll_area_max($an_id, 1);"
+		end
+
 	image: INTEGER
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "return sg_image();"

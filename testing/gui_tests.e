@@ -3358,6 +3358,98 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_a_scroll_area_scrolls_smoothly_on_the_manual_clock
+			-- 1x-d: a smooth scroll starts where the content is, is half way at half time
+			-- (Ease_in_out), arrives at 200 ms and says so once.
+		local
+			l_window: GUI_WINDOW
+			l_area: GUI_SCROLL_AREA
+		do
+			create l_window.make ("Scroll", 300, 200)
+			l_area := tall_scroll_area
+			l_window.set_content (l_area)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			assert ("at the top, room to go: " + l_area.max_scroll_y.out, l_area.scroll_y = 0 and l_area.max_scroll_y > 300)
+			l_area.scroll_to_animated (0, 300)
+			assert ("on its way from the top", l_area.is_scrolling_smoothly and l_area.smooth_target_y = 300 and l_area.scroll_y = 0)
+			app.animation_clock.step (100)
+			assert ("half way at half time: " + l_area.scroll_y.out, (l_area.scroll_y - 150).abs <= 2)
+			assert ("not said yet", l_area.smooth_scroll_finished_actions.fire_count = 0)
+			app.animation_clock.step (100)
+			assert ("there: " + l_area.scroll_y.out, l_area.scroll_y = 300 and not l_area.is_scrolling_smoothly)
+			assert ("said once", l_area.smooth_scroll_finished_actions.fire_count = 1)
+			end_manual_clock
+			l_window.close
+		end
+
+	test_the_users_scroll_stops_a_smooth_scroll
+			-- 1x-d: the user's own scroll during a smooth scroll stands; the smooth scroll stops
+			-- there and never says it arrived. `scroll_to' stops one the same way.
+		local
+			l_window: GUI_WINDOW
+			l_area: GUI_SCROLL_AREA
+		do
+			create l_window.make ("Scroll", 300, 200)
+			l_area := tall_scroll_area
+			l_window.set_content (l_area)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_area.scroll_to_animated (0, 300)
+			app.animation_clock.step (100)
+				-- the user's wheel: straight to the toolkit, not through the scroll area
+			backend.scroll_area_scroll_to (l_area.id, 0, 40)
+			app.animation_clock.step (50)
+			assert ("stopped: " + l_area.scroll_y.out, not l_area.is_scrolling_smoothly and l_area.scroll_y = 40)
+			app.animation_clock.step (200)
+			assert ("the user's stands: " + l_area.scroll_y.out, l_area.scroll_y = 40)
+			l_area.scroll_to_animated (0, 300)
+			app.animation_clock.step (100)
+			l_area.scroll_to (0, 10)
+			assert ("scroll_to stops it", not l_area.is_scrolling_smoothly and l_area.scroll_y = 10)
+			app.animation_clock.step (200)
+			assert ("and stands: " + l_area.scroll_y.out, l_area.scroll_y = 10)
+			assert ("neither said it arrived", l_area.smooth_scroll_finished_actions.fire_count = 0)
+			end_manual_clock
+			l_window.close
+		end
+
+	test_a_smooth_scroll_clamps_and_jumps_with_reduced_motion
+			-- 1x-d: a target past the end goes to the end; with reduced motion the scroll is
+			-- there at once and says so on the next turn of the queue.
+		local
+			l_window: GUI_WINDOW
+			l_area: GUI_SCROLL_AREA
+			i: INTEGER
+		do
+			create l_window.make ("Scroll", 300, 200)
+			l_area := tall_scroll_area
+			l_window.set_content (l_area)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			l_area.scroll_to_animated (0, 100000)
+			assert ("clamped to the end", l_area.smooth_target_y = l_area.max_scroll_y)
+			app.animation_clock.step (200)
+			assert ("at the end: " + l_area.scroll_y.out, l_area.scroll_y = l_area.max_scroll_y)
+			end_manual_clock
+			app.set_reduces_motion_for_tests (True)
+			l_area.scroll_to_animated (0, 50)
+			assert ("there at once: " + l_area.scroll_y.out, l_area.scroll_y = 50 and not l_area.is_scrolling_smoothly)
+			from i := 1 until l_area.smooth_scroll_finished_actions.fire_count >= 2 or i > 100 loop
+				driver.wait (10)
+				i := i + 1
+			end
+			assert ("said so: " + l_area.smooth_scroll_finished_actions.fire_count.out, l_area.smooth_scroll_finished_actions.fire_count = 2)
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
 	test_the_clock_ticks_only_while_something_runs
 			-- 1x: a real clock asks for frame ticks when an animation starts and stops them
 			-- when the last one ends, so an idle program never wakes at the display rate.
@@ -7934,6 +8026,21 @@ feature {NONE} -- Fixtures
 			"C inline use %"simple_gui_memory.h%""
 		alias
 			"return (EIF_INTEGER_64) sg_process_bytes();"
+		end
+
+	tall_scroll_area: GUI_SCROLL_AREA
+			-- A scroll area holding sixty rows of text, far taller than its window.
+		local
+			l_rows: GUI_STACK
+			i: INTEGER
+		do
+			create Result.make
+			create l_rows.make_vertical
+			from i := 1 until i > 60 loop
+				l_rows.extend (create {GUI_LABEL}.make ("Row " + i.out))
+				i := i + 1
+			end
+			Result.set_content (l_rows)
 		end
 
 	three_pages: GUI_PAGES

@@ -4435,6 +4435,28 @@ static void sg_scroll_area_scroll_to(int id, int x, int y) {
     gtk_adjustment_set_value(gtk_scrolled_window_get_hadjustment(s), x);
     gtk_adjustment_set_value(gtk_scrolled_window_get_vadjustment(s), y);
 }
+/* 1x-d: a scroll area's furthest offset and its offset now, logical pixels from the
+   content's edge; kinetic overshoot answers 0 or the end. */
+static double sg_scroll_area_range(int id, int vertical, double *v) {
+    GtkScrolledWindow *s = GTK_SCROLLED_WINDOW(sg_w[id]);
+    GtkAdjustment *a = vertical ? gtk_scrolled_window_get_vadjustment(s) : gtk_scrolled_window_get_hadjustment(s);
+    double l = gtk_adjustment_get_lower(a);
+    double m = gtk_adjustment_get_upper(a) - gtk_adjustment_get_page_size(a) - l;
+    if (m < 0) m = 0;
+    *v = gtk_adjustment_get_value(a) - l;
+    if (*v < 0) *v = 0;
+    if (*v > m) *v = m;
+    return m;
+}
+static int sg_scroll_area_offset(int id, int vertical) {
+    double v;
+    sg_scroll_area_range(id, vertical, &v);
+    return (int)(v + 0.5);
+}
+static int sg_scroll_area_max(int id, int vertical) {
+    double v;
+    return (int)sg_scroll_area_range(id, vertical, &v);
+}
 /* A date picker's value is y*10000 + m*100 + d; a time picker's h*60 + m. */
 static void sg_date_or_time_set(int id, int v) {
     if (sg_kind[id] == 40) sg_calendar_set(id, v);
