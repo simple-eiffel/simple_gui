@@ -5955,21 +5955,27 @@ feature -- The remaining controls (1j)
 		end
 
 	test_fullscreen_toggles
-			-- 1m: a window fills the screen and comes back.
+			-- 1m: a window fills the screen and comes back. Skipped on a display with no window
+			-- manager (SIMPLE_GUI_TEST_NO_WM set, as on the hidden Xvfb display): there nothing
+			-- grants full screen.
 		local
 			l_window: GUI_WINDOW
 		do
-			create l_window.make ("Full screen", 300, 120)
-			l_window.set_content (create {GUI_LABEL}.make ("Full"))
-			l_window.show
-			settle_window
-			l_window.set_fullscreen (True)
-			settle_window
-			assert ("full screen", l_window.is_fullscreen)
-			l_window.set_fullscreen (False)
-			settle_window
-			assert ("back", not l_window.is_fullscreen)
-			l_window.close
+			if attached (create {EXECUTION_ENVIRONMENT}).item ("SIMPLE_GUI_TEST_NO_WM") as al_no_wm and then not al_no_wm.is_empty then
+				io.put_string ("    SKIP: no window manager on this display grants full screen%N")
+			else
+				create l_window.make ("Full screen", 300, 120)
+				l_window.set_content (create {GUI_LABEL}.make ("Full"))
+				l_window.show
+				settle_window
+				l_window.set_fullscreen (True)
+				settle_window
+				assert ("full screen", l_window.is_fullscreen)
+				l_window.set_fullscreen (False)
+				settle_window
+				assert ("back", not l_window.is_fullscreen)
+				l_window.close
+			end
 		end
 
 	test_appearance_can_be_chosen
