@@ -2088,6 +2088,25 @@ feature -- Common widget state
 		deferred
 		end
 
+	widget_watch_pointer (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y-c: while `a_on', push event 63 for widget `an_id' when the pointer comes over it
+			-- or one of its children (a = 1) and when it leaves them all (a = 0); moving from the
+			-- widget onto a child is not a leave.
+		deferred
+		end
+
+	widget_watch_focus (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y-c: while `a_on', push event 64 for widget `an_id' when the keyboard focus comes to
+			-- it or one of its children from outside (a = 1) and when it leaves them all (a = 0).
+		deferred
+		end
+
+	test_pointer_crossing (an_id: INTEGER; a_inside: BOOLEAN)
+			-- Tests, 1y-c: report the pointer coming over widget `an_id' or leaving it, as the
+			-- toolkit would (event 63), for the test driver.
+		deferred
+		end
+
 	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)
 			-- 1x: show widget `an_id' at `a_opacity' (0 transparent to 1 opaque). At 0 it
 			-- takes no pointer input, on every platform. A fade's reveal multiplies it (see
