@@ -3812,6 +3812,13 @@ feature -- The remaining controls (1j)
 			l_flow.set_maximum_per_line (3)
 			let_layout_settle
 			assert ("three a line: " + lines_of (l_chips).out + " lines", lines_of (l_chips) = 3)
+			l_flow.set_maximum_per_line (0)
+			let_layout_settle
+			l_wide_lines := lines_of (l_chips)
+			l_chips.first.set_text ("A chip given a much longer text, so long that it no longer fits beside the others")
+			let_layout_settle
+			assert ("longer text re-wraps without a resize: " + l_wide_lines.out + " then " + lines_of (l_chips).out,
+				lines_of (l_chips) > l_wide_lines)
 			l_window.close
 		end
 
