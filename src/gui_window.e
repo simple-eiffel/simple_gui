@@ -18,6 +18,8 @@ inherit
 			dispatch, cascade_direction, show, effective_effect
 		end
 
+	GUI_BREAKING
+
 create
 	make
 
@@ -36,11 +38,14 @@ feature {NONE} -- Initialization
 			create toast_actions.make (2)
 			create last_toast.make_empty
 			title := a_title.to_string_32
+			opening_width := a_width
+			opening_height := a_height
 			l_c := backend.to_c (a_title)
 			register (backend.window (l_c.item, a_width, a_height))
 		ensure
 			titled: title.same_string_general (a_title)
 			open: not is_closed
+			opening_size: opening_width = a_width and opening_height = a_height
 		end
 
 feature -- Access
@@ -214,10 +219,14 @@ feature -- Element change
 feature -- Basic operations
 
 	show
-			-- Present the window, with the application menu's shortcuts.
+			-- Present the window, with the application menu's shortcuts. Its breakpoints are
+			-- chosen first, at the size it opens at, so no layout is drawn and then switched (1y).
 		local
 			l_c: C_STRING
 		do
+			if breakpoint_count > 0 and reported_width = 0 then
+				choose_breakpoint (opening_width, opening_height)
+			end
 			if not shortcuts_installed then
 				l_c := backend.to_c (application.menu.shortcut_spec)
 				backend.window_install_shortcuts (id, l_c.item)
@@ -252,6 +261,8 @@ feature -- Size (1x-e)
 			sized: a_width > 0 and a_height > 0
 		do
 			stop_size_animation
+			opening_width := a_width
+			opening_height := a_height
 			backend.window_set_size (id, a_width, a_height)
 		ensure
 			not_resizing: not is_resizing_smoothly
@@ -274,6 +285,8 @@ feature -- Size (1x-e)
 			size_target_height := a_height
 			size_from_width := width
 			size_from_height := height
+			opening_width := a_width
+			opening_height := a_height
 			if size_from_width <= 0 or size_from_height <= 0 or not is_shown then
 				backend.window_set_size (id, a_width, a_height)
 					-- a zero-length animation: its end comes on the next turn, as a reduced one's does
@@ -303,6 +316,10 @@ feature -- Size (1x-e)
 		attribute
 			create Result.make
 		end
+
+	opening_width, opening_height: INTEGER
+			-- The size last asked for (`make', `set_size', `animate_size'): the one the window
+			-- opens at, and its breakpoints are chosen at before it is first shown (1y).
 
 feature {GUI_PRINT_JOB} -- Printing (1v-c)
 

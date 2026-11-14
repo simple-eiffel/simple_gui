@@ -104,6 +104,16 @@ feature -- Windows and containers
 		alias "sg_stack_set_spacing($a_stack, $a_spacing);"
 		end
 
+	stack_set_vertical (a_stack: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_stack_set_vertical($a_stack, $a_on ? 1 : 0);"
+		end
+
+	widget_watch_size (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_widget_watch_size($an_id, $a_on ? 1 : 0);"
+		end
+
 	stack_set_alignment (a_stack, an_alignment: INTEGER)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_stack_set_alignment($a_stack, $an_alignment);"

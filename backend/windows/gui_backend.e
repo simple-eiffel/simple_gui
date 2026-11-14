@@ -264,27 +264,39 @@ feature -- Windows and containers
 		end
 
 	stack (a_vertical: BOOLEAN; a_spacing: INTEGER): INTEGER
+			-- A GUI_SW_STACK, a column or a row that can turn into the other (1y).
 		local
-			l_col: SW_COLUMN
-			l_row: SW_ROW
+			l_box: GUI_SW_STACK
 		do
-			if a_vertical then
-				create l_col.make
-					-- 12 clear around a stack, as GTK and AppKit keep
-				l_col.set_padding (scaled (Stack_margin))
-				l_col.set_gap (scaled (a_spacing))
-				Result := register (l_col)
-				margins.force (scaled (Stack_margin), Result)
-				stack_ids.force (True, Result)
-			else
-				create l_row.make
-				l_row.set_padding (scaled (Stack_margin))
-				l_row.set_gap (scaled (a_spacing))
-					-- children fill the row's height, as in a GTK box and an NSStackView
-				l_row.set_cross_axis ({SW_ROW}.Cross_stretch)
-				Result := register (l_row)
-				margins.force (scaled (Stack_margin), Result)
-				stack_ids.force (True, Result)
+			create l_box.make (a_vertical)
+				-- 12 clear around a stack, as GTK and AppKit keep
+			l_box.set_padding (scaled (Stack_margin))
+			l_box.set_gap (scaled (a_spacing))
+				-- a row's children fill its height, as in a GTK box and an NSStackView
+			l_box.set_cross_axis ({SW_ROW}.Cross_stretch)
+			Result := register (l_box)
+			margins.force (scaled (Stack_margin), Result)
+			stack_ids.force (True, Result)
+		end
+
+	stack_set_vertical (a_stack: INTEGER; a_on: BOOLEAN)
+			-- Lay the box out the other way; a button GTK and AppKit keep at its natural width in a
+			-- column goes back to filling a row's height, and the other way round.
+		do
+			if attached {GUI_SW_STACK} widget (a_stack) as al_box then
+				al_box.set_vertical (a_on)
+				if not stack_alignment.has (a_stack) then
+					across al_box.children as ic loop
+						if attached {SW_BUTTON} ic then
+							if a_on then
+								ic.set_cross_alignment ({SW_WIDGET}.Place_start)
+							else
+								ic.set_cross_alignment ({SW_WIDGET}.Place_fill)
+							end
+						end
+					end
+				end
+				changed
 			end
 		end
 
@@ -297,7 +309,9 @@ feature -- Windows and containers
 				end
 				if stack_alignment.has (a_stack) then
 					al_child.set_cross_alignment (stack_alignment.item (a_stack))
-				elseif attached {SW_COLUMN} al_box and then attached {SW_BUTTON} al_child then
+				elseif attached {GUI_SW_STACK} al_box as al_stack and then al_stack.is_vertical
+					and then attached {SW_BUTTON} al_child
+				then
 						-- GTK and AppKit keep a button at its natural width in a column
 					al_child.set_cross_alignment ({SW_WIDGET}.Place_start)
 				end
@@ -1624,6 +1638,41 @@ feature -- Controls
 			-- Windows' "Show animations in Windows" off (simple_shell, event 57).
 		do
 			Result := (create {SHELL_APPEARANCE}).system_reduces_motion
+		end
+
+	widget_watch_size (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y: windows report watched sizes after each frame they draw (`report_watched_sizes').
+		do
+			if a_on then
+				if not watched_sizes.has (an_id) then
+					watched_sizes.force ([0, 0], an_id)
+				end
+			else
+				watched_sizes.remove (an_id)
+			end
+		end
+
+	report_watched_sizes
+			-- After a window drew (its layout done): event 9 for each watched widget whose size
+			-- changed since its last report, once it has one.
+		local
+			l_w, l_h: INTEGER
+		do
+			across watched_sizes as ic loop
+				l_w := width (@ic.key)
+				l_h := height (@ic.key)
+				if l_w > 0 and l_h > 0 and (l_w /= ic.width or l_h /= ic.height) then
+					ic.width := l_w
+					ic.height := l_h
+					push (9, @ic.key, l_w, l_h, 0)
+				end
+			end
+		end
+
+	watched_sizes: HASH_TABLE [TUPLE [width, height: INTEGER], INTEGER]
+			-- The watched widgets' last reported sizes, by id (1y).
+		once ("OBJECT")
+			create Result.make (8)
 		end
 
 	widget_set_opacity (an_id: INTEGER; a_opacity: REAL_64)

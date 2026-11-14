@@ -56,6 +56,24 @@ feature -- Status
 			Result := backend.widget_y (id)
 		end
 
+feature -- Size reports (1y)
+
+	size_changed_actions: GUI_TARGET_ACTIONS [TUPLE [width, height: INTEGER]]
+			-- Run after layout when this widget's size changed, with the new width and height
+			-- in logical pixels: never during the toolkit's layout, and once per change with
+			-- the final size. The first agent asks the backend to watch the size.
+		do
+			if attached size_changed_actions_made as al_a then
+				Result := al_a
+			else
+				create Result.make (agent watch_size)
+				size_changed_actions_made := Result
+			end
+		end
+
+	reported_width, reported_height: INTEGER
+			-- The size the last report gave (0 before the first).
+
 feature -- Status setting
 
 	enable
@@ -794,6 +812,14 @@ feature {NONE} -- Pick and drop
 
 	drag_out_ended_actions_made: detachable like drag_out_ended_actions
 
+	size_changed_actions_made: detachable like size_changed_actions
+
+	watch_size
+			-- Ask the backend for this widget's size reports (1y).
+		do
+			backend.widget_watch_size (id, True)
+		end
+
 	tell_drop_target
 			-- Tell the backend everything this widget takes: pebbles, files, text.
 		do
@@ -1020,6 +1046,24 @@ feature {GUI_APPLICATION} -- Events
 	dispatch (a_type, a_a, a_b, a_c: INTEGER)
 			-- Handle a queued event for this widget.
 		do
+		end
+
+	is_new_size (a_width, a_height: INTEGER): BOOLEAN
+			-- Does a report of `a_width' by `a_height' differ from the last one?
+		do
+			Result := a_width /= reported_width or a_height /= reported_height
+		end
+
+	take_size_report (a_width, a_height: INTEGER)
+			-- 1y: the toolkit laid this widget out at `a_width' by `a_height'.
+		require
+			new: is_new_size (a_width, a_height)
+		do
+			reported_width := a_width
+			reported_height := a_height
+			if attached size_changed_actions_made as al_a then
+				al_a.call ([a_width, a_height])
+			end
 		end
 
 feature {NONE} -- Implementation

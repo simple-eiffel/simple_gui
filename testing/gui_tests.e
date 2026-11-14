@@ -3616,6 +3616,163 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_a_window_reports_its_size_after_layout
+			-- 1y-a: a watched window reports the size `width' and `height' answer, after layout,
+			-- and again when it changes; a repeat of the same size is not reported.
+		local
+			l_window: GUI_WINDOW
+			l_told: ARRAYED_LIST [TUPLE [w, h: INTEGER]]
+		do
+			create l_window.make ("Sizes", 400, 300)
+			l_window.set_content (create {GUI_LABEL}.make ("Sized"))
+			l_told := sizes_told (l_window)
+			l_window.show
+			settle_window
+			wait_for_report (l_window, 400)
+			assert ("told after layout: " + reports_text (l_told), not l_told.is_empty and then (near (l_told.last.w, 400) and near (l_told.last.h, 300)))
+			assert ("as the window answers", l_told.last.w = l_window.width and l_told.last.h = l_window.height)
+			assert ("kept", l_window.reported_width = l_told.last.w and l_window.reported_height = l_told.last.h)
+			l_window.set_size (520, 340)
+			wait_for_report (l_window, 520)
+			assert ("told the change: " + reports_text (l_told), near (l_told.last.w, 520) and near (l_told.last.h, 340))
+			assert ("no repeats: " + reports_text (l_told), across 2 |..| l_told.count as i all
+				l_told.i_th (i).w /= l_told.i_th (i - 1).w or l_told.i_th (i).h /= l_told.i_th (i - 1).h end)
+			l_window.close
+		end
+
+	test_breakpoints_apply_and_the_last_match_wins
+			-- 1y-a: of a window's breakpoints the last added that matches is applied; the one
+			-- before is unapplied first; with none matching, none is.
+		local
+			l_window: GUI_WINDOW
+			l_row: GUI_STACK
+			l_narrow, l_tiny: GUI_BREAKPOINT
+		do
+			create l_window.make ("Breakpoints", 600, 300)
+			create l_row.make_horizontal
+			l_row.extend (create {GUI_LABEL}.make ("One"))
+			l_row.extend (create {GUI_LABEL}.make ("Two"))
+			l_window.set_content (l_row)
+			create l_narrow.make_width_at_most (500)
+			l_narrow.applied_actions.extend (agent l_row.set_vertical (True))
+			l_narrow.unapplied_actions.extend (agent l_row.set_vertical (False))
+			create l_tiny.make_width_at_most (350)
+			l_window.add_breakpoint (l_narrow)
+			l_window.add_breakpoint (l_tiny)
+			l_window.show
+			settle_window
+			wait_for_report (l_window, 600)
+			assert ("wide: none", l_window.active_breakpoint = Void and not l_row.is_vertical)
+			l_window.set_size (450, 300)
+			wait_for_report (l_window, 450)
+			assert ("narrow applied", l_window.active_breakpoint = l_narrow and l_narrow.is_applied and l_row.is_vertical)
+			l_window.set_size (300, 300)
+			wait_for_report (l_window, 300)
+			assert ("the last match wins", l_window.active_breakpoint = l_tiny and l_tiny.is_applied and not l_narrow.is_applied)
+			assert ("narrow unapplied once", l_narrow.applied_actions.fire_count = 1 and l_narrow.unapplied_actions.fire_count = 1)
+			assert ("so the row is back", not l_row.is_vertical)
+			l_window.set_size (600, 300)
+			wait_for_report (l_window, 600)
+			assert ("wide again: none", l_window.active_breakpoint = Void and not l_tiny.is_applied)
+			assert ("each told once", l_tiny.applied_actions.fire_count = 1 and l_tiny.unapplied_actions.fire_count = 1)
+			l_window.close
+		end
+
+	test_a_window_opens_in_its_breakpoint_layout
+			-- 1y-a: a window's breakpoints are chosen at its opening size before it is shown, so
+			-- it never draws the other layout first.
+		local
+			l_window: GUI_WINDOW
+			l_row: GUI_STACK
+			l_narrow: GUI_BREAKPOINT
+		do
+			create l_window.make ("Opening", 320, 300)
+			create l_row.make_horizontal
+			l_row.extend (create {GUI_LABEL}.make ("One"))
+			l_row.extend (create {GUI_LABEL}.make ("Two"))
+			l_window.set_content (l_row)
+			create l_narrow.make_width_at_most (400)
+			l_narrow.applied_actions.extend (agent l_row.set_vertical (True))
+			l_narrow.unapplied_actions.extend (agent l_row.set_vertical (False))
+			l_window.add_breakpoint (l_narrow)
+			l_window.show
+			assert ("chosen before the first frame", l_narrow.is_applied and l_row.is_vertical)
+			settle_window
+			wait_for_report (l_window, 320)
+			assert ("and kept: no switch back", l_narrow.applied_actions.fire_count = 1 and l_narrow.unapplied_actions.fire_count = 0)
+			l_window.close
+		end
+
+	test_a_row_turns_into_a_column_with_its_children
+			-- 1y-a: `set_vertical' lays a row's children out down a column and back, in order.
+		local
+			l_window: GUI_WINDOW
+			l_row: GUI_STACK
+			l_one, l_two, l_three: GUI_LABEL
+		do
+			create l_window.make ("Turning", 500, 400)
+			create l_row.make_horizontal
+			create l_one.make ("One")
+			create l_two.make ("Two")
+			create l_three.make ("Three")
+			l_row.extend (l_one)
+			l_row.extend (l_two)
+			l_row.extend (l_three)
+			l_window.set_content (l_row)
+			l_window.show
+			settle_window
+			assert ("across: " + l_one.x.out + " " + l_two.x.out + " " + l_three.x.out,
+				l_one.x < l_two.x and l_two.x < l_three.x and near (l_one.y, l_two.y))
+			l_row.set_vertical (True)
+			let_layout_settle
+			assert ("down: " + l_one.y.out + " " + l_two.y.out + " " + l_three.y.out,
+				l_one.y < l_two.y and l_two.y < l_three.y and near (l_one.x, l_two.x))
+			assert ("kept", l_row.count = 3 and l_row.children.first = l_one and l_row.children.last = l_three)
+			l_row.set_vertical (False)
+			let_layout_settle
+			assert ("across again", l_one.x < l_two.x and l_two.x < l_three.x and near (l_one.y, l_two.y))
+			l_window.close
+		end
+
+	test_breakpoints_do_not_flip
+			-- 1y-a: a container breaking on the width its parent gives it switches once at the
+			-- edge and stays switched while the size holds.
+		local
+			l_window: GUI_WINDOW
+			l_outer, l_row: GUI_STACK
+			l_break: GUI_BREAKPOINT
+			l_wide, i: INTEGER
+		do
+			create l_window.make ("Edge", 500, 300)
+			create l_outer.make_vertical
+			create l_row.make_horizontal
+			l_row.extend (create {GUI_LABEL}.make ("Left"))
+			l_row.extend (create {GUI_LABEL}.make ("Right"))
+			l_outer.extend (l_row)
+			l_window.set_content (l_outer)
+			l_row.size_changed_actions.extend (agent (a_w, a_h: INTEGER) do end)
+			l_window.show
+			settle_window
+			wait_for_report (l_row, 1)
+			l_wide := l_row.reported_width
+			assert ("the row has a width: " + l_wide.out, l_wide > 100)
+			create l_break.make_width_at_most (l_wide - 20)
+			l_break.applied_actions.extend (agent l_row.set_vertical (True))
+			l_break.unapplied_actions.extend (agent l_row.set_vertical (False))
+			l_row.add_breakpoint (l_break)
+			assert ("not yet", not l_break.is_applied)
+			l_window.set_size (460, 300)
+			wait_for_report (l_window, 460)
+			from i := 1 until i > 20 loop
+				driver.wait (10)
+				i := i + 1
+			end
+			assert ("switched: " + l_row.reported_width.out + " of " + l_wide.out, l_break.is_applied and l_row.is_vertical)
+			assert ("once: " + l_break.applied_actions.fire_count.out + " " + l_break.unapplied_actions.fire_count.out,
+				l_break.applied_actions.fire_count = 1 and l_break.unapplied_actions.fire_count = 0)
+			l_window.close
+		end
+
 	test_the_clock_ticks_only_while_something_runs
 			-- 1x: a real clock asks for frame ticks when an animation starts and stops them
 			-- when the last one ends, so an idle program never wakes at the display rate.
@@ -8192,6 +8349,39 @@ feature {NONE} -- Fixtures
 			"C inline use %"simple_gui_memory.h%""
 		alias
 			"return (EIF_INTEGER_64) sg_process_bytes();"
+		end
+
+	sizes_told (a_widget: GUI_WIDGET): ARRAYED_LIST [TUPLE [w, h: INTEGER]]
+			-- A list that gathers every size `a_widget' reports (1y).
+		do
+			create Result.make (4)
+			a_widget.size_changed_actions.extend (agent (a_told: ARRAYED_LIST [TUPLE [w, h: INTEGER]]; a_w, a_h: INTEGER)
+				do a_told.extend ([a_w, a_h]) end (Result, ?, ?))
+		end
+
+	reports_text (a_told: ARRAYED_LIST [TUPLE [w, h: INTEGER]]): STRING
+			-- The reports, for a failure's message.
+		do
+			create Result.make (40)
+			across a_told as ic loop
+				Result.append (ic.w.out + "x" + ic.h.out + " ")
+			end
+		end
+
+	wait_for_report (a_widget: GUI_WIDGET; a_width: INTEGER)
+			-- Turn the loop until `a_widget' has reported a width near `a_width' (1: any width), or
+			-- about a second has passed.
+		local
+			i: INTEGER
+		do
+			from
+				i := 1
+			until
+				(if a_width = 1 then a_widget.reported_width > 0 else near (a_widget.reported_width, a_width) end) or i > 100
+			loop
+				driver.wait (10)
+				i := i + 1
+			end
 		end
 
 	let_layout_settle

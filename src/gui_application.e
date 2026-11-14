@@ -583,6 +583,12 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 					if attached widgets.item (l_id) as al_source then
 						al_source.end_drag_out (l_a)
 					end
+				when 9 then
+						-- 1y: a size report (a canvas's own resize too); a repeat of the last is dropped
+					if attached widgets.item (l_id) as al_widget and then al_widget.is_new_size (l_a, l_b) then
+						al_widget.take_size_report (l_a, l_b)
+						al_widget.dispatch (l_type, l_a, l_b, l_c)
+					end
 				when 62 then
 						-- 1x: a frame tick, `l_a' milliseconds after the last one
 					animation_clock.frame_tick (l_a.max (0))

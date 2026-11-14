@@ -134,6 +134,21 @@ feature -- Element change
 			set: spacing = a_spacing
 		end
 
+	set_vertical (a_on: BOOLEAN)
+			-- 1y: make this a column (`a_on') or a row, its children kept in order with their
+			-- stretching and alignment, as a breakpoint turns a row into a column.
+		require
+			gui_thread: is_gui_thread
+		do
+			if a_on /= is_vertical then
+				is_vertical := a_on
+				backend.stack_set_vertical (id, a_on)
+			end
+		ensure
+			set: is_vertical = a_on
+			children_kept: children ~ old children.twin
+		end
+
 invariant
 	spacing_non_negative: spacing >= 0
 	alignment_valid: is_valid_alignment (alignment)

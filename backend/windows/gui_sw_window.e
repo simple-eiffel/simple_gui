@@ -639,6 +639,7 @@ feature {NONE} -- Rendering (1x)
 			Precursor
 			frames_rendered := frames_rendered + 1
 			backend.note_frame_drawn
+			backend.report_watched_sizes
 		end
 
 invariant
