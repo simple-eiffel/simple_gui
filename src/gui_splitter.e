@@ -108,7 +108,49 @@ feature -- Element change
 			gui_thread: is_gui_thread
 			non_negative: a_position >= 0
 		do
+			stop_position_animation
 			backend.splitter_set_position (id, a_position)
+		ensure
+			not_moving: not is_moving_smoothly
+		end
+
+	animate_position (a_position: INTEGER)
+			-- Move the divider to `a_position' (as `set_position') over the application's
+			-- `animation_duration' (at once while motion is reduced). One still on its way is cut
+			-- short; the user's own drag stops this one where it is (1x-e). No event;
+			-- `position_finished_actions' when it arrives.
+		require
+			gui_thread: is_gui_thread
+			non_negative: a_position >= 0
+		local
+			l_animation: GUI_ANIMATION
+		do
+			stop_position_animation
+			position_target := a_position
+			position_from := position
+			position_left := position_from
+			create l_animation.make (0.0, 1.0, application.animation_duration, {GUI_EASING}.Ease_in_out,
+				agent show_position_frame)
+			l_animation.finished_actions.extend (agent position_animation_ended (l_animation))
+			position_animation := l_animation
+			application.animation_clock.run (l_animation)
+		ensure
+			target_set: position_target = a_position
+		end
+
+	is_moving_smoothly: BOOLEAN
+			-- Is a divider animation on its way?
+		do
+			Result := attached position_animation as al_a and then not al_a.is_finished
+		end
+
+	position_target: INTEGER
+			-- Where the divider animation started last is going (the panes may stop it short).
+
+	position_finished_actions: GUI_ACTIONS [TUPLE]
+			-- Run when a divider animation arrives; never for one stopped.
+		attribute
+			create Result.make
 		end
 
 feature -- Collapsing panes (1r-c)
@@ -148,6 +190,7 @@ feature -- Collapsing panes (1r-c)
 			collapsible: is_collapsible (a_pane)
 			other_open: not is_pane_collapsed (3 - a_pane)
 		do
+			stop_position_animation
 			backend.splitter_collapse (id, a_pane, True)
 		ensure
 			collapsed: is_pane_collapsed (a_pane)
@@ -159,6 +202,7 @@ feature -- Collapsing panes (1r-c)
 			gui_thread: is_gui_thread
 			pane: a_pane = 1 or a_pane = 2
 		do
+			stop_position_animation
 			backend.splitter_collapse (id, a_pane, False)
 		ensure
 			opened: not is_pane_collapsed (a_pane)
@@ -193,6 +237,48 @@ feature {NONE} -- Collapsing
 		end
 
 	collapse_actions_made: detachable like collapse_actions
+
+feature {NONE} -- Divider animation (1x-e)
+
+	position_animation: detachable GUI_ANIMATION
+			-- The divider animation started last.
+
+	position_from: INTEGER
+			-- Where it started.
+
+	position_left: INTEGER
+			-- Where its last frame left the divider, as the toolkit then answered.
+
+	show_position_frame (a_fraction: REAL_64)
+			-- One frame: `a_fraction' of the way, unless the user has moved the divider since
+			-- the last frame, which stops it there (as 1x-d's smooth scroll).
+		do
+			if position /= position_left then
+				stop_position_animation
+			else
+				backend.splitter_set_position (id,
+					(position_from + (position_target - position_from) * a_fraction.max (0.0).min (1.0)).rounded.max (0))
+				position_left := position
+			end
+		end
+
+	position_animation_ended (a_animation: GUI_ANIMATION)
+			-- `a_animation' has arrived.
+		do
+			if position_animation = a_animation then
+				position_finished_actions.call (Void)
+			end
+		end
+
+	stop_position_animation
+			-- Stop a divider animation on its way where it is, without its finished actions.
+		do
+			if attached position_animation as al_a and then not al_a.is_finished then
+				application.animation_clock.cancel (al_a)
+			end
+		ensure
+			stopped: not is_moving_smoothly
+		end
 
 invariant
 	at_most_two: count <= 2

@@ -217,6 +217,26 @@ feature -- Windows and containers
 			end
 		end
 
+	window_set_size (a_window, a_width, a_height: INTEGER)
+			-- 1x-e: the client area, in logical pixels as `window' takes them: the main window
+			-- through its own handle, a second window through its panel's, the size it opens at
+			-- before it is shown. simple_widgets takes the new size from the WM_SIZE that follows.
+		do
+			if attached floats.item (a_window) as al_f then
+				if al_f.is_open then
+					c_set_client_size (al_f.panel.handle, device (a_width), device (a_height))
+				end
+			elseif attached windows.item (a_window) as al_w then
+				if al_w.hwnd /= default_pointer and al_w.is_window_open then
+					if not fullscreen_saves.has (a_window) then
+						c_set_client_size (al_w.hwnd, device (a_width), device (a_height))
+					end
+				elseif not al_w.is_window_open then
+					al_w.set_opening_size (device (a_width), device (a_height))
+				end
+			end
+		end
+
 	window_set_title (a_window: INTEGER; a_title: POINTER)
 		do
 			if attached windows.item (a_window) as al_w then
@@ -4955,6 +4975,9 @@ feature -- Canvas
 		do
 			if attached widget (an_id) as al_w then
 				Result := logical (al_w, (al_w.width - 2.0 * margin_of (an_id)).max (0.0))
+			elseif attached floats.item (an_id) as al_f then
+					-- a second window: its own client area (1x-e)
+				Result := (al_f.client_width / dpi).rounded
 			elseif attached windows.item (an_id) as al_win then
 				Result := (al_win.win_w / dpi).rounded
 			end
@@ -4964,6 +4987,8 @@ feature -- Canvas
 		do
 			if attached widget (an_id) as al_w then
 				Result := logical (al_w, (al_w.height - 2.0 * margin_of (an_id)).max (0.0))
+			elseif attached floats.item (an_id) as al_f then
+				Result := (al_f.client_height / dpi).rounded
 			elseif attached windows.item (an_id) as al_win then
 				Result := (al_win.win_h / dpi).rounded
 			end
@@ -5165,10 +5190,13 @@ feature -- Appearance
 		end
 
 	reveals_in_place (an_id: INTEGER): BOOLEAN
-			-- Do slides and grow reveal widget `an_id' - in a stack, or as a window's content?
-			-- Elsewhere they fade, as on GTK and AppKit (PROD and MACMINI, 2026-11-12).
+			-- Do slides and grow reveal widget `an_id' - in a stack, as a window's content, or
+			-- as an expander's (1x-e)? Elsewhere they fade, as on GTK and AppKit (PROD and
+			-- MACMINI, 2026-11-12).
 		do
 			if window_content.has_item (an_id) then
+				Result := True
+			elseif attached widget (an_id) as al_w and then attached {GUI_SW_EXPANDER} al_w.parent then
 				Result := True
 			elseif attached widget (an_id) as al_w and then attached al_w.parent as al_p then
 				Result := stack_ids.has (items.index_of (al_p, 1))
@@ -6399,6 +6427,25 @@ feature {NONE} -- Timers, shortcuts and full screen (1m)
 			-- Each full-screen window: its style and rectangle before, to go back to.
 		once ("OBJECT")
 			create Result.make (2)
+		end
+
+	c_set_client_size (a_hwnd: POINTER; a_width, a_height: INTEGER)
+			-- Make `a_hwnd''s client area `a_width' by `a_height' device pixels, its top left
+			-- kept; nothing while it is maximized or minimized (1x-e).
+		external
+			"C inline use <windows.h>"
+		alias
+			"[
+				HWND h = (HWND) $a_hwnd;
+				RECT r;
+				if (h && !IsZoomed(h) && !IsIconic(h)) {
+					r.left = 0; r.top = 0; r.right = $a_width; r.bottom = $a_height;
+					AdjustWindowRectEx(&r, (DWORD) GetWindowLongPtrW(h, GWL_STYLE), FALSE,
+						(DWORD) GetWindowLongPtrW(h, GWL_EXSTYLE));
+					SetWindowPos(h, 0, 0, 0, r.right - r.left, r.bottom - r.top,
+						SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+				}
+			]"
 		end
 
 	c_enter_fullscreen (a_hwnd, a_save: POINTER)

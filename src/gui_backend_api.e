@@ -107,6 +107,16 @@ feature -- Windows and containers
 		deferred
 		end
 
+	window_set_size (a_window, a_width, a_height: INTEGER)
+			-- 1x-e: make window `a_window' `a_width' by `a_height' logical pixels, meaning what
+			-- `window''s width and height mean, at once, its top left kept, as far as the desktop
+			-- allows; nothing while it is full screen or maximized. Before it is shown, the size
+			-- it opens at. `width' and `height' of the window read it back (GTK's a frame later).
+		require
+			sized: a_width > 0 and a_height > 0
+		deferred
+		end
+
 	window_set_title (a_window: INTEGER; a_title: POINTER)
 		deferred
 		end
