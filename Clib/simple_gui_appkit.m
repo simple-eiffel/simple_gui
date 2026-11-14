@@ -12753,7 +12753,9 @@ void sga_scroller_watch(int a_id, int a_on)
 {
 	if (a_id <= 0 || a_id >= SGA_MAX) return;
 	s_scroller_watched[a_id] = a_on ? 1 : 0;
-	if (a_on) sga_scroller_measure(a_id, &s_scroller_told[a_id][0], &s_scroller_told[a_id][1], &s_scroller_told[a_id][2]);
+	/* The first turn after a watch begins reports once, laid out: shared code looks at the end
+	   then, though nothing may change after (a scroll area whose content already fits). */
+	if (a_on) { s_scroller_told[a_id][0] = -1; s_scroller_told[a_id][1] = -1; s_scroller_told[a_id][2] = -1; }
 	if (a_on && !s_scroller_observer) {
 		s_scroller_observer = CFRunLoopObserverCreate(NULL, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, 2100003, sga_scrollers_check, NULL);
 		CFRunLoopAddObserver(CFRunLoopGetMain(), s_scroller_observer, kCFRunLoopCommonModes);
