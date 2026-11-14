@@ -3219,9 +3219,13 @@ static int sg_width(int id) { return sg_w[id] ? gtk_widget_get_width(sg_w[id]) :
 static int sg_height(int id) { return sg_w[id] ? gtk_widget_get_height(sg_w[id]) : 0; }
 /* ---------- 1y: size reports. After each frame a window paints (its frame clock's after-paint,
    so after layout), every watched widget's size is read, and event 9 (a, b = width, height, as
-   sg_width and sg_height answer) is pushed for each one that changed and has a size. */
+   sg_width and sg_height answer) is pushed for each one that changed and has a size. The list
+   is shared by every C file this header is compiled into (weak), as sg_opacity_of is. */
 #define SG_WATCH_MAX 256
-static int sg_watch_id[SG_WATCH_MAX], sg_watch_w[SG_WATCH_MAX], sg_watch_h[SG_WATCH_MAX], sg_watch_n = 0;
+__attribute__((weak)) int sg_watch_id[SG_WATCH_MAX] = {0};
+__attribute__((weak)) int sg_watch_w[SG_WATCH_MAX] = {0};
+__attribute__((weak)) int sg_watch_h[SG_WATCH_MAX] = {0};
+__attribute__((weak)) int sg_watch_n = 0;
 static void sg_watch_report(GdkFrameClock *fc, gpointer d) {
     int i;
     (void) fc; (void) d;
