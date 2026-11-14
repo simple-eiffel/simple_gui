@@ -949,6 +949,10 @@ int sga_stack(int a_vertical, int a_spacing)
 	BOOL vertical;
 	BOOL natural;   /* a button: keeps its natural size on the main axis too */
 	BOOL stretches; /* takes a share of the stack's spare room */
+	/* 1y-a: kept so a stack can turn between a row and a column in place */
+	NSLayoutConstraint *across;   /* the slot fills the stack across */
+	NSLayoutConstraint *share;    /* a stretching slot's tie to the first stretching one */
+	NSLayoutPriority hug[2];      /* the child's own hugging before the stack set it: horizontal, vertical */
 	/* 1x-b: a slide or grow in progress. The placing constraints are off; the child is held at
 	   its full size (reveal_w x reveal_h) and pinned to the edge it slides from, while the slot
 	   takes `reveal_fraction' of that size and clips. */
@@ -1052,6 +1056,8 @@ void sga_stack_extend(int a_stack, int a_child, int a_stretch)
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
 	[l_slot addSubview:v];
 	sga_keep_natural_size(v, a_stretch);
+	l_slot->hug[0] = [v contentHuggingPriorityForOrientation:NSLayoutConstraintOrientationHorizontal];
+	l_slot->hug[1] = [v contentHuggingPriorityForOrientation:NSLayoutConstraintOrientationVertical];
 	[v setContentHuggingPriority:a_stretch ? 1 : NSLayoutPriorityDefaultHigh forOrientation:l_main];
 	[l_slot setContentHuggingPriority:a_stretch ? 1 : NSLayoutPriorityDefaultHigh forOrientation:l_main];
 	l_slot->natural = [v isKindOfClass:[NSButton class]];
@@ -1067,14 +1073,69 @@ void sga_stack_extend(int a_stack, int a_child, int a_stretch)
 					: [l_slot.widthAnchor constraintEqualToAnchor:l_other.widthAnchor];
 				[l_share setPriority:2];
 				[l_share setActive:YES];
+				l_slot->share = l_share;
 				break;
 			}
 	/* The slot fills the stack across, inside its edge insets (1w: a style's padding). */
 	NSEdgeInsets l_insets = [s edgeInsets];
-	if (l_vertical) [[l_slot.widthAnchor constraintEqualToAnchor:s.widthAnchor constant:-(l_insets.left + l_insets.right)] setActive:YES];
-	else [[l_slot.heightAnchor constraintEqualToAnchor:s.heightAnchor constant:-(l_insets.top + l_insets.bottom)] setActive:YES];
+	l_slot->across = l_vertical ? [l_slot.widthAnchor constraintEqualToAnchor:s.widthAnchor constant:-(l_insets.left + l_insets.right)]
+		: [l_slot.heightAnchor constraintEqualToAnchor:s.heightAnchor constant:-(l_insets.top + l_insets.bottom)];
+	[l_slot->across setActive:YES];
 	sga_place(l_slot, s_stack_alignment[a_stack] > 0 ? s_stack_alignment[a_stack] - 1 : sga_default_alignment(v));
 	if (a_stretch) [sga_end_margin(a_stack) setPriority:NSLayoutPriorityRequired - 1];
+}
+
+static void sga_slot_reveal_end(SGASlot *a_slot);
+
+/* 1y-a: turn stack `a_stack' into a column (`a_on') or a row. Each child stays in its slot, in
+   the window (so the keyboard focus stays where it is), with its stretching and alignment; only
+   what depends on the axis is redone: the slot's placing, its fill across, a stretching slot's
+   share, the hugging along the stack, and which margin is the weak end one. */
+void sga_stack_set_vertical(int a_stack, int a_on)
+{
+	NSStackView *s = s_inner[a_stack];
+	if (![s isKindOfClass:[NSStackView class]]) return;
+	BOOL l_vertical = a_on != 0;
+	if (([s orientation] == NSUserInterfaceLayoutOrientationVertical) == l_vertical) return;
+	NSLayoutConstraint *l_old_end = sga_end_margin(a_stack);
+	NSLayoutPriority l_end_priority = [l_old_end priority];
+	[l_old_end setPriority:[s_margins[a_stack][0] priority]];
+	NSLayoutConstraintOrientation l_main = l_vertical ? NSLayoutConstraintOrientationVertical : NSLayoutConstraintOrientationHorizontal;
+	NSLayoutConstraintOrientation l_cross = l_vertical ? NSLayoutConstraintOrientationHorizontal : NSLayoutConstraintOrientationVertical;
+	[s setOrientation:l_vertical ? NSUserInterfaceLayoutOrientationVertical : NSUserInterfaceLayoutOrientationHorizontal];
+	[s setAlignment:l_vertical ? NSLayoutAttributeLeading : NSLayoutAttributeTop];
+	[s setHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:l_cross];
+	[s setHuggingPriority:NSLayoutPriorityDefaultLow - 1 forOrientation:l_main];
+	[sga_end_margin(a_stack) setPriority:l_end_priority];
+	NSEdgeInsets l_insets = [s edgeInsets];
+	SGASlot *l_first_stretching = nil;
+	for (NSView *l_view in [s arrangedSubviews]) {
+		if (![l_view isKindOfClass:[SGASlot class]]) continue;
+		SGASlot *l_slot = (SGASlot *)l_view;
+		NSView *c = l_slot->child;
+		sga_slot_reveal_end(l_slot);
+		l_slot->vertical = l_vertical;
+		[l_slot->across setActive:NO];
+		l_slot->across = l_vertical ? [l_slot.widthAnchor constraintEqualToAnchor:s.widthAnchor constant:-(l_insets.left + l_insets.right)]
+			: [l_slot.heightAnchor constraintEqualToAnchor:s.heightAnchor constant:-(l_insets.top + l_insets.bottom)];
+		[l_slot->across setActive:YES];
+		[l_slot->share setActive:NO];
+		l_slot->share = nil;
+		if (l_slot->stretches) {
+			if (l_first_stretching) {
+				l_slot->share = l_vertical ? [l_slot.heightAnchor constraintEqualToAnchor:l_first_stretching.heightAnchor]
+					: [l_slot.widthAnchor constraintEqualToAnchor:l_first_stretching.widthAnchor];
+				[l_slot->share setPriority:2];
+				[l_slot->share setActive:YES];
+			} else l_first_stretching = l_slot;
+		}
+		[c setContentHuggingPriority:l_slot->hug[l_vertical ? 0 : 1] forOrientation:l_cross];
+		[c setContentHuggingPriority:l_slot->stretches ? 1 : NSLayoutPriorityDefaultHigh forOrientation:l_main];
+		[l_slot setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:l_cross];
+		[l_slot setContentHuggingPriority:l_slot->stretches ? 1 : NSLayoutPriorityDefaultHigh forOrientation:l_main];
+		sga_place(l_slot, l_slot->alignment);
+	}
+	[s setNeedsLayout:YES];
 }
 
 /* 1w: a stack's edge insets changed (a style's padding): its slots fill it across inside them. */
@@ -6486,8 +6547,19 @@ static NSView *sga_measured_view(int a_id)
 	return s_margins[a_id][0] ? (NSView *)s_inner[a_id] : (NSView *)o;
 }
 
+/* 1y-a: the space a container is given, less its margins, as GTK allocates it. The inner stack
+   or grid itself can be narrower: its end margin holds only weakly until a child stretches. */
+static NSSize sga_given_size(int a_id)
+{
+	NSView *w = sga_get(a_id);
+	NSSize s = [w bounds].size;
+	return NSMakeSize(s.width - [s_margins[a_id][0] constant] - [s_margins[a_id][2] constant],
+		s.height - [s_margins[a_id][1] constant] - [s_margins[a_id][3] constant]);
+}
+
 int sga_width(int a_id)
 {
+	if (s_margins[a_id][0] && [sga_get(a_id) isKindOfClass:[NSView class]]) return MAX(0, (int)sga_given_size(a_id).width);
 	NSView *v = sga_measured_view(a_id);
 	int w = (int)[v bounds].size.width;
 	return w > 0 ? w : ([v isKindOfClass:[SGACanvas class]] ? (int)((SGACanvas *)v)->wanted.width : 0);
@@ -6495,9 +6567,45 @@ int sga_width(int a_id)
 
 int sga_height(int a_id)
 {
+	if (s_margins[a_id][0] && [sga_get(a_id) isKindOfClass:[NSView class]]) return MAX(0, (int)sga_given_size(a_id).height);
 	NSView *v = sga_measured_view(a_id);
 	int h = (int)[v bounds].size.height;
 	return h > 0 ? h : ([v isKindOfClass:[SGACanvas class]] ? (int)((SGACanvas *)v)->wanted.height : 0);
+}
+
+/* 1y-a: size reports. A watched widget or window is measured once a turn of the run loop,
+   after layout: the observer runs after Core Animation's commit (order 2000000), where AppKit
+   lays out and draws, both before the loop sleeps and when a poll of it ends. It reports
+   event 9 (a, b = `sga_width', `sga_height') only when the size changed and both are above 0.
+   A canvas already reports its own resizes (event 9), so it is left to those. */
+static char s_size_watched[SGA_MAX];
+static int s_size_told[SGA_MAX][2];
+static CFRunLoopObserverRef s_size_observer;
+
+static void sga_sizes_check(CFRunLoopObserverRef a_observer, CFRunLoopActivity a_activity, void *a_info)
+{
+	(void)a_observer; (void)a_activity; (void)a_info;
+	for (int i = 1; i <= s_count && i < SGA_MAX; i++) {
+		if (!s_size_watched[i]) continue;
+		if (!s_objects[i]) { s_size_watched[i] = 0; continue; }
+		int w = sga_width(i), h = sga_height(i);
+		if (w > 0 && h > 0 && (w != s_size_told[i][0] || h != s_size_told[i][1])) {
+			s_size_told[i][0] = w; s_size_told[i][1] = h;
+			sga_push(9, i, w, h, 0);
+		}
+	}
+}
+
+void sga_widget_watch_size(int a_id, int a_on)
+{
+	if (a_id <= 0 || a_id >= SGA_MAX) return;
+	if ([sga_get(a_id) isKindOfClass:[SGACanvas class]]) return;
+	s_size_watched[a_id] = a_on ? 1 : 0;
+	s_size_told[a_id][0] = 0; s_size_told[a_id][1] = 0;
+	if (a_on && !s_size_observer) {
+		s_size_observer = CFRunLoopObserverCreate(NULL, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, 2100001, sga_sizes_check, NULL);
+		CFRunLoopAddObserver(CFRunLoopGetMain(), s_size_observer, kCFRunLoopCommonModes);
+	}
 }
 
 /* ------------------------------------------------------------------ menus */

@@ -134,6 +134,11 @@ feature -- Windows and containers
 		alias "sga_stack_set_spacing($a_stack, $a_spacing);"
 		end
 
+	stack_set_vertical (a_stack: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_stack_set_vertical($a_stack, $a_on ? 1 : 0);"
+		end
+
 	grid: INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_grid();"
@@ -2310,6 +2315,11 @@ feature -- Canvas
 	height (an_id: INTEGER): INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_height($an_id);"
+		end
+
+	widget_watch_size (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_widget_watch_size($an_id, $a_on ? 1 : 0);"
 		end
 
 feature -- Menus
