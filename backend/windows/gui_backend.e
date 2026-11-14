@@ -1894,9 +1894,16 @@ feature -- Controls
 			end
 		end
 
-	pointer_watch, focus_watch: HASH_TABLE [BOOLEAN, INTEGER]
-			-- The watched widgets, by id, and whether the pointer (the focus) is inside each as
-			-- last reported (1y-c).
+	pointer_watch: HASH_TABLE [BOOLEAN, INTEGER]
+			-- The widgets whose pointer is watched, by id, and whether it is inside each as last
+			-- reported (1y-c).
+		once ("OBJECT")
+			create Result.make (4)
+		end
+
+	focus_watch: HASH_TABLE [BOOLEAN, INTEGER]
+			-- The widgets whose focus is watched, by id, and whether it is inside each as last
+			-- reported (1y-c).
 		once ("OBJECT")
 			create Result.make (4)
 		end
@@ -1937,7 +1944,8 @@ feature -- Controls
 	overlay_set_offset (an_overlay, a_child, a_dx, a_dy: INTEGER)
 		do
 			if attached {SW_OVERLAY} widget (an_overlay) as al_o and then attached widget (a_child) as al_c and then al_o.is_layer (al_c) then
-				al_o.set_layer_offset (al_c, scaled (a_dx), scaled (a_dy))
+					-- an offset may be negative: not `scaled', which keeps 0 for those
+				al_o.set_layer_offset (al_c, a_dx * dpi, a_dy * dpi)
 				changed
 			end
 		end
