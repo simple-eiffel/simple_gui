@@ -4564,11 +4564,22 @@ static int sg_expander(const char *title) {
 }
 static void sg_expander_set_expanded(int id, int on) { sg_quiet++; gtk_expander_set_expanded(GTK_EXPANDER(sg_w[id]), on ? TRUE : FALSE); sg_quiet--; }
 static int sg_expander_is_expanded(int id) { return gtk_expander_get_expanded(GTK_EXPANDER(sg_w[id])) ? 1 : 0; }
+/* A scroll area's content keeps its natural size: the viewport GTK puts around it sizes it by
+   the natural width and height, not the minimum (an ellipsizing label's minimum is a few
+   characters, so a long one was cut to the visible width instead of scrolling across). */
+static void sg_viewport_natural(GtkScrolledWindow *sw) {
+    GtkWidget *c = gtk_scrolled_window_get_child(sw);
+    if (c && GTK_IS_VIEWPORT(c)) {
+        gtk_scrollable_set_hscroll_policy(GTK_SCROLLABLE(c), GTK_SCROLL_NATURAL);
+        gtk_scrollable_set_vscroll_policy(GTK_SCROLLABLE(c), GTK_SCROLL_NATURAL);
+    }
+}
 static void sg_single_set_content(int id, int child) {
     switch (sg_kind[id]) {
     case 27:   /* a new content has no sticky children (1y-e) */
         g_object_set_data(G_OBJECT(sg_w[id]), "sg-sticky-host", NULL);
         gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sg_w[id]), sg_w[child]);
+        sg_viewport_natural(GTK_SCROLLED_WINDOW(sg_w[id]));
         break;
     case 30: gtk_frame_set_child(GTK_FRAME(sg_w[id]), sg_w[child]); break;
     case 31: gtk_expander_set_child(GTK_EXPANDER(sg_w[id]), sg_w[child]); break;
@@ -5147,6 +5158,7 @@ static SgStickyHost *sg_sticky_host_ensure(int id, GtkWidget *box) {
     gtk_widget_set_parent(box, GTK_WIDGET(h));
     g_object_unref(box);
     gtk_scrolled_window_set_child(sw, GTK_WIDGET(h));
+    sg_viewport_natural(sw);
     g_signal_connect_object(h->adj, "value-changed", G_CALLBACK(gtk_widget_queue_allocate), h, G_CONNECT_SWAPPED);
     g_object_set_data(G_OBJECT(sg_w[id]), "sg-sticky-host", h);
     return h;
