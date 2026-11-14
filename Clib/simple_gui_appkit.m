@@ -12786,6 +12786,19 @@ void sga_widget_watch_focus(int a_id, int a_on)
 }
 @end
 
+/* Constraints place alignment rectangles, and a label's frame overhangs its own by a little on
+   each side; an overlay pins frames, so the base's frame is the overlay's and a child's is its
+   holder's (nothing of it clipped). */
+static NSArray<NSLayoutConstraint *> *sga_pin_frame(NSView *v, NSView *a_to, NSLayoutPriority a_far)
+{
+	NSEdgeInsets i = [v alignmentRectInsets];
+	NSLayoutConstraint *l_right = [v.rightAnchor constraintEqualToAnchor:a_to.rightAnchor constant:-i.right];
+	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:a_to.bottomAnchor constant:-i.bottom];
+	[l_right setPriority:a_far]; [l_bottom setPriority:a_far];
+	return @[[v.leftAnchor constraintEqualToAnchor:a_to.leftAnchor constant:i.left],
+		[v.topAnchor constraintEqualToAnchor:a_to.topAnchor constant:i.top], l_right, l_bottom];
+}
+
 int sga_overlay(void)
 {
 	SGAOverlay *o = [[SGAOverlay alloc] init];
@@ -12801,9 +12814,7 @@ void sga_overlay_set_base(int an_overlay, int a_child)
 	for (NSView *l_old in [[o subviews] copy]) if (![l_old isKindOfClass:[SGAOverlayHolder class]]) [l_old removeFromSuperview];
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
 	[o addSubview:v positioned:NSWindowBelow relativeTo:nil];
-	[NSLayoutConstraint activateConstraints:@[[v.leadingAnchor constraintEqualToAnchor:o.leadingAnchor],
-		[v.trailingAnchor constraintEqualToAnchor:o.trailingAnchor], [v.topAnchor constraintEqualToAnchor:o.topAnchor],
-		[v.bottomAnchor constraintEqualToAnchor:o.bottomAnchor]]];
+	[NSLayoutConstraint activateConstraints:sga_pin_frame(v, o, NSLayoutPriorityRequired)];
 }
 
 void sga_overlay_extend(int an_overlay, int a_child, int a_place)
@@ -12816,11 +12827,7 @@ void sga_overlay_extend(int an_overlay, int a_child, int a_place)
 	h->child = v; h->place = a_place;
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
 	[h addSubview:v];
-	NSLayoutConstraint *l_trailing = [v.trailingAnchor constraintEqualToAnchor:h.trailingAnchor];
-	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:h.bottomAnchor];
-	[l_trailing setPriority:NSLayoutPriorityRequired - 1]; [l_bottom setPriority:NSLayoutPriorityRequired - 1];
-	[NSLayoutConstraint activateConstraints:@[[v.leadingAnchor constraintEqualToAnchor:h.leadingAnchor],
-		[v.topAnchor constraintEqualToAnchor:h.topAnchor], l_trailing, l_bottom]];
+	[NSLayoutConstraint activateConstraints:sga_pin_frame(v, h, NSLayoutPriorityRequired - 1)];
 	[o addSubview:h];
 	[o place:h];
 }
