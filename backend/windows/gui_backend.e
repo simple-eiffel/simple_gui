@@ -1816,10 +1816,12 @@ feature -- Controls
 
 	test_scroller_scroll_to (an_id, a_y: INTEGER)
 			-- As the user: a scroll area's bar is dragged there; a list, table, tree or grid view
-			-- is wheeled toward it a notch at a time until it gets there or stops moving.
+			-- is wheeled toward it, a notch at a time while it is far, then by the part of a notch
+			-- a precision touchpad sends (1y-e: a step finer than a notch's three rows), until it
+			-- gets there or stops moving.
 		local
-			l_target, l_before: REAL_64
-			l_notches: INTEGER
+			l_target, l_before, l_per_unit: REAL_64
+			l_notches, l_delta: INTEGER
 			l_moved: BOOLEAN
 		do
 			if attached {SW_SCROLL_AREA} widget (an_id) as al_s then
@@ -1830,10 +1832,18 @@ feature -- Controls
 					or (sw_scroll_y (al_w) - l_target).abs < 1.0
 				loop
 					l_before := sw_scroll_y (al_w)
-					if l_before < l_target then
-						l_moved := al_w.handle_wheel (-120) and sw_scroll_y (al_w) /= l_before and sw_scroll_y (al_w) < l_target
+					if l_per_unit > 0.0 then
+							-- as much of a notch as covers what is left (positive scrolls up)
+						l_delta := ((l_before - l_target) / l_per_unit).rounded.max (-120).min (120)
+					elseif l_before < l_target then
+						l_delta := -120
 					else
-						l_moved := al_w.handle_wheel (120) and sw_scroll_y (al_w) /= l_before and sw_scroll_y (al_w) > l_target
+						l_delta := 120
+					end
+					l_moved := l_delta /= 0 and then al_w.handle_wheel (l_delta) and then sw_scroll_y (al_w) /= l_before
+					if l_moved then
+							-- what one unit of wheel travels: the most seen (an end cuts a move short)
+						l_per_unit := l_per_unit.max ((sw_scroll_y (al_w) - l_before).abs / l_delta.abs)
 					end
 					l_notches := l_notches + 1
 				end
@@ -1902,6 +1912,119 @@ feature -- Controls
 			elseif attached {SW_GRID_VIEW} a_w as al then
 				Result := al.scroll_y
 			end
+		end
+
+	list_set_sections (an_id: INTEGER; a_starts, a_titles: POINTER)
+			-- 1y-e: SW_TEXT_LIST takes the whole layout; it draws each header in a slot of its own
+			-- above its section's first shown row, and the top section's header pinned.
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l
+				and then attached sections_in (from_c (a_starts), from_c (a_titles)) as al_s
+			then
+				al_l.set_sections (al_s.starts, al_s.titles)
+				changed
+			end
+		end
+
+	table_set_sections (an_id: INTEGER; a_starts, a_titles: POINTER)
+			-- 1y-e: as `list_set_sections', for SW_DATA_GRID (pinned below its column titles).
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (an_id) as al_g
+				and then attached sections_in (from_c (a_starts), from_c (a_titles)) as al_s
+			then
+				al_g.set_sections (al_s.starts, al_s.titles)
+				changed
+			end
+		end
+
+	sections_in (a_starts, a_titles: STRING_32): detachable TUPLE [starts: ARRAYED_LIST [INTEGER]; titles: ARRAYED_LIST [STRING_32]]
+			-- 1y-e: the first rows (comma-joined) and the titles (joined by U+001F) as lists, a
+			-- title for each start; Void unless the starts are positive and ascending.
+		local
+			l_numbers: ARRAY [INTEGER]
+			l_titles: LIST [STRING_32]
+			l_starts: ARRAYED_LIST [INTEGER]
+			l_named: ARRAYED_LIST [STRING_32]
+			i: INTEGER
+			l_ok: BOOLEAN
+		do
+			l_numbers := numbers_in (a_starts)
+			l_titles := a_titles.split ('%/31/')
+			create l_starts.make (l_numbers.count)
+			create l_named.make (l_numbers.count)
+			l_ok := True
+			from i := l_numbers.lower until i > l_numbers.upper loop
+				l_ok := l_ok and l_numbers [i] >= 1 and (i = l_numbers.lower or else l_numbers [i - 1] < l_numbers [i])
+				l_starts.extend (l_numbers [i])
+				if l_named.count < l_titles.count then
+					l_named.extend (l_titles [l_named.count + 1])
+				else
+					l_named.extend ({STRING_32} "")
+				end
+				i := i + 1
+			end
+			if l_ok then
+				Result := [l_starts, l_named]
+			end
+		ensure
+			a_title_each: attached Result as al_r implies al_r.starts.count = al_r.titles.count
+		end
+
+	list_set_sticky_headers (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_TEXT_LIST} widget (an_id) as al_l then
+				al_l.set_sticky_headers (a_on)
+				changed
+			end
+		end
+
+	table_set_sticky_headers (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (an_id) as al_g then
+				al_g.set_sticky_headers (a_on)
+				changed
+			end
+		end
+
+	scroll_area_set_sticky (an_id, a_child: INTEGER; a_on: BOOLEAN)
+			-- 1y-e: SW_SCROLL_AREA draws the sticky child at the top of the viewport, over what
+			-- scrolls under it, while its part of the content column is in view.
+		do
+			if attached {SW_SCROLL_AREA} widget (an_id) as al_s and then attached widget (a_child) as al_c
+				and then al_s.is_in_content_column (al_c)
+			then
+				al_s.set_sticky (al_c, a_on)
+				changed
+			end
+		end
+
+	test_pinned_header (an_id: INTEGER): INTEGER
+			-- What the list, grid or scroll area draws pinned now: a section number, or the sticky
+			-- child's id.
+		do
+			if attached {SW_LIST} widget (an_id) as al_l then
+				Result := al_l.pinned_section
+			elseif attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (an_id) as al_g then
+				Result := al_g.pinned_section
+			elseif attached {SW_SCROLL_AREA} widget (an_id) as al_s and then attached al_s.pinned_sticky as al_w then
+				Result := id_of_widget (al_w)
+			end
+		end
+
+	test_pinned_header_y (an_id: INTEGER): INTEGER
+			-- Where it is drawn, from the top of the rows (below a grid's column titles) or the
+			-- viewport, in logical pixels.
+		local
+			l_offset: REAL_64
+		do
+			if attached {SW_LIST} widget (an_id) as al_l then
+				l_offset := al_l.pinned_offset
+			elseif attached {SW_DATA_GRID [ARRAY [STRING_32]]} widget (an_id) as al_g then
+				l_offset := al_g.pinned_offset
+			elseif attached {SW_SCROLL_AREA} widget (an_id) as al_s then
+				l_offset := al_s.pinned_offset
+			end
+			Result := (l_offset / dpi).rounded.min (0)
 		end
 
 	widget_watch_pointer (an_id: INTEGER; a_on: BOOLEAN)
