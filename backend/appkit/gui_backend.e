@@ -2104,6 +2104,18 @@ feature -- Common widget state
 		alias "sga_info_bar_set_closable($an_id, $a_on ? 1 : 0);"
 		end
 
+	window_set_cover (a_window, a_child: INTEGER)
+			-- 1z-a: pinned to every edge of the content view, under the toasts.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_window_set_cover ($a_window, $a_child);"
+		end
+
+	window_focused (a_window: INTEGER): INTEGER
+			-- 1z-a: the first responder (a field for its field editor), or its nearest ancestor of ours.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_window_focused ($a_window);"
+		end
+
 	window_show_toast (a_window: INTEGER; a_message, an_action_text: POINTER; a_toast_id: INTEGER)
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "sga_window_show_toast($a_window, (const char *) $a_message, (const char *) $an_action_text, $a_toast_id);"
@@ -2405,6 +2417,24 @@ feature -- Canvas
 	scroller_extent (an_id: INTEGER): INTEGER
 		external "C inline use %"simple_gui_appkit.h%""
 		alias "return sga_scroller_extent($an_id);"
+		end
+
+	test_canvas_pixel (an_id, a_x, a_y: INTEGER): NATURAL_32
+			-- 1z-a: what canvas `an_id' shows at logical (x, y), 0xAARRGGBB (straight alpha); 0 outside.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_NATURAL_32) sga_test_canvas_pixel ($an_id, $a_x, $a_y);"
+		end
+
+	test_canvas_wheel (an_id, an_amount, a_modifiers, a_x, a_y: INTEGER)
+			-- 1z-a: a user's wheel over canvas `an_id' (1/120 of a notch), through the toolkit.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_canvas_wheel ($an_id, $an_amount, $a_modifiers, $a_x, $a_y);"
+		end
+
+	test_canvas_magnify (an_id, a_factor_1000, a_x, a_y: INTEGER)
+			-- 1z-a: a user's pinch by `a_factor_1000' / 1000 over canvas `an_id'.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_canvas_magnify ($an_id, $a_factor_1000, $a_x, $a_y);"
 		end
 
 	test_scroller_scroll_to (an_id, a_y: INTEGER)
