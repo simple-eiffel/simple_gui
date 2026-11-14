@@ -1442,7 +1442,8 @@ void sga_columns_set_minimum_width(int a_columns, int a_width) { SGAColumns *c =
 	NSSize b = [self bounds].size;
 	CGFloat w = b.width, h = ratio > 0 ? w / ratio : b.height;
 	if (h > b.height) { h = b.height; w = h * ratio; }
-	[content setFrame:NSMakeRect(round((b.width - w) / 2), round((b.height - h) / 2), round(w), round(h))];
+	/* the content's box (its alignment rect) is the largest centered rect at the ratio */
+	[content setFrame:[content frameForAlignmentRect:NSMakeRect(round((b.width - w) / 2), round((b.height - h) / 2), round(w), round(h))]];
 }
 - (void)tieTo:(double)a_ratio
 {
@@ -6875,11 +6876,23 @@ static NSSize sga_given_size(int a_id)
 		s.height - [s_margins[a_id][1] constant] - [s_margins[a_id][3] constant]);
 }
 
+/* The box the user sees (SIMPLE_GUI_SPEC, "Geometry: the box the user sees"): a control's alignment
+   rect, the box AppKit lays it out by and draws its bezel to, in the view's own coordinates. Its
+   frame is larger by the shadow and focus ring (a push button: frame 59 by 32, alignment rect 45 by
+   20). For a container or a canvas the two are the same. */
+static NSRect sga_box_in_view(NSView *v)
+{
+	NSRect b = [v bounds];
+	NSEdgeInsets i = [v alignmentRectInsets];
+	CGFloat l_top_off = [v isFlipped] ? i.top : i.bottom;
+	return NSMakeRect(NSMinX(b) + i.left, NSMinY(b) + l_top_off, MAX(0, NSWidth(b) - i.left - i.right), MAX(0, NSHeight(b) - i.top - i.bottom));
+}
+
 int sga_width(int a_id)
 {
 	if (s_margins[a_id][0] && [sga_get(a_id) isKindOfClass:[NSView class]]) return MAX(0, (int)sga_given_size(a_id).width);
 	NSView *v = sga_measured_view(a_id);
-	int w = (int)[v bounds].size.width;
+	int w = (int)lround(NSWidth(sga_box_in_view(v)));
 	return w > 0 ? w : ([v isKindOfClass:[SGACanvas class]] ? (int)((SGACanvas *)v)->wanted.width : 0);
 }
 
@@ -6887,7 +6900,7 @@ int sga_height(int a_id)
 {
 	if (s_margins[a_id][0] && [sga_get(a_id) isKindOfClass:[NSView class]]) return MAX(0, (int)sga_given_size(a_id).height);
 	NSView *v = sga_measured_view(a_id);
-	int h = (int)[v bounds].size.height;
+	int h = (int)lround(NSHeight(sga_box_in_view(v)));
 	return h > 0 ? h : ([v isKindOfClass:[SGACanvas class]] ? (int)((SGACanvas *)v)->wanted.height : 0);
 }
 
@@ -7396,7 +7409,7 @@ static NSRect sga_frame_in_window(int a_id)
 	NSView *l_content = [[v window] contentView];
 	if (!l_content) return NSZeroRect;
 	[l_content layoutSubtreeIfNeeded];
-	NSRect r = [v convertRect:[v bounds] toView:l_content];
+	NSRect r = [v convertRect:(s_margins[a_id][0] ? [v bounds] : sga_box_in_view(v)) toView:l_content];
 	if (![l_content isFlipped]) r.origin.y = [l_content bounds].size.height - NSMaxY(r);
 	return r;
 }
@@ -12904,22 +12917,26 @@ void sga_widget_watch_focus(int a_id, int a_on)
 	[NSLayoutConstraint deactivateConstraints:h->placing ?: @[]];
 	NSMutableArray *k = [NSMutableArray array];
 	CGFloat m = h->margin, x = h->dx, y = h->dy;
+	/* The holder wraps its child's whole frame (nothing of it clipped) and is placed so the child's
+	   box, its alignment rect, sits at the margins: the box the user sees (SIMPLE_GUI_SPEC,
+	   "Geometry"). `i' is how far the frame reaches past that box on each side. */
+	NSEdgeInsets i = h->child ? [h->child alignmentRectInsets] : NSEdgeInsetsZero;
 	if (h->place == 10) {
-		[k addObjectsFromArray:@[[h.leftAnchor constraintEqualToAnchor:self.leftAnchor constant:m + x],
-			[h.rightAnchor constraintEqualToAnchor:self.rightAnchor constant:-m + x],
-			[h.topAnchor constraintEqualToAnchor:self.topAnchor constant:m + y],
-			[h.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-m + y]]];
+		[k addObjectsFromArray:@[[h.leftAnchor constraintEqualToAnchor:self.leftAnchor constant:m + x - i.left],
+			[h.rightAnchor constraintEqualToAnchor:self.rightAnchor constant:-m + x + i.right],
+			[h.topAnchor constraintEqualToAnchor:self.topAnchor constant:m + y - i.top],
+			[h.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-m + y + i.bottom]]];
 	} else {
 		int l_column = (h->place - 1) % 3, l_row = (h->place - 1) / 3;
 		if (l_column != 1 && [self userInterfaceLayoutDirection] == NSUserInterfaceLayoutDirectionRightToLeft) l_column = 2 - l_column;
-		[k addObject:l_column == 0 ? [h.leftAnchor constraintEqualToAnchor:self.leftAnchor constant:m + x]
-			: l_column == 1 ? [h.centerXAnchor constraintEqualToAnchor:self.centerXAnchor constant:x]
-			: [h.rightAnchor constraintEqualToAnchor:self.rightAnchor constant:-m + x]];
-		[k addObject:l_row == 0 ? [h.topAnchor constraintEqualToAnchor:self.topAnchor constant:m + y]
-			: l_row == 1 ? [h.centerYAnchor constraintEqualToAnchor:self.centerYAnchor constant:y]
-			: [h.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-m + y]];
-		[k addObject:[h.widthAnchor constraintLessThanOrEqualToAnchor:self.widthAnchor constant:-2 * m]];
-		[k addObject:[h.heightAnchor constraintLessThanOrEqualToAnchor:self.heightAnchor constant:-2 * m]];
+		[k addObject:l_column == 0 ? [h.leftAnchor constraintEqualToAnchor:self.leftAnchor constant:m + x - i.left]
+			: l_column == 1 ? [h.centerXAnchor constraintEqualToAnchor:self.centerXAnchor constant:x + (i.right - i.left) / 2]
+			: [h.rightAnchor constraintEqualToAnchor:self.rightAnchor constant:-m + x + i.right]];
+		[k addObject:l_row == 0 ? [h.topAnchor constraintEqualToAnchor:self.topAnchor constant:m + y - i.top]
+			: l_row == 1 ? [h.centerYAnchor constraintEqualToAnchor:self.centerYAnchor constant:y + (i.bottom - i.top) / 2]
+			: [h.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-m + y + i.bottom]];
+		[k addObject:[h.widthAnchor constraintLessThanOrEqualToAnchor:self.widthAnchor constant:-2 * m + i.left + i.right]];
+		[k addObject:[h.heightAnchor constraintLessThanOrEqualToAnchor:self.heightAnchor constant:-2 * m + i.top + i.bottom]];
 		NSLayoutConstraint *l_w = [h.widthAnchor constraintEqualToConstant:0], *l_h = [h.heightAnchor constraintEqualToConstant:0];
 		[l_w setPriority:49]; [l_h setPriority:49];   /* hug the child's natural size */
 		[k addObjectsFromArray:@[l_w, l_h]];
@@ -12968,7 +12985,10 @@ void sga_overlay_set_base(int an_overlay, int a_child)
 	for (NSView *l_old in [[o subviews] copy]) if (![l_old isKindOfClass:[SGAOverlayHolder class]]) [l_old removeFromSuperview];
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
 	[o addSubview:v positioned:NSWindowBelow relativeTo:nil];
-	[NSLayoutConstraint activateConstraints:sga_pin_frame(v, o, NSLayoutPriorityRequired)];
+	/* the base's box fills the overlay (its anchors are its alignment rect; a label's few points
+	   of overhang fall outside the overlay's clip, where they draw nothing) */
+	[NSLayoutConstraint activateConstraints:@[[v.leftAnchor constraintEqualToAnchor:o.leftAnchor], [v.rightAnchor constraintEqualToAnchor:o.rightAnchor],
+		[v.topAnchor constraintEqualToAnchor:o.topAnchor], [v.bottomAnchor constraintEqualToAnchor:o.bottomAnchor]]];
 }
 
 void sga_overlay_extend(int an_overlay, int a_child, int a_place)
