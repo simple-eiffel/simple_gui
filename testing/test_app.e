@@ -157,6 +157,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_tabs_switch_with_a_transition_when_the_user_chooses, "tabs_switch_with_a_transition_when_the_user_chooses")
 				run_test (agent t.test_a_wizard_slides_between_steps, "a_wizard_slides_between_steps")
 				run_test (agent t.test_a_scroll_area_scrolls_smoothly_on_the_manual_clock, "a_scroll_area_scrolls_smoothly_on_the_manual_clock")
+				run_test (agent t.test_a_label_in_a_scroll_area_keeps_its_natural_width, "a_label_in_a_scroll_area_keeps_its_natural_width")
 				run_test (agent t.test_the_users_scroll_stops_a_smooth_scroll, "the_users_scroll_stops_a_smooth_scroll")
 				run_test (agent t.test_a_smooth_scroll_clamps_and_jumps_with_reduced_motion, "a_smooth_scroll_clamps_and_jumps_with_reduced_motion")
 				run_test (agent t.test_a_window_resizes_smoothly_on_the_manual_clock, "a_window_resizes_smoothly_on_the_manual_clock")
