@@ -2387,6 +2387,51 @@ feature -- Canvas
 		alias "sga_widget_watch_size($an_id, $a_on ? 1 : 0);"
 		end
 
+	widget_watch_pointer (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_widget_watch_pointer($an_id, $a_on ? 1 : 0);"
+		end
+
+	widget_watch_focus (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_widget_watch_focus($an_id, $a_on ? 1 : 0);"
+		end
+
+	test_pointer_crossing (an_id: INTEGER; a_inside: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_pointer_crossing($an_id, $a_inside ? 1 : 0);"
+		end
+
+	overlay: INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_overlay();"
+		end
+
+	overlay_set_base (an_overlay, a_child: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_overlay_set_base($an_overlay, $a_child);"
+		end
+
+	overlay_extend (an_overlay, a_child, a_place: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_overlay_extend($an_overlay, $a_child, $a_place);"
+		end
+
+	overlay_set_place (an_overlay, a_child, a_place, a_margin: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_overlay_set_place($an_overlay, $a_child, $a_place, $a_margin);"
+		end
+
+	overlay_set_offset (an_overlay, a_child, a_dx, a_dy: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_overlay_set_offset($an_overlay, $a_child, $a_dx, $a_dy);"
+		end
+
+	overlay_set_passes_input (an_overlay, a_child: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_overlay_set_passes_input($an_overlay, $a_child, $a_on ? 1 : 0);"
+		end
+
 feature -- Menus
 
 	menu_new (a_title: POINTER): POINTER

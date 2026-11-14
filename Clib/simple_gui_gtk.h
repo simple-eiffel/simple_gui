@@ -5567,6 +5567,7 @@ __attribute__((weak)) int sg_opacity_set[SG_MAX] = {0};
 __attribute__((weak)) double sg_fade_of[SG_MAX] = {0};
 __attribute__((weak)) int sg_fade_set[SG_MAX] = {0};
 __attribute__((weak)) int sg_blocked[SG_MAX] = {0};
+__attribute__((weak)) int sg_passes[SG_MAX] = {0};      /* 1y-c: an overlay child letting the pointer through */
 
 typedef struct { GtkWidget parent_instance; GtkWidget *child; int effect; double fraction; int in_place; } SgReveal;
 /* Tests, 1x-b: the last size each widget was seen allocated (its slot), for the moments GTK
@@ -5584,7 +5585,123 @@ static void sg_apply_alpha(int id) {
     double a = sg_opacity_value(id) * sg_fade_value(id);
     if (!w) return;
     gtk_widget_set_opacity(w, a);
-    gtk_widget_set_can_target(w, (sg_opacity_value(id) > 0.0 && !sg_blocked[id]) ? TRUE : FALSE);
+    gtk_widget_set_can_target(w, (sg_opacity_value(id) > 0.0 && !sg_blocked[id] && !sg_passes[id]) ? TRUE : FALSE);
+}
+
+/* ---------- 1y-c: pointer and focus inside (events 63 and 64), and the overlay (kind 62).
+   A watched widget gets a motion controller and a focus controller of its own. GTK emits their
+   enter and leave when the pointer (the focus) comes into the widget's subtree or leaves it all,
+   so moving onto a child is no leave. The overlay is GTK's GtkOverlay; each child's place,
+   margin and offset are kept on the child and turned into its rectangle by get-child-position. */
+static void sg_on_pointer_enter(GtkEventControllerMotion *c, double x, double y, gpointer d) {
+    (void) c; (void) x; (void) y;
+    sg_push(63, GPOINTER_TO_INT(d), 1, 0);
+}
+static void sg_on_pointer_leave(GtkEventControllerMotion *c, gpointer d) {
+    (void) c;
+    sg_push(63, GPOINTER_TO_INT(d), 0, 0);
+}
+static void sg_widget_watch_pointer(int id, int on) {
+    GtkWidget *w = sg_w[id];
+    GtkEventController *m;
+    if (!w) return;
+    m = (GtkEventController *) g_object_get_data(G_OBJECT(w), "sg-pointer-watch");
+    if (on && !m) {
+        m = gtk_event_controller_motion_new();
+        g_signal_connect(m, "enter", G_CALLBACK(sg_on_pointer_enter), GINT_TO_POINTER(id));
+        g_signal_connect(m, "leave", G_CALLBACK(sg_on_pointer_leave), GINT_TO_POINTER(id));
+        gtk_widget_add_controller(w, m);
+        g_object_set_data(G_OBJECT(w), "sg-pointer-watch", m);
+    } else if (!on && m) {
+        gtk_widget_remove_controller(w, m);
+        g_object_set_data(G_OBJECT(w), "sg-pointer-watch", NULL);
+    }
+}
+static void sg_on_focus_enter(GtkEventControllerFocus *c, gpointer d) {
+    (void) c;
+    sg_push(64, GPOINTER_TO_INT(d), 1, 0);
+}
+static void sg_on_focus_leave(GtkEventControllerFocus *c, gpointer d) {
+    (void) c;
+    sg_push(64, GPOINTER_TO_INT(d), 0, 0);
+}
+static void sg_widget_watch_focus(int id, int on) {
+    GtkWidget *w = sg_w[id];
+    GtkEventController *f;
+    if (!w) return;
+    f = (GtkEventController *) g_object_get_data(G_OBJECT(w), "sg-focus-watch");
+    if (on && !f) {
+        f = gtk_event_controller_focus_new();
+        g_signal_connect(f, "enter", G_CALLBACK(sg_on_focus_enter), GINT_TO_POINTER(id));
+        g_signal_connect(f, "leave", G_CALLBACK(sg_on_focus_leave), GINT_TO_POINTER(id));
+        gtk_widget_add_controller(w, f);
+        g_object_set_data(G_OBJECT(w), "sg-focus-watch", f);
+    } else if (!on && f) {
+        gtk_widget_remove_controller(w, f);
+        g_object_set_data(G_OBJECT(w), "sg-focus-watch", NULL);
+    }
+}
+/* Tests: the pointer came over widget `id' (inside) or left it, as GTK would report it. */
+static void sg_test_pointer_crossing(int id, int inside) { sg_push(63, id, inside ? 1 : 0, 0); }
+
+/* An overlay child's rectangle: its natural size, never more than the overlay less twice the
+   margin; at its place (1 to 9 in reading order, leading and trailing mirrored under
+   right-to-left; 10 fills the base inset by the margin); then moved by its offset. */
+static gboolean sg_overlay_child_position(GtkOverlay *o, GtkWidget *ch, GdkRectangle *a, gpointer d) {
+    int place = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(ch), "sg-ov-place"));
+    int m = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(ch), "sg-ov-margin"));
+    int dx = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(ch), "sg-ov-dx"));
+    int dy = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(ch), "sg-ov-dy"));
+    int W = gtk_widget_get_width(GTK_WIDGET(o)), H = gtk_widget_get_height(GTK_WIDGET(o));
+    int wmin, wnat, hmin, hnat, w, h, col, row;
+    (void) d;
+    if (!place) return FALSE;
+    if (place == 10) {
+        a->x = m; a->y = m;
+        a->width = W - 2 * m > 0 ? W - 2 * m : 0;
+        a->height = H - 2 * m > 0 ? H - 2 * m : 0;
+    } else {
+        gtk_widget_measure(ch, GTK_ORIENTATION_HORIZONTAL, -1, &wmin, &wnat, NULL, NULL);
+        w = wnat < W - 2 * m ? wnat : W - 2 * m;
+        if (w < wmin) w = wmin;
+        gtk_widget_measure(ch, GTK_ORIENTATION_VERTICAL, w, &hmin, &hnat, NULL, NULL);
+        h = hnat < H - 2 * m ? hnat : H - 2 * m;
+        if (h < hmin) h = hmin;
+        col = (place - 1) % 3; row = (place - 1) / 3;
+        if (gtk_widget_get_direction(GTK_WIDGET(o)) == GTK_TEXT_DIR_RTL) col = 2 - col;
+        a->x = col == 0 ? m : col == 1 ? (W - w) / 2 : W - w - m;
+        a->y = row == 0 ? m : row == 1 ? (H - h) / 2 : H - h - m;
+        a->width = w; a->height = h;
+    }
+    a->x += dx; a->y += dy;
+    return TRUE;
+}
+static int sg_overlay(void) {
+    GtkWidget *o = gtk_overlay_new();
+    g_signal_connect(o, "get-child-position", G_CALLBACK(sg_overlay_child_position), NULL);
+    return sg_reg(o, 62);
+}
+static void sg_overlay_set_base(int o, int child) { gtk_overlay_set_child(GTK_OVERLAY(sg_w[o]), sg_w[child]); }
+static void sg_overlay_extend(int o, int child, int place) {
+    GtkWidget *ch = sg_w[child];
+    g_object_set_data(G_OBJECT(ch), "sg-ov-place", GINT_TO_POINTER(place));
+    gtk_overlay_add_overlay(GTK_OVERLAY(sg_w[o]), ch);
+    gtk_overlay_set_clip_overlay(GTK_OVERLAY(sg_w[o]), ch, TRUE);
+}
+static void sg_overlay_set_place(int o, int child, int place, int margin) {
+    g_object_set_data(G_OBJECT(sg_w[child]), "sg-ov-place", GINT_TO_POINTER(place));
+    g_object_set_data(G_OBJECT(sg_w[child]), "sg-ov-margin", GINT_TO_POINTER(margin));
+    gtk_widget_queue_allocate(sg_w[o]);
+}
+static void sg_overlay_set_offset(int o, int child, int dx, int dy) {
+    g_object_set_data(G_OBJECT(sg_w[child]), "sg-ov-dx", GINT_TO_POINTER(dx));
+    g_object_set_data(G_OBJECT(sg_w[child]), "sg-ov-dy", GINT_TO_POINTER(dy));
+    gtk_widget_queue_allocate(sg_w[o]);
+}
+static void sg_overlay_set_passes_input(int o, int child, int on) {
+    (void) o;
+    sg_passes[child] = on ? 1 : 0;
+    sg_apply_alpha(child);
 }
 
 static int sg_reveal_shares_width(int e) { return e == 4 || e == 5 || e == 6; }

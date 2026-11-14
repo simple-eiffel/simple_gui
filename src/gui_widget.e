@@ -74,6 +74,62 @@ feature -- Size reports (1y)
 	reported_width, reported_height: INTEGER
 			-- The size the last report gave (0 before the first).
 
+feature -- Pointer and focus inside (1y-c)
+
+	pointer_enter_actions: GUI_TARGET_ACTIONS [TUPLE]
+			-- Run when the pointer comes over this widget, children included: moving from it onto
+			-- a child of its is not a leave. The first agent asks the backend to watch.
+		do
+			if attached pointer_enter_actions_made as al_a then
+				Result := al_a
+			else
+				create Result.make (agent watch_pointer)
+				pointer_enter_actions_made := Result
+			end
+		end
+
+	pointer_leave_actions: GUI_TARGET_ACTIONS [TUPLE]
+			-- Run when the pointer leaves this widget and all its children.
+		do
+			if attached pointer_leave_actions_made as al_a then
+				Result := al_a
+			else
+				create Result.make (agent watch_pointer)
+				pointer_leave_actions_made := Result
+			end
+		end
+
+	is_pointer_inside: BOOLEAN
+			-- Is the pointer over this widget or one of its children, as last reported? (Watched
+			-- widgets only.)
+
+	focus_enter_actions: GUI_TARGET_ACTIONS [TUPLE]
+			-- Run when the keyboard focus comes to this widget or one of its children from
+			-- outside it. The first agent asks the backend to watch.
+		do
+			if attached focus_enter_actions_made as al_a then
+				Result := al_a
+			else
+				create Result.make (agent watch_focus)
+				focus_enter_actions_made := Result
+			end
+		end
+
+	focus_leave_actions: GUI_TARGET_ACTIONS [TUPLE]
+			-- Run when the keyboard focus leaves this widget and all its children.
+		do
+			if attached focus_leave_actions_made as al_a then
+				Result := al_a
+			else
+				create Result.make (agent watch_focus)
+				focus_leave_actions_made := Result
+			end
+		end
+
+	has_focus_within: BOOLEAN
+			-- Is the keyboard focus on this widget or one of its children, as last reported?
+			-- (Watched widgets only.)
+
 feature -- Status setting
 
 	enable
@@ -814,6 +870,31 @@ feature {NONE} -- Pick and drop
 
 	size_changed_actions_made: detachable like size_changed_actions
 
+	pointer_enter_actions_made, pointer_leave_actions_made: detachable like pointer_enter_actions
+
+	focus_enter_actions_made, focus_leave_actions_made: detachable like focus_enter_actions
+
+	is_pointer_watched, is_focus_watched: BOOLEAN
+			-- Has the backend been asked to watch the pointer or the focus here (1y-c)?
+
+	watch_pointer
+			-- Ask the backend for this widget's pointer reports, once.
+		do
+			if not is_pointer_watched then
+				is_pointer_watched := True
+				backend.widget_watch_pointer (id, True)
+			end
+		end
+
+	watch_focus
+			-- Ask the backend for this widget's focus reports, once.
+		do
+			if not is_focus_watched then
+				is_focus_watched := True
+				backend.widget_watch_focus (id, True)
+			end
+		end
+
 	watch_size
 			-- Ask the backend for this widget's size reports (1y).
 		do
@@ -1052,6 +1133,40 @@ feature {GUI_APPLICATION} -- Events
 			-- Does a report of `a_width' by `a_height' differ from the last one?
 		do
 			Result := a_width /= reported_width or a_height /= reported_height
+		end
+
+	take_pointer_report (a_inside: BOOLEAN)
+			-- 1y-c: the pointer came over this widget (`a_inside') or left it.
+		do
+			if a_inside /= is_pointer_inside then
+				is_pointer_inside := a_inside
+				if a_inside then
+					if attached pointer_enter_actions_made as al_a then
+						al_a.call (Void)
+					end
+				elseif attached pointer_leave_actions_made as al_a then
+					al_a.call (Void)
+				end
+			end
+		ensure
+			kept: is_pointer_inside = a_inside
+		end
+
+	take_focus_report (a_within: BOOLEAN)
+			-- 1y-c: the keyboard focus came inside this widget (`a_within') or left it.
+		do
+			if a_within /= has_focus_within then
+				has_focus_within := a_within
+				if a_within then
+					if attached focus_enter_actions_made as al_a then
+						al_a.call (Void)
+					end
+				elseif attached focus_leave_actions_made as al_a then
+					al_a.call (Void)
+				end
+			end
+		ensure
+			kept: has_focus_within = a_within
 		end
 
 	take_size_report (a_width, a_height: INTEGER)

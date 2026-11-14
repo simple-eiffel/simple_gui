@@ -214,6 +214,24 @@ feature -- User actions
 			set: a_combo.text.same_string (a_combo.i_th (i))
 		end
 
+	pointer_enter (a_widget: GUI_WIDGET)
+			-- 1y-c: the pointer comes over `a_widget', as the toolkit reports it (watched widgets).
+		require
+			has_application: has_application
+		do
+			backend.test_pointer_crossing (a_widget.id, True)
+			settle
+		end
+
+	pointer_leave (a_widget: GUI_WIDGET)
+			-- 1y-c: the pointer leaves `a_widget', as the toolkit reports it (watched widgets).
+		require
+			has_application: has_application
+		do
+			backend.test_pointer_crossing (a_widget.id, False)
+			settle
+		end
+
 	toggle_expander (an_expander: GUI_EXPANDER)
 			-- Click the expander's title as a user would (fires toggled).
 		require

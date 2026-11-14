@@ -589,6 +589,16 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 						al_widget.take_size_report (l_a, l_b)
 						al_widget.dispatch (l_type, l_a, l_b, l_c)
 					end
+				when 63 then
+						-- 1y-c: the pointer came over a watched widget (a = 1) or left it
+					if attached widgets.item (l_id) as al_widget then
+						al_widget.take_pointer_report (l_a = 1)
+					end
+				when 64 then
+						-- 1y-c: the focus came inside a watched widget (a = 1) or left it
+					if attached widgets.item (l_id) as al_widget then
+						al_widget.take_focus_report (l_a = 1)
+					end
 				when 62 then
 						-- 1x: a frame tick, `l_a' milliseconds after the last one
 					animation_clock.frame_tick (l_a.max (0))

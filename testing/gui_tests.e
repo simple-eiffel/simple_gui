@@ -3900,6 +3900,184 @@ feature -- The remaining controls (1j)
 			l_window.close
 		end
 
+	test_the_pointer_and_the_focus_come_and_go
+			-- 1y-c: a watched container hears the pointer come and go once each, and the focus
+			-- come inside when a child of its takes it and leave when another widget does.
+		local
+			l_window: GUI_WINDOW
+			l_column, l_row: GUI_STACK
+			l_outside, l_inside: GUI_TEXT_FIELD
+		do
+				-- text fields: they take the focus on every platform (Windows' drawn buttons do not yet)
+			create l_window.make ("Inside", 400, 200)
+			create l_column.make_vertical
+			create l_row.make_horizontal
+			create l_outside.make
+			create l_inside.make
+			l_row.extend (l_inside)
+			l_column.extend (l_outside)
+			l_column.extend (l_row)
+			l_window.set_content (l_column)
+			l_row.pointer_enter_actions.extend (agent do end)
+			l_row.pointer_leave_actions.extend (agent do end)
+			l_row.focus_enter_actions.extend (agent do end)
+			l_row.focus_leave_actions.extend (agent do end)
+			l_window.show
+			settle_window
+			l_outside.focus
+			let_layout_settle
+			assert ("not inside at first", not l_row.is_pointer_inside and not l_row.has_focus_within)
+			driver.pointer_enter (l_row)
+			assert ("the pointer came", l_row.is_pointer_inside and l_row.pointer_enter_actions.fire_count = 1)
+			driver.pointer_enter (l_row)
+			assert ("told once", l_row.pointer_enter_actions.fire_count = 1)
+			driver.pointer_leave (l_row)
+			assert ("and went", not l_row.is_pointer_inside and l_row.pointer_leave_actions.fire_count = 1)
+			l_inside.focus
+			let_layout_settle
+			assert ("the focus came inside", l_row.has_focus_within and l_row.focus_enter_actions.fire_count = 1)
+			l_outside.focus
+			let_layout_settle
+			assert ("and left", not l_row.has_focus_within and l_row.focus_leave_actions.fire_count = 1)
+			l_window.close
+		end
+
+	test_a_part_shows_on_hover_and_on_focus
+			-- 1y-c: a part revealed on hover is at opacity 0 until the pointer or the focus comes
+			-- inside its container, keeps its place meanwhile, and fades back out after.
+		local
+			l_window: GUI_WINDOW
+			l_column, l_row: GUI_STACK
+			l_other, l_note: GUI_TEXT_FIELD
+			l_title: GUI_LABEL
+			l_delete: GUI_BUTTON
+			l_place: INTEGER
+		do
+			create l_window.make ("Hover", 400, 200)
+			create l_column.make_vertical
+			create l_row.make_horizontal
+			create l_other.make
+			create l_title.make ("A row")
+			create l_note.make
+			create l_delete.make ("Delete")
+			l_row.extend (l_title)
+			l_row.extend (l_note)
+			l_row.extend (l_delete)
+			l_column.extend (l_other)
+			l_column.extend (l_row)
+			l_window.set_content (l_column)
+			l_window.show
+			settle_window
+			l_other.focus
+			let_layout_settle
+			app.set_reduces_motion_for_tests (True)
+			l_place := l_delete.x
+			l_row.set_reveals_on_hover (l_delete, True)
+			assert ("hidden at first", l_delete.opacity = 0.0 and l_row.reveals_on_hover (l_delete))
+			let_layout_settle
+			assert ("its place kept: " + l_place.out + " " + l_delete.x.out, near (l_delete.x, l_place))
+			driver.pointer_enter (l_row)
+			assert ("shown on hover", l_delete.opacity = 1.0)
+			driver.pointer_leave (l_row)
+			assert ("hidden after", l_delete.opacity = 0.0)
+			l_note.focus
+			let_layout_settle
+			assert ("shown when the focus comes inside the row", l_delete.opacity = 1.0)
+			l_other.focus
+			let_layout_settle
+			assert ("hidden when it leaves", l_delete.opacity = 0.0)
+			l_row.set_reveals_on_hover (l_delete, False)
+			assert ("always shown again", l_delete.opacity = 1.0 and not l_row.reveals_on_hover (l_delete))
+			app.clear_reduces_motion_for_tests
+			l_window.close
+		end
+
+	test_an_overlay_places_its_children
+			-- 1y-c: the base fills the overlay; children sit at their places and margins, a fill
+			-- covers the base, trailing mirrors under right-to-left, and an offset moves a child.
+		local
+			l_window: GUI_WINDOW
+			l_overlay: GUI_OVERLAY
+			l_base, l_badge, l_veil: GUI_LABEL
+			l_button: GUI_LABEL
+			ox, oy, ow, oh: INTEGER
+		do
+				-- labels: GTK reports a padded widget's content box, the others the whole widget
+				-- (a closeout item), so a label's box is the same everywhere
+			create l_window.make ("Overlay", 400, 300)
+			create l_overlay.make
+			create l_base.make ("The picture")
+			create l_badge.make ("3")
+			create l_veil.make ("Loading")
+			create l_button.make ("Add")
+			l_overlay.set_base (l_base)
+			l_overlay.extend_overlay (l_veil, l_overlay.Place_fill)
+			l_overlay.extend_overlay (l_badge, l_overlay.Place_top_trailing)
+			l_overlay.extend_overlay (l_button, l_overlay.Place_bottom_leading)
+			l_overlay.set_overlay_margin (l_button, 10)
+			l_overlay.set_overlay_passes_input (l_veil, True)
+			l_window.set_content (l_overlay)
+			l_window.show
+			settle_window
+			let_layout_settle
+			ox := l_overlay.x; oy := l_overlay.y; ow := l_overlay.width; oh := l_overlay.height
+			assert ("the base fills it: " + l_base.width.out + " of " + ow.out, near (l_base.width, ow) and near (l_base.height, oh))
+			assert ("the fill covers it", near (l_veil.width, ow) and near (l_veil.height, oh))
+			assert ("the badge at the top trailing corner: " + l_badge.x.out + "+" + l_badge.width.out + " vs " + (ox + ow).out,
+				near (l_badge.x + l_badge.width, ox + ow) and near (l_badge.y, oy))
+			assert ("the button at its margin: " + l_button.x.out + "," + l_button.y.out + " " + l_button.width.out + "x" + l_button.height.out + " in " + ox.out + "," + oy.out + " " + ow.out + "x" + oh.out,
+				near (l_button.x, ox + 10) and near (l_button.y + l_button.height, oy + oh - 10))
+			assert ("passes input", l_overlay.passes_input (l_veil) and not l_overlay.passes_input (l_button))
+			l_overlay.set_overlay_offset (l_button, 30, -20)
+			let_layout_settle
+			assert ("moved by its offset: " + l_button.x.out, near (l_button.x, ox + 40) and near (l_button.y + l_button.height, oy + oh - 30))
+			l_overlay.set_base_direction (Direction_right_to_left)
+			let_layout_settle
+			assert ("trailing is the left under right-to-left: " + l_badge.x.out, near (l_badge.x, ox))
+			l_window.close
+		end
+
+	test_an_overlay_offset_moves_on_the_manual_clock
+			-- 1y-c: an animated offset is half way at half time and arrives, saying so once; a
+			-- plain one stops it.
+		local
+			l_window: GUI_WINDOW
+			l_overlay: GUI_OVERLAY
+			l_button: GUI_BUTTON
+			l_start: INTEGER
+		do
+			create l_window.make ("Offset", 400, 300)
+			create l_overlay.make
+			create l_button.make ("Float")
+			l_overlay.set_base (create {GUI_LABEL}.make ("Base"))
+			l_overlay.extend_overlay (l_button, l_overlay.Place_top_leading)
+			l_window.set_content (l_overlay)
+			l_window.show
+			settle_window
+			app.set_reduces_motion_for_tests (False)
+			app.animation_clock.set_manual (True)
+			let_layout_settle
+			l_start := l_button.x
+			l_overlay.animate_overlay_offset (l_button, 80, 0)
+			assert ("on its way", l_overlay.is_offset_moving (l_button))
+			app.animation_clock.step (100)
+			let_layout_settle
+			assert ("half way at half time: " + l_overlay.offset_x_of (l_button).out + " " + (l_button.x - l_start).out,
+				near (l_overlay.offset_x_of (l_button), 40) and near (l_button.x - l_start, 40))
+			app.animation_clock.step (100)
+			let_layout_settle
+			assert ("there", l_overlay.offset_x_of (l_button) = 80 and near (l_button.x - l_start, 80))
+			assert ("said once", l_overlay.offset_finished_actions.fire_count = 1 and not l_overlay.is_offset_moving (l_button))
+			l_overlay.animate_overlay_offset (l_button, 0, 0)
+			app.animation_clock.step (50)
+			l_overlay.set_overlay_offset (l_button, 10, 10)
+			assert ("a plain offset stops it", not l_overlay.is_offset_moving (l_button))
+			app.animation_clock.step (200)
+			assert ("and stands", l_overlay.offset_x_of (l_button) = 10 and l_overlay.offset_finished_actions.fire_count = 1)
+			end_manual_clock
+			l_window.close
+		end
+
 	test_the_clock_ticks_only_while_something_runs
 			-- 1x: a real clock asks for frame ticks when an animation starts and stops them
 			-- when the last one ends, so an idle program never wakes at the display rate.

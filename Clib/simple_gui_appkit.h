@@ -142,6 +142,15 @@ int sga_scale_factor(int a_id);   /* sga_scale rounded up */
 int sga_width(int a_id);
 int sga_height(int a_id);
 void sga_widget_watch_size(int a_id, int a_on);
+void sga_widget_watch_pointer(int a_id, int a_on);
+void sga_widget_watch_focus(int a_id, int a_on);
+void sga_test_pointer_crossing(int a_id, int a_inside);
+int sga_overlay(void);
+void sga_overlay_set_base(int an_overlay, int a_child);
+void sga_overlay_extend(int an_overlay, int a_child, int a_place);
+void sga_overlay_set_place(int an_overlay, int a_child, int a_place, int a_margin);
+void sga_overlay_set_offset(int an_overlay, int a_child, int a_dx, int a_dy);
+void sga_overlay_set_passes_input(int an_overlay, int a_child, int a_on);
 
 /* Menus: roles 0 none, 1 about, 2 settings, 3 quit, 10 undo, 11 redo, 12 cut, 13 copy,
    14 paste, 15 select all. Shortcuts "primary+O", "primary+shift+Z". */

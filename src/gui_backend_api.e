@@ -254,6 +254,48 @@ feature -- Windows and containers
 		deferred
 		end
 
+	overlay: INTEGER
+			-- 1y-c: an empty overlay. Its size is its base's; overlay children never enlarge it and
+			-- are clipped to it; later ones lie above earlier ones.
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	overlay_set_base (an_overlay, a_child: INTEGER)
+			-- `a_child' under the others, giving the overlay its size.
+		deferred
+		end
+
+	overlay_extend (an_overlay, a_child, a_place: INTEGER)
+			-- Lay `a_child' over the others at `a_place' (1 to 9: top leading, top, top trailing,
+			-- leading, center, trailing, bottom leading, bottom, bottom trailing, leading and
+			-- trailing mirrored under right-to-left; 10: filling the base), no margin, no offset.
+			-- It takes its natural size, never more than the overlay less the margins.
+		require
+			known: a_place >= 1 and a_place <= 10
+		deferred
+		end
+
+	overlay_set_place (an_overlay, a_child, a_place, a_margin: INTEGER)
+			-- Put `a_child' at `a_place', `a_margin' logical pixels in from the edges.
+		require
+			known: a_place >= 1 and a_place <= 10
+			non_negative: a_margin >= 0
+		deferred
+		end
+
+	overlay_set_offset (an_overlay, a_child, a_dx, a_dy: INTEGER)
+			-- Move `a_child' `a_dx' right and `a_dy' down from its place, in logical pixels (the
+			-- direction is the screen's: `a_dx' is not mirrored under right-to-left).
+		deferred
+		end
+
+	overlay_set_passes_input (an_overlay, a_child: INTEGER; a_on: BOOLEAN)
+			-- Let the pointer through `a_child' to what lies below (`a_on'), or not.
+		deferred
+		end
+
 	grid: INTEGER
 		deferred
 		ensure
@@ -2085,6 +2127,25 @@ feature -- Common widget state
 			-- and `height' answer) for widget or window `an_id' after the toolkit's layout
 			-- whenever its size changed: never during layout, at most once a turn of the queue,
 			-- with the final size, and only once it has a size (both above 0).
+		deferred
+		end
+
+	widget_watch_pointer (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y-c: while `a_on', push event 63 for widget `an_id' when the pointer comes over it
+			-- or one of its children (a = 1) and when it leaves them all (a = 0); moving from the
+			-- widget onto a child is not a leave.
+		deferred
+		end
+
+	widget_watch_focus (an_id: INTEGER; a_on: BOOLEAN)
+			-- 1y-c: while `a_on', push event 64 for widget `an_id' when the keyboard focus comes to
+			-- it or one of its children from outside (a = 1) and when it leaves them all (a = 0).
+		deferred
+		end
+
+	test_pointer_crossing (an_id: INTEGER; a_inside: BOOLEAN)
+			-- Tests, 1y-c: report the pointer coming over widget `an_id' or leaving it, as the
+			-- toolkit would (event 63), for the test driver.
 		deferred
 		end
 
