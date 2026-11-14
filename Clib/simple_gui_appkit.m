@@ -1179,6 +1179,7 @@ void sga_stack_set_spacing(int a_stack, int a_spacing) { [(NSStackView *)s_inner
 @public
 	CGFloat line_gap, sibling_gap;
 	CGFloat placed_width;   /* the width the last intrinsic height was worked out for */
+	NSArray<NSValue *> *placed_sizes;   /* the children's fitting sizes it last placed by */
 }
 - (CGFloat)heightFor:(CGFloat)a_width placing:(BOOL)a_place;
 - (CGFloat)narrowest;
@@ -1213,12 +1214,44 @@ void sga_stack_set_spacing(int a_stack, int a_spacing) { [(NSStackView *)s_inner
 - (void)layout
 {
 	[super layout];
+	placed_sizes = [self childSizes];
 	[self heightFor:NSWidth([self bounds]) placing:YES];
+}
+- (NSArray<NSValue *> *)childSizes
+{
+	NSMutableArray *r = [NSMutableArray array];
+	for (NSView *v in [self placed]) [r addObject:[NSValue valueWithSize:[v fittingSize]]];
+	return r;
 }
 - (void)didAddSubview:(NSView *)a_view { [super didAddSubview:a_view]; [self changed]; }
 - (void)willRemoveSubview:(NSView *)a_view { [super willRemoveSubview:a_view]; [self changed]; }
 - (void)changed { [self invalidateIntrinsicContentSize]; [self setNeedsLayout:YES]; }
 @end
+
+/* A child that changes its own size (a label given new text, a child shown or hidden) is
+   placed again in the same frame, as GTK's queue_resize does: just before Core Animation's
+   commit lays the window out, each placer in a window compares its children's fitting sizes
+   with those it last placed by, and on a difference asks for its size and placement again.
+   Only placers on screen are looked at, and only their own children. */
+static NSHashTable<SGAPlacer *> *s_placers;
+static CFRunLoopObserverRef s_placer_observer;
+
+static void sga_placers_check(CFRunLoopObserverRef a_observer, CFRunLoopActivity a_activity, void *a_info)
+{
+	(void)a_observer; (void)a_activity; (void)a_info;
+	for (SGAPlacer *p in [s_placers allObjects])
+		if ([p window] && ![p isHiddenOrHasHiddenAncestor] && ![[p childSizes] isEqualToArray:p->placed_sizes ?: @[]]) [p changed];
+}
+
+static void sga_placer_watch(SGAPlacer *p)
+{
+	if (!s_placers) s_placers = [NSHashTable weakObjectsHashTable];
+	[s_placers addObject:p];
+	if (!s_placer_observer) {
+		s_placer_observer = CFRunLoopObserverCreate(NULL, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, 1999000, sga_placers_check, NULL);
+		CFRunLoopAddObserver(CFRunLoopGetMain(), s_placer_observer, kCFRunLoopCommonModes);
+	}
+}
 
 static void sga_placer_init(SGAPlacer *p)
 {
@@ -1226,6 +1259,7 @@ static void sga_placer_init(SGAPlacer *p)
 	[p setContentCompressionResistancePriority:NSLayoutPriorityRequired - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
 	[p setContentHuggingPriority:NSLayoutPriorityRequired - 1 forOrientation:NSLayoutConstraintOrientationVertical];
 	[p setContentCompressionResistancePriority:NSLayoutPriorityRequired - 1 forOrientation:NSLayoutConstraintOrientationVertical];
+	sga_placer_watch(p);
 }
 
 static void sga_placer_add(SGAPlacer *p, NSView *v)
