@@ -506,6 +506,9 @@ static void sg_flow_box_set_homogeneous(int box, int on) {
     gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(sg_w[box]), on ? TRUE : FALSE);
 }
 
+/* Both containers' heights follow their widths: GTK must measure them for a width. */
+static GtkSizeRequestMode sg_height_for_width(GtkWidget *w) { (void) w; return GTK_SIZE_REQUEST_HEIGHT_FOR_WIDTH; }
+
 typedef struct { GtkWidget parent_instance; int count, min_width, row_gap, col_gap; } SgColumns;
 typedef struct { GtkWidgetClass parent_class; } SgColumnsClass;
 
@@ -606,6 +609,7 @@ static void sg_columns_class_init(gpointer klass, gpointer data) {
     (void) data;
     wc->measure = sg_columns_measure;
     wc->size_allocate = sg_columns_allocate;
+    wc->get_request_mode = sg_height_for_width;
     G_OBJECT_CLASS(klass)->dispose = sg_columns_dispose;
 }
 static GType sg_columns_type(void) {
@@ -683,6 +687,7 @@ static void sg_aspect_class_init(gpointer klass, gpointer data) {
     (void) data;
     wc->measure = sg_aspect_measure;
     wc->size_allocate = sg_aspect_allocate;
+    wc->get_request_mode = sg_height_for_width;
     G_OBJECT_CLASS(klass)->dispose = sg_aspect_dispose;
 }
 static GType sg_aspect_type(void) {
