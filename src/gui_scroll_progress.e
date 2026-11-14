@@ -26,8 +26,8 @@ feature {NONE} -- Initialization
 			gui_thread: is_gui_thread
 			has_application: has_application
 		do
-			make_bar
 			scrolling := a_scrolling
+			make_bar
 			set_accessible_label ("Scroll position")
 			a_scrolling.reported_actions.extend (agent follow)
 			a_scrolling.scroll_actions.extend (agent (a_y: INTEGER) do follow end)

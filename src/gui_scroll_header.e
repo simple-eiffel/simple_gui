@@ -25,7 +25,6 @@ feature {NONE} -- Initialization
 			-- Hide `a_header' as `a_scrolling' scrolls down and show it as it scrolls up.
 		require
 			gui_thread: is_gui_thread
-			distinct: a_header /= a_scrolling
 		do
 			header := a_header
 			scrolling := a_scrolling
@@ -43,7 +42,6 @@ feature {NONE} -- Initialization
 			-- Run `compact_actions' when `a_scrolling' passes `a_distance', `full_actions' back above.
 		require
 			gui_thread: is_gui_thread
-			distinct: a_header /= a_scrolling
 			positive: a_distance > 0
 		do
 			header := a_header
