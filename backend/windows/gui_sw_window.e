@@ -100,6 +100,7 @@ feature -- Operation
 					end
 					Precursor (a_type, a_x, a_y)
 				end
+				backend.report_crossings
 				if a_type = 53 then
 						-- the light/dark setting flipped (the theme followed it)
 					backend.push (10, 0, theme.is_dark.to_integer, 0, 0)
@@ -108,6 +109,14 @@ feature -- Operation
 					backend.push (10, 0, backend.is_dark.to_integer, 0, 0)
 				end
 			end
+		end
+
+feature {GUI_BACKEND} -- Pointer inside (1y-c)
+
+	pointer_widget: detachable SW_WIDGET
+			-- The widget under the pointer now (Void: the pointer is outside the window).
+		do
+			Result := hovered
 		end
 
 feature {GUI_BACKEND} -- Custom dialogs (1u)
@@ -640,6 +649,7 @@ feature {NONE} -- Rendering (1x)
 			frames_rendered := frames_rendered + 1
 			backend.note_frame_drawn
 			backend.report_watched_sizes
+			backend.report_crossings
 		end
 
 invariant
