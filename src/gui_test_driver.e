@@ -214,6 +214,16 @@ feature -- User actions
 			set: a_combo.text.same_string (a_combo.i_th (i))
 		end
 
+	scroll_to_as_user (a_scrolling: GUI_SCROLLING; a_y: INTEGER)
+			-- 1y-d: the user scrolls `a_scrolling' to `a_y' (wheel or bar), straight to the toolkit.
+		require
+			has_application: has_application
+			not_negative: a_y >= 0
+		do
+			backend.test_scroller_scroll_to (a_scrolling.id, a_y)
+			settle
+		end
+
 	pointer_enter (a_widget: GUI_WIDGET)
 			-- 1y-c: the pointer comes over `a_widget', as the toolkit reports it (watched widgets).
 		require

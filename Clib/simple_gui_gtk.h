@@ -4774,6 +4774,42 @@ static int sg_scroll_area_max(int id, int vertical) {
     double v;
     return (int)sg_scroll_area_range(id, vertical, &v);
 }
+/* ---------- 1y-d: scrollers. Every scroll area, list, table, tree, tree table and grid view is a
+   GtkScrolledWindow in sg_w, so one reader serves them all. A watched one pushes event 65 when
+   its vertical adjustment's value or bounds change (value-changed, changed): once until shared
+   code reads the offset again, so a burst is one report. */
+__attribute__((weak)) int sg_scroll_pending[SG_MAX] = {0};
+static void sg_on_scroller_changed(GtkAdjustment *a, gpointer d) {
+    int id = GPOINTER_TO_INT(d);
+    (void) a;
+    if (!sg_scroll_pending[id]) { sg_scroll_pending[id] = 1; sg_push(65, id, 0, 0); }
+}
+static GtkAdjustment *sg_scroller_adjustment(int id) {
+    if (!sg_w[id] || !GTK_IS_SCROLLED_WINDOW(sg_w[id])) return NULL;
+    return gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(sg_w[id]));
+}
+static void sg_scroller_watch(int id, int on) {
+    GtkAdjustment *v = sg_scroller_adjustment(id);
+    if (!v || !on || g_object_get_data(G_OBJECT(sg_w[id]), "sg-scroll-watch")) return;
+    g_signal_connect(v, "value-changed", G_CALLBACK(sg_on_scroller_changed), GINT_TO_POINTER(id));
+    g_signal_connect(v, "changed", G_CALLBACK(sg_on_scroller_changed), GINT_TO_POINTER(id));
+    g_object_set_data(G_OBJECT(sg_w[id]), "sg-scroll-watch", GINT_TO_POINTER(1));
+    sg_on_scroller_changed(v, GINT_TO_POINTER(id));
+}
+static int sg_scroller_y(int id) { sg_scroll_pending[id] = 0; return sg_scroll_area_offset(id, 1); }
+static int sg_scroller_max_y(int id) { return sg_scroll_area_max(id, 1); }
+static int sg_scroller_extent(int id) {
+    GtkAdjustment *v = sg_scroller_adjustment(id);
+    double e;
+    if (!v) return 0;
+    e = gtk_adjustment_get_upper(v) - gtk_adjustment_get_lower(v);
+    return e > 0 ? (int) (e + 0.5) : 0;
+}
+/* Tests: the user drags the bar to y (GTK clamps it). */
+static void sg_test_scroller_scroll_to(int id, int y) {
+    GtkAdjustment *v = sg_scroller_adjustment(id);
+    if (v) gtk_adjustment_set_value(v, gtk_adjustment_get_lower(v) + y);
+}
 /* A date picker's value is y*10000 + m*100 + d; a time picker's h*60 + m. */
 static void sg_date_or_time_set(int id, int v) {
     if (sg_kind[id] == 40) sg_calendar_set(id, v);

@@ -14,6 +14,8 @@ inherit
 			dispatch, has_row_pebbles, pebble_at_row
 		end
 
+	GUI_SCROLLING
+
 create
 	make
 

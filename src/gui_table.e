@@ -25,6 +25,8 @@ inherit
 			dispatch
 		end
 
+	GUI_SCROLLING
+
 create
 	make
 

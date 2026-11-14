@@ -15,6 +15,11 @@ class
 inherit
 	GUI_SINGLE_CONTAINER
 
+	GUI_SCROLLING
+		redefine
+			scroll_y, max_scroll_y
+		end
+
 create
 	make
 
@@ -47,7 +52,7 @@ feature -- Access
 			-- How far the content is scrolled from its top edge, in logical pixels.
 		do
 			Result := backend.scroll_area_y (id)
-		ensure
+		ensure then
 			not_negative: Result >= 0
 		end
 
@@ -65,7 +70,7 @@ feature -- Access
 			-- the content fits).
 		do
 			Result := backend.scroll_area_max_y (id)
-		ensure
+		ensure then
 			not_negative: Result >= 0
 		end
 
