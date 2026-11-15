@@ -6956,6 +6956,45 @@ static void sg_window_set_fullscreen(int win, int on) {
 }
 static int sg_window_is_fullscreen(int win) { return gtk_window_is_fullscreen(GTK_WINDOW(sg_w[win])) ? 1 : 0; }
 
+/* 1z-c: monitor `i''s whole scale factor, counting GDK's list from 0 (simple_shell's fields are
+   GDK's logical geometry times it); 1 where there is none. */
+static int sg_monitor_scale_factor(int i) {
+    GdkDisplay *d = gdk_display_get_default();
+    GListModel *l = d ? gdk_display_get_monitors(d) : NULL;
+    GdkMonitor *m;
+    int k = 1;
+    if (!l || i < 0 || (guint) i >= g_list_model_get_n_items(l)) return 1;
+    m = g_list_model_get_item(l, (guint) i);
+    if (m) { k = gdk_monitor_get_scale_factor(m); g_object_unref(m); }
+    return k > 0 ? k : 1;
+}
+
+/* 1z-c: the monitor holding most of window `win', as its place in GDK's list counted from 1
+   (simple_shell's order); 0 before the window has a surface, or where GDK cannot say. */
+static int sg_window_monitor(int win) {
+    GtkWidget *w = sg_w[win];
+    GdkSurface *s;
+    GdkDisplay *d;
+    GdkMonitor *m;
+    GListModel *l;
+    guint i, n;
+    int r = 0;
+    if (!w || !GTK_IS_NATIVE(w)) return 0;
+    s = gtk_native_get_surface(GTK_NATIVE(w));
+    if (!s) return 0;
+    d = gdk_surface_get_display(s);
+    m = gdk_display_get_monitor_at_surface(d, s);
+    if (!m) return 0;
+    l = gdk_display_get_monitors(d);
+    n = g_list_model_get_n_items(l);
+    for (i = 0; i < n && !r; i++) {
+        GdkMonitor *c = g_list_model_get_item(l, i);
+        if (c == m) r = (int) i + 1;
+        g_object_unref(c);
+    }
+    return r;
+}
+
 /* Follow the system again: the setting goes back to its default (the dark handler reports a change). */
 static void sg_follow_system_appearance(void) {
     gtk_settings_reset_property(gtk_settings_get_default(), "gtk-application-prefer-dark-theme");

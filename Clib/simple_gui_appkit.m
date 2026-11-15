@@ -13767,3 +13767,13 @@ static int sga_pinned(int a_id, int *a_y)
 }
 int sga_test_pinned_header(int a_id) { int y; return sga_pinned(a_id, &y); }
 int sga_test_pinned_header_y(int a_id) { int y; sga_pinned(a_id, &y); return y; }
+
+/* 1z-c: the 1-based place of window `a_window''s screen (the one holding most of it) in
+   [NSScreen screens], simple_shell's monitor order; 0 when it has none. */
+int sga_window_monitor(int a_window)
+{
+	NSWindow *w = sga_get(a_window);
+	if (![w isKindOfClass:[NSWindow class]] || ![w screen]) return 0;
+	NSUInteger i = [[NSScreen screens] indexOfObject:[w screen]];
+	return i == NSNotFound ? 0 : (int)i + 1;
+}

@@ -612,3 +612,6 @@ void sga_test_press_chevron(int a_id, int a_part);
 void sga_test_press_path_space(int a_id);
 void sga_widget_focus(int a_id);
 void sga_test_field_escape(int a_id);
+
+/* 1z-c */
+int sga_window_monitor(int a_window);
