@@ -2552,6 +2552,36 @@ feature -- Controls
 			end
 		end
 
+	window_set_cover (a_window, a_child: INTEGER)
+			-- 1z-a: the window's root becomes an SW_OVERLAY with the cover as a filling layer over
+			-- the rest (`compose'); the cover canvas draws bare, so its scrim is see-through.
+		do
+			window_cover.force (a_child, a_window)
+			if attached {GUI_SW_CANVAS} widget (a_child) as al_c then
+				al_c.set_bare (True)
+			end
+			if attached windows.item (a_window) as al_w and then al_w.is_window_open then
+				compose (a_window, al_w)
+			end
+		end
+
+	window_focused (a_window: INTEGER): INTEGER
+			-- 1z-a: the focused SW widget of the window (a second window's own), or its nearest
+			-- registered ancestor.
+		local
+			l_at: detachable SW_WIDGET
+		do
+			if attached floats.item (a_window) as al_f then
+				l_at := al_f.focused
+			elseif attached windows.item (a_window) as al_w then
+				l_at := al_w.focused
+			end
+			from until Result > 0 or not attached l_at as al_at loop
+				Result := id_of_widget (al_at)
+				l_at := al_at.parent
+			end
+		end
+
 	window_show_toast (a_window: INTEGER; a_message, an_action_text: POINTER; a_toast_id: INTEGER)
 			-- SW_WINDOW's notices; an action pushes event 27.
 		local
@@ -5478,6 +5508,7 @@ feature -- Canvas
 			l_c.set_on_resize (agent report_resize (Result, ?, ?))
 			l_c.set_on_key (agent report_key (Result, ?, ?))
 			l_c.set_on_char (agent report_char (Result, ?))
+			l_c.set_on_wheel (agent report_wheel (Result, ?, ?, ?, ?))
 		end
 
 	canvas_present (an_id: INTEGER; a_cairo_surface: POINTER)
@@ -5589,6 +5620,88 @@ feature -- Canvas
 	test_drawn_event (an_id, a_type, a_a, a_b, a_c: INTEGER)
 		do
 			push (a_type, an_id, a_a, a_b, a_c)
+		end
+
+	test_canvas_pixel (an_id, a_x, a_y: INTEGER): NATURAL_32
+			-- 1z-a: the main window's frame (the Cairo image simple_widgets composites), drawn now
+			-- and read at the canvas's logical point times its scale: the device pixel under the
+			-- logical pixel's center. 0 outside the canvas, or for one in a second window.
+		local
+			l_scale: REAL_64
+			l_x, l_y: INTEGER
+			l_frame: CAIRO_SURFACE
+			l_word: MANAGED_POINTER
+			l_v, a, r, g, b: NATURAL_32
+		do
+			if attached {SW_CANVAS} widget (an_id) as al_c and then attached open_window as al_w and then al_w.is_window_open
+				and then attached al_w.root as al_root and then is_inside (al_c, al_root)
+			then
+				al_w.request_render
+				l_scale := al_c.device_scale
+				l_x := (al_c.x + (a_x + 0.5) * l_scale).floor
+				l_y := (al_c.y + (a_y + 0.5) * l_scale).floor
+				l_frame := al_w.frame_surface
+				if a_x >= 0 and a_y >= 0 and l_x < (al_c.x + al_c.width).floor and l_y < (al_c.y + al_c.height).floor
+					and l_x >= 0 and l_y >= 0 and l_x < l_frame.width and l_y < l_frame.height
+				then
+					l_frame.flush.do_nothing
+					create l_word.share_from_pointer (l_frame.data + l_y * l_frame.stride + l_x * 4, 4)
+					l_v := l_word.read_natural_32 (0)
+					a := l_v |>> 24
+					if a > 0 then
+						r := ((((l_v |>> 16) & 0xFF) * 255 + a // 2) // a).min (255)
+						g := ((((l_v |>> 8) & 0xFF) * 255 + a // 2) // a).min (255)
+						b := (((l_v & 0xFF) * 255 + a // 2) // a).min (255)
+						Result := (a |<< 24) | (r |<< 16) | (g |<< 8) | b
+					end
+				end
+			end
+		end
+
+	test_canvas_wheel (an_id, an_amount, a_modifiers, a_x, a_y: INTEGER)
+			-- 1z-a: as a user: the pointer comes to the point (the canvas's hover point, as a move
+			-- sets it), then the wheel turns through the main window's own wheel path
+			-- (`simulate_wheel', the hit test and the parent chain a WM_MOUSEWHEEL takes), with the
+			-- modifiers held (SW_KEYS simulates them, then goes back to what it was).
+		local
+			l_keys: SW_KEYS
+			l_was: BOOLEAN
+			l_shift, l_control, l_alt: BOOLEAN
+			l_px, l_py: REAL_64
+		do
+			if attached {GUI_SW_CANVAS} widget (an_id) as al_c and then attached open_window as al_w and then al_w.is_window_open then
+				create l_keys
+				l_was := l_keys.is_simulating
+				l_shift := l_keys.shift_down
+				l_control := l_keys.control_down
+				l_alt := l_keys.alt_down
+				l_px := al_c.x + a_x * al_c.device_scale
+				l_py := al_c.y + a_y * al_c.device_scale
+				al_c.set_hover_point (l_px, l_py)
+				l_keys.simulate ((a_modifiers & 1) /= 0, (a_modifiers & 2) /= 0, (a_modifiers & 4) /= 0)
+				al_w.simulate_wheel (l_px.floor, l_py.floor, an_amount)
+				if l_was then
+					l_keys.simulate (l_shift, l_control, l_alt)
+				else
+					l_keys.stop_simulating
+				end
+			end
+		end
+
+	test_canvas_magnify (an_id, a_factor_1000, a_x, a_y: INTEGER)
+			-- 1z-a: a precision touchpad's pinch reaches a Windows program as Control + wheel, so
+			-- it is sent so: the delta that zooms shared code by the same factor (one notch,
+			-- 120, is {GUI_CANVAS}.Wheel_zoom_step). A touchscreen's pinch is not reported (a
+			-- named deviation).
+		local
+			l_math: DOUBLE_MATH
+			l_delta: INTEGER
+		do
+			create l_math
+			l_delta := (120.0 * l_math.log (a_factor_1000 / 1000.0) / l_math.log ({GUI_CANVAS}.Wheel_zoom_step)).rounded
+			if l_delta /= 0 then
+				test_canvas_wheel (an_id, l_delta, 2, a_x, a_y)
+			end
 		end
 
 	scale_factor (an_id: INTEGER): INTEGER
@@ -8014,6 +8127,12 @@ feature {NONE} -- State
 			create Result.make (4)
 		end
 
+	window_cover: HASH_TABLE [INTEGER, INTEGER]
+			-- 1z-a: each window's cover, over everything.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
 	window_toolbar: HASH_TABLE [INTEGER, INTEGER]
 			-- Each window's toolbar.
 		once ("OBJECT")
@@ -8477,6 +8596,7 @@ feature {NONE} -- Implementation
 			-- and the status bar, top to bottom.
 		local
 			l_root: SW_COLUMN
+			l_layers: SW_OVERLAY
 			l_bar: SW_MENU_BAR
 			i: INTEGER
 		do
@@ -8505,7 +8625,15 @@ feature {NONE} -- Implementation
 			if window_direction.has (a_window) then
 				l_root.set_layout_direction (window_direction.item (a_window))
 			end
-			a_w.set_root (l_root)
+			if window_cover.has (a_window) and then attached widget (window_cover.item (a_window)) as al_cover then
+					-- 1z-a: the cover (a lightbox's view) over everything, filling the window
+				create l_layers.make
+				l_layers.set_base (l_root)
+				l_layers.put_layer (al_cover, {SW_OVERLAY}.Layer_fill)
+				a_w.set_root (l_layers)
+			else
+				a_w.set_root (l_root)
+			end
 			apply_pills (a_w)
 		end
 
@@ -8870,6 +8998,19 @@ feature {NONE} -- Implementation
 		do
 			if attached widget (an_id) as al_w then
 				push (7, an_id, logical (al_w, a_x), logical (al_w, a_y), a_kind + a_button * 16 + a_modifiers * 256)
+			end
+		end
+
+	report_wheel (an_id, a_delta: INTEGER; a_x, a_y: REAL_64; a_modifiers: INTEGER)
+			-- 1z-a: a canvas's wheel, event 68: a = 1 (wheel) + modifiers * 16; b = the delta;
+			-- c = x + y * 65536, logical pixels.
+		local
+			l_x, l_y: INTEGER
+		do
+			if attached widget (an_id) as al_w then
+				l_x := logical (al_w, a_x).max (0).min (65535)
+				l_y := logical (al_w, a_y).max (0).min (32767)
+				push (68, an_id, 1 + a_modifiers * 16, a_delta, l_x + l_y * 65536)
 			end
 		end
 

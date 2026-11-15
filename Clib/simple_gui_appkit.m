@@ -197,7 +197,9 @@ static int sga_gdk_key(NSEvent *e)
 @public
 	CGImageRef image;
 	NSSize wanted;
+	BOOL size_told;   /* has its first real size been reported (event 9)? */
 }
+- (void)gesture:(int)a_kind amount:(int)an_amount modifiers:(int)a_modifiers at:(NSPoint)p;   /* 1z-a, event 68 */
 @end
 
 @implementation SGACanvas
@@ -236,6 +238,30 @@ static int sga_gdk_key(NSEvent *e)
 	if (a_kind == 3 && [NSEvent pressedMouseButtons] == 0) l_button = 0;
 	sga_push(7, sga_id_of(self), (int)p.x, (int)p.y, a_kind + l_button * 16 + sga_modifiers([e modifierFlags]) * 256);
 }
+/* 1z-a: a canvas's gestures, event 68: a = kind (1 wheel, 2 magnify) + modifiers << 4; b = the
+   amount (a wheel's in 1/120 of a notch, as Windows' WHEEL_DELTA, positive away from the user as
+   macOS reports it; a magnify's factor x 1000); c = x + y << 16, in the canvas's logical pixels. */
+- (void)gesture:(int)a_kind amount:(int)an_amount modifiers:(int)a_modifiers at:(NSPoint)p
+{
+	int x = (int)MAX(0, MIN(65535, lround(p.x))), y = (int)MAX(0, MIN(65535, lround(p.y)));
+	sga_push(68, sga_id_of(self), a_kind + a_modifiers * 16, an_amount, x + y * 65536);
+}
+/* A mouse's notch is one line, 120; a trackpad's precise deltas are points, 10 to a notch. */
+- (void)scrollWheel:(NSEvent *)e
+{
+	double dy = [e scrollingDeltaY];
+	int l_amount = (int)lround([e hasPreciseScrollingDeltas] ? dy * 12.0 : dy * 120.0);
+	if (l_amount == 0) return;
+	/* an event made from a CGEvent (the test driver's) has no window, and its location is then on
+	   the screen; a user's always has one */
+	NSPoint l_in_window = [e window] ? [e locationInWindow] : [[self window] convertPointFromScreen:[e locationInWindow]];
+	[self gesture:1 amount:l_amount modifiers:sga_modifiers([e modifierFlags]) at:[self convertPoint:l_in_window fromView:nil]];
+}
+- (void)magnifyWithEvent:(NSEvent *)e
+{
+	[self gesture:2 amount:(int)lround((1.0 + [e magnification]) * 1000.0) modifiers:sga_modifiers([e modifierFlags])
+		at:[self convertPoint:[e locationInWindow] fromView:nil]];
+}
 - (void)mouseDown:(NSEvent *)e { [[self window] makeFirstResponder:self]; [self pointer:e kind:1]; }
 - (void)mouseUp:(NSEvent *)e { [self pointer:e kind:2]; }
 - (void)mouseDragged:(NSEvent *)e { [self pointer:e kind:3]; }
@@ -262,7 +288,24 @@ static int sga_gdk_key(NSEvent *e)
 {
 	NSSize l_old = [self frame].size;
 	[super setFrameSize:a_size];
-	if (!NSEqualSizes(l_old, a_size) && ![self inLiveResize]) sga_push(9, sga_id_of(self), (int)a_size.width, (int)a_size.height, 0);
+	/* The canvas is made at the size it asks for, so layout often gives it that same size: the
+	   first size it is laid out at is reported even so (a canvas draws when its first size
+	   arrives; without this, one laid out at its own size never drew). */
+	if ((!NSEqualSizes(l_old, a_size) || (!size_told && [self window])) && ![self inLiveResize] && a_size.width > 0 && a_size.height > 0) {
+		size_told = YES;
+		sga_push(9, sga_id_of(self), (int)a_size.width, (int)a_size.height, 0);
+	}
+}
+/* Auto Layout leaves a frame that is already right alone, so the first size is also reported
+   from the layout pass. */
+- (void)layout
+{
+	[super layout];
+	NSSize s = [self bounds].size;
+	if (!size_told && [self window] && ![self inLiveResize] && s.width > 0 && s.height > 0) {
+		size_told = YES;
+		sga_push(9, sga_id_of(self), (int)s.width, (int)s.height, 0);
+	}
 }
 /* One resize event for a whole live resize: the final size, when the drag ends (the program
    could not draw during it, and would otherwise redraw once per frame afterwards). */
@@ -794,19 +837,24 @@ static void sga_content_place_keep(NSView *a_child, NSView *a_content, NSLayoutC
 	s_content_places[[NSValue valueWithNonretainedObject:a_child]] = p;
 }
 
+static NSMutableDictionary<NSNumber *, NSView *> *s_covers;   /* 1z-a: each window's cover */
 void sga_window_set_content(int a_window, int a_child)
 {
 	NSWindow *w = sga_get(a_window);
 	SGAContent *l_content = [w contentView];
 	NSView *v = sga_get(a_child);
-	for (NSView *l_old in [[l_content subviews] copy]) if (![l_old isKindOfClass:[SGAStatus class]]) [l_old removeFromSuperview];
+	NSView *l_cover = s_covers[@(a_window)];
+	for (NSView *l_old in [[l_content subviews] copy])
+		if (![l_old isKindOfClass:[SGAStatus class]] && l_old != l_cover && ![l_old isKindOfClass:NSClassFromString(@"SGAToast")]) [l_old removeFromSuperview];
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
 	/* The window keeps the size the program asked for: a lone control (a button, a label) must
 	   not pull it down to its own natural size. */
 	for (NSInteger o = 0; o < 2; o++)
 		if ([v contentHuggingPriorityForOrientation:o] >= NSLayoutPriorityWindowSizeStayPut)
 			[v setContentHuggingPriority:NSLayoutPriorityWindowSizeStayPut - 1 forOrientation:o];
-	[l_content addSubview:v];
+	/* 1z-a: the content goes under the window's cover and toasts, which stay on top */
+	if ([l_cover superview] == l_content) [l_content addSubview:v positioned:NSWindowBelow relativeTo:l_cover];
+	else [l_content addSubview:v];
 	/* a group box as the whole content keeps the containers' 12 from the window's edges */
 	CGFloat m = [v isKindOfClass:[NSBox class]] ? 12 : 0;
 	NSLayoutConstraint *l_bottom = [v.bottomAnchor constraintEqualToAnchor:l_content.bottomAnchor constant:-l_content->bottom_bar - m];
@@ -12984,6 +13032,13 @@ void sga_overlay_set_base(int an_overlay, int a_child)
 	NSView *v = sga_get(a_child);
 	for (NSView *l_old in [[o subviews] copy]) if (![l_old isKindOfClass:[SGAOverlayHolder class]]) [l_old removeFromSuperview];
 	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	/* The base fills the overlay; it must not pull the overlay, and so the window, down to its own
+	   natural size (a label hugs at 750, above the window's 500 for keeping its size, so a window
+	   with a label as an overlay's base shrank to the label's height). As set_content does for
+	   the content itself, its hugging gives way to the window's size. */
+	for (NSInteger l_orientation = 0; l_orientation < 2; l_orientation++)
+		if ([v contentHuggingPriorityForOrientation:l_orientation] >= NSLayoutPriorityWindowSizeStayPut)
+			[v setContentHuggingPriority:NSLayoutPriorityWindowSizeStayPut - 1 forOrientation:l_orientation];
 	[o addSubview:v positioned:NSWindowBelow relativeTo:nil];
 	/* the base's box fills the overlay (its anchors are its alignment rect; a label's few points
 	   of overhang fall outside the overlay's clip, where they draw nothing) */
@@ -13776,4 +13831,100 @@ int sga_window_monitor(int a_window)
 	if (![w isKindOfClass:[NSWindow class]] || ![w screen]) return 0;
 	NSUInteger i = [[NSScreen screens] indexOfObject:[w screen]];
 	return i == NSNotFound ? 0 : (int)i + 1;
+}
+
+/* ------------------------------------------- 1z-a: canvas tests */
+
+/* What canvas `a_id' shows at logical (x, y): the pixel of the image it draws (the one shared code
+   presented), as 0xAARRGGBB with straight alpha; 0 outside or with no image. The image fills the
+   canvas, so a logical point maps to image pixel (x * image width / canvas width). */
+unsigned int sga_test_canvas_pixel(int a_id, int a_x, int a_y)
+{
+	SGACanvas *c = sga_get(a_id);
+	if (![c isKindOfClass:[SGACanvas class]] || !c->image) return 0;
+	NSSize b = [c bounds].size;
+	size_t w = CGImageGetWidth(c->image), h = CGImageGetHeight(c->image);
+	if (b.width <= 0 || b.height <= 0 || a_x < 0 || a_y < 0 || a_x >= b.width || a_y >= b.height) return 0;
+	size_t px = (size_t)((a_x + 0.5) * (double)w / b.width), py = (size_t)((a_y + 0.5) * (double)h / b.height);
+	if (px >= w || py >= h) return 0;
+	unsigned char l_rgba[4] = {0, 0, 0, 0};
+	CGColorSpaceRef l_space = CGImageGetColorSpace(c->image);
+	CGContextRef l_cg = CGBitmapContextCreate(l_rgba, 1, 1, 8, 4, l_space, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+	if (!l_cg) return 0;
+	CGContextSetBlendMode(l_cg, kCGBlendModeCopy);
+	/* draw the image so that pixel (px, py), counted from the top, lands on the 1 x 1 context */
+	CGContextDrawImage(l_cg, CGRectMake(-(CGFloat)px, -(CGFloat)(h - 1 - py), (CGFloat)w, (CGFloat)h), c->image);
+	CGContextRelease(l_cg);
+	unsigned int a = l_rgba[3];
+	unsigned int r = a ? (l_rgba[0] * 255u + a / 2) / a : 0, g = a ? (l_rgba[1] * 255u + a / 2) / a : 0, bl = a ? (l_rgba[2] * 255u + a / 2) / a : 0;
+	return (a << 24) | (MIN(r, 255u) << 16) | (MIN(g, 255u) << 8) | MIN(bl, 255u);
+}
+
+/* As a user: the wheel turned by `an_amount' (1/120 of a notch) over canvas point (x, y) with
+   `a_modifiers', posted to AppKit as a real scroll event (lines, so a notch is 120). */
+void sga_test_canvas_wheel(int a_id, int an_amount, int a_modifiers, int a_x, int a_y)
+{
+	SGACanvas *c = sga_get(a_id);
+	if (![c isKindOfClass:[SGACanvas class]] || ![c window]) return;
+	NSPoint l_window = [c convertPoint:NSMakePoint(a_x, a_y) toView:nil];
+	NSPoint l_screen = [[c window] convertPointToScreen:l_window];
+	CGFloat l_top = NSMaxY([[[NSScreen screens] firstObject] frame]);
+	CGEventRef l_cg = CGEventCreateScrollWheelEvent(NULL, kCGScrollEventUnitLine, 1, (int32_t)lround(an_amount / 120.0));
+	if (!l_cg) return;
+	CGEventSetLocation(l_cg, CGPointMake(l_screen.x, l_top - l_screen.y));
+	CGEventFlags f = 0;
+	if (a_modifiers & 1) f |= kCGEventFlagMaskShift;
+	if (a_modifiers & 2) f |= kCGEventFlagMaskControl;
+	if (a_modifiers & 4) f |= kCGEventFlagMaskAlternate;
+	if (a_modifiers & 8) f |= kCGEventFlagMaskCommand;
+	CGEventSetFlags(l_cg, f);
+	NSEvent *e = [NSEvent eventWithCGEvent:l_cg];
+	CFRelease(l_cg);
+	if (e) [c scrollWheel:e];
+}
+
+/* As a user: a pinch by `a_factor_1000' / 1000 over canvas point (x, y). AppKit has no public way
+   to make a magnify event, so this takes the path `magnifyWithEvent:' takes (a named limit). */
+void sga_test_canvas_magnify(int a_id, int a_factor_1000, int a_x, int a_y)
+{
+	SGACanvas *c = sga_get(a_id);
+	if ([c isKindOfClass:[SGACanvas class]]) [c gesture:2 amount:a_factor_1000 modifiers:0 at:NSMakePoint(a_x, a_y)];
+}
+
+/* ------------------------------------------- 1z-a: the window's cover and focus */
+
+/* `a_child' over the whole of window `a_window''s content (its content, toolbar area inside the
+   content and status bar; the menu bar and title bar are the system's), under its toasts: pinned
+   to every edge, so it fills the window and follows it; it takes the pointer where it is (it is
+   the topmost view there) and, being a layer-less, non-opaque view, shows what is under it
+   where it draws nothing. Hidden, it takes nothing: AppKit hit-tests no hidden view. Called
+   once for a window; the content set later goes under it. */
+void sga_window_set_cover(int a_window, int a_child)
+{
+	NSWindow *w = sga_get(a_window);
+	NSView *c = [w contentView], *v = sga_get(a_child);
+	if (![v isKindOfClass:[NSView class]] || !c) return;
+	if (!s_covers) s_covers = [NSMutableDictionary dictionary];
+	s_covers[@(a_window)] = v;
+	[v removeFromSuperview];
+	[v setTranslatesAutoresizingMaskIntoConstraints:NO];
+	NSView *l_toast = s_toasts[@(a_window)];
+	if ([l_toast superview] == c) [c addSubview:v positioned:NSWindowBelow relativeTo:l_toast];
+	else [c addSubview:v positioned:NSWindowAbove relativeTo:nil];
+	[NSLayoutConstraint activateConstraints:@[[v.leadingAnchor constraintEqualToAnchor:c.leadingAnchor], [v.trailingAnchor constraintEqualToAnchor:c.trailingAnchor],
+		[v.topAnchor constraintEqualToAnchor:c.topAnchor], [v.bottomAnchor constraintEqualToAnchor:c.bottomAnchor]]];
+	[c layoutSubtreeIfNeeded];
+}
+
+/* The id of the view in `a_window' holding the keyboard focus (a field's own, for its field
+   editor), or of the nearest view up from it that simple_gui made; 0 for none. */
+int sga_window_focused(int a_window)
+{
+	NSWindow *w = sga_get(a_window);
+	if (![w isKindOfClass:[NSWindow class]]) return 0;
+	for (NSView *v = sga_focused_view(w); v; v = [v superview]) {
+		int l_id = sga_id_of(v);
+		if (l_id > 0) return l_id;
+	}
+	return 0;
 }

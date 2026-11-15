@@ -119,6 +119,42 @@ feature -- Toasts (1o)
 			recorded: last_toast.same_string_general (a_message)
 		end
 
+feature -- Cover and focus (1z-a)
+
+	cover: detachable GUI_WIDGET
+			-- The widget over the whole window, on its top overlay layer (a lightbox's view).
+
+	set_cover (a_cover: GUI_WIDGET)
+			-- Put `a_cover' over the whole window (menu bar, toolbar, content and status bar),
+			-- on the window's top overlay layer where its toasts go: filling it and taking the
+			-- pointer there, its transparent parts showing what is under it. It shows and hides
+			-- with `show' and `hide'.
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+			no_cover: cover = Void
+			not_parented: a_cover.parent = Void
+			not_self: a_cover /= Current
+		do
+			cover := a_cover
+			a_cover.set_parent (Current)
+			a_cover.inherit_direction (base_direction)
+			backend.window_set_cover (id, a_cover.id)
+		ensure
+			set: cover = a_cover
+			parent_set: a_cover.parent = Current
+		end
+
+	focused_widget: detachable GUI_WIDGET
+			-- The widget holding the keyboard focus in this window, or the nearest one up from it
+			-- that simple_gui made; Void for none.
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+		do
+			Result := application.widget_of (backend.window_focused (id))
+		end
+
 feature -- Shortcuts and full screen (1m)
 
 	add_shortcut (a_shortcut: READABLE_STRING_GENERAL; an_action: PROCEDURE)

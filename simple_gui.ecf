@@ -44,6 +44,8 @@
 		<library name="simple_pdf_print" location="$SIMPLE_EIFFEL\simple_pdf\simple_pdf_print.ecf"/>
 		<!-- GUI_PREFERENCES keeps its values as JSON (1v-d) -->
 		<library name="simple_json" location="$SIMPLE_EIFFEL\simple_json\simple_json.ecf"/>
+		<!-- 1z-a: the image viewer, the comparison slider, the lightbox and the effects draw with simple_image on every platform -->
+		<library name="simple_image" location="$SIMPLE_EIFFEL\simple_image\simple_image.ecf"/>
 		<!-- Windows: simple_widgets (the Cairo look) on simple_shell -->
 		<library name="simple_widgets" location="$SIMPLE_EIFFEL\simple_widgets\simple_widgets.ecf">
 			<condition>
