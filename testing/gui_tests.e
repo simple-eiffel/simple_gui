@@ -8819,10 +8819,7 @@ feature -- Images (1z-a)
 			driver.canvas_double_click (l_view, 50, 50, 1)
 			assert ("a double-click: actual size", l_view.zoom = 1.0 and not l_view.is_fitted)
 			driver.wait (450)
-			driver.canvas_pointer (l_view, 1, 50, 50, 1, 0)
-			driver.canvas_pointer (l_view, 2, 50, 50, 1, 0)
-			driver.canvas_pointer (l_view, 1, 50, 50, 1, 0)
-			driver.canvas_pointer (l_view, 2, 50, 50, 1, 0)
+			driver.canvas_double_click (l_view, 50, 50, 1)
 			assert ("and again: fitted", l_view.is_fitted)
 			l_window.close
 		end
