@@ -66,6 +66,9 @@
 		<!-- Every platform (1z-c): open, reveal, network status and monitors are simple_shell's.
 		     On Linux its GTK object is built by make -C simple_shell/Clib. -->
 		<library name="simple_shell" location="$SIMPLE_EIFFEL\simple_shell\simple_shell.ecf"/>
+		<!-- Every platform (1z-c): GUI_APPLICATION.formatter; the system gives only the locale's
+		     name, simple_i18n's own CLDR table writes it, so the strings are the same everywhere -->
+		<library name="simple_i18n" location="$SIMPLE_EIFFEL\simple_i18n\simple_i18n.ecf"/>
 		<cluster name="src" location=".\src\" recursive="true"/>
 		<cluster name="backend_gtk" location=".\backend\gtk\">
 			<condition>
