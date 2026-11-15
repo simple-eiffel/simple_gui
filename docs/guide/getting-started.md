@@ -95,6 +95,22 @@ The worker gets `app.mailbox` when it is created. The mailbox copies the text in
 
 Speech Studio (in simple_speech) works this way: a transcription runs on its own processor and posts progress and results through the mailbox, and the window stays responsive throughout.
 
+## On Linux
+
+simple_gui draws with GTK 4 on Linux. Install its development files (Ubuntu 24.04):
+
+```
+sudo apt install libgtk-4-dev
+```
+
+The media player (GUI_MEDIA_PLAYER) plays through GTK's GStreamer media backend. It needs two more packages: GTK's GStreamer media module, and GStreamer's libav plugin for MP4 (H.264 and AAC):
+
+```
+sudo apt install libgtk-4-media-gstreamer gstreamer1.0-libav
+```
+
+Without the first, GTK has no media backend and a player plays nothing; without the second, MP4 files fail to open. Windows (Media Foundation) and macOS (AVFoundation) need nothing extra.
+
 ## Next
 
 - Lay widgets out with a [stack](stack.md) or a [grid](grid.md).
