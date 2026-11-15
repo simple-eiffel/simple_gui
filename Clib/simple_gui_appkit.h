@@ -622,3 +622,8 @@ void sga_test_canvas_wheel(int a_id, int an_amount, int a_modifiers, int a_x, in
 void sga_test_canvas_magnify(int a_id, int a_factor_1000, int a_x, int a_y);
 void sga_window_set_cover(int a_window, int a_child);
 int sga_window_focused(int a_window);
+
+/* 1z-d: app identity */
+void sga_app_set_icon(void *a_cairo_surface);
+void sga_window_set_icon(int a_window, void *a_cairo_surface);
+unsigned int sga_test_app_icon_pixel(int a_x, int a_y);
