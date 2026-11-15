@@ -615,3 +615,10 @@ void sga_test_field_escape(int a_id);
 
 /* 1z-c */
 int sga_window_monitor(int a_window);
+
+/* 1z-a: canvas gestures (event 68) and tests */
+unsigned int sga_test_canvas_pixel(int a_id, int a_x, int a_y);
+void sga_test_canvas_wheel(int a_id, int an_amount, int a_modifiers, int a_x, int a_y);
+void sga_test_canvas_magnify(int a_id, int a_factor_1000, int a_x, int a_y);
+void sga_window_set_cover(int a_window, int a_child);
+int sga_window_focused(int a_window);
