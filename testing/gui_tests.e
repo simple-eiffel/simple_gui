@@ -4595,6 +4595,9 @@ feature -- The remaining controls (1j)
 			assert ("three pages", l_preview.page_count = 3)
 			l_preview.present (l_window)
 			settle_window
+				-- #124: the preview focuses its canvas as it opens, so its keys work with no click
+			assert ("the canvas has the focus: " + attached_name (l_preview.window.focused_widget),
+				l_preview.window.focused_widget = l_preview.canvas)
 			assert ("on page 1, fitted", l_preview.page = 1 and l_preview.zoom = l_preview.Zoom_fit_page)
 			assert ("the page was drawn", l_preview.pixels_per_point > 0.0)
 			l_fit := l_preview.pixels_per_point
@@ -9970,6 +9973,19 @@ feature {NONE} -- Fixtures
 				create l_e
 				l_e.set_description (a_tag)
 				l_e.raise
+			end
+		end
+
+
+feature {NONE} -- Focus (#124)
+
+	attached_name (a_widget: detachable GUI_WIDGET): STRING
+			-- What `a_widget' is, for a failure message: its type, or "nothing".
+		do
+			if attached a_widget as al_widget then
+				Result := al_widget.generating_type.name.to_string_8
+			else
+				Result := "nothing"
 			end
 		end
 
