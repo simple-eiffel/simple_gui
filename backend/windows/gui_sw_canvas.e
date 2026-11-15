@@ -8,6 +8,9 @@ note
 		1z-a: it takes the wheel (`on_wheel', where the pointer is and with the modifiers held,
 		reported as event 68), and as a window's cover it is `is_bare': it draws only the image
 		the program presented, so the image's transparent parts show the window under it.
+
+		1z-d: a skeleton's canvas `is_busy': a progress bar with no value to screen readers, named
+		or not, and bare.
 	]"
 
 class
@@ -32,6 +35,10 @@ feature -- Access
 			-- 1z-a: does it draw only its presented image, with no surface or outline of its
 			-- own (a window's cover)?
 
+	is_busy: BOOLEAN
+			-- 1z-d: does it read to screen readers as busy, a progress bar with no value (a
+			-- skeleton's)?
+
 feature -- Element change
 
 	set_on_wheel (a_action: PROCEDURE [INTEGER, REAL_64, REAL_64, INTEGER])
@@ -48,6 +55,14 @@ feature -- Element change
 			is_bare := a_on
 		ensure
 			set: is_bare = a_on
+		end
+
+	set_busy (a_on: BOOLEAN)
+			-- Read as busy (`a_on'), or as any canvas.
+		do
+			is_busy := a_on
+		ensure
+			set: is_busy = a_on
 		end
 
 feature -- Input
@@ -81,9 +96,12 @@ feature -- Drawing
 feature -- Accessibility
 
 	accessible_role: INTEGER
-			-- An image once named; else as SW_CANVAS.
+			-- Busy: a progress bar (with no value: SW_CANVAS gives none); else an image once
+			-- named; else as SW_CANVAS.
 		do
-			if attached accessible_name_override as al_name and then not al_name.is_empty then
+			if is_busy then
+				Result := {SW_ACCESSIBILITY}.Role_progress_bar
+			elseif attached accessible_name_override as al_name and then not al_name.is_empty then
 				Result := {SW_ACCESSIBILITY}.Role_image
 			else
 				Result := Precursor

@@ -2683,6 +2683,36 @@ feature -- Monitors (1z-c)
 		alias "return sga_window_monitor ($a_window);"
 		end
 
+feature -- App identity (1z-d)
+
+	app_set_icon (a_cairo_surface: POINTER)
+			-- 1z-d: NSApp.applicationIconImage, the Dock's icon, from a Cairo image surface;
+			-- default_pointer gives the default back.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_app_set_icon ($a_cairo_surface);"
+		end
+
+	window_set_icon (a_window: INTEGER; a_cairo_surface: POINTER)
+			-- 1z-d: macOS windows show no icon; kept and ignored (a named deviation).
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_window_set_icon ($a_window, $a_cairo_surface);"
+		end
+
+	test_app_icon_pixel (a_x, a_y: INTEGER): NATURAL_32
+			-- 1z-d: the app icon drawn at 64 by 64, its pixel at (x, y) from the top left, as
+			-- 0xAARRGGBB with straight alpha; 0 outside.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_NATURAL_32) sga_test_app_icon_pixel ($a_x, $a_y);"
+		end
+
+	busy_canvas (a_width, a_height: INTEGER): INTEGER
+			-- 1z-d: a canvas that reads as a busy progress indicator with no value
+			-- (NSAccessibilityProgressIndicatorRole, AXElementBusy YES), takes no key focus,
+			-- and draws like any canvas.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_busy_canvas ($a_width, $a_height);"
+		end
+
 feature -- Test driver
 
 	test_click (an_id: INTEGER)

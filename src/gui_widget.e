@@ -440,6 +440,124 @@ feature -- Badge (1n)
 			none: badge = Void
 		end
 
+feature -- Loading (1z-d)
+
+	Loading_skeleton: INTEGER = 1
+			-- `show_loading': placeholders filling the widget (GUI_SKELETON's `make_fill').
+
+	Loading_spinner: INTEGER = 2
+			-- `show_loading': a spinner (GUI_SPINNER) turning at the widget's center.
+
+	is_loading_kind (a_kind: INTEGER): BOOLEAN
+			-- Is `a_kind' one of the kinds above?
+		do
+			Result := a_kind = Loading_skeleton or a_kind = Loading_spinner
+		end
+
+	loading_kind: INTEGER
+			-- What `show_loading' lays over the widget now: `Loading_skeleton', `Loading_spinner',
+			-- or 0 for nothing.
+
+	is_loading: BOOLEAN
+			-- Is a loading layer over the widget?
+		do
+			Result := loading_kind /= 0
+		end
+
+	can_show_loading: BOOLEAN
+			-- Is this widget the base of a GUI_OVERLAY, where `show_loading' lays its layer?
+		do
+			Result := attached {GUI_OVERLAY} parent as al_overlay and then al_overlay.base = Current
+		end
+
+	skeleton_layer: detachable GUI_SKELETON
+			-- The skeleton `show_loading' laid over the widget, kept (hidden) between uses.
+
+	spinner_layer: detachable GUI_SPINNER
+			-- The spinner `show_loading' laid over the widget, kept (hidden and still) between uses.
+
+	show_loading (a_kind: INTEGER)
+			-- Lay `a_kind' over the widget, on the overlay it is the base of: a skeleton filling it
+			-- (`Place_fill'), or a spinner turning at its center (`Place_center': a spinner
+			-- stretched to fill draws huge on GTK). The layer takes the pointer over the widget,
+			-- and the widget is disabled until `hide_loading'. One shown before goes.
+		require
+			gui_thread: is_gui_thread
+			known: is_loading_kind (a_kind)
+			on_an_overlay: can_show_loading
+		local
+			l_skeleton: GUI_SKELETON
+			l_spinner: GUI_SPINNER
+		do
+			if not is_loading then
+				was_enabled_before_loading := is_enabled
+			end
+			hide_loading_layers
+			check attached {GUI_OVERLAY} parent as al_overlay then
+				if a_kind = Loading_skeleton then
+					if attached skeleton_layer as al_skeleton then
+						al_skeleton.show
+					else
+						create l_skeleton.make_fill
+						skeleton_layer := l_skeleton
+						al_overlay.extend_overlay (l_skeleton, al_overlay.Place_fill)
+					end
+				else
+					if attached spinner_layer as al_spinner then
+						l_spinner := al_spinner
+						l_spinner.show
+					else
+						create l_spinner.make
+						spinner_layer := l_spinner
+						al_overlay.extend_overlay (l_spinner, al_overlay.Place_center)
+					end
+					l_spinner.start
+				end
+			end
+			loading_kind := a_kind
+			disable
+		ensure
+			loading: loading_kind = a_kind
+			disabled: not is_enabled
+			skeleton_laid: a_kind = Loading_skeleton implies attached skeleton_layer
+			spinner_turning: a_kind = Loading_spinner implies (attached spinner_layer as al_s and then al_s.is_spinning)
+		end
+
+	hide_loading
+			-- Take the loading layer away, and give the widget back the enabled state it had before
+			-- `show_loading'. Nothing when none is shown.
+		require
+			gui_thread: is_gui_thread
+		do
+			if is_loading then
+				hide_loading_layers
+				loading_kind := 0
+				if was_enabled_before_loading then
+					enable
+				end
+			end
+		ensure
+			none: not is_loading
+			enabled_as_before: (old is_loading) implies is_enabled = old was_enabled_before_loading
+		end
+
+feature {NONE} -- Loading
+
+	was_enabled_before_loading: BOOLEAN
+			-- Was the widget enabled when `show_loading' laid the first layer?
+
+	hide_loading_layers
+			-- Hide both loading layers; the spinner stops, the skeleton's band too.
+		do
+			if attached skeleton_layer as al_skeleton then
+				al_skeleton.hide
+			end
+			if attached spinner_layer as al_spinner then
+				al_spinner.stop
+				al_spinner.hide
+			end
+		end
+
 feature -- Reference pill (1l)
 
 	pill_code: detachable STRING_32

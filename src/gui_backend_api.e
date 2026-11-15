@@ -2879,6 +2879,69 @@ feature -- Monitors (1z-c)
 			valid: Result = 0 or a_monitors.valid_index (Result)
 		end
 
+feature -- Loading states and app identity (1z-d)
+
+	busy_canvas (a_width, a_height: INTEGER): INTEGER
+			-- 1z-d: a canvas as `canvas' makes one, that reads to screen readers as busy: a progress
+			-- bar with no value (the shared role name "progress-bar"), named by
+			-- `set_accessible_label', and that takes no keyboard focus. Its transparent parts show
+			-- what is under it. GUI_SKELETON's. GTK: a drawing area made with
+			-- GTK_ACCESSIBLE_ROLE_PROGRESS_BAR and GTK_ACCESSIBLE_STATE_BUSY true; Windows: UI
+			-- Automation's progress bar control type; AppKit: NSAccessibilityProgressIndicatorRole
+			-- with AXElementBusy true.
+		require
+			sized: a_width > 0 and a_height > 0
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	skeleton_fill_color: INTEGER
+			-- 1z-d: the color of a skeleton's placeholders as 0xRRGGBB, or -1 for shared code's own
+			-- (GUI_SKELETON mixes the window background toward the secondary text). Windows answers
+			-- simple_widgets' SW_THEME.surface_variant, so a GUI_SKELETON's pixels match SW_SKELETON's.
+		do
+			Result := -1
+		ensure
+			rgb_or_none: Result = -1 or (Result >= 0 and Result <= 0xFFFFFF)
+		end
+
+	app_set_icon (a_cairo_surface: POINTER)
+			-- 1z-d: the program's icon while it runs, from a Cairo image surface (ARGB32,
+			-- premultiplied; the backend copies what it needs); default_pointer gives the default
+			-- back. macOS: NSApp.applicationIconImage, the Dock's; Windows: WM_SETICON, big and
+			-- small, on every window without an icon of its own, and on each window opened later;
+			-- GTK: written as PNG at 48 and 256 pixels into the hicolor theme under the icon theme
+			-- root (the user's ~/.local/share/icons unless `set_icon_theme_root' gave another), as
+			-- <app-id>.png, and named with gtk_window_set_default_icon_name.
+		deferred
+		end
+
+	window_set_icon (a_window: INTEGER; a_cairo_surface: POINTER)
+			-- 1z-d: window `a_window''s own icon, in place of the program's; default_pointer gives
+			-- the program's back. Windows: WM_SETICON, now or when it opens; GTK: written as for
+			-- `app_set_icon' under a name of its own (<app-id>-<hash of the image>) and named with
+			-- gtk_window_set_icon_name; macOS: windows show no icon, so it is kept and ignored (a
+			-- named deviation).
+		deferred
+		end
+
+	set_icon_theme_root (a_path: POINTER)
+			-- Tests, 1z-d: where GTK writes icon files (the folder holding hicolor), in place of the
+			-- user's icon theme folder, so a test never writes into the real home; "" gives the
+			-- user's back. Nothing elsewhere: only GTK writes icon files.
+		do
+		end
+
+	test_app_icon_pixel (a_x, a_y: INTEGER): NATURAL_32
+			-- Tests only, 1z-d: what the program's icon shows at (`a_x', `a_y') of it drawn 64 by 64,
+			-- from its top left, as 0xAARRGGBB with straight alpha; 0 outside or with no icon.
+			-- AppKit: NSApp.applicationIconImage rendered at 64; GTK: the icon theme's lookup of the
+			-- default icon name at 64; Windows: the HICON the main window shows (WM_GETICON, big)
+			-- when it is open with no icon of its own, else the program's big HICON.
+		deferred
+		end
+
 feature -- Test driver
 
 	test_click (an_id: INTEGER)

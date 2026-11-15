@@ -83,10 +83,13 @@ static int sg_reg(GtkWidget *w, int kind) {
 static void sg_on_dark(GObject *o, GParamSpec *p, gpointer d);
 
 __attribute__((weak)) char sg_app_name[128] = "";
+/* 1z-d: the application's id, the name its icon takes in the icon theme */
+__attribute__((weak)) char sg_app_id[256] = "";
 static int sg_init(const char *name, const char *app_id) {
-    (void) app_id;   /* GTK without GtkApplication needs no id; kept for the AppKit and future GtkApplication path */
+    /* GTK without GtkApplication needs no id for itself; the app icon is named by it (1z-d) */
     if (!gtk_init_check()) return 0;
     g_strlcpy(sg_app_name, name, sizeof sg_app_name);
+    g_strlcpy(sg_app_id, app_id ? app_id : "", sizeof sg_app_id);
     g_set_application_name(name);
     sg_gui_thread = g_thread_self();
     sg_actions = g_simple_action_group_new();
@@ -3662,12 +3665,9 @@ static void sg_canvas_zoom_changed(GtkGestureZoom *g, double scale, gpointer d) 
     sg_canvas_gesture(id, 2, amount, sg_canvas_gesture_mods(w, GTK_EVENT_CONTROLLER(g)), x, y);
 }
 
-static int sg_canvas(int w, int h) {
-    /* #126/#136: created with the image role - GTK 4.14 fixes a widget's role when it is created,
-       so a canvas cannot become an image when the program names it. A named canvas reads as a
-       named image, as on Windows and the Mac; an unnamed one as an unnamed image (a named
-       difference: there it is a custom element). */
-    GtkWidget *a = GTK_WIDGET(g_object_new(GTK_TYPE_DRAWING_AREA, "accessible-role", GTK_ACCESSIBLE_ROLE_IMG, NULL));
+/* A canvas with accessibility role `role' (GTK 4.14 fixes a widget's role when it is created). */
+static int sg_canvas_with_role(int w, int h, GtkAccessibleRole role) {
+    GtkWidget *a = GTK_WIDGET(g_object_new(GTK_TYPE_DRAWING_AREA, "accessible-role", role, NULL));
     GtkGesture *click = gtk_gesture_click_new();
     GtkEventController *motion = gtk_event_controller_motion_new();
     GtkEventController *keys = gtk_event_controller_key_new();
@@ -3695,6 +3695,23 @@ static int sg_canvas(int w, int h) {
     gtk_widget_add_controller(a, GTK_EVENT_CONTROLLER(zoom));
     g_object_set_data(G_OBJECT(a), "sg-zoom", zoom);
     gtk_widget_set_focusable(a, TRUE);
+    return id;
+}
+static int sg_canvas(int w, int h) {
+    /* #126/#136: created with the image role - GTK 4.14 fixes a widget's role when it is created,
+       so a canvas cannot become an image when the program names it. A named canvas reads as a
+       named image, as on Windows and the Mac; an unnamed one as an unnamed image (a named
+       difference: there it is a custom element). */
+    return sg_canvas_with_role(w, h, GTK_ACCESSIBLE_ROLE_IMG);
+}
+/* 1z-d: a skeleton's canvas: a progress bar to screen readers (with no value), busy, and taking
+   no keyboard focus. */
+static int sg_busy_canvas(int w, int h) {
+    int id = sg_canvas_with_role(w, h, GTK_ACCESSIBLE_ROLE_PROGRESS_BAR);
+    if (id > 0 && sg_w[id]) {
+        gtk_accessible_update_state(GTK_ACCESSIBLE(sg_w[id]), GTK_ACCESSIBLE_STATE_BUSY, TRUE, -1);
+        gtk_widget_set_focusable(sg_w[id], FALSE);
+    }
     return id;
 }
 static int sg_scale_factor(int id) { return gtk_widget_get_scale_factor(sg_w[id]); }
@@ -6956,7 +6973,12 @@ static void sg_on_after_paint(GdkFrameClock *clock, gpointer d) {
     }
 }
 static void sg_stop_frame_ticks(void) {
-    if (sg_fr_clock && sg_fr_handler) g_signal_handler_disconnect(sg_fr_clock, sg_fr_handler);
+    /* the clock is held (a reference taken in sg_start_frame_ticks): the window it came from may
+       be gone, and a handler disconnected from a freed clock was a GLib critical (1z-d); a clock
+       disposed with its surface has dropped its handlers already, so ask before disconnecting */
+    if (sg_fr_clock && sg_fr_handler && g_signal_handler_is_connected(sg_fr_clock, sg_fr_handler))
+        g_signal_handler_disconnect(sg_fr_clock, sg_fr_handler);
+    if (sg_fr_clock) g_object_unref(sg_fr_clock);
     sg_fr_clock = NULL;
     sg_fr_handler = 0;
     if (sg_tick_widget) {
@@ -6982,6 +7004,7 @@ static int sg_start_frame_ticks(void) {
     sg_tick_last = g_get_monotonic_time();
     sg_tick_id = gtk_widget_add_tick_callback(sg_tick_widget, sg_on_frame, NULL, NULL);
     sg_fr_clock = gtk_widget_get_frame_clock(sg_tick_widget);
+    if (sg_fr_clock) g_object_ref(sg_fr_clock);
     sg_fr_value_set = 0;
     if (sg_fr_clock) sg_fr_handler = g_signal_connect(sg_fr_clock, "after-paint", G_CALLBACK(sg_on_after_paint), NULL);
     return 1;
@@ -11082,6 +11105,165 @@ static int sg_font_family_available(const char *name) {
     for (i = 0; i < n && !r; i++) r = !g_ascii_strcasecmp(pango_font_family_get_name(fams[i]), name);
     g_free(fams);
     return r;
+}
+
+/* ---------- 1z-d: app identity ---------- */
+
+/* GTK 4 shows icons only by name, from an icon theme: the program's image is written as PNG
+   at 48 and 256 pixels into the hicolor theme under the icon theme root, and named (Larry's
+   ruling 3, 2026-11-14: at run time, only when the program sets an icon). The root is the
+   user's $XDG_DATA_HOME/icons (~/.local/share/icons), or a test's folder (sg_icon_root), so a
+   test never writes into the real home. */
+__attribute__((weak)) char sg_icon_root[1024] = "";
+
+static void sg_set_icon_theme_root(const char *path) { g_strlcpy(sg_icon_root, path ? path : "", sizeof sg_icon_root); }
+
+/* The folder holding hicolor. The caller frees it. */
+static char *sg_icon_root_path(void) {
+    if (sg_icon_root[0]) return g_strdup(sg_icon_root);
+    return g_build_filename(g_get_user_data_dir(), "icons", NULL);
+}
+
+/* An icon name: the application's id (letters, digits, '.', '-' and '_' kept, anything else as
+   '_'), then `suffix' when there is one. The caller frees it. */
+static char *sg_icon_name(const char *suffix) {
+    GString *g = g_string_new(NULL);
+    const char *p = sg_app_id[0] ? sg_app_id : (sg_app_name[0] ? sg_app_name : "simple-gui");
+    for (; *p; p++) g_string_append_c(g, (g_ascii_isalnum(*p) || *p == '.' || *p == '-' || *p == '_') ? *p : '_');
+    if (suffix) g_string_append(g, suffix);
+    return g_string_free(g, FALSE);
+}
+
+/* Write image `s' (a Cairo image surface) scaled to fit `n' by `n' and centered (Cairo's good
+   filter) as root/hicolor/NxN/apps/name.png. 1 when written. */
+static int sg_icon_write(cairo_surface_t *s, const char *root, const char *name, int n) {
+    char size[32];
+    char *dir, *file;
+    int ok = 0, w = cairo_image_surface_get_width(s), h = cairo_image_surface_get_height(s);
+    double k;
+    cairo_surface_t *sq;
+    cairo_t *cr;
+    if (w <= 0 || h <= 0) return 0;
+    g_snprintf(size, sizeof size, "%dx%d", n, n);
+    dir = g_build_filename(root, "hicolor", size, "apps", NULL);
+    if (g_mkdir_with_parents(dir, 0755) == 0) {
+        file = g_strconcat(dir, G_DIR_SEPARATOR_S, name, ".png", NULL);
+        sq = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, n, n);
+        cr = cairo_create(sq);
+        k = MIN((double) n / w, (double) n / h);
+        cairo_translate(cr, (n - w * k) / 2.0, (n - h * k) / 2.0);
+        cairo_scale(cr, k, k);
+        cairo_set_source_surface(cr, s, 0, 0);
+        cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+        cairo_rectangle(cr, 0, 0, w, h);
+        cairo_fill(cr);
+        cairo_destroy(cr);
+        cairo_surface_flush(sq);
+        ok = cairo_surface_write_to_png(sq, file) == CAIRO_STATUS_SUCCESS;
+        cairo_surface_destroy(sq);
+        g_free(file);
+    }
+    g_free(dir);
+    return ok;
+}
+
+/* Let the display's icon theme see files just written under `root': add it to the search path,
+   or, when it is there already, set the same path again, which makes GTK read the theme afresh
+   and forget the icons it looked up before. */
+static void sg_icon_theme_refresh(const char *root) {
+    GdkDisplay *d = gdk_display_get_default();
+    GtkIconTheme *t;
+    char **paths;
+    int i, has = 0;
+    if (!d) return;
+    t = gtk_icon_theme_get_for_display(d);
+    paths = gtk_icon_theme_get_search_path(t);
+    for (i = 0; paths && paths[i]; i++) if (strcmp(paths[i], root) == 0) has = 1;
+    if (has) gtk_icon_theme_set_search_path(t, (const char * const *) paths);
+    else gtk_icon_theme_add_search_path(t, root);
+    g_strfreev(paths);
+}
+
+/* Write image `s' at 48 and 256 pixels as `name', and let the theme see them; 1 when both were written. */
+static int sg_icon_write_both(cairo_surface_t *s, const char *name) {
+    char *root = sg_icon_root_path();
+    int ok;
+    cairo_surface_flush(s);
+    ok = sg_icon_write(s, root, name, 48);
+    ok = sg_icon_write(s, root, name, 256) && ok;
+    sg_icon_theme_refresh(root);
+    g_free(root);
+    return ok;
+}
+
+/* GUI_APPLICATION.set_icon: the image as <app-id>.png, named as every window's default icon.
+   NULL (or a surface that is not an image) gives GTK's default back. */
+static void sg_app_set_icon(void *surface) {
+    cairo_surface_t *s = (cairo_surface_t *) surface;
+    char *name;
+    if (!s || cairo_surface_get_type(s) != CAIRO_SURFACE_TYPE_IMAGE) { gtk_window_set_default_icon_name(NULL); return; }
+    name = sg_icon_name(NULL);
+    if (sg_icon_write_both(s, name)) gtk_window_set_default_icon_name(name);
+    g_free(name);
+}
+
+/* GUI_WINDOW.set_icon: the image under a name of its own, <app-id>-<FNV-1a of its pixels>, so
+   the same image always takes the same file; named as window `win''s icon. NULL gives it the
+   program's again. */
+static void sg_window_set_icon(int win, void *surface) {
+    cairo_surface_t *s = (cairo_surface_t *) surface;
+    GtkWidget *w = (win > 0 && win < SG_MAX) ? sg_w[win] : NULL;
+    const unsigned char *data;
+    guint32 hash = 2166136261u;
+    int x, y, iw, ih, stride;
+    char suffix[16];
+    char *name;
+    if (!w || !GTK_IS_WINDOW(w)) return;
+    if (!s || cairo_surface_get_type(s) != CAIRO_SURFACE_TYPE_IMAGE) { gtk_window_set_icon_name(GTK_WINDOW(w), NULL); return; }
+    cairo_surface_flush(s);
+    data = cairo_image_surface_get_data(s);
+    iw = cairo_image_surface_get_width(s); ih = cairo_image_surface_get_height(s);
+    stride = cairo_image_surface_get_stride(s);
+    for (y = 0; data && y < ih; y++)
+        for (x = 0; x < iw * 4; x++) { hash ^= data[(size_t) y * stride + x]; hash *= 16777619u; }
+    g_snprintf(suffix, sizeof suffix, "-%08x", (unsigned int) hash);
+    name = sg_icon_name(suffix);
+    if (sg_icon_write_both(s, name)) gtk_window_set_icon_name(GTK_WINDOW(w), name);
+    g_free(name);
+}
+
+/* Tests: the default icon as the display's icon theme finds it by name at 64 pixels: the file the
+   lookup gives, read at 64 by 64, the pixel at (x, y) from its top left, 0xAARRGGBB straight;
+   0 outside, with no default icon name, or when the lookup found another icon (image-missing). */
+static unsigned int sg_test_app_icon_pixel(int x, int y) {
+    const char *name = gtk_window_get_default_icon_name();
+    GdkDisplay *d = gdk_display_get_default();
+    GtkIconPaintable *p;
+    GFile *f;
+    char *path, *base;
+    GdkPixbuf *pb;
+    unsigned int v = 0;
+    if (x < 0 || y < 0 || x >= 64 || y >= 64 || !name || !*name || !d) return 0;
+    p = gtk_icon_theme_lookup_icon(gtk_icon_theme_get_for_display(d), name, NULL, 64, 1, GTK_TEXT_DIR_NONE, 0);
+    if (!p) return 0;
+    f = gtk_icon_paintable_get_file(p);
+    path = f ? g_file_get_path(f) : NULL;
+    base = g_strconcat(name, ".png", NULL);
+    if (path && g_str_has_suffix(path, base)) {
+        pb = gdk_pixbuf_new_from_file_at_scale(path, 64, 64, FALSE, NULL);
+        if (pb && gdk_pixbuf_get_width(pb) == 64 && gdk_pixbuf_get_height(pb) == 64) {
+            int n = gdk_pixbuf_get_n_channels(pb), rs = gdk_pixbuf_get_rowstride(pb);
+            const guint8 *px = gdk_pixbuf_read_pixels(pb) + (size_t) y * rs + (size_t) x * n;
+            unsigned int a = (n == 4 && gdk_pixbuf_get_has_alpha(pb)) ? px[3] : 255;
+            v = (a << 24) | ((unsigned int) px[0] << 16) | ((unsigned int) px[1] << 8) | (unsigned int) px[2];
+        }
+        if (pb) g_object_unref(pb);
+    }
+    g_free(base);
+    g_free(path);
+    if (f) g_object_unref(f);
+    g_object_unref(p);
+    return v;
 }
 
 #endif

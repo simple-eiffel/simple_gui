@@ -18,7 +18,7 @@ class
 inherit
 	GUI_BACKEND_API
 		redefine
-			scale, text_area_string
+			scale, text_area_string, skeleton_fill_color
 		end
 
 	GUI_PICTURE_BYTES
@@ -2178,6 +2178,8 @@ feature -- Controls
 		do
 			if attached {SW_OVERLAY} widget (an_overlay) as al_o and then attached widget (a_child) as al_c then
 				al_o.put_layer (al_c, a_place)
+					-- 1z-d: a layer may come while the window shows (`show_loading')
+				changed
 			end
 		end
 
@@ -2549,6 +2551,100 @@ feature -- Controls
 			if attached info_bars.item (an_id) as al_parts then
 				al_parts.close.set_visible (a_on)
 				changed
+			end
+		end
+
+	busy_canvas (a_width, a_height: INTEGER): INTEGER
+			-- 1z-d: a GUI_SW_CANVAS that reads as a progress bar with no value (busy), draws bare (its
+			-- transparent parts show what is under it, as SW_SKELETON's shapes do) and takes no
+			-- keyboard focus (no key reports, so SW_CANVAS.accepts_focus is False).
+		local
+			l_c: GUI_SW_CANVAS
+		do
+			create l_c.make (device (a_height.max (1)).to_double)
+			l_c := l_c.with_min_size (device (a_width.max (1)).to_double, device (a_height.max (1)).to_double)
+			l_c.set_busy (True)
+			l_c.set_bare (True)
+			Result := register (l_c)
+			l_c.set_on_pointer (agent report_pointer (Result, ?, ?, ?, ?, ?))
+			l_c.set_on_resize (agent report_resize (Result, ?, ?))
+		end
+
+	skeleton_fill_color: INTEGER
+			-- 1z-d: SW_THEME.surface_variant of the theme a window wears now (the contrast one, the
+			-- dark or the light), SW_SKELETON's placeholder color.
+		local
+			t: SW_THEME
+		do
+			if is_high_contrast then
+				t := contrast_theme
+			elseif is_dark then
+				create t.make_dark
+			else
+				create t.make_light
+			end
+			Result := (t.surface_variant & 0xFFFFFF).to_integer_32
+		end
+
+	app_set_icon (a_cairo_surface: POINTER)
+			-- 1z-d: HICONs at the system's big and small icon sizes, made from the image, given to
+			-- every window without an icon of its own by WM_SETICON (and to each that opens later);
+			-- default_pointer takes them away, so Windows' default shows.
+		local
+			l_old: like app_icons
+		do
+			l_old := app_icons
+			if a_cairo_surface /= default_pointer then
+				app_icons := new_icons (a_cairo_surface)
+			else
+				app_icons := Void
+			end
+			across windows.current_keys as ic loop
+				give_icons (ic)
+			end
+			if attached l_old as al_old then
+				c_destroy_icon (al_old.big)
+				c_destroy_icon (al_old.small)
+			end
+		end
+
+	window_set_icon (a_window: INTEGER; a_cairo_surface: POINTER)
+			-- 1z-d: window `a_window''s own HICONs, big and small, by WM_SETICON now or when it opens;
+			-- default_pointer gives it the program's again.
+		local
+			l_old: detachable TUPLE [big, small: POINTER]
+		do
+			l_old := window_icons.item (a_window)
+			if a_cairo_surface /= default_pointer then
+				window_icons.force (new_icons (a_cairo_surface), a_window)
+			else
+				window_icons.remove (a_window)
+			end
+			give_icons (a_window)
+			if attached l_old as al_old then
+				c_destroy_icon (al_old.big)
+				c_destroy_icon (al_old.small)
+			end
+		end
+
+	test_app_icon_pixel (a_x, a_y: INTEGER): NATURAL_32
+			-- 1z-d: the main window's big icon (WM_GETICON) when it is open with no icon of its own,
+			-- so a window opened after `app_set_icon' is seen to carry it; else the program's big
+			-- HICON. Its color bits read back: the pixel nearest (x, y) of it drawn 64 by 64.
+		local
+			l_icon: POINTER
+		do
+			if a_x >= 0 and a_y >= 0 and a_x < 64 and a_y < 64 then
+				if attached open_window as al_w and then al_w.is_window_open and then al_w.hwnd /= default_pointer
+					and then not window_icons.has (al_w.gui_id)
+				then
+					l_icon := c_window_big_icon (al_w.hwnd)
+				elseif attached app_icons as al_icons then
+					l_icon := al_icons.big
+				end
+				if l_icon /= default_pointer then
+					Result := c_icon_pixel (l_icon, a_x, a_y, 64)
+				end
 			end
 		end
 
@@ -5497,12 +5593,14 @@ feature -- Every widget
 feature -- Canvas
 
 	canvas (a_width, a_height: INTEGER): INTEGER
-			-- A GUI_SW_CANVAS: an image to screen readers once named (#126).
+			-- A GUI_SW_CANVAS: an image to screen readers once named (#126). It asks for `a_width' by
+			-- `a_height' logical pixels, as on GTK and AppKit (1z-d: it took them as device pixels, so at
+			-- 150 percent a canvas came out two thirds of the size asked for).
 		local
 			l_c: GUI_SW_CANVAS
 		do
-			create l_c.make (a_height.max (1).to_double)
-			l_c := l_c.with_min_size (a_width.max (1).to_double, a_height.max (1).to_double)
+			create l_c.make (device (a_height.max (1)).to_double)
+			l_c := l_c.with_min_size (device (a_width.max (1)).to_double, device (a_height.max (1)).to_double)
 			Result := register (l_c)
 			l_c.set_on_pointer (agent report_pointer (Result, ?, ?, ?, ?, ?))
 			l_c.set_on_resize (agent report_resize (Result, ?, ?))
@@ -8108,6 +8206,232 @@ feature {NONE} -- Own appearance (1w)
 			never_empty: not Result.is_empty
 		end
 
+feature {NONE} -- App identity (1z-d)
+
+	app_icons: detachable TUPLE [big, small: POINTER]
+			-- The program's HICONs (`app_set_icon'), Void for Windows' default.
+
+	window_icons: HASH_TABLE [TUPLE [big, small: POINTER], INTEGER]
+			-- Each window's own HICONs, by its id (`window_set_icon').
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	new_icons (a_cairo_surface: POINTER): TUPLE [big, small: POINTER]
+			-- New HICONs at the system's big and small icon sizes (SM_CXICON, SM_CXSMICON: the
+			-- process is DPI aware, so they follow the display's scale) showing the image.
+		require
+			image: a_cairo_surface /= default_pointer
+		do
+			Result := [new_icon (a_cairo_surface, c_icon_size (False)), new_icon (a_cairo_surface, c_icon_size (True))]
+		end
+
+	new_icon (a_cairo_surface: POINTER; a_size: INTEGER): POINTER
+			-- A new HICON `a_size' pixels square showing the Cairo image `a_cairo_surface' scaled to
+			-- fit and centered (Cairo's good filter); default_pointer when it cannot be made. The
+			-- owner destroys it (`c_destroy_icon').
+		require
+			image: a_cairo_surface /= default_pointer
+		local
+			l_source, l_square: CAIRO_SURFACE
+			l_context: CAIRO_CONTEXT
+			l_pattern: CAIRO_SURFACE_PATTERN
+			l_k: REAL_64
+		do
+			create l_source.make_from_handle (a_cairo_surface)
+			if a_size > 0 and then l_source.width > 0 and then l_source.height > 0 then
+				create l_square.make (a_size, a_size)
+				create l_context.make (l_square)
+				l_k := (a_size / l_source.width).min (a_size / l_source.height)
+				create l_pattern.make_from_surface (l_source)
+				l_pattern.set_filter ({CAIRO_PATTERN}.Filter_good).do_nothing
+				l_context.translate ((a_size - l_source.width * l_k) / 2.0, (a_size - l_source.height * l_k) / 2.0).scale (l_k, l_k).do_nothing
+				l_context.set_pattern (l_pattern).rectangle (0.0, 0.0, l_source.width, l_source.height).fill.do_nothing
+				l_pattern.destroy
+				l_context.destroy
+				l_square.flush.do_nothing
+				Result := c_icon_from_cairo (l_square.data, l_square.stride, a_size)
+				l_square.destroy
+			end
+		end
+
+	give_icons (a_window: INTEGER)
+			-- WM_SETICON on window `a_window''s native window, when it has one: its own icons, else
+			-- the program's, else none (Windows' default).
+		local
+			l_handle: POINTER
+		do
+			if attached floats.item (a_window) as al_f then
+				if al_f.is_open then
+					l_handle := al_f.panel.handle
+				end
+			elseif attached windows.item (a_window) as al_w and then al_w.is_window_open then
+				l_handle := al_w.hwnd
+			end
+			if l_handle /= default_pointer then
+				if attached window_icons.item (a_window) as al_own then
+					c_set_window_icons (l_handle, al_own.big, al_own.small)
+				elseif attached app_icons as al_app then
+					c_set_window_icons (l_handle, al_app.big, al_app.small)
+				else
+					c_set_window_icons (l_handle, default_pointer, default_pointer)
+				end
+			end
+		end
+
+	let_go_of_icons (a_window: INTEGER)
+			-- Window `a_window' is gone: destroy its own HICONs.
+		do
+			if attached window_icons.item (a_window) as al_own then
+				window_icons.remove (a_window)
+				c_destroy_icon (al_own.big)
+				c_destroy_icon (al_own.small)
+			end
+		ensure
+			gone: not window_icons.has (a_window)
+		end
+
+	c_icon_size (a_small: BOOLEAN): INTEGER
+			-- The system's big or small icon size, pixels.
+		external
+			"C inline use <windows.h>"
+		alias
+			"return (EIF_INTEGER) GetSystemMetrics($a_small ? SM_CXSMICON : SM_CXICON);"
+		end
+
+	c_icon_from_cairo (a_data: POINTER; a_stride, a_size: INTEGER): POINTER
+			-- A new HICON `a_size' square from the Cairo ARGB32 pixels at `a_data' (premultiplied,
+			-- `a_stride' bytes a row): a 32-bit top-down DIB of straight BGRA, as an icon's color
+			-- bits are, and an all-zero mask (the alpha decides). NULL when it cannot be made.
+		external
+			"C inline use <windows.h>"
+		alias
+			"[
+				const unsigned char *l_data = (const unsigned char *) $a_data;
+				int l_n = (int) $a_size, l_stride = (int) $a_stride, x, y;
+				BITMAPV5HEADER l_bi;
+				void *l_bits = NULL;
+				HDC l_dc;
+				HBITMAP l_color, l_mask;
+				ICONINFO l_ii;
+				HICON l_icon = NULL;
+				unsigned char *l_zeros;
+				if (!l_data || l_n <= 0) return (EIF_POINTER) NULL;
+				ZeroMemory(&l_bi, sizeof l_bi);
+				l_bi.bV5Size = sizeof l_bi;
+				l_bi.bV5Width = l_n;
+				l_bi.bV5Height = -l_n;
+				l_bi.bV5Planes = 1;
+				l_bi.bV5BitCount = 32;
+				l_bi.bV5Compression = BI_BITFIELDS;
+				l_bi.bV5RedMask = 0x00FF0000;
+				l_bi.bV5GreenMask = 0x0000FF00;
+				l_bi.bV5BlueMask = 0x000000FF;
+				l_bi.bV5AlphaMask = 0xFF000000;
+				l_dc = GetDC(NULL);
+				l_color = CreateDIBSection(l_dc, (BITMAPINFO *) &l_bi, DIB_RGB_COLORS, &l_bits, NULL, 0);
+				ReleaseDC(NULL, l_dc);
+				if (!l_color || !l_bits) { if (l_color) DeleteObject(l_color); return (EIF_POINTER) NULL; }
+				for (y = 0; y < l_n; y++) {
+					const unsigned int *l_row = (const unsigned int *) (l_data + (size_t) y * l_stride);
+					unsigned int *l_out = (unsigned int *) l_bits + (size_t) y * l_n;
+					for (x = 0; x < l_n; x++) {
+						unsigned int p = l_row[x], a = p >> 24, r = (p >> 16) & 0xFF, g = (p >> 8) & 0xFF, b = p & 0xFF;
+						if (a > 0 && a < 255) {
+							r = (r * 255 + a / 2) / a; if (r > 255) r = 255;
+							g = (g * 255 + a / 2) / a; if (g > 255) g = 255;
+							b = (b * 255 + a / 2) / a; if (b > 255) b = 255;
+						}
+						l_out[x] = (a << 24) | (r << 16) | (g << 8) | b;
+					}
+				}
+				l_zeros = (unsigned char *) calloc((size_t) ((l_n + 15) / 16) * 2 * l_n, 1);
+				l_mask = l_zeros ? CreateBitmap(l_n, l_n, 1, 1, l_zeros) : NULL;
+				free(l_zeros);
+				if (l_mask) {
+					l_ii.fIcon = TRUE; l_ii.xHotspot = 0; l_ii.yHotspot = 0;
+					l_ii.hbmMask = l_mask; l_ii.hbmColor = l_color;
+					l_icon = CreateIconIndirect(&l_ii);
+					DeleteObject(l_mask);
+				}
+				DeleteObject(l_color);
+				return (EIF_POINTER) l_icon;
+			]"
+		end
+
+	c_destroy_icon (an_icon: POINTER)
+		external
+			"C inline use <windows.h>"
+		alias
+			"if ($an_icon) DestroyIcon((HICON) $an_icon);"
+		end
+
+	c_set_window_icons (a_hwnd, a_big, a_small: POINTER)
+			-- WM_SETICON, big and small (NULL takes the icon away).
+		external
+			"C inline use <windows.h>"
+		alias
+			"[
+				SendMessageW((HWND) $a_hwnd, WM_SETICON, ICON_BIG, (LPARAM) $a_big);
+				SendMessageW((HWND) $a_hwnd, WM_SETICON, ICON_SMALL, (LPARAM) $a_small);
+			]"
+		end
+
+	c_window_big_icon (a_hwnd: POINTER): POINTER
+			-- The big icon `a_hwnd' shows (WM_GETICON).
+		external
+			"C inline use <windows.h>"
+		alias
+			"return (EIF_POINTER) SendMessageW((HWND) $a_hwnd, WM_GETICON, ICON_BIG, 0);"
+		end
+
+	c_icon_pixel (an_icon: POINTER; a_x, a_y, a_size: INTEGER): NATURAL_32
+			-- The color bits of `an_icon' read back (GetIconInfo, GetDIBits): the pixel nearest
+			-- (x, y) of it drawn `a_size' square, 0xAARRGGBB straight; an icon with no alpha at all
+			-- reads opaque; 0 when it cannot be read.
+		external
+			"C inline use <windows.h>"
+		alias
+			"[
+				ICONINFO l_ii;
+				BITMAP l_bm;
+				BITMAPINFO l_bi;
+				unsigned int *l_px;
+				unsigned int l_v = 0, l_any = 0;
+				int l_w, l_h, l_sx, l_sy, i;
+				HDC l_dc;
+				if (!$an_icon || !GetIconInfo((HICON) $an_icon, &l_ii)) return (EIF_NATURAL_32) 0;
+				if (l_ii.hbmColor && GetObjectW(l_ii.hbmColor, sizeof l_bm, &l_bm) && l_bm.bmWidth > 0 && l_bm.bmHeight > 0) {
+					l_w = l_bm.bmWidth; l_h = l_bm.bmHeight;
+					l_px = (unsigned int *) malloc((size_t) l_w * l_h * 4);
+					if (l_px) {
+						ZeroMemory(&l_bi, sizeof l_bi);
+						l_bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+						l_bi.bmiHeader.biWidth = l_w;
+						l_bi.bmiHeader.biHeight = -l_h;
+						l_bi.bmiHeader.biPlanes = 1;
+						l_bi.bmiHeader.biBitCount = 32;
+						l_bi.bmiHeader.biCompression = BI_RGB;
+						l_dc = GetDC(NULL);
+						if (GetDIBits(l_dc, l_ii.hbmColor, 0, (UINT) l_h, l_px, &l_bi, DIB_RGB_COLORS) == l_h) {
+							for (i = 0; i < l_w * l_h; i++) l_any |= l_px[i] >> 24;
+							l_sx = (int) (((long long) $a_x * l_w) / $a_size);
+							l_sy = (int) (((long long) $a_y * l_h) / $a_size);
+							if (l_sx >= l_w) l_sx = l_w - 1;
+							if (l_sy >= l_h) l_sy = l_h - 1;
+							l_v = l_px[(size_t) l_sy * l_w + l_sx];
+							if (!l_any) l_v |= 0xFF000000u;
+						}
+						ReleaseDC(NULL, l_dc);
+						free(l_px);
+					}
+				}
+				if (l_ii.hbmColor) DeleteObject(l_ii.hbmColor);
+				if (l_ii.hbmMask) DeleteObject(l_ii.hbmMask);
+				return (EIF_NATURAL_32) l_v;
+			]"
+		end
+
 feature {NONE} -- State
 
 	items: ARRAYED_LIST [detachable SW_WIDGET]
@@ -8490,6 +8814,7 @@ feature {NONE} -- Implementation
 					drawn_timers.remove (ic)
 				end
 			end
+			let_go_of_icons (a_window)
 			windows.remove (a_window)
 			window_content.remove (a_window)
 			window_toolbar.remove (a_window)
@@ -8532,6 +8857,7 @@ feature {NONE} -- Implementation
 			a_w.set_close_requests_are_events (True)
 			a_w.shell_open_window (a_w.title, a_w.win_x, a_w.win_y, a_w.win_w, a_w.win_h)
 			open_window := a_w
+			give_icons (a_window)
 			tell_window_takes_text
 			a_w.request_render
 			apply_pending_positions
@@ -8575,6 +8901,7 @@ feature {NONE} -- Implementation
 			l_f := a_owner.float_document (l_root, a_w.title, a_owner.win_x + 40, a_owner.win_y + 40, l_w, l_h)
 			if l_f.is_open then
 				floats.force (l_f, a_window)
+				give_icons (a_window)
 				l_f.set_on_close_request (agent push (6, a_window, 0, 0, 0))
 				changed
 			end

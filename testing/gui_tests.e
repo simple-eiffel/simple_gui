@@ -9293,6 +9293,283 @@ feature -- App services (1z-c)
 			m.changed_actions.prune (l_agent)
 		end
 
+feature -- Loading states and app identity (1z-d)
+
+	test_skeleton_lines_are_sw_skeleton_shapes
+			-- 1z-d: three lines 14 high with 10 between, the last 62 percent wide, in the theme's
+			-- muted color (on Windows SW_THEME.surface_variant, SW_SKELETON's own); between the lines
+			-- and past the short line's end, not that color. Read with motion reduced: no band.
+		local
+			l_window: GUI_WINDOW
+			l_skeleton: GUI_SKELETON
+			l_fill: NATURAL_32
+			w: INTEGER
+		do
+			app.set_reduces_motion_for_tests (True)
+			create l_skeleton.make_lines (3)
+			l_window := view_window (l_skeleton, "Skeleton")
+			w := l_skeleton.width
+			assert ("three lines", l_skeleton.shape = l_skeleton.Shape_lines and l_skeleton.line_count = 3)
+			assert ("as tall as three lines and two gaps: " + l_skeleton.height.out, near (l_skeleton.height, 62))
+			assert ("wide: " + w.out, w >= 100)
+			l_fill := l_skeleton.fill_color
+			if {PLATFORM}.is_windows and not app.is_high_contrast then
+				assert ("Windows: SW_SKELETON's color: " + l_fill.to_hex_string,
+					l_fill = (if app.is_dark then {NATURAL_32} 0x232A35 else {NATURAL_32} 0xF5F7FA end))
+			end
+			assert ("muted: not the window's background", not same_color ({NATURAL_32} 0xFF000000 | app.system_color (app.Color_window_background), l_fill))
+			assert ("the first line: " + driver.canvas_pixel (l_skeleton, w // 2, 7).to_hex_string, same_color (driver.canvas_pixel (l_skeleton, w // 2, 7), l_fill))
+			assert ("the second: " + driver.canvas_pixel (l_skeleton, w // 2, 31).to_hex_string, same_color (driver.canvas_pixel (l_skeleton, w // 2, 31), l_fill))
+			assert ("the third, short: " + driver.canvas_pixel (l_skeleton, w // 4, 55).to_hex_string, same_color (driver.canvas_pixel (l_skeleton, w // 4, 55), l_fill))
+			assert ("its rounded end: " + driver.canvas_pixel (l_skeleton, 0, 0).to_hex_string, not same_color (driver.canvas_pixel (l_skeleton, 0, 0), l_fill))
+			assert ("between the first two, no line: " + driver.canvas_pixel (l_skeleton, w // 2, 19).to_hex_string, not same_color (driver.canvas_pixel (l_skeleton, w // 2, 19), l_fill))
+			assert ("past the short line's end: " + driver.canvas_pixel (l_skeleton, (w * 0.8).floor, 55).to_hex_string, not same_color (driver.canvas_pixel (l_skeleton, (w * 0.8).floor, 55), l_fill))
+			assert ("standing still", not l_skeleton.is_shimmering)
+			l_window.close
+			app.clear_reduces_motion_for_tests
+		end
+
+	test_skeleton_disc_and_block_shapes
+			-- 1z-d: a disc fills its middle and leaves its corners; a block fills its middle and its
+			-- corners are rounded. Read with motion reduced: no band.
+		local
+			l_window: GUI_WINDOW
+			l_disc, l_block: GUI_SKELETON
+		do
+			app.set_reduces_motion_for_tests (True)
+			create l_disc.make_disc (40)
+			l_window := view_window (l_disc, "Disc")
+			assert ("a disc", l_disc.shape = l_disc.Shape_disc and l_disc.disc_diameter = 40)
+			assert ("its middle: " + driver.canvas_pixel (l_disc, 20, 20).to_hex_string, same_color (driver.canvas_pixel (l_disc, 20, 20), l_disc.fill_color))
+			assert ("its corner is outside it: " + driver.canvas_pixel (l_disc, 1, 1).to_hex_string, not same_color (driver.canvas_pixel (l_disc, 1, 1), l_disc.fill_color))
+			l_window.close
+			create l_block.make_rect (80, 40)
+			l_window := view_window (l_block, "Block")
+			assert ("a block", l_block.shape = l_block.Shape_rect and l_block.rect_width = 80 and l_block.rect_height = 40)
+			assert ("its middle: " + driver.canvas_pixel (l_block, 40, 20).to_hex_string, same_color (driver.canvas_pixel (l_block, 40, 20), l_block.fill_color))
+			assert ("near its corner: " + driver.canvas_pixel (l_block, 2, 20).to_hex_string, same_color (driver.canvas_pixel (l_block, 2, 20), l_block.fill_color))
+			assert ("its corner is rounded: " + driver.canvas_pixel (l_block, 0, 0).to_hex_string, not same_color (driver.canvas_pixel (l_block, 0, 0), l_block.fill_color))
+			l_window.close
+			app.clear_reduces_motion_for_tests
+		end
+
+	test_skeleton_band_sweeps_on_the_clock
+			-- 1z-d: one sweep every 1.2 seconds on the shared clock, in 24 steps: at the start the
+			-- band covers the line's leading end, half a sweep later its middle, and a whole sweep
+			-- brings it back. The band is the muted color with the secondary text over it at 18
+			-- percent (SW_SKELETON's).
+		local
+			l_window: GUI_WINDOW
+			l_skeleton: GUI_SKELETON
+			l_fill, l_band: NATURAL_32
+			w: INTEGER
+		do
+			app.animation_clock.set_manual (True)
+			create l_skeleton.make_lines (1)
+			l_window := view_window (l_skeleton, "Shimmer")
+			w := l_skeleton.width
+			l_fill := l_skeleton.fill_color
+			l_band := blended (l_fill, l_skeleton.band_color, l_skeleton.Band_alpha)
+			assert ("sweeping", l_skeleton.is_shimmering and l_skeleton.shows_band)
+			assert ("at the start: " + l_skeleton.phase.out, l_skeleton.phase = 0)
+			assert ("the band at the leading end: " + driver.canvas_pixel (l_skeleton, 10, 7).to_hex_string + " for " + l_band.to_hex_string,
+				same_color (driver.canvas_pixel (l_skeleton, 10, 7), l_band))
+			assert ("not at the middle yet: " + driver.canvas_pixel (l_skeleton, w // 2, 7).to_hex_string, same_color (driver.canvas_pixel (l_skeleton, w // 2, 7), l_fill))
+			app.animation_clock.step (600)
+			assert ("half a sweep is step 12: " + l_skeleton.phase.out, l_skeleton.phase = 12)
+			assert ("the band at the middle: " + driver.canvas_pixel (l_skeleton, w // 2, 7).to_hex_string, same_color (driver.canvas_pixel (l_skeleton, w // 2, 7), l_band))
+			assert ("gone from the leading end: " + driver.canvas_pixel (l_skeleton, 10, 7).to_hex_string, same_color (driver.canvas_pixel (l_skeleton, 10, 7), l_fill))
+			app.animation_clock.step (600)
+			assert ("a whole sweep: back at the start, still sweeping", l_skeleton.phase = 0 and l_skeleton.is_shimmering)
+			assert ("the band at the leading end again: " + driver.canvas_pixel (l_skeleton, 10, 7).to_hex_string, same_color (driver.canvas_pixel (l_skeleton, 10, 7), l_band))
+			l_skeleton.hide
+			assert ("hidden: the clock may rest", not l_skeleton.is_shimmering)
+			l_skeleton.show
+			assert ("shown again: sweeping", l_skeleton.is_shimmering)
+			end_manual_clock
+			l_window.close
+		end
+
+	test_skeleton_stands_still_under_reduced_motion
+			-- 1z-d: with motion reduced no band is drawn and nothing sweeps: a clock step later the
+			-- pixels are the same, all the muted color. With motion allowed, `set_shimmer (False)'
+			-- stands it still too, and `set_shimmer (True)' sweeps again.
+		local
+			l_window: GUI_WINDOW
+			l_skeleton: GUI_SKELETON
+			l_fill, l_band, l_before: NATURAL_32
+			w: INTEGER
+		do
+			app.animation_clock.set_manual (True)
+			app.set_reduces_motion_for_tests (True)
+			create l_skeleton.make_lines (2)
+			l_window := view_window (l_skeleton, "Still")
+			w := l_skeleton.width
+			l_fill := l_skeleton.fill_color
+			l_band := blended (l_fill, l_skeleton.band_color, l_skeleton.Band_alpha)
+			assert ("not sweeping", not l_skeleton.is_shimmering and not l_skeleton.shows_band)
+			l_before := driver.canvas_pixel (l_skeleton, 10, 7)
+			assert ("no band at the leading end: " + l_before.to_hex_string, same_color (l_before, l_fill))
+			app.animation_clock.step (600)
+			assert ("still: " + driver.canvas_pixel (l_skeleton, 10, 7).to_hex_string, driver.canvas_pixel (l_skeleton, 10, 7) = l_before
+				and same_color (driver.canvas_pixel (l_skeleton, w // 2, 7), l_fill))
+			app.clear_reduces_motion_for_tests
+			l_skeleton.set_shimmer (False)
+			app.animation_clock.step (600)
+			assert ("shimmer off: still", not l_skeleton.has_shimmer and not l_skeleton.is_shimmering
+				and same_color (driver.canvas_pixel (l_skeleton, 10, 7), l_fill))
+			l_skeleton.set_shimmer (True)
+			assert ("on again: sweeping", l_skeleton.has_shimmer and l_skeleton.is_shimmering)
+			assert ("the band from the start: " + driver.canvas_pixel (l_skeleton, 10, 7).to_hex_string, same_color (driver.canvas_pixel (l_skeleton, 10, 7), l_band))
+			end_manual_clock
+			l_window.close
+		end
+
+	test_show_loading_lays_a_skeleton_or_a_spinner_and_disables
+			-- 1z-d: on an overlay's base, `show_loading' lays a skeleton filling it (reading as
+			-- "Loading", a busy progress bar) or a spinner at its center, and disables the base;
+			-- `hide_loading' takes it away and enables the base again. A base disabled before
+			-- stays disabled.
+		local
+			l_window: GUI_WINDOW
+			l_overlay: GUI_OVERLAY
+			l_base: GUI_BUTTON
+			l_tree: STRING_32
+		do
+			app.set_reduces_motion_for_tests (True)
+			create l_window.make ("Loading", 400, 300)
+			create l_overlay.make
+			create l_base.make ("Save the report")
+			l_overlay.set_base (l_base)
+			l_window.set_content (l_overlay)
+			l_window.show
+			settle_window
+			let_layout_settle
+			assert ("an overlay's base can", l_base.can_show_loading and not l_overlay.can_show_loading)
+			assert ("enabled, not loading", l_base.is_enabled and not l_base.is_loading)
+			l_base.show_loading (l_base.Loading_skeleton)
+			let_layout_settle
+			assert ("loading a skeleton", l_base.is_loading and l_base.loading_kind = l_base.Loading_skeleton)
+			assert ("the base disabled meanwhile", not l_base.is_enabled)
+			if attached l_base.skeleton_layer as al_skeleton then
+				assert ("a block at Place_fill", al_skeleton.shape = al_skeleton.Shape_fill and l_overlay.place_of (al_skeleton) = l_overlay.Place_fill and al_skeleton.is_shown)
+				assert ("filling the base: " + al_skeleton.width.out + " x " + al_skeleton.height.out + " over " + l_overlay.width.out + " x " + l_overlay.height.out,
+					near (al_skeleton.width, l_overlay.width) and near (al_skeleton.height, l_overlay.height))
+				assert ("the muted color over the base: " + driver.canvas_pixel (al_skeleton, al_skeleton.width // 2, al_skeleton.height // 2).to_hex_string,
+					same_color (driver.canvas_pixel (al_skeleton, al_skeleton.width // 2, al_skeleton.height // 2), al_skeleton.fill_color))
+				assert ("reads as busy: " + al_skeleton.accessible_role.to_string_8, al_skeleton.accessible_role.same_string ("progress-bar"))
+				assert ("named Loading", al_skeleton.accessible_label.same_string ("Loading"))
+				l_tree := driver.describe_accessibility (l_window)
+				assert ("in the tree as a busy Loading: " + {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (l_tree), l_tree.has_substring ("progress-bar: Loading"))
+				l_base.hide_loading
+				assert ("taken away", not l_base.is_loading and not al_skeleton.is_shown)
+				assert ("enabled again", l_base.is_enabled)
+			else
+				assert ("a skeleton was laid", False)
+			end
+			l_base.show_loading (l_base.Loading_spinner)
+			let_layout_settle
+			assert ("loading a spinner, disabled", l_base.loading_kind = l_base.Loading_spinner and not l_base.is_enabled)
+			if attached l_base.spinner_layer as al_spinner then
+				assert ("turning at the center", al_spinner.is_spinning and al_spinner.is_shown and l_overlay.place_of (al_spinner) = l_overlay.Place_center)
+				assert ("the skeleton stays hidden", attached l_base.skeleton_layer as al_s and then not al_s.is_shown)
+				l_base.show_loading (l_base.Loading_skeleton)
+				assert ("a skeleton in its place: the spinner stops", l_base.loading_kind = l_base.Loading_skeleton and not al_spinner.is_spinning and not al_spinner.is_shown)
+				l_base.hide_loading
+				assert ("enabled once more", l_base.is_enabled and not l_base.is_loading)
+			else
+				assert ("a spinner was laid", False)
+			end
+			l_base.disable
+			l_base.show_loading (l_base.Loading_skeleton)
+			l_base.hide_loading
+			assert ("disabled before, disabled after", not l_base.is_enabled and not l_base.is_loading)
+			l_window.close
+			app.clear_reduces_motion_for_tests
+		end
+
+	test_app_icon_shows_the_image
+			-- 1z-d: the program's icon, red with a blue top-left quarter, read back from the toolkit
+			-- at 64 by 64 (the Dock's image, the icon theme's lookup of its name, the HICON of a
+			-- window opened after it): the center reads red, the top-left quarter blue, within the
+			-- toolkits' color tolerance (the Mac reads pure red back as FFFE2000). On Linux it is
+			-- written at 48 and 256 pixels under the icon theme root, which this test points at a
+			-- folder of its own, never the real home. A window's own icon leaves the program's be.
+		local
+			l_image, l_green: IMG_IMAGE
+			l_root: PATH
+			l_window: GUI_WINDOW
+			l_dir: DIRECTORY
+			l_file: RAW_FILE
+			x, y: INTEGER
+		do
+			create l_root.make_from_string (temporary_folder ("simple_gui_icon_theme_test"))
+			create l_dir.make_with_path (l_root)
+			if l_dir.exists then
+				l_dir.recursive_delete
+			end
+			l_dir.recursive_create_dir
+			create l_image.make_filled (64, 64, 0xFFFF0000)
+			from y := 0 until y >= 32 loop
+				from x := 0 until x >= 32 loop
+					l_image.set_pixel (x, y, 0xFF0000FF)
+					x := x + 1
+				end
+				y := y + 1
+			end
+			app.set_icon_theme_root_for_tests (l_root.name)
+			app.set_icon (l_image)
+			assert ("kept", attached app.icon as al_icon and then al_icon.is_equal (l_image))
+			create l_window.make ("Icon", 240, 160)
+			l_window.set_content (create {GUI_LABEL}.make ("An icon"))
+			l_window.show
+			settle_window
+			assert ("the center reads red: " + driver.app_icon_pixel (48, 48).to_hex_string, is_red (driver.app_icon_pixel (48, 48)))
+			assert ("the top-left quarter blue: " + driver.app_icon_pixel (8, 8).to_hex_string, is_blue (driver.app_icon_pixel (8, 8)))
+			assert ("the top-right quarter red: " + driver.app_icon_pixel (56, 8).to_hex_string, is_red (driver.app_icon_pixel (56, 8)))
+			assert ("nothing outside it", driver.app_icon_pixel (64, 10) = 0 and driver.app_icon_pixel (-1, 10) = 0)
+			if {PLATFORM}.is_unix and not {PLATFORM}.is_mac then
+				create l_file.make_with_path (l_root.extended ("hicolor").extended ("48x48").extended ("apps").extended (app.identifier + ".png"))
+				assert ("Linux: written at 48 under the test's root", l_file.exists)
+				create l_file.make_with_path (l_root.extended ("hicolor").extended ("256x256").extended ("apps").extended (app.identifier + ".png"))
+				assert ("Linux: and at 256", l_file.exists)
+			end
+			create l_green.make_filled (32, 32, 0xFF00C000)
+			l_window.set_icon (l_green)
+			assert ("the window keeps its own", attached l_window.icon as al_own and then al_own.is_equal (l_green))
+			l_window.close
+			assert ("the program's is still red and blue: " + driver.app_icon_pixel (48, 48).to_hex_string + " " + driver.app_icon_pixel (8, 8).to_hex_string,
+				is_red (driver.app_icon_pixel (48, 48)) and is_blue (driver.app_icon_pixel (8, 8)))
+			app.remove_icon
+			assert ("the default again", app.icon = Void)
+			app.set_icon_theme_root_for_tests ("")
+			l_dir.recursive_delete
+			assert ("the test's folder is gone", not l_dir.exists)
+		end
+
+feature {NONE} -- Fixtures (1z-d)
+
+	same_color (a_argb, a_rgb: NATURAL_32): BOOLEAN
+			-- Is `a_argb' opaque and within 3 a channel of `a_rgb' (0xRRGGBB)?
+		do
+			Result := alpha_of (a_argb) >= 0xF0 and (red_of (a_argb) - red_of (a_rgb)).abs <= 3
+				and (green_of (a_argb) - green_of (a_rgb)).abs <= 3 and (blue_of (a_argb) - blue_of (a_rgb)).abs <= 3
+		end
+
+	blended (a_under, a_over: NATURAL_32; a_alpha: REAL_64): NATURAL_32
+			-- `a_over' at `a_alpha' over `a_under' (both 0xRRGGBB), rounded.
+		local
+			l_shift: INTEGER
+			l_u, l_o: REAL_64
+		do
+			from l_shift := 0 until l_shift > 16 loop
+				l_u := ((a_under |>> l_shift) & 0xFF).to_real_64
+				l_o := ((a_over |>> l_shift) & 0xFF).to_real_64
+				Result := Result | ((l_u + (l_o - l_u) * a_alpha).rounded.max (0).min (255).to_natural_32 |<< l_shift)
+				l_shift := l_shift + 8
+			end
+		end
+
 feature {NONE} -- Fixtures
 
 	new_ruled_editor: GUI_CODE_EDITOR

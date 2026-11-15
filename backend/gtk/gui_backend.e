@@ -12,7 +12,7 @@ class
 inherit
 	GUI_BACKEND_API
 		redefine
-			scale
+			scale, set_icon_theme_root
 		end
 
 feature -- Lifecycle and loop
@@ -2801,6 +2801,40 @@ feature -- Appearance
 	set_dark (a_on: BOOLEAN)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_set_dark($a_on ? 1 : 0);"
+		end
+
+feature -- Loading states and app identity (1z-d)
+
+	busy_canvas (a_width, a_height: INTEGER): INTEGER
+			-- 1z-d: a drawing area made with GTK_ACCESSIBLE_ROLE_PROGRESS_BAR, its
+			-- GTK_ACCESSIBLE_STATE_BUSY true, not focusable.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_busy_canvas($a_width, $a_height);"
+		end
+
+	app_set_icon (a_cairo_surface: POINTER)
+			-- 1z-d: <app-id>.png at 48 and 256 in the hicolor theme under the icon theme root, then
+			-- gtk_window_set_default_icon_name.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_app_set_icon((void *) $a_cairo_surface);"
+		end
+
+	window_set_icon (a_window: INTEGER; a_cairo_surface: POINTER)
+			-- 1z-d: <app-id>-<hash>.png at 48 and 256, then gtk_window_set_icon_name.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_window_set_icon($a_window, (void *) $a_cairo_surface);"
+		end
+
+	set_icon_theme_root (a_path: POINTER)
+			-- 1z-d tests: the folder icon files go under ("" for ~/.local/share/icons).
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_set_icon_theme_root((const char *) $a_path);"
+		end
+
+	test_app_icon_pixel (a_x, a_y: INTEGER): NATURAL_32
+			-- 1z-d: the icon theme's lookup of the default icon name at 64, read 64 by 64.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_NATURAL_32) sg_test_app_icon_pixel($a_x, $a_y);"
 		end
 
 feature -- Test driver

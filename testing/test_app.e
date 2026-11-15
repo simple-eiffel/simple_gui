@@ -262,6 +262,12 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_monitors_have_sizes_work_areas_and_scales, "monitors_have_sizes_work_areas_and_scales")
 				run_test (agent t.test_locale_formats_the_same_on_every_platform, "locale_formats_the_same_on_every_platform")
 				run_test (agent t.test_a_monitor_change_takes_a_new_snapshot_and_tells, "a_monitor_change_takes_a_new_snapshot_and_tells")
+				run_test (agent t.test_skeleton_lines_are_sw_skeleton_shapes, "skeleton_lines_are_sw_skeleton_shapes")
+				run_test (agent t.test_skeleton_disc_and_block_shapes, "skeleton_disc_and_block_shapes")
+				run_test (agent t.test_skeleton_band_sweeps_on_the_clock, "skeleton_band_sweeps_on_the_clock")
+				run_test (agent t.test_skeleton_stands_still_under_reduced_motion, "skeleton_stands_still_under_reduced_motion")
+				run_test (agent t.test_show_loading_lays_a_skeleton_or_a_spinner_and_disables, "show_loading_lays_a_skeleton_or_a_spinner_and_disables")
+				run_test (agent t.test_app_icon_shows_the_image, "app_icon_shows_the_image")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
