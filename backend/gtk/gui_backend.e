@@ -2837,6 +2837,150 @@ feature -- Loading states and app identity (1z-d)
 		alias "return (EIF_NATURAL_32) sg_test_app_icon_pixel($a_x, $a_y);"
 		end
 
+feature -- Media player (1z-b)
+
+	media_player: INTEGER
+			-- A GtkPicture showing a GtkMediaFile (GStreamer) over GtkMediaControls.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_media_player();"
+		end
+
+	media_open_file (an_id: INTEGER; a_path: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_open($an_id, (const char *) $a_path, 0);"
+		end
+
+	media_open_url (an_id: INTEGER; a_url: POINTER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_open($an_id, (const char *) $a_url, 1);"
+		end
+
+	media_play (an_id: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_play($an_id);"
+		end
+
+	media_pause (an_id: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_pause($an_id);"
+		end
+
+	media_stop (an_id: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_stop($an_id);"
+		end
+
+	media_seek (an_id, a_ms: INTEGER)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_seek($an_id, $a_ms);"
+		end
+
+	media_position_ms (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_media_position_ms($an_id);"
+		end
+
+	media_duration_ms (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_media_duration_ms($an_id);"
+		end
+
+	media_is_playing (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_BOOLEAN) (sg_media_is_playing($an_id) != 0);"
+		end
+
+	media_volume (an_id: INTEGER): REAL_64
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_REAL_64) sg_media_volume($an_id);"
+		end
+
+	media_set_volume (an_id: INTEGER; a_volume: REAL_64)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_set_volume($an_id, (double) $a_volume);"
+		end
+
+	media_is_muted (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_BOOLEAN) (sg_media_is_muted($an_id) != 0);"
+		end
+
+	media_set_muted (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_set_muted($an_id, $a_on ? 1 : 0);"
+		end
+
+	media_video_width (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_media_video_width($an_id);"
+		end
+
+	media_video_height (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_media_video_height($an_id);"
+		end
+
+	media_has_video (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_BOOLEAN) (sg_media_has_video($an_id) != 0);"
+		end
+
+	media_set_controls_visible (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_set_controls_visible($an_id, $a_on ? 1 : 0);"
+		end
+
+	media_set_loops (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_set_loops($an_id, $a_on ? 1 : 0);"
+		end
+
+	media_set_watched (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_set_watched($an_id, $a_on ? 1 : 0);"
+		end
+
+	media_failure (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_POINTER) sg_media_failure($an_id);"
+		end
+
+	media_set_full_screen (an_id: INTEGER; a_on: BOOLEAN)
+			-- The window's own full screen, with a second view of the stream filling the
+			-- window's overlay; 66/5 when the window's notify::fullscreened says so.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_media_set_full_screen($an_id, $a_on ? 1 : 0);"
+		end
+
+	media_is_full_screen (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_BOOLEAN) (sg_media_is_full_screen($an_id) != 0);"
+		end
+
+	test_media_position_ms (an_id: INTEGER): INTEGER
+			-- GtkMediaStream's timestamp.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_media_position_ms($an_id);"
+		end
+
+	test_media_rate (an_id: INTEGER): REAL_64
+			-- 1 while playing (GtkMediaStream has no rate), else 0.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_REAL_64) sg_test_media_rate($an_id);"
+		end
+
+	test_media_video_size (an_id: INTEGER): INTEGER
+			-- The paintable's intrinsic size, width + height * 65536.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_test_media_video_size($an_id);"
+		end
+
+	test_media_frame_color (an_id: INTEGER): NATURAL_32
+			-- The paintable's snapshot drawn with Cairo, its center 16 by 16.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_NATURAL_32) sg_test_media_frame_color($an_id);"
+		end
+
 feature -- Test driver
 
 	test_click (an_id: INTEGER)

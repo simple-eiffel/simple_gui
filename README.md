@@ -89,14 +89,14 @@ GUI_DROPDOWN, GUI_SPIN_BOX and GUI_PROGRESS_BAR are ordinary controls. GUI_TOOLB
 
 ## Build (Linux)
 
-Needs GTK 4 development files (`sudo apt install libgtk-4-dev` on Ubuntu 24.04) and a display. Pictures taken by the test driver come out at the screen's scale (a 200% window gives a 200% picture).
+Needs GTK 4 development files (`sudo apt install libgtk-4-dev` on Ubuntu 24.04) and a display. The media player (GUI_MEDIA_PLAYER) plays through GTK's GStreamer media backend, which needs `libgtk-4-media-gstreamer`, and for MP4 (H.264 and AAC) GStreamer's libav plugin, `gstreamer1.0-libav` (a named platform deviation: AVFoundation and Media Foundation play MP4 as they come). Pictures taken by the test driver come out at the screen's scale (a 200% window gives a 200% picture).
 
 ```
 ec_linux.sh test -config simple_gui.ecf -target simple_gui_tests
 ```
 
 **Which display the suite runs on (Linux):**
-- **While fixing:** use a hidden X11 display, so nothing shows on the desktop. Start it with `Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp -nolisten unix &` (`sudo apt install xvfb`; under WSLg `/tmp/.X11-unix` is read-only, so it listens on the abstract socket only), then run the suite with `GDK_BACKEND=x11 DISPLAY=:99 SIMPLE_GUI_TEST_NO_WM=1` and `WAYLAND_DISPLAY` unset (Xvfb has no window manager, so `fullscreen_toggles` reports a skip). These runs are for iterating.
+- **While fixing:** use a hidden X11 display, so nothing shows on the desktop. Start it with `Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp -nolisten unix &` (`sudo apt install xvfb`; under WSLg `/tmp/.X11-unix` is read-only, so it listens on the abstract socket only), then run the suite with `GDK_BACKEND=x11 DISPLAY=:99 SIMPLE_GUI_TEST_NO_WM=1` and `WAYLAND_DISPLAY` unset (Xvfb has no window manager, so `fullscreen_toggles` and `media_full_screen_reports_both_ways` report a skip; with no sound device there, GStreamer plays the media into a silent sink). These runs are for iterating.
 - **The merge gate:** one run on the real Wayland display (WSLg under WSL). It shows windows on the desktop, so ask before it runs.
 
 ## Build (Windows)

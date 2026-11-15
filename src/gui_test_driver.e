@@ -366,6 +366,62 @@ feature -- User actions
 			Result := backend.test_app_icon_pixel (a_x, a_y)
 		end
 
+	wait_until (a_condition: FUNCTION [BOOLEAN]; a_ms: INTEGER): BOOLEAN
+			-- 1z-b: turn the loop, firing events as they come, until `a_condition' holds or `a_ms'
+			-- milliseconds have passed by the wall clock; does it hold? Media timing is noisy, so a
+			-- test waits for what it needs rather than sleeping a fixed time.
+		require
+			has_application: has_application
+			non_negative: a_ms >= 0
+		local
+			l_clock: SHELL_DESKTOP
+			l_until: REAL_64
+		do
+			create l_clock
+			l_until := l_clock.now_ms + a_ms
+			from
+				Result := a_condition.item (Void)
+			until
+				Result or l_clock.now_ms >= l_until
+			loop
+				application.process_events (10)
+				Result := a_condition.item (Void)
+			end
+		end
+
+	media_position_ms (a_player: GUI_MEDIA_PLAYER): INTEGER
+			-- 1z-b: the position read from what plays, in milliseconds (no settling: it is timed).
+		require
+			has_application: has_application
+		do
+			Result := backend.test_media_position_ms (a_player.id)
+		end
+
+	media_rate (a_player: GUI_MEDIA_PLAYER): REAL_64
+			-- 1z-b: the playback rate, 0 when paused (no settling).
+		require
+			has_application: has_application
+		do
+			Result := backend.test_media_rate (a_player.id)
+		end
+
+	media_video_size (a_player: GUI_MEDIA_PLAYER): INTEGER
+			-- 1z-b: the natural video size the toolkit reads, as width + height * 65536.
+		require
+			has_application: has_application
+		do
+			Result := backend.test_media_video_size (a_player.id)
+		end
+
+	media_frame_color (a_player: GUI_MEDIA_PLAYER): NATURAL_32
+			-- 1z-b: the mean color of the frame shown now over a 16 by 16 patch at its center, as
+			-- 0xFFRRGGBB; 0 with no frame yet (no settling).
+		require
+			has_application: has_application
+		do
+			Result := backend.test_media_frame_color (a_player.id)
+		end
+
 	toggle_expander (an_expander: GUI_EXPANDER)
 			-- Click the expander's title as a user would (fires toggled).
 		require

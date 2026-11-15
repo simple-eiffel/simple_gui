@@ -66,6 +66,7 @@ feature -- Lifecycle and loop
 				end
 			end
 			fire_due_timers
+			turn_media
 			check_pick_menu
 			check_rows_wanted
 		end
@@ -6876,6 +6877,440 @@ feature -- Test doors (act on the widget as a user would)
 			end
 		end
 
+feature -- Media player (1z-b)
+
+	media_player: INTEGER
+			-- A GUI_SW_MEDIA_VIEW (the video over simple_widgets' SW_MEDIA_BAR) with its own
+			-- Media Foundation engine (GUI_SW_MEDIA). The bar's clicks and the view's keys act on
+			-- the engine; the pump turns it (`turn_media').
+		local
+			l_view: GUI_SW_MEDIA_VIEW
+			l_media: GUI_SW_MEDIA
+		do
+			create l_view.make (device (320).to_double, device (240).to_double)
+			Result := register (l_view)
+			create l_media.make (Result, l_view)
+			l_view.set_media (l_media)
+			wire_media_view (Result, l_view)
+			media_players.force (l_media, Result)
+		end
+
+	media_open_file (an_id: INTEGER; a_path: POINTER)
+		do
+			open_media (an_id, a_path, False)
+		end
+
+	media_open_url (an_id: INTEGER; a_url: POINTER)
+		do
+			open_media (an_id, a_url, True)
+		end
+
+	media_play (an_id: INTEGER)
+		do
+			if attached media_players.item (an_id) as al_m then
+				al_m.engine.play
+				media_moved (al_m)
+			end
+		end
+
+	media_pause (an_id: INTEGER)
+		do
+			if attached media_players.item (an_id) as al_m then
+				al_m.engine.pause
+				media_moved (al_m)
+			end
+		end
+
+	media_stop (an_id: INTEGER)
+		do
+			if attached media_players.item (an_id) as al_m then
+				al_m.engine.stop
+				media_moved (al_m)
+			end
+		end
+
+	media_seek (an_id, a_ms: INTEGER)
+		do
+			if attached media_players.item (an_id) as al_m then
+				al_m.engine.seek (a_ms)
+				media_moved (al_m)
+			end
+		end
+
+	media_position_ms (an_id: INTEGER): INTEGER
+		do
+			if attached media_players.item (an_id) as al_m then
+				Result := al_m.engine.position_ms
+			end
+		end
+
+	media_duration_ms (an_id: INTEGER): INTEGER
+		do
+			if attached media_players.item (an_id) as al_m then
+				Result := al_m.engine.duration_ms
+			end
+		end
+
+	media_is_playing (an_id: INTEGER): BOOLEAN
+		do
+			if attached media_players.item (an_id) as al_m then
+				Result := al_m.engine.is_playing
+			end
+		end
+
+	media_volume (an_id: INTEGER): REAL_64
+		do
+			if attached media_players.item (an_id) as al_m then
+				Result := al_m.engine.volume
+			end
+		end
+
+	media_set_volume (an_id: INTEGER; a_volume: REAL_64)
+		do
+			if attached media_players.item (an_id) as al_m then
+				al_m.engine.set_volume (a_volume)
+				media_moved (al_m)
+			end
+		end
+
+	media_is_muted (an_id: INTEGER): BOOLEAN
+		do
+			if attached media_players.item (an_id) as al_m then
+				Result := al_m.engine.is_muted
+			end
+		end
+
+	media_set_muted (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached media_players.item (an_id) as al_m then
+				al_m.engine.set_muted (a_on)
+				media_moved (al_m)
+			end
+		end
+
+	media_video_width (an_id: INTEGER): INTEGER
+		do
+			if attached media_players.item (an_id) as al_m then
+				Result := al_m.engine.video_width
+			end
+		end
+
+	media_video_height (an_id: INTEGER): INTEGER
+		do
+			if attached media_players.item (an_id) as al_m then
+				Result := al_m.engine.video_height
+			end
+		end
+
+	media_has_video (an_id: INTEGER): BOOLEAN
+		do
+			if attached media_players.item (an_id) as al_m then
+				Result := al_m.engine.has_video
+			end
+		end
+
+	media_set_controls_visible (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached media_players.item (an_id) as al_m then
+				across al_m.views as ic loop
+					ic.set_controls_visible (a_on)
+				end
+				changed
+			end
+		end
+
+	media_set_loops (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached media_players.item (an_id) as al_m then
+				al_m.engine.set_loops (a_on)
+			end
+		end
+
+	media_set_watched (an_id: INTEGER; a_on: BOOLEAN)
+		do
+			if attached media_players.item (an_id) as al_m then
+				al_m.set_watched (a_on)
+			end
+		end
+
+	media_failure (an_id: INTEGER): POINTER
+		do
+			if attached media_players.item (an_id) as al_m then
+				if al_m.engine.is_available then
+					Result := al_m.engine.failure
+				else
+					Result := c_text ({STRING_32} "Media Foundation is not available on this system")
+				end
+			end
+		end
+
+	media_set_full_screen (an_id: INTEGER; a_on: BOOLEAN)
+			-- The window's own full screen (`window_set_fullscreen'), with a second view of the
+			-- player filling it on the window's cover layer (`compose'); 66/5 tells. Coming back
+			-- leaves the window as it was before.
+		local
+			l_window: INTEGER
+			l_filler: GUI_SW_MEDIA_VIEW
+			l_was: BOOLEAN
+		do
+			if attached media_players.item (an_id) as al_m then
+				if a_on and not al_m.is_full_screen then
+					l_window := main_window_of (al_m.view)
+					if l_window > 0 and then attached windows.item (l_window) as al_w and then al_w.is_window_open then
+						create l_filler.make (al_m.view.video_area_width, al_m.view.video_area_height)
+						wire_media_view (an_id, l_filler)
+						l_was := fullscreen_saves.has (l_window)
+						al_m.enter_full_screen (l_window, l_filler, l_was)
+						if not l_was then
+							window_set_fullscreen (l_window, True)
+						end
+						compose (l_window, al_w)
+						al_w.give_focus (l_filler)
+						al_m.sync_bars
+						push (66, an_id, 5, 1, 0)
+						changed
+					end
+				elseif not a_on and al_m.is_full_screen then
+					l_window := al_m.full_screen_window
+					l_was := al_m.window_was_full_screen
+					al_m.leave_full_screen
+					if not l_was then
+						window_set_fullscreen (l_window, False)
+					end
+					if attached windows.item (l_window) as al_w and then al_w.is_window_open then
+						compose (l_window, al_w)
+						al_w.give_focus (al_m.view)
+					end
+					al_m.sync_bars
+					push (66, an_id, 5, 0, 0)
+					changed
+				end
+			end
+		end
+
+	media_is_full_screen (an_id: INTEGER): BOOLEAN
+		do
+			if attached media_players.item (an_id) as al_m then
+				Result := al_m.is_full_screen
+			end
+		end
+
+	test_media_position_ms (an_id: INTEGER): INTEGER
+			-- The engine's GetCurrentTime.
+		do
+			Result := media_position_ms (an_id)
+		end
+
+	test_media_rate (an_id: INTEGER): REAL_64
+			-- The engine's GetPlaybackRate, 0 while IsPaused.
+		do
+			if attached media_players.item (an_id) as al_m then
+				Result := al_m.engine.rate
+			end
+		end
+
+	test_media_video_size (an_id: INTEGER): INTEGER
+			-- GetNativeVideoSize, width + height * 65536.
+		do
+			Result := media_video_width (an_id) + media_video_height (an_id) * 65536
+		end
+
+	test_media_frame_color (an_id: INTEGER): NATURAL_32
+			-- The center 16 by 16 of the bitmap transferred last.
+		do
+			if attached media_players.item (an_id) as al_m then
+				Result := al_m.engine.frame_color
+			end
+		end
+
+feature {NONE} -- Media player (1z-b)
+
+	media_players: HASH_TABLE [GUI_SW_MEDIA, INTEGER]
+			-- Each media player by its id.
+		once ("OBJECT")
+			create Result.make (2)
+		end
+
+	wire_media_view (an_id: INTEGER; a_view: GUI_SW_MEDIA_VIEW)
+			-- `a_view''s bar and keys act on player `an_id'.
+		do
+			a_view.bar.set_on_play (agent media_play (an_id))
+			a_view.bar.set_on_pause (agent media_pause (an_id))
+			a_view.bar.set_on_seek (agent media_seek_seconds (an_id, ?))
+			a_view.bar.set_on_volume (agent media_set_volume (an_id, ?))
+			a_view.bar.set_on_mute (agent media_set_muted (an_id, ?))
+			a_view.bar.set_on_full_screen (agent media_set_full_screen (an_id, ?))
+			a_view.set_on_key (agent media_key (an_id, ?))
+		end
+
+	media_seek_seconds (an_id: INTEGER; a_seconds: REAL_64)
+			-- The bar's seek, in seconds.
+		do
+			media_seek (an_id, (a_seconds * 1000.0).rounded.max (0))
+		end
+
+	media_key (an_id, a_vk: INTEGER)
+			-- Space plays and pauses, Left and Right seek 5 s, Escape leaves full screen.
+		do
+			if attached media_players.item (an_id) as al_m then
+				inspect a_vk
+				when 32 then
+					if al_m.engine.is_playing then
+						media_pause (an_id)
+					else
+						media_play (an_id)
+					end
+				when 37 then
+					media_seek (an_id, (al_m.engine.position_ms - 5000).max (0))
+				when 39 then
+					media_seek (an_id, (al_m.engine.position_ms + 5000).min (al_m.engine.duration_ms).max (0))
+				when 27 then
+					media_set_full_screen (an_id, False)
+				else
+				end
+			end
+		end
+
+	open_media (an_id: INTEGER; a_text: POINTER; a_is_url: BOOLEAN)
+			-- Open a file or a URL in player `an_id'; with no engine, fail at once.
+		do
+			if attached media_players.item (an_id) as al_m then
+				al_m.set_frame (Void)
+				al_m.mark_opened (clock.milliseconds.to_double)
+				if al_m.engine.is_available then
+					al_m.engine.open (a_text, a_is_url)
+				else
+					al_m.mark_settled
+					push (66, an_id, 4, 0, 0)
+				end
+				changed
+			end
+		end
+
+	media_moved (a_media: GUI_SW_MEDIA)
+			-- The user or the program acted on it: turn often for a while, and show it.
+		do
+			a_media.mark_busy (clock.milliseconds.to_double)
+			a_media.sync_bars
+			changed
+		end
+
+	ms_to_next_media: INTEGER
+			-- `Media_turn_ms' while a player is busy (playing, opening or moved lately), else a
+			-- large number.
+		local
+			l_now: REAL_64
+		do
+			Result := 1_000_000
+			if not media_players.is_empty then
+				l_now := clock.milliseconds.to_double
+				across media_players as ic until Result < 1_000_000 loop
+					if ic.is_busy (l_now) then
+						Result := Media_turn_ms
+					end
+				end
+			end
+		ensure
+			non_negative: Result >= 0
+		end
+
+	Media_turn_ms: INTEGER = 15
+			-- How often the pump turns for a busy player (frames come at the video's rate).
+
+	turn_media
+			-- Each busy player: its engine's reports become event 66 (ready with the duration,
+			-- ended, failed), a new frame is copied for its views, its position is reported
+			-- while watched and playing (at most every 250 ms), and its bars are brought in step.
+		local
+			l_now: REAL_64
+			l_kind, l_value: INTEGER
+			l_moved: BOOLEAN
+		do
+			if not media_players.is_empty then
+				l_now := clock.milliseconds.to_double
+				across media_players as ic loop
+					if ic.is_busy (l_now) then
+						l_moved := False
+						from until not ic.engine.next_report ($l_kind, $l_value) loop
+							inspect l_kind
+							when 1 then
+								if not ic.is_settled then
+									ic.mark_settled
+									ic.engine.mark_ready
+									push (66, ic.id, 1, ic.engine.duration_ms, 0)
+								end
+							when 3 then
+								push (66, ic.id, 3, 0, 0)
+							when 4 then
+								if not ic.is_settled then
+									ic.mark_settled
+									push (66, ic.id, 4, 0, 0)
+								end
+							else
+							end
+							l_moved := True
+						end
+						if ic.take_frame then
+							l_moved := True
+						end
+						if ic.is_watched and then ic.engine.is_playing and then l_now - ic.last_report_ms >= ic.Report_every_ms then
+							ic.note_report (l_now)
+							push (66, ic.id, 2, ic.engine.position_ms, 0)
+						end
+						if ic.engine.is_playing then
+							l_moved := True
+						end
+						if l_moved then
+							ic.sync_bars
+							changed
+						end
+					end
+				end
+			end
+		end
+
+	main_window_of (a_widget: SW_WIDGET): INTEGER
+			-- The id of the open main window `a_widget' is in; 0 for none (a second window's
+			-- content, or nowhere).
+		do
+			if attached window_of (a_widget) as al_w then
+				across windows as ic until Result > 0 loop
+					if ic = al_w then
+						Result := @ic.key
+					end
+				end
+			end
+		ensure
+			not_negative: Result >= 0
+		end
+
+	media_filler_of (a_window: INTEGER): detachable GUI_SW_MEDIA_VIEW
+			-- The view of a player filling window `a_window''s full screen, if one does.
+		do
+			across media_players as ic until Result /= Void loop
+				if ic.full_screen_window = a_window then
+					Result := ic.filler
+				end
+			end
+		end
+
+	let_go_of_media (a_tops: LIST [SW_WIDGET])
+			-- The players under `a_tops' (a closed window's) shut their engines down.
+		local
+			l_gone: ARRAYED_LIST [INTEGER]
+		do
+			create l_gone.make (0)
+			across media_players as ic loop
+				if is_under_any (ic.view, a_tops) then
+					ic.close
+					l_gone.extend (@ic.key)
+				end
+			end
+			across l_gone as ic loop
+				media_players.remove (ic)
+			end
+		end
+
 feature {NONE} -- Drawn views (1i)
 
 	drawn_timers: HASH_TABLE [TUPLE [tick_ms, fast_ms: INTEGER; next_tick, next_fast, dwell_due: INTEGER_64; serial: INTEGER], INTEGER]
@@ -7223,6 +7658,7 @@ feature {NONE} -- Timers, shortcuts and full screen (1m)
 				l_soonest := l_soonest.min (ic.due - l_now)
 			end
 			l_soonest := l_soonest.min (ms_to_next_deadline)
+			l_soonest := l_soonest.min (ms_to_next_media)
 			Result := l_soonest.max (0).min (1_000_000).to_integer_32
 		ensure
 			non_negative: Result >= 0
@@ -8814,6 +9250,7 @@ feature {NONE} -- Implementation
 					drawn_timers.remove (ic)
 				end
 			end
+			let_go_of_media (l_tops)
 			let_go_of_icons (a_window)
 			windows.remove (a_window)
 			window_content.remove (a_window)
@@ -8925,6 +9362,7 @@ feature {NONE} -- Implementation
 			l_root: SW_COLUMN
 			l_layers: SW_OVERLAY
 			l_bar: SW_MENU_BAR
+			l_filler: detachable GUI_SW_MEDIA_VIEW
 			i: INTEGER
 		do
 			create l_root.make
@@ -8952,11 +9390,18 @@ feature {NONE} -- Implementation
 			if window_direction.has (a_window) then
 				l_root.set_layout_direction (window_direction.item (a_window))
 			end
-			if window_cover.has (a_window) and then attached widget (window_cover.item (a_window)) as al_cover then
-					-- 1z-a: the cover (a lightbox's view) over everything, filling the window
+			l_filler := media_filler_of (a_window)
+			if (window_cover.has (a_window) and then attached widget (window_cover.item (a_window))) or l_filler /= Void then
 				create l_layers.make
 				l_layers.set_base (l_root)
-				l_layers.put_layer (al_cover, {SW_OVERLAY}.Layer_fill)
+				if window_cover.has (a_window) and then attached widget (window_cover.item (a_window)) as al_cover then
+						-- 1z-a: the cover (a lightbox's view) over everything, filling the window
+					l_layers.put_layer (al_cover, {SW_OVERLAY}.Layer_fill)
+				end
+				if attached l_filler as al_filler then
+						-- 1z-b: a full screen player over everything, the cover too
+					l_layers.put_layer (al_filler, {SW_OVERLAY}.Layer_fill)
+				end
 				a_w.set_root (l_layers)
 			else
 				a_w.set_root (l_root)

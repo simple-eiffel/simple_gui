@@ -9547,6 +9547,357 @@ feature -- Loading states and app identity (1z-d)
 			assert ("the test's folder is gone", not l_dir.exists)
 		end
 
+feature -- Media player (1z-b)
+
+	test_media_clip_is_ready_with_its_size
+			-- 1z-b: clip.mp4 gets ready once, with a duration of 1000 ms within 50, a video of 160
+			-- by 120 (as the player says and as the toolkit reads it), and a video track; the
+			-- volume and mute are set and read back.
+		local
+			l_window: GUI_WINDOW
+			l_player: GUI_MEDIA_PLAYER
+		do
+			l_window := media_window ("Media ready")
+			l_player := last_media_player
+			assert ("nothing before an open", not l_player.is_ready and l_player.duration_ms = 0 and not l_player.has_video)
+			l_player.open_file (clip_path)
+			l_player.set_muted (True)
+			assert ("ready: " + as_utf8 (l_player.failure), wait_settled (l_player) and l_player.is_ready)
+			assert ("ready once", l_player.ready_actions.fire_count = 1)
+			assert ("a second long: " + l_player.duration_ms.out, (l_player.duration_ms - 1000).abs <= 50)
+			assert ("160 by 120: " + l_player.video_width.out + " by " + l_player.video_height.out,
+				l_player.video_width = 160 and l_player.video_height = 120)
+			assert ("the toolkit reads 160 by 120: " + driver.media_video_size (l_player).out,
+				driver.media_video_size (l_player) = 160 + 120 * 65536)
+			assert ("it has video", l_player.has_video)
+			assert ("not playing yet", not l_player.is_playing)
+			l_player.set_volume (0.5)
+			assert ("half volume: " + l_player.volume.out, (l_player.volume - 0.5).abs < 0.01)
+			assert ("muted", l_player.is_muted)
+			l_player.set_muted (False)
+			assert ("not muted", not l_player.is_muted)
+			l_player.set_muted (True)
+			l_window.close
+		end
+
+	test_media_frames_are_red_then_blue
+			-- 1z-b: the frame shown near 200 ms is red (R above 200, B below 60) and near 800 ms
+			-- blue, read from what the toolkit shows (the clip is red for its first half second,
+			-- then blue).
+		local
+			l_window: GUI_WINDOW
+			l_player: GUI_MEDIA_PLAYER
+			l_color: NATURAL_32
+		do
+			l_window := media_window ("Media frames")
+			l_player := last_media_player
+			l_player.open_file (clip_path)
+			l_player.set_muted (True)
+			assert ("ready: " + as_utf8 (l_player.failure), wait_settled (l_player) and l_player.is_ready)
+			l_player.seek (200)
+			l_player.play
+			assert ("it plays past 200 ms", driver.wait_until (agent position_at_least (l_player, 200), 5000))
+			l_player.pause
+			assert ("a red frame near 200 ms", driver.wait_until (agent frame_is_red (l_player), 3000))
+			l_color := driver.media_frame_color (l_player)
+			assert ("red: " + l_color.to_hex_string, red_of (l_color) > 200 and blue_of (l_color) < 60)
+			l_player.seek (800)
+			l_player.play
+			assert ("it plays past 800 ms", driver.wait_until (agent position_at_least_or_ended (l_player, 800), 5000))
+			l_player.pause
+			assert ("a blue frame near 800 ms", driver.wait_until (agent frame_is_blue (l_player), 3000))
+			l_color := driver.media_frame_color (l_player)
+			assert ("blue: " + l_color.to_hex_string, blue_of (l_color) > 200 and red_of (l_color) < 60)
+			l_window.close
+		end
+
+	test_media_playing_advances_and_reports_positions
+			-- 1z-b: playing, the rate is above 0, the position advances, and while somebody watches
+			-- the position (66/2) it is reported, at most every 250 ms.
+		local
+			l_window: GUI_WINDOW
+			l_player: GUI_MEDIA_PLAYER
+			l_reports: ARRAYED_LIST [INTEGER]
+		do
+			l_window := media_window ("Media plays")
+			l_player := last_media_player
+			create l_reports.make (8)
+			l_player.position_actions.extend (agent l_reports.extend)
+			l_player.open_file (clip_path)
+			l_player.set_muted (True)
+			assert ("ready: " + as_utf8 (l_player.failure), wait_settled (l_player) and l_player.is_ready)
+			assert ("no report before playing", l_reports.is_empty)
+			l_player.play
+			assert ("the rate goes above 0", driver.wait_until (agent rate_above_zero (l_player), 3000))
+			assert ("it plays", l_player.is_playing)
+			assert ("the position advances", driver.wait_until (agent position_at_least (l_player, 300), 5000))
+			assert ("reports come while watched: " + l_reports.count.out, driver.wait_until (agent count_at_least (l_reports, 2), 5000))
+			assert ("the last report is kept: " + l_player.last_reported_position_ms.out,
+				l_player.last_reported_position_ms = l_reports.last and l_reports.last > 0)
+			l_player.pause
+			l_window.close
+		end
+
+	test_media_ends_once_and_stops
+			-- 1z-b: played to the end, `ended_actions' run once and it is no longer playing.
+		local
+			l_window: GUI_WINDOW
+			l_player: GUI_MEDIA_PLAYER
+		do
+			l_window := media_window ("Media ends")
+			l_player := last_media_player
+			l_player.open_file (clip_path)
+			l_player.set_muted (True)
+			assert ("ready: " + as_utf8 (l_player.failure), wait_settled (l_player) and l_player.is_ready)
+			l_player.play
+			assert ("it ends", driver.wait_until (agent ended_at_least (l_player, 1), 6000))
+			assert ("and stays ended", not driver.wait_until (agent ended_at_least (l_player, 2), 800))
+			assert ("once: " + l_player.ended_actions.fire_count.out, l_player.ended_actions.fire_count = 1)
+			assert ("not playing after it", not l_player.is_playing)
+			l_window.close
+		end
+
+	test_media_pause_holds_the_position
+			-- 1z-b: paused, the position holds (within 50 ms over 300 ms) and the rate is 0.
+		local
+			l_window: GUI_WINDOW
+			l_player: GUI_MEDIA_PLAYER
+			l_at, l_later: INTEGER
+		do
+			l_window := media_window ("Media pauses")
+			l_player := last_media_player
+			l_player.open_file (clip_path)
+			l_player.set_muted (True)
+			assert ("ready: " + as_utf8 (l_player.failure), wait_settled (l_player) and l_player.is_ready)
+			l_player.play
+			assert ("it plays past 300 ms", driver.wait_until (agent position_at_least (l_player, 300), 5000))
+			l_player.pause
+			assert ("the rate drops to 0", driver.wait_until (agent rate_is_zero (l_player), 2000))
+			l_at := driver.media_position_ms (l_player)
+			assert ("held for 300 ms", not driver.wait_until (agent position_moved (l_player, l_at, 50), 300))
+			l_later := driver.media_position_ms (l_player)
+			assert ("held: " + l_at.out + " then " + l_later.out, (l_later - l_at).abs <= 50)
+			assert ("not playing", not l_player.is_playing)
+			assert ("the rate is 0", driver.media_rate (l_player) = 0.0)
+			l_window.close
+		end
+
+	test_media_looping_does_not_end
+			-- 1z-b: looping, it plays on past its end, playing again from the start, and never ends.
+		local
+			l_window: GUI_WINDOW
+			l_player: GUI_MEDIA_PLAYER
+		do
+			l_window := media_window ("Media loops")
+			l_player := last_media_player
+			l_player.open_file (clip_path)
+			l_player.set_muted (True)
+			l_player.set_loops (True)
+			assert ("ready: " + as_utf8 (l_player.failure), wait_settled (l_player) and l_player.is_ready)
+			l_player.play
+			assert ("it plays", driver.wait_until (agent rate_above_zero (l_player), 3000))
+			assert ("no end in 2.5 s", not driver.wait_until (agent ended_at_least (l_player, 1), 2500))
+			assert ("still playing", l_player.is_playing)
+			l_player.set_loops (False)
+			l_player.pause
+			l_window.close
+		end
+
+	test_media_tone_plays_without_video
+			-- 1z-b: tone.wav (1 s of 440 Hz) gets ready with no video, no video size, and plays.
+		local
+			l_window: GUI_WINDOW
+			l_player: GUI_MEDIA_PLAYER
+		do
+			l_window := media_window ("Media tone")
+			l_player := last_media_player
+			l_player.open_file (tone_path)
+			l_player.set_muted (True)
+			assert ("ready: " + as_utf8 (l_player.failure), wait_settled (l_player) and l_player.is_ready)
+			assert ("a second long: " + l_player.duration_ms.out, (l_player.duration_ms - 1000).abs <= 50)
+			assert ("no video", not l_player.has_video and l_player.video_width = 0 and l_player.video_height = 0)
+			l_player.play
+			assert ("it plays", driver.wait_until (agent position_at_least (l_player, 200), 5000))
+			l_player.pause
+			l_window.close
+		end
+
+	test_media_missing_file_fails_with_a_reason
+			-- 1z-b: a file that is not there fails, with a reason, and never gets ready.
+		local
+			l_window: GUI_WINDOW
+			l_player: GUI_MEDIA_PLAYER
+			l_reasons: ARRAYED_LIST [STRING_32]
+		do
+			l_window := media_window ("Media missing")
+			l_player := last_media_player
+			create l_reasons.make (1)
+			l_player.failed_actions.extend (agent l_reasons.extend)
+			l_player.open_file (create {PATH}.make_from_string ("testing/fixtures/no_such_clip.mp4"))
+			assert ("it fails", wait_settled (l_player) and l_player.is_failed)
+			assert ("with a reason: " + as_utf8 (l_player.failure), not l_player.failure.is_empty)
+			assert ("told once, with it", l_reasons.count = 1 and then l_reasons.first.same_string (l_player.failure))
+			assert ("never ready", not driver.wait_until (agent is_ready (l_player), 500))
+			assert ("no ready report", l_player.ready_actions.fire_count = 0 and l_player.duration_ms = 0)
+			l_window.close
+		end
+
+	test_media_full_screen_reports_both_ways
+			-- 1z-b: the player fills its window's own full screen and comes back, each change
+			-- reported (66/5). Skipped on a display with no window manager (SIMPLE_GUI_TEST_NO_WM
+			-- set, as on the hidden Xvfb display): there nothing grants full screen.
+		local
+			l_window: GUI_WINDOW
+			l_player: GUI_MEDIA_PLAYER
+			l_changes: ARRAYED_LIST [BOOLEAN]
+		do
+			if attached (create {EXECUTION_ENVIRONMENT}).item ("SIMPLE_GUI_TEST_NO_WM") as al_no_wm and then not al_no_wm.is_empty then
+				io.put_string ("    SKIP: no window manager on this display grants full screen%N")
+			else
+				l_window := media_window ("Media full screen")
+				l_player := last_media_player
+				create l_changes.make (2)
+				l_player.full_screen_actions.extend (agent l_changes.extend)
+				l_player.open_file (clip_path)
+				l_player.set_muted (True)
+				assert ("ready: " + as_utf8 (l_player.failure), wait_settled (l_player) and l_player.is_ready)
+				assert ("not full screen yet", not l_player.is_full_screen)
+				l_player.set_full_screen (True)
+				assert ("full screen reported", driver.wait_until (agent count_at_least_booleans (l_changes, 1), 8000))
+				assert ("as on", l_changes.first and l_player.is_full_screen)
+				l_player.set_full_screen (False)
+				assert ("back reported", driver.wait_until (agent count_at_least_booleans (l_changes, 2), 8000))
+				assert ("as off", not l_changes.last and not l_player.is_full_screen)
+				assert ("twice in all: " + l_changes.count.out, l_changes.count = 2)
+				settle_window
+				l_window.close
+			end
+		end
+
+feature {NONE} -- Fixtures (1z-b)
+
+	clip_path: PATH
+			-- The test clip, testing/fixtures/clip.mp4: 1 s, 160 by 120, 10 frames a second, solid
+			-- red for the first half second, then solid blue, so a frame's color tells the time; a
+			-- 440 Hz tone; H.264 baseline and AAC, +faststart. Made (by PROD; ffmpeg is not on the
+			-- Mac) with:
+			--   ffmpeg -f lavfi -i "color=c=red:s=160x120:r=10:d=0.5"
+			--          -f lavfi -i "color=c=blue:s=160x120:r=10:d=0.5"
+			--          -f lavfi -i "sine=frequency=440:duration=1"
+			--          -filter_complex "[0:v][1:v]concat=n=2:v=1:a=0[v]" -map "[v]" -map 2:a
+			--          -c:v libx264 -profile:v baseline -pix_fmt yuv420p -c:a aac -b:a 64k
+			--          -movflags +faststart testing/fixtures/clip.mp4
+		do
+			create Result.make_from_string ("testing/fixtures/clip.mp4")
+		end
+
+	tone_path: PATH
+			-- testing/fixtures/tone.wav: 1 s of 440 Hz, 16-bit PCM, mono, 44.1 kHz. Made with:
+			--   ffmpeg -f lavfi -i "sine=frequency=440:duration=1" -ac 1 -ar 44100 -c:a pcm_s16le
+			--          testing/fixtures/tone.wav
+		do
+			create Result.make_from_string ("testing/fixtures/tone.wav")
+		end
+
+	last_media_player: GUI_MEDIA_PLAYER
+			-- The player `media_window' made last.
+		attribute
+			create Result.make
+		end
+
+	media_window (a_title: STRING): GUI_WINDOW
+			-- A shown window holding a new media player (`last_media_player').
+		do
+			create Result.make (a_title, 400, 340)
+			create last_media_player.make
+			Result.set_content (last_media_player)
+			Result.show
+			settle_window
+		end
+
+	wait_settled (a_player: GUI_MEDIA_PLAYER): BOOLEAN
+			-- Wait (up to 15 s: the first opening starts the toolkit's media stack) until the media
+			-- opened last is ready or failed; is it?
+		do
+			Result := driver.wait_until (agent is_settled (a_player), 15000)
+		end
+
+	is_settled (a_player: GUI_MEDIA_PLAYER): BOOLEAN
+		do
+			Result := a_player.is_ready or a_player.is_failed
+		end
+
+	is_ready (a_player: GUI_MEDIA_PLAYER): BOOLEAN
+		do
+			Result := a_player.is_ready
+		end
+
+	position_at_least (a_player: GUI_MEDIA_PLAYER; a_ms: INTEGER): BOOLEAN
+			-- Is what plays at `a_ms' or later?
+		do
+			Result := driver.media_position_ms (a_player) >= a_ms
+		end
+
+	position_at_least_or_ended (a_player: GUI_MEDIA_PLAYER; a_ms: INTEGER): BOOLEAN
+		do
+			Result := driver.media_position_ms (a_player) >= a_ms or a_player.ended_actions.fire_count > 0
+		end
+
+	position_moved (a_player: GUI_MEDIA_PLAYER; a_from, a_by: INTEGER): BOOLEAN
+			-- Has the position moved more than `a_by' ms from `a_from'?
+		do
+			Result := (driver.media_position_ms (a_player) - a_from).abs > a_by
+		end
+
+	rate_above_zero (a_player: GUI_MEDIA_PLAYER): BOOLEAN
+		do
+			Result := driver.media_rate (a_player) > 0.0
+		end
+
+	rate_is_zero (a_player: GUI_MEDIA_PLAYER): BOOLEAN
+		do
+			Result := driver.media_rate (a_player) = 0.0
+		end
+
+	ended_at_least (a_player: GUI_MEDIA_PLAYER; a_count: INTEGER): BOOLEAN
+		do
+			Result := a_player.ended_actions.fire_count >= a_count
+		end
+
+	frame_is_red (a_player: GUI_MEDIA_PLAYER): BOOLEAN
+			-- Does the frame shown read red (R above 200, B below 60)?
+		local
+			l_color: NATURAL_32
+		do
+			l_color := driver.media_frame_color (a_player)
+			Result := l_color /= 0 and red_of (l_color) > 200 and blue_of (l_color) < 60
+		end
+
+	frame_is_blue (a_player: GUI_MEDIA_PLAYER): BOOLEAN
+			-- Does the frame shown read blue (B above 200, R below 60)?
+		local
+			l_color: NATURAL_32
+		do
+			l_color := driver.media_frame_color (a_player)
+			Result := l_color /= 0 and blue_of (l_color) > 200 and red_of (l_color) < 60
+		end
+
+	count_at_least (a_list: ARRAYED_LIST [INTEGER]; a_count: INTEGER): BOOLEAN
+		do
+			Result := a_list.count >= a_count
+		end
+
+	count_at_least_booleans (a_list: ARRAYED_LIST [BOOLEAN]; a_count: INTEGER): BOOLEAN
+		do
+			Result := a_list.count >= a_count
+		end
+
+	as_utf8 (a_text: READABLE_STRING_32): STRING_8
+			-- `a_text' for an assertion's tag.
+		do
+			Result := {UTF_CONVERTER}.utf_32_string_to_utf_8_string_8 (a_text)
+		end
+
 feature {NONE} -- Fixtures (1z-d)
 
 	same_color (a_argb, a_rgb: NATURAL_32): BOOLEAN

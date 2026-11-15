@@ -11266,4 +11266,454 @@ static unsigned int sg_test_app_icon_pixel(int x, int y) {
     return v;
 }
 
+/* ---------- 1z-b: the media player (event 66) ----------
+   A GtkMediaFile (GTK's GStreamer media backend) shown by a GtkPicture over GtkMediaControls,
+   in a vertical box: GtkVideo would show the same, but its controls cannot be hidden, and the
+   spec's `set_controls_visible' hides them. With audio alone the picture is hidden, so the
+   player is the controls. Without an audio device (a hidden X display in a test) GStreamer's
+   autoaudiosink falls back to a fakesink, so the media still plays, silently.
+
+   Event 66, a = the kind: 1 ready (b = the duration in ms; notify::prepared), 2 the position
+   (b = ms, every 250 ms while playing and watched), 3 ended (notify::ended; never while
+   looping, as GtkMediaStream's loop plays again from the start), 4 failed (notify::error, the
+   reason from sg_media_failure), 5 full screen changed (b = 1 on, 0 off; the window's
+   notify::fullscreened).
+
+   Full screen is the window's own, with a second box showing the same stream (its own picture
+   and controls) filling the window's overlay, where the cover goes (1z-a): the player stays in
+   its layout. Escape, or the window leaving full screen however it does, brings it back. */
+typedef struct {
+    GtkWidget *box, *picture, *controls;          /* the player in its layout */
+    GtkWidget *filler, *fill_picture, *fill_controls;   /* while full screen (weak pointers) */
+    GtkMediaStream *stream;                        /* the GtkMediaFile; NULL before an open */
+    GtkWidget *window;                             /* whose notify::fullscreened is heard (weak) */
+    gulong window_handler;
+    guint position_timer;
+    int id, watched, loops, controls_visible, told_ready, told_failed, muted;
+    double volume;                                 /* kept for a stream opened later */
+    int full_screen, wants_full_screen, window_was_full;
+    char *failure;
+} sg_media;
+
+__attribute__((weak)) int sg_media_css_done = 0;
+
+static sg_media *sg_media_of(int id) {
+    if (id <= 0 || id >= SG_MAX || !sg_w[id]) return NULL;
+    return (sg_media *) g_object_get_data(G_OBJECT(sg_w[id]), "sg-media");
+}
+
+static void sg_media_css(void) {
+    GtkCssProvider *p;
+    if (sg_media_css_done) return;
+    sg_media_css_done = 1;
+    p = gtk_css_provider_new();
+    /* the video on black, as AVKit and the drawn Windows player show it */
+    gtk_css_provider_load_from_string(p,
+        "picture.sg-media-picture { background-color: #000000; }"
+        " box.sg-media-fill { background-color: #000000; }");
+    gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(p),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(p);
+}
+
+static void sg_media_set_full_screen(int id, int on);
+
+/* Space plays and pauses, Left and Right seek 5 s, Escape leaves full screen. `d' is the
+   player's box (the filler's keys act on the player it stands for). */
+static gboolean sg_media_on_key(GtkEventControllerKey *k, guint key, guint code, GdkModifierType mods, gpointer d) {
+    sg_media *m = (sg_media *) g_object_get_data(G_OBJECT(d), "sg-media");
+    gint64 t;
+    (void) k; (void) code; (void) mods;
+    if (!m) return FALSE;
+    if (key == GDK_KEY_Escape) {
+        if (!m->wants_full_screen) return FALSE;
+        sg_media_set_full_screen(m->id, 0);
+        return TRUE;
+    }
+    if (!m->stream) return FALSE;
+    switch (key) {
+    case GDK_KEY_space:
+        if (gtk_media_stream_get_playing(m->stream)) gtk_media_stream_pause(m->stream);
+        else gtk_media_stream_play(m->stream);
+        return TRUE;
+    case GDK_KEY_Left:
+    case GDK_KEY_Right:
+        if (!gtk_media_stream_is_seekable(m->stream)) return TRUE;
+        t = gtk_media_stream_get_timestamp(m->stream) + (key == GDK_KEY_Left ? -5000000 : 5000000);
+        if (t < 0) t = 0;
+        if (gtk_media_stream_get_duration(m->stream) > 0 && t > gtk_media_stream_get_duration(m->stream))
+            t = gtk_media_stream_get_duration(m->stream);
+        gtk_media_stream_seek(m->stream, t);
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+/* Fill `box' with a picture of the stream over its controls, its keys going to the player. */
+static void sg_media_fill_view(sg_media *m, GtkWidget *box, GtkWidget **picture, GtkWidget **controls) {
+    GtkWidget *pic = gtk_picture_new();
+    GtkWidget *ctl = gtk_media_controls_new(m->stream);
+    GtkEventController *k = gtk_event_controller_key_new();
+    sg_media_css();
+    gtk_widget_add_css_class(pic, "sg-media-picture");
+    gtk_picture_set_content_fit(GTK_PICTURE(pic), GTK_CONTENT_FIT_CONTAIN);
+    gtk_picture_set_can_shrink(GTK_PICTURE(pic), TRUE);
+    gtk_widget_set_hexpand(pic, TRUE);
+    gtk_widget_set_vexpand(pic, TRUE);
+    gtk_widget_set_size_request(pic, 320, 180);
+    if (m->stream) gtk_picture_set_paintable(GTK_PICTURE(pic), GDK_PAINTABLE(m->stream));
+    gtk_widget_set_visible(pic, !m->told_ready || !m->stream || gtk_media_stream_has_video(m->stream));
+    gtk_widget_set_visible(ctl, m->controls_visible);
+    gtk_box_append(GTK_BOX(box), pic);
+    gtk_box_append(GTK_BOX(box), ctl);
+    gtk_widget_set_focusable(box, TRUE);
+    gtk_widget_set_focus_on_click(box, TRUE);
+    g_signal_connect(k, "key-pressed", G_CALLBACK(sg_media_on_key), m->box);
+    gtk_widget_add_controller(box, k);
+    *picture = pic;
+    *controls = ctl;
+}
+
+/* A click on the picture gives the player the focus, for its keys. */
+static void sg_media_on_press(GtkGestureClick *g, int n, double x, double y, gpointer d) {
+    (void) n; (void) x; (void) y;
+    gtk_widget_grab_focus(GTK_WIDGET(d));
+    gtk_gesture_set_state(GTK_GESTURE(g), GTK_EVENT_SEQUENCE_NONE);
+}
+
+/* ---- the stream's reports ---- */
+
+static void sg_media_on_prepared(GObject *o, GParamSpec *p, gpointer d) {
+    sg_media *m = (sg_media *) d;
+    GtkMediaStream *s = GTK_MEDIA_STREAM(o);
+    gboolean l_video;
+    (void) p;
+    if (s != m->stream || m->told_ready || m->told_failed || !gtk_media_stream_is_prepared(s)) return;
+    m->told_ready = 1;
+    l_video = gtk_media_stream_has_video(s);
+    gtk_widget_set_visible(m->picture, l_video);
+    if (m->fill_picture) gtk_widget_set_visible(m->fill_picture, l_video);
+    sg_push(66, m->id, 1, (int) (gtk_media_stream_get_duration(s) / 1000));
+}
+
+static void sg_media_on_error(GObject *o, GParamSpec *p, gpointer d) {
+    sg_media *m = (sg_media *) d;
+    GtkMediaStream *s = GTK_MEDIA_STREAM(o);
+    const GError *e = gtk_media_stream_get_error(s);
+    (void) p;
+    if (s != m->stream || !e || m->told_failed || m->told_ready) return;
+    m->told_failed = 1;
+    g_free(m->failure);
+    m->failure = g_strdup((e->message && *e->message) ? e->message : "the media could not be played");
+    sg_push(66, m->id, 4, 0);
+}
+
+static void sg_media_on_ended(GObject *o, GParamSpec *p, gpointer d) {
+    sg_media *m = (sg_media *) d;
+    GtkMediaStream *s = GTK_MEDIA_STREAM(o);
+    (void) p;
+    if (s == m->stream && gtk_media_stream_get_ended(s)) sg_push(66, m->id, 3, 0);
+}
+
+static gboolean sg_media_tick(gpointer d) {
+    sg_media *m = (sg_media *) d;
+    if (m->stream && gtk_media_stream_get_playing(m->stream))
+        sg_push(66, m->id, 2, (int) (gtk_media_stream_get_timestamp(m->stream) / 1000));
+    return G_SOURCE_CONTINUE;
+}
+
+/* Let the stream go: its reports, the pictures and controls showing it. */
+static void sg_media_drop_stream(sg_media *m) {
+    if (!m->stream) return;
+    /* the user may have changed them on the controls: the next stream keeps them */
+    m->volume = gtk_media_stream_get_volume(m->stream);
+    m->muted = gtk_media_stream_get_muted(m->stream) ? 1 : 0;
+    g_signal_handlers_disconnect_by_data(m->stream, m);
+    gtk_media_stream_pause(m->stream);
+    if (m->picture) gtk_picture_set_paintable(GTK_PICTURE(m->picture), NULL);
+    if (m->controls) gtk_media_controls_set_media_stream(GTK_MEDIA_CONTROLS(m->controls), NULL);
+    if (m->fill_picture) gtk_picture_set_paintable(GTK_PICTURE(m->fill_picture), NULL);
+    if (m->fill_controls) gtk_media_controls_set_media_stream(GTK_MEDIA_CONTROLS(m->fill_controls), NULL);
+    g_object_unref(m->stream);
+    m->stream = NULL;
+}
+
+/* The filler out of the window's overlay. */
+static void sg_media_remove_filler(sg_media *m) {
+    GtkWidget *f = m->filler, *p;
+    /* the weak pointers go first: a later filler must not be emptied when this one dies */
+    if (m->fill_picture) g_object_remove_weak_pointer(G_OBJECT(m->fill_picture), (gpointer *) &m->fill_picture);
+    if (m->fill_controls) g_object_remove_weak_pointer(G_OBJECT(m->fill_controls), (gpointer *) &m->fill_controls);
+    if (f) g_object_remove_weak_pointer(G_OBJECT(f), (gpointer *) &m->filler);
+    m->filler = m->fill_picture = m->fill_controls = NULL;
+    if (!f) return;
+    p = gtk_widget_get_parent(f);
+    if (p && GTK_IS_OVERLAY(p)) gtk_overlay_remove_overlay(GTK_OVERLAY(p), f);
+}
+
+static void sg_media_forget_window(sg_media *m) {
+    if (m->window) {
+        if (m->window_handler) g_signal_handler_disconnect(m->window, m->window_handler);
+        g_object_remove_weak_pointer(G_OBJECT(m->window), (gpointer *) &m->window);
+    }
+    m->window = NULL;
+    m->window_handler = 0;
+}
+
+/* The player's box is being destroyed: let go of what it holds outside itself. */
+static void sg_media_on_destroy(GtkWidget *w, gpointer d) {
+    sg_media *m = (sg_media *) d;
+    (void) w;
+    if (m->position_timer) { g_source_remove(m->position_timer); m->position_timer = 0; }
+    sg_media_forget_window(m);
+    sg_media_remove_filler(m);
+    m->picture = m->controls = NULL;
+    sg_media_drop_stream(m);
+}
+
+static void sg_media_free(gpointer d) {
+    sg_media *m = (sg_media *) d;
+    g_free(m->failure);
+    g_free(m);
+}
+
+static int sg_media_player(void) {
+    sg_media *m = g_new0(sg_media, 1);
+    GtkGesture *g;
+    m->controls_visible = 1;
+    m->volume = 1.0;
+    m->box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    sg_media_fill_view(m, m->box, &m->picture, &m->controls);
+    g = gtk_gesture_click_new();
+    g_signal_connect(g, "pressed", G_CALLBACK(sg_media_on_press), m->box);
+    gtk_widget_add_controller(m->picture, GTK_EVENT_CONTROLLER(g));
+    g_object_set_data_full(G_OBJECT(m->box), "sg-media", m, sg_media_free);
+    g_signal_connect(m->box, "destroy", G_CALLBACK(sg_media_on_destroy), m);
+    m->id = sg_reg(m->box, 63);
+    return m->id;
+}
+
+/* Open `path' (a file) or, with `is_url', a URL: ready or failed follows. */
+static void sg_media_open(int id, const char *text, int is_url) {
+    sg_media *m = sg_media_of(id);
+    GFile *f;
+    if (!m) return;
+    sg_media_drop_stream(m);
+    m->told_ready = m->told_failed = 0;
+    g_free(m->failure);
+    m->failure = NULL;
+    f = is_url ? g_file_new_for_uri(text) : g_file_new_for_path(text);
+    m->stream = GTK_MEDIA_STREAM(gtk_media_file_new_for_file(f));
+    g_object_unref(f);
+    gtk_media_stream_set_loop(m->stream, m->loops);
+    gtk_media_stream_set_volume(m->stream, m->volume);
+    gtk_media_stream_set_muted(m->stream, m->muted ? TRUE : FALSE);
+    g_signal_connect(m->stream, "notify::prepared", G_CALLBACK(sg_media_on_prepared), m);
+    g_signal_connect(m->stream, "notify::error", G_CALLBACK(sg_media_on_error), m);
+    g_signal_connect(m->stream, "notify::ended", G_CALLBACK(sg_media_on_ended), m);
+    gtk_widget_set_visible(m->picture, TRUE);
+    gtk_picture_set_paintable(GTK_PICTURE(m->picture), GDK_PAINTABLE(m->stream));
+    gtk_media_controls_set_media_stream(GTK_MEDIA_CONTROLS(m->controls), m->stream);
+    if (m->fill_picture) {
+        gtk_widget_set_visible(m->fill_picture, TRUE);
+        gtk_picture_set_paintable(GTK_PICTURE(m->fill_picture), GDK_PAINTABLE(m->stream));
+    }
+    if (m->fill_controls) gtk_media_controls_set_media_stream(GTK_MEDIA_CONTROLS(m->fill_controls), m->stream);
+    /* a stream that is already prepared or failed told nothing to a handler connected late */
+    sg_media_on_error(G_OBJECT(m->stream), NULL, m);
+    sg_media_on_prepared(G_OBJECT(m->stream), NULL, m);
+}
+
+static void sg_media_play(int id) { sg_media *m = sg_media_of(id); if (m && m->stream) gtk_media_stream_play(m->stream); }
+static void sg_media_pause(int id) { sg_media *m = sg_media_of(id); if (m && m->stream) gtk_media_stream_pause(m->stream); }
+static void sg_media_seek(int id, int ms) {
+    sg_media *m = sg_media_of(id);
+    if (m && m->stream && gtk_media_stream_is_seekable(m->stream)) gtk_media_stream_seek(m->stream, (gint64) (ms < 0 ? 0 : ms) * 1000);
+}
+static void sg_media_stop(int id) {
+    sg_media *m = sg_media_of(id);
+    if (!m || !m->stream) return;
+    gtk_media_stream_pause(m->stream);
+    if (gtk_media_stream_is_seekable(m->stream)) gtk_media_stream_seek(m->stream, 0);
+}
+static int sg_media_position_ms(int id) {
+    sg_media *m = sg_media_of(id);
+    return (m && m->stream) ? (int) (gtk_media_stream_get_timestamp(m->stream) / 1000) : 0;
+}
+static int sg_media_duration_ms(int id) {
+    sg_media *m = sg_media_of(id);
+    return (m && m->stream && m->told_ready) ? (int) (gtk_media_stream_get_duration(m->stream) / 1000) : 0;
+}
+static int sg_media_is_playing(int id) { sg_media *m = sg_media_of(id); return (m && m->stream && gtk_media_stream_get_playing(m->stream)) ? 1 : 0; }
+static double sg_media_volume(int id) {
+    sg_media *m = sg_media_of(id);
+    return m ? (m->stream ? gtk_media_stream_get_volume(m->stream) : m->volume) : 0.0;
+}
+static void sg_media_set_volume(int id, double v) {
+    sg_media *m = sg_media_of(id);
+    if (!m) return;
+    m->volume = v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v);
+    if (m->stream) gtk_media_stream_set_volume(m->stream, m->volume);
+}
+static int sg_media_is_muted(int id) {
+    sg_media *m = sg_media_of(id);
+    return m ? (m->stream ? (gtk_media_stream_get_muted(m->stream) ? 1 : 0) : m->muted) : 0;
+}
+static void sg_media_set_muted(int id, int on) {
+    sg_media *m = sg_media_of(id);
+    if (!m) return;
+    m->muted = on ? 1 : 0;
+    if (m->stream) gtk_media_stream_set_muted(m->stream, m->muted ? TRUE : FALSE);
+}
+/* The natural size (the paintable's intrinsic size), 0 by 0 for audio alone or before ready. */
+static int sg_media_video_width(int id) {
+    sg_media *m = sg_media_of(id);
+    return (m && m->stream && m->told_ready && gtk_media_stream_has_video(m->stream)) ? gdk_paintable_get_intrinsic_width(GDK_PAINTABLE(m->stream)) : 0;
+}
+static int sg_media_video_height(int id) {
+    sg_media *m = sg_media_of(id);
+    return (m && m->stream && m->told_ready && gtk_media_stream_has_video(m->stream)) ? gdk_paintable_get_intrinsic_height(GDK_PAINTABLE(m->stream)) : 0;
+}
+static int sg_media_has_video(int id) { sg_media *m = sg_media_of(id); return (m && m->stream && m->told_ready && gtk_media_stream_has_video(m->stream)) ? 1 : 0; }
+static void sg_media_set_controls_visible(int id, int on) {
+    sg_media *m = sg_media_of(id);
+    if (!m) return;
+    m->controls_visible = on ? 1 : 0;
+    if (m->controls) gtk_widget_set_visible(m->controls, m->controls_visible);
+    if (m->fill_controls) gtk_widget_set_visible(m->fill_controls, m->controls_visible);
+}
+static void sg_media_set_loops(int id, int on) {
+    sg_media *m = sg_media_of(id);
+    if (!m) return;
+    m->loops = on ? 1 : 0;
+    if (m->stream) gtk_media_stream_set_loop(m->stream, m->loops);
+}
+static void sg_media_set_watched(int id, int on) {
+    sg_media *m = sg_media_of(id);
+    if (!m) return;
+    m->watched = on ? 1 : 0;
+    if (on && !m->position_timer) m->position_timer = g_timeout_add(250, sg_media_tick, m);
+    else if (!on && m->position_timer) { g_source_remove(m->position_timer); m->position_timer = 0; }
+}
+static const char *sg_media_failure(int id) { sg_media *m = sg_media_of(id); return (m && m->failure) ? m->failure : ""; }
+
+/* ---- full screen ---- */
+
+static void sg_media_entered(sg_media *m) {
+    if (!m->wants_full_screen || m->full_screen) return;
+    m->full_screen = 1;
+    sg_push(66, m->id, 5, 1);
+}
+
+static void sg_media_exited(sg_media *m) {
+    int l_was = m->full_screen;
+    sg_media_remove_filler(m);
+    sg_media_forget_window(m);
+    m->full_screen = m->wants_full_screen = m->window_was_full = 0;
+    if (m->box && gtk_widget_get_root(m->box)) gtk_widget_grab_focus(m->box);
+    if (l_was) sg_push(66, m->id, 5, 0);
+}
+
+static void sg_media_on_fullscreened(GObject *o, GParamSpec *p, gpointer d) {
+    sg_media *m = (sg_media *) g_object_get_data(G_OBJECT(d), "sg-media");
+    (void) p;
+    if (!m) return;
+    if (gtk_window_is_fullscreen(GTK_WINDOW(o))) sg_media_entered(m);
+    else if (m->wants_full_screen) sg_media_exited(m);
+}
+
+static void sg_media_set_full_screen(int id, int on) {
+    sg_media *m = sg_media_of(id);
+    GtkRoot *r;
+    GtkWidget *win;
+    GtkOverlay *o;
+    if (!m || (on != 0) == m->wants_full_screen) return;
+    r = gtk_widget_get_root(m->box);
+    if (!r || !GTK_IS_WINDOW(r)) {
+        if (!on) sg_media_exited(m);
+        return;
+    }
+    win = GTK_WIDGET(r);
+    if (on) {
+        o = (GtkOverlay *) g_object_get_data(G_OBJECT(win), "sg-overlay");
+        if (!o && sg_id_of(win) > 0) {
+            sg_window_outer(sg_id_of(win));
+            o = (GtkOverlay *) g_object_get_data(G_OBJECT(win), "sg-overlay");
+        }
+        if (!o) return;
+        m->filler = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+        gtk_widget_add_css_class(m->filler, "sg-media-fill");
+        sg_media_fill_view(m, m->filler, &m->fill_picture, &m->fill_controls);
+        g_object_add_weak_pointer(G_OBJECT(m->filler), (gpointer *) &m->filler);
+        g_object_add_weak_pointer(G_OBJECT(m->fill_picture), (gpointer *) &m->fill_picture);
+        g_object_add_weak_pointer(G_OBJECT(m->fill_controls), (gpointer *) &m->fill_controls);
+        gtk_widget_set_halign(m->filler, GTK_ALIGN_FILL);
+        gtk_widget_set_valign(m->filler, GTK_ALIGN_FILL);
+        gtk_overlay_add_overlay(o, m->filler);
+        m->wants_full_screen = 1;
+        m->window_was_full = gtk_window_is_fullscreen(GTK_WINDOW(win)) ? 1 : 0;
+        m->window = win;
+        g_object_add_weak_pointer(G_OBJECT(win), (gpointer *) &m->window);
+        m->window_handler = g_signal_connect_object(win, "notify::fullscreened", G_CALLBACK(sg_media_on_fullscreened), m->box, 0);
+        gtk_widget_grab_focus(m->filler);
+        if (m->window_was_full) sg_media_entered(m);
+        else gtk_window_fullscreen(GTK_WINDOW(win));
+    } else if (gtk_window_is_fullscreen(GTK_WINDOW(win)) && !m->window_was_full) {
+        gtk_window_unfullscreen(GTK_WINDOW(win));   /* notify::fullscreened brings it back */
+    } else {
+        sg_media_exited(m);
+    }
+}
+static int sg_media_is_full_screen(int id) { sg_media *m = sg_media_of(id); return (m && m->full_screen) ? 1 : 0; }
+
+/* ---- tests: what GStreamer plays ---- */
+
+static int sg_test_media_position_ms(int id) { return sg_media_position_ms(id); }
+/* GtkMediaStream has no rate: 1 while playing, 0 otherwise. */
+static double sg_test_media_rate(int id) { return sg_media_is_playing(id) ? 1.0 : 0.0; }
+static int sg_test_media_video_size(int id) { return sg_media_video_width(id) + sg_media_video_height(id) * 65536; }
+/* The mean color over the center 16 by 16 of the frame shown now (the paintable's snapshot,
+   drawn at its own size with Cairo), 0xFFRRGGBB; 0 with no frame. */
+static unsigned int sg_test_media_frame_color(int id) {
+    sg_media *m = sg_media_of(id);
+    GdkPaintable *p;
+    GtkSnapshot *s;
+    GskRenderNode *n;
+    cairo_surface_t *cs;
+    cairo_t *cr;
+    unsigned char *l_data;
+    unsigned long r = 0, g = 0, b = 0, l_count = 0;
+    int w, h, x, y, l_stride;
+    if (!m || !m->stream) return 0;
+    p = GDK_PAINTABLE(m->stream);
+    w = gdk_paintable_get_intrinsic_width(p);
+    h = gdk_paintable_get_intrinsic_height(p);
+    if (w < 16 || h < 16) return 0;
+    s = gtk_snapshot_new();
+    gdk_paintable_snapshot(p, GDK_SNAPSHOT(s), (double) w, (double) h);
+    n = gtk_snapshot_free_to_node(s);
+    if (!n) return 0;
+    cs = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+    cr = cairo_create(cs);
+    gsk_render_node_draw(n, cr);
+    cairo_destroy(cr);
+    gsk_render_node_unref(n);
+    cairo_surface_flush(cs);
+    l_data = cairo_image_surface_get_data(cs);
+    l_stride = cairo_image_surface_get_stride(cs);
+    if (l_data) {
+        for (y = h / 2 - 8; y < h / 2 + 8; y++) {
+            for (x = w / 2 - 8; x < w / 2 + 8; x++) {
+                guint32 v = *(guint32 *) (l_data + (size_t) y * l_stride + (size_t) x * 4);
+                if ((v >> 24) == 0) continue;   /* nothing drawn there */
+                r += (v >> 16) & 0xFF; g += (v >> 8) & 0xFF; b += v & 0xFF; l_count++;
+            }
+        }
+    }
+    cairo_surface_destroy(cs);
+    if (!l_count) return 0;
+    return 0xFF000000u | (unsigned int) ((r / l_count) << 16) | (unsigned int) ((g / l_count) << 8) | (unsigned int) (b / l_count);
+}
+
 #endif

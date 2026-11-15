@@ -2942,6 +2942,159 @@ feature -- Loading states and app identity (1z-d)
 		deferred
 		end
 
+feature -- Media player (1z-b)
+
+	media_player: INTEGER
+			-- 1z-b: a media player, empty, with the toolkit's own transport controls shown. Its
+			-- reports are event 66, a = the kind: 1 ready (b = the duration in milliseconds); 2 the
+			-- position (b = milliseconds), only while playing and watched (`media_set_watched'),
+			-- at most every 250 ms; 3 ended (never while looping: it plays again from 0); 4 failed
+			-- (the reason from `media_failure'); 5 full screen changed (b = 1 on, 0 off). AppKit:
+			-- an AVPlayerView with an AVPlayer; GTK: a GtkPicture showing a GtkMediaFile
+			-- (GStreamer) over its GtkMediaControls; Windows: Media Foundation's media engine in
+			-- frame-server mode, drawn into the window with simple_widgets' SW_MEDIA_BAR.
+		deferred
+		ensure
+			named: Result > 0
+		end
+
+	media_open_file (an_id: INTEGER; a_path: POINTER)
+			-- 1z-b: open the file at `a_path' (UTF-8); ready (66/1) or failed (66/4) follows, once.
+			-- Paused at 0 when ready.
+		deferred
+		end
+
+	media_open_url (an_id: INTEGER; a_url: POINTER)
+			-- 1z-b: open the media at `a_url' (UTF-8), as `media_open_file' does a file.
+		deferred
+		end
+
+	media_play (an_id: INTEGER)
+		deferred
+		end
+
+	media_pause (an_id: INTEGER)
+		deferred
+		end
+
+	media_stop (an_id: INTEGER)
+			-- Pause, and seek to 0.
+		deferred
+		end
+
+	media_seek (an_id, a_ms: INTEGER)
+			-- Move to `a_ms' milliseconds, playing or paused as it was.
+		require
+			non_negative: a_ms >= 0
+		deferred
+		end
+
+	media_position_ms (an_id: INTEGER): INTEGER
+			-- Where it is now, in milliseconds, asked of the toolkit.
+		deferred
+		end
+
+	media_duration_ms (an_id: INTEGER): INTEGER
+			-- Its length in milliseconds; 0 until ready.
+		deferred
+		end
+
+	media_is_playing (an_id: INTEGER): BOOLEAN
+			-- Playing now (not paused, stopped or ended)?
+		deferred
+		end
+
+	media_volume (an_id: INTEGER): REAL_64
+			-- 0 (silent) to 1 (full).
+		deferred
+		end
+
+	media_set_volume (an_id: INTEGER; a_volume: REAL_64)
+		require
+			unit: a_volume >= 0.0 and a_volume <= 1.0
+		deferred
+		end
+
+	media_is_muted (an_id: INTEGER): BOOLEAN
+		deferred
+		end
+
+	media_set_muted (an_id: INTEGER; a_on: BOOLEAN)
+		deferred
+		end
+
+	media_video_width (an_id: INTEGER): INTEGER
+			-- The video's natural width in pixels; 0 for audio alone or before ready.
+		deferred
+		end
+
+	media_video_height (an_id: INTEGER): INTEGER
+			-- The video's natural height in pixels; 0 for audio alone or before ready.
+		deferred
+		end
+
+	media_has_video (an_id: INTEGER): BOOLEAN
+			-- Ready, with a video track?
+		deferred
+		end
+
+	media_set_controls_visible (an_id: INTEGER; a_on: BOOLEAN)
+			-- Show the toolkit's own transport bar (`a_on'), or hide it.
+		deferred
+		end
+
+	media_set_loops (an_id: INTEGER; a_on: BOOLEAN)
+			-- At the end, play again from 0 (`a_on'), or end (66/3).
+		deferred
+		end
+
+	media_set_watched (an_id: INTEGER; a_on: BOOLEAN)
+			-- Report the position (66/2) while playing (`a_on'), or not.
+		deferred
+		end
+
+	media_failure (an_id: INTEGER): POINTER
+			-- Why it failed (UTF-8), after 66/4; empty before.
+		deferred
+		end
+
+	media_set_full_screen (an_id: INTEGER; a_on: BOOLEAN)
+			-- The window's own full screen with the player filling it (`a_on'), or back; 66/5
+			-- reports each change, however it came (this call, Escape, the toolkit's button). Only
+			-- in an open window.
+		deferred
+		end
+
+	media_is_full_screen (an_id: INTEGER): BOOLEAN
+			-- Is the player filling its window's full screen now?
+		deferred
+		end
+
+	test_media_position_ms (an_id: INTEGER): INTEGER
+			-- Tests only, 1z-b: the position read from what plays (AVPlayer's currentTime,
+			-- GtkMediaStream's timestamp, the media engine's GetCurrentTime), in milliseconds.
+		deferred
+		end
+
+	test_media_rate (an_id: INTEGER): REAL_64
+			-- Tests only, 1z-b: the playback rate, 0 when paused (AVPlayer's rate; GTK: 1 while
+			-- playing, it has no rate; Windows: GetPlaybackRate, 0 while IsPaused).
+		deferred
+		end
+
+	test_media_video_size (an_id: INTEGER): INTEGER
+			-- Tests only, 1z-b: the natural video size as width + height * 65536 (presentationSize,
+			-- the paintable's intrinsic size, GetNativeVideoSize).
+		deferred
+		end
+
+	test_media_frame_color (an_id: INTEGER): NATURAL_32
+			-- Tests only, 1z-b: the mean color of the frame shown now, over a 16 by 16 patch at its
+			-- center, as 0xFFRRGGBB; 0 with no frame yet. AppKit: an AVPlayerItemVideoOutput's
+			-- pixel buffer; GTK: the GdkPaintable's snapshot; Windows: the bitmap last transferred.
+		deferred
+		end
+
 feature -- Test driver
 
 	test_click (an_id: INTEGER)

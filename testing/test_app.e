@@ -268,6 +268,15 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_skeleton_stands_still_under_reduced_motion, "skeleton_stands_still_under_reduced_motion")
 				run_test (agent t.test_show_loading_lays_a_skeleton_or_a_spinner_and_disables, "show_loading_lays_a_skeleton_or_a_spinner_and_disables")
 				run_test (agent t.test_app_icon_shows_the_image, "app_icon_shows_the_image")
+				run_test (agent t.test_media_clip_is_ready_with_its_size, "media_clip_is_ready_with_its_size")
+				run_test (agent t.test_media_frames_are_red_then_blue, "media_frames_are_red_then_blue")
+				run_test (agent t.test_media_playing_advances_and_reports_positions, "media_playing_advances_and_reports_positions")
+				run_test (agent t.test_media_ends_once_and_stops, "media_ends_once_and_stops")
+				run_test (agent t.test_media_pause_holds_the_position, "media_pause_holds_the_position")
+				run_test (agent t.test_media_looping_does_not_end, "media_looping_does_not_end")
+				run_test (agent t.test_media_tone_plays_without_video, "media_tone_plays_without_video")
+				run_test (agent t.test_media_missing_file_fails_with_a_reason, "media_missing_file_fails_with_a_reason")
+				run_test (agent t.test_media_full_screen_reports_both_ways, "media_full_screen_reports_both_ways")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then
