@@ -3592,12 +3592,74 @@ static void sg_canvas_pressed(GtkGestureClick *g, int n, double x, double y, gpo
 static void sg_canvas_released(GtkGestureClick *g, int n, double x, double y, gpointer d) { (void) n; sg_pointer(GTK_GESTURE(g), 2, x, y, d); }
 static void sg_canvas_motion(GtkEventControllerMotion *c, double x, double y, gpointer d) {
     GdkModifierType m = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(c));
+    GtkWidget *w = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(c));
+    /* 1z-a: where the pointer is, for the wheel */
+    g_object_set_data(G_OBJECT(w), "sg-px", GINT_TO_POINTER((int) lround(x)));
+    g_object_set_data(G_OBJECT(w), "sg-py", GINT_TO_POINTER((int) lround(y)));
     sg_push5(7, GPOINTER_TO_INT(d), (int) x, (int) y, 3 | (sg_mods(m) << 8));
 }
 static gboolean sg_canvas_key(GtkEventControllerKey *c, guint keyval, guint code, GdkModifierType m, gpointer d) {
     (void) c; (void) code;
     sg_push5(8, GPOINTER_TO_INT(d), (int) keyval, (int) gdk_keyval_to_unicode(keyval), sg_mods(m) << 8);
     return TRUE;
+}
+
+/* ---------- 1z-a: a canvas's gestures, event 68: a = kind (1 wheel, 2 magnify) + modifiers * 16;
+   b = the amount (a wheel's in 1/120 of a notch, positive away from the user; a magnify's
+   factor * 1000); c = x + y * 65536, in logical pixels. The wheel is reported where the pointer
+   last moved (the canvas keeps it); a pinch about its center. GtkGestureZoom's scale-changed
+   is the scale since the pinch began, so it is reported as the ratio to the last report, the
+   meaning AppKit's 1 + magnification has. A test sets "sg-test-mods" (1 + the modifiers) and,
+   for a pinch, "sg-test-x" and "sg-test-y", then sends the controller's own signal, the one GTK
+   sends for a user's wheel or pinch. ---------- */
+static void sg_canvas_gesture(int id, int kind, int amount, int mods, double x, double y) {
+    int ix = (int) lround(x), iy = (int) lround(y);
+    if (ix < 0) ix = 0;
+    if (ix > 65535) ix = 65535;
+    if (iy < 0) iy = 0;
+    if (iy > 32767) iy = 32767;
+    sg_push5(68, id, kind + mods * 16, amount, ix + iy * 65536);
+}
+static int sg_canvas_gesture_mods(GtkWidget *w, GtkEventController *c) {
+    int t = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "sg-test-mods"));
+    return t > 0 ? t - 1 : sg_mods(gtk_event_controller_get_current_event_state(c));
+}
+/* A mouse's notch is one wheel unit, 120; a touchpad's smooth scroll is in surface pixels,
+   10 to a notch (as AppKit's precise deltas are counted). */
+static gboolean sg_canvas_scroll(GtkEventControllerScroll *c, double dx, double dy, gpointer d) {
+    int id = GPOINTER_TO_INT(d), amount;
+    GtkWidget *w = sg_w[id];
+    (void) dx;
+    if (!w) return FALSE;
+    amount = (int) lround(-dy * (gtk_event_controller_scroll_get_unit(c) == GDK_SCROLL_UNIT_SURFACE ? 12.0 : 120.0));
+    if (amount != 0)
+        sg_canvas_gesture(id, 1, amount, sg_canvas_gesture_mods(w, GTK_EVENT_CONTROLLER(c)),
+            GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "sg-px")), GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "sg-py")));
+    return TRUE;
+}
+/* "sg-zoom-last": the gesture's scale at its last report, times a million. */
+static void sg_canvas_zoom_begin(GtkGesture *g, GdkEventSequence *s, gpointer d) {
+    (void) s; (void) d;
+    g_object_set_data(G_OBJECT(g), "sg-zoom-last", GINT_TO_POINTER(1000000));
+}
+static void sg_canvas_zoom_changed(GtkGestureZoom *g, double scale, gpointer d) {
+    int id = GPOINTER_TO_INT(d), last, amount;
+    GtkWidget *w = sg_w[id];
+    double x = 0.0, y = 0.0;
+    if (!w || scale <= 0.0) return;
+    last = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(g), "sg-zoom-last"));
+    if (last <= 0) last = 1000000;
+    amount = (int) lround(scale / (last / 1000000.0) * 1000.0);
+    if (amount == 1000 || amount <= 0) return;   /* too small to tell: it adds up to the next */
+    g_object_set_data(G_OBJECT(g), "sg-zoom-last", GINT_TO_POINTER((int) lround(scale * 1000000.0)));
+    if (g_object_get_data(G_OBJECT(w), "sg-test-mods")) {
+        x = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "sg-test-x"));
+        y = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "sg-test-y"));
+    } else if (!gtk_gesture_get_bounding_box_center(GTK_GESTURE(g), &x, &y)) {
+        x = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "sg-px"));
+        y = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "sg-py"));
+    }
+    sg_canvas_gesture(id, 2, amount, sg_canvas_gesture_mods(w, GTK_EVENT_CONTROLLER(g)), x, y);
 }
 
 static int sg_canvas(int w, int h) {
@@ -3609,6 +3671,8 @@ static int sg_canvas(int w, int h) {
     GtkGesture *click = gtk_gesture_click_new();
     GtkEventController *motion = gtk_event_controller_motion_new();
     GtkEventController *keys = gtk_event_controller_key_new();
+    GtkEventController *scroll = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+    GtkGesture *zoom = gtk_gesture_zoom_new();
     int id = sg_reg(a, 8);
     gtk_drawing_area_set_content_width(GTK_DRAWING_AREA(a), w);
     gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(a), h);
@@ -3622,6 +3686,14 @@ static int sg_canvas(int w, int h) {
     gtk_widget_add_controller(a, motion);
     g_signal_connect(keys, "key-pressed", G_CALLBACK(sg_canvas_key), GINT_TO_POINTER(id));
     gtk_widget_add_controller(a, keys);
+    /* 1z-a: the wheel and a pinch (event 68) */
+    g_signal_connect(scroll, "scroll", G_CALLBACK(sg_canvas_scroll), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(a, scroll);
+    g_object_set_data(G_OBJECT(a), "sg-scroll", scroll);
+    g_signal_connect(zoom, "begin", G_CALLBACK(sg_canvas_zoom_begin), NULL);
+    g_signal_connect(zoom, "scale-changed", G_CALLBACK(sg_canvas_zoom_changed), GINT_TO_POINTER(id));
+    gtk_widget_add_controller(a, GTK_EVENT_CONTROLLER(zoom));
+    g_object_set_data(G_OBJECT(a), "sg-zoom", zoom);
     gtk_widget_set_focusable(a, TRUE);
     return id;
 }
@@ -3686,6 +3758,88 @@ static void sg_canvas_present(int id, void *image) {
     if (sg_canvas_image[id]) cairo_surface_destroy(sg_canvas_image[id]);
     sg_canvas_image[id] = image ? cairo_surface_reference((cairo_surface_t *) image) : NULL;
     gtk_widget_queue_draw(sg_w[id]);
+}
+/* Tests, 1z-a: what canvas `id' shows at logical (x, y), as GTK draws it: the drawing area's own
+   snapshot at the window's scale, one device pixel of it: the one under the logical pixel's
+   center: what the last frame drew. A canvas just presented has no snapshot until its next
+   frame paints (a queued redraw drops the old one), so the loop turns, up to half a second,
+   until it has one. The node is drawn with Cairo (gsk_render_node_draw), one pixel, rather than
+   by the window's renderer. 0xAARRGGBB, straight alpha; 0 outside or not drawn. */
+static unsigned int sg_test_canvas_pixel(int id, int x, int y) {
+    GtkWidget *w = sg_w[id];
+    int W, H, px, py;
+    double k;
+    GdkPaintable *p; GtkSnapshot *s; GskRenderNode *n;
+    cairo_surface_t *one; cairo_t *cr;
+    guint32 v = 0;
+    unsigned int a, r, g, b;
+    if (!w || !gtk_widget_get_mapped(w)) return 0;
+    W = gtk_widget_get_width(w); H = gtk_widget_get_height(w);
+    if (x < 0 || y < 0 || x >= W || y >= H) return 0;
+    k = sg_scale(id);
+    p = gtk_widget_paintable_new(w);
+    s = gtk_snapshot_new();
+    gtk_snapshot_scale(s, (float) k, (float) k);
+    gdk_paintable_snapshot(p, GDK_SNAPSHOT(s), W, H);
+    n = gtk_snapshot_free_to_node(s);
+    {
+        gint64 until = g_get_monotonic_time() + 500 * 1000;
+        while (!n && g_get_monotonic_time() < until) {
+            while (g_main_context_iteration(NULL, FALSE)) { }
+            g_usleep(5000);
+            g_object_unref(p);
+            p = gtk_widget_paintable_new(w);
+            s = gtk_snapshot_new();
+            gtk_snapshot_scale(s, (float) k, (float) k);
+            gdk_paintable_snapshot(p, GDK_SNAPSHOT(s), W, H);
+            n = gtk_snapshot_free_to_node(s);
+        }
+    }
+    g_object_unref(p);
+    if (!n) return 0;
+    px = (int) floor((x + 0.5) * k); py = (int) floor((y + 0.5) * k);
+    one = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cr = cairo_create(one);
+    cairo_translate(cr, -px, -py);
+    gsk_render_node_draw(n, cr);
+    cairo_destroy(cr);
+    gsk_render_node_unref(n);
+    cairo_surface_flush(one);
+    /* cairo's ARGB32, premultiplied, in the machine's order: one 32-bit word */
+    v = *(guint32 *) cairo_image_surface_get_data(one);
+    cairo_surface_destroy(one);
+    a = v >> 24;
+    if (a == 0) return 0;
+    r = (((v >> 16) & 0xFF) * 255 + a / 2) / a;
+    g = (((v >> 8) & 0xFF) * 255 + a / 2) / a;
+    b = ((v & 0xFF) * 255 + a / 2) / a;
+    return (a << 24) | ((r > 255 ? 255 : r) << 16) | ((g > 255 ? 255 : g) << 8) | (b > 255 ? 255 : b);
+}
+/* Tests, 1z-a: as a user, the pointer comes to (x, y) and the wheel turns `amount' (1/120 of a
+   notch, positive away from the user) with `mods' held: the scroll controller's own signal. */
+static void sg_test_canvas_wheel(int id, int amount, int mods, int x, int y) {
+    GtkWidget *w = sg_w[id];
+    GtkEventController *c = w ? g_object_get_data(G_OBJECT(w), "sg-scroll") : NULL;
+    gboolean handled = FALSE;
+    if (!c || amount == 0) return;
+    g_object_set_data(G_OBJECT(w), "sg-px", GINT_TO_POINTER(x));
+    g_object_set_data(G_OBJECT(w), "sg-py", GINT_TO_POINTER(y));
+    g_object_set_data(G_OBJECT(w), "sg-test-mods", GINT_TO_POINTER(1 + mods));
+    g_signal_emit_by_name(c, "scroll", 0.0, - amount / 120.0, &handled);
+    g_object_set_data(G_OBJECT(w), "sg-test-mods", NULL);
+}
+/* Tests, 1z-a: as a user, a pinch of `f1000' / 1000 about (x, y): a new zoom gesture's own
+   scale-changed signal. */
+static void sg_test_canvas_magnify(int id, int f1000, int x, int y) {
+    GtkWidget *w = sg_w[id];
+    GtkGesture *g = w ? g_object_get_data(G_OBJECT(w), "sg-zoom") : NULL;
+    if (!g || f1000 <= 0) return;
+    g_object_set_data(G_OBJECT(g), "sg-zoom-last", GINT_TO_POINTER(1000000));
+    g_object_set_data(G_OBJECT(w), "sg-test-x", GINT_TO_POINTER(x));
+    g_object_set_data(G_OBJECT(w), "sg-test-y", GINT_TO_POINTER(y));
+    g_object_set_data(G_OBJECT(w), "sg-test-mods", GINT_TO_POINTER(1));
+    g_signal_emit_by_name(g, "scale-changed", f1000 / 1000.0);
+    g_object_set_data(G_OBJECT(w), "sg-test-mods", NULL);
 }
 
 /* ---------- 1i: the drawn view (kind 50). A GUI_DRAWN hosts a simple_widgets window in it: a
@@ -7610,6 +7764,21 @@ static gboolean sg_on_window_help_key(GtkEventControllerKey *k, guint key, guint
     return TRUE;
 }
 static void sg_test_press_help(int window) { if (sg_w[window]) sg_push(49, 0, sg_focused_id(sg_w[window]), 0); }
+/* 1z-a: the widget holding the focus in window `win' (or its nearest ancestor of ours); 0 none. */
+static int sg_window_focused(int win) { return sg_w[win] ? sg_focused_id(sg_w[win]) : 0; }
+/* 1z-a: `child' over the whole window, on the window's overlay where its toasts go, filling it;
+   it shows and hides with sg_set_visible. Once per window. */
+static void sg_window_set_cover(int win, int child) {
+    GtkWidget *w = sg_w[win], *c = sg_w[child];
+    GtkOverlay *o;
+    if (!w || !c || gtk_widget_get_parent(c)) return;
+    o = g_object_get_data(G_OBJECT(w), "sg-overlay");
+    if (!o) { sg_window_outer(win); o = g_object_get_data(G_OBJECT(w), "sg-overlay"); }
+    if (!o) return;
+    gtk_widget_set_halign(c, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(c, GTK_ALIGN_FILL);
+    gtk_overlay_add_overlay(o, c);
+}
 __attribute__((weak)) GtkWidget *sg_help_note = NULL;
 static gboolean sg_help_note_hide(gpointer d) { (void) d; if (sg_help_note) gtk_widget_set_visible(sg_help_note, FALSE); return G_SOURCE_REMOVE; }
 static void sg_help_show_tip(int widget, const char *text) {

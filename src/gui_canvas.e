@@ -34,6 +34,8 @@ feature {NONE} -- Initialization
 			create pointer_actions.make
 			create key_actions.make
 			create resize_actions.make
+			create wheel_actions.make
+			create magnify_actions.make
 			register (backend.canvas (a_width, a_height))
 		end
 
@@ -75,6 +77,21 @@ feature -- Access
 
 	resize_actions: GUI_ACTIONS [TUPLE [width, height: INTEGER]]
 
+	wheel_actions: GUI_ACTIONS [TUPLE [amount, modifiers, x, y: INTEGER]]
+			-- 1z-a: the wheel turned over the canvas: `amount' in 1/120 of a notch, positive away
+			-- from the user (a touchpad's scroll in the same units); the modifiers held, as in
+			-- `pointer_actions'; and where, in logical pixels. Control (Command on the Mac) with
+			-- the wheel is a zoom by convention, and a Windows touchpad's pinch arrives that way.
+			-- A canvas takes the wheel: it does not scroll what holds it.
+
+	magnify_actions: GUI_ACTIONS [TUPLE [factor: REAL_64; x, y: INTEGER]]
+			-- 1z-a: a pinch over the canvas: the size it asks for grew by `factor' since the last
+			-- report (above 1 apart, below 1 together), about (x, y) in logical pixels.
+
+	Wheel_zoom_step: REAL_64 = 1.25
+			-- 1z-a: the zoom one notch of Control + wheel makes in shared code (GUI_IMAGE_VIEW);
+			-- a Windows touchpad's pinch, which arrives as Control + wheel, is sent so.
+
 feature -- Basic operations
 
 	present (a_image: CAIRO_SURFACE)
@@ -97,6 +114,18 @@ feature {GUI_APPLICATION} -- Events
 				key_actions.call ([a_a, a_b.to_character_32, a_c // 256])
 			when 9 then
 				resize_actions.call ([a_a, a_b])
+			when 68 then
+					-- 1z-a: a = kind (1 wheel, 2 magnify) + modifiers * 16; b = the amount (1/120
+					-- of a notch; a magnify's factor * 1000); c = x + y * 65536
+				inspect a_a \\ 16
+				when 1 then
+					wheel_actions.call ([a_b, a_a // 16, a_c \\ 65536, a_c // 65536])
+				when 2 then
+					if a_b > 0 then
+						magnify_actions.call ([a_b / 1000.0, a_c \\ 65536, a_c // 65536])
+					end
+				else
+				end
 			else
 			end
 		end

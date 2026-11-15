@@ -18,6 +18,9 @@ note
 		user) | 20 key (a = GDK keyval, b = 1 down, c = modifiers * 256) | 21 character
 		(a = code point) | 22 focus (a = 1 in) | 23 timers (a = 0 tick, 1 fast tick, 2 dwell
 		with b = serial).
+		A canvas (1z-a): 68 gesture (a = kind + modifiers * 16, kind 1 wheel, 2 magnify; b = the
+		amount: a wheel's in 1/120 of a notch, positive away from the user, a magnify's as
+		(1 + magnification) * 1000; c = x + y * 65536, in the canvas's logical pixels).
 		1z-c: 67 monitors changed (id 0), from a backend the system tells; shared code also
 		polls simple_shell's change count on the heartbeat, so a backend need not report it.
 		Text areas report text changed (2) like fields; spin boxes report it with a = the
@@ -2316,6 +2319,22 @@ feature -- Common widget state
 		deferred
 		end
 
+	window_set_cover (a_window, a_child: INTEGER)
+			-- 1z-a: `a_child' over the whole of `a_window' (menu bar, toolbar, content and status
+			-- bar), on the window's top overlay layer where its toasts go: filling it, taking the
+			-- pointer there, its transparent parts showing what is under it. Shown and hidden with
+			-- `set_visible'. Called once for a window.
+		deferred
+		end
+
+	window_focused (a_window: INTEGER): INTEGER
+			-- 1z-a: the id of the widget in `a_window' holding the keyboard focus, or of the
+			-- nearest one up from it that simple_gui made; 0 for none.
+		deferred
+		ensure
+			not_negative: Result >= 0
+		end
+
 	window_show_toast (a_window: INTEGER; a_message, an_action_text: POINTER; a_toast_id: INTEGER)
 			-- A toast at the bottom of `a_window'; with action text, a button sending event 27
 			-- (id = window, a = `a_toast_id').
@@ -2940,6 +2959,29 @@ feature -- Test driver
 
 	test_drawn_event (an_id, a_type, a_a, a_b, a_c: INTEGER)
 			-- Put a drawn view's event (18 to 23) on the queue, as the view would.
+		deferred
+		end
+
+	test_canvas_pixel (an_id, a_x, a_y: INTEGER): NATURAL_32
+			-- Tests only, 1z-a: what canvas `an_id' shows at logical point (`a_x', `a_y'), read
+			-- from what the toolkit shows (not the image shared code made): the device pixel under
+			-- the logical pixel's center, as 0xAARRGGBB with straight alpha; 0 outside it.
+		deferred
+		end
+
+	test_canvas_wheel (an_id, an_amount, a_modifiers, a_x, a_y: INTEGER)
+			-- Tests only, 1z-a: the wheel turned by `an_amount' (1/120 of a notch, positive away
+			-- from the user) with `a_modifiers' held, over logical point (`a_x', `a_y') of canvas
+			-- `an_id', sent to the toolkit as a user's would be; it reports event 68.
+		deferred
+		end
+
+	test_canvas_magnify (an_id, a_factor_1000, a_x, a_y: INTEGER)
+			-- Tests only, 1z-a: a pinch by `a_factor_1000' / 1000 about logical point (`a_x',
+			-- `a_y') of canvas `an_id', sent to the toolkit as a user's would be (on Windows, as
+			-- the Control + wheel a touchpad's pinch arrives as).
+		require
+			positive: a_factor_1000 > 0
 		deferred
 		end
 

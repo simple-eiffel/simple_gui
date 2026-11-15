@@ -283,6 +283,78 @@ feature -- User actions
 			settle
 		end
 
+	canvas_pointer (a_canvas: GUI_CANVAS; a_kind, a_x, a_y, a_button, a_modifiers: INTEGER)
+			-- 1z-a: a pointer event over `a_canvas' (kind 1 press, 2 release, 3 motion) at logical
+			-- (x, y), as the canvas reports one (event 7).
+		require
+			has_application: has_application
+			known_kind: 1 <= a_kind and a_kind <= 3
+		do
+			backend.test_drawn_event (a_canvas.id, 7, a_x, a_y, a_kind + a_button * 16 + a_modifiers * 256)
+			settle
+		end
+
+	canvas_double_click (a_canvas: GUI_CANVAS; a_x, a_y, a_button: INTEGER)
+			-- 1z-a: a double-click over `a_canvas' at logical (x, y): press, release, press, release
+			-- reported together and then settled once, as a user's quick clicks arrive. Settling
+			-- after each one, as `canvas_pointer' does, can let more than the double-click time pass
+			-- between them (the Mac's pump runs its whole length).
+		require
+			has_application: has_application
+		local
+			i: INTEGER
+		do
+			from i := 1 until i > 2 loop
+				backend.test_drawn_event (a_canvas.id, 7, a_x, a_y, 1 + a_button * 16)
+				backend.test_drawn_event (a_canvas.id, 7, a_x, a_y, 2 + a_button * 16)
+				i := i + 1
+			end
+			settle
+		end
+
+	canvas_key (a_canvas: GUI_CANVAS; a_key: INTEGER; a_character: CHARACTER_32; a_modifiers: INTEGER)
+			-- 1z-a: a key pressed while `a_canvas' holds the focus (`a_key' a GDK key code), as the
+			-- canvas reports one (event 8).
+		require
+			has_application: has_application
+		do
+			backend.test_drawn_event (a_canvas.id, 8, a_key, a_character.code, a_modifiers * 256)
+			settle
+		end
+
+	wheel (a_canvas: GUI_CANVAS; a_dy, a_modifiers, a_x, a_y: INTEGER)
+			-- 1z-a: the wheel turned by `a_dy' (1/120 of a notch, positive away from the user)
+			-- with `a_modifiers' held, over logical (x, y) of `a_canvas', sent to the toolkit as a
+			-- user's would be.
+		require
+			has_application: has_application
+		do
+			backend.test_canvas_wheel (a_canvas.id, a_dy, a_modifiers, a_x, a_y)
+			settle
+		end
+
+	pinch (a_canvas: GUI_CANVAS; a_factor: REAL_64; a_x, a_y: INTEGER)
+			-- 1z-a: a pinch by `a_factor' (above 1 apart) about logical (x, y) of `a_canvas', sent
+			-- to the toolkit as a user's would be.
+		require
+			has_application: has_application
+			positive: a_factor > 0.0
+			measurable: (a_factor * 1000.0).rounded > 0
+		do
+			backend.test_canvas_magnify (a_canvas.id, (a_factor * 1000.0).rounded, a_x, a_y)
+			settle
+		end
+
+	canvas_pixel (a_canvas: GUI_CANVAS; a_x, a_y: INTEGER): NATURAL_32
+			-- 1z-a: what `a_canvas' shows at logical (x, y), read from what the toolkit shows, as
+			-- 0xAARRGGBB with straight alpha (after letting the loop settle).
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.test_canvas_pixel (a_canvas.id, a_x, a_y)
+		end
+
 	toggle_expander (an_expander: GUI_EXPANDER)
 			-- Click the expander's title as a user would (fires toggled).
 		require

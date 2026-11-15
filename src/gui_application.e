@@ -871,6 +871,16 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Style (1w)
 			end
 		end
 
+feature {GUI_WIDGET} -- Registry
+
+	widget_of (an_id: INTEGER): detachable GUI_WIDGET
+			-- 1z-a: the widget whose id is `an_id'; Void for none (0, or one gone).
+		do
+			Result := widgets.item (an_id)
+		ensure
+			found: attached Result implies Result.id = an_id
+		end
+
 feature {GUI_TEST_DRIVER} -- Registry
 
 	widgets: HASH_TABLE [GUI_WIDGET, INTEGER]

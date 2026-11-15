@@ -8638,6 +8638,522 @@ feature -- Styles and the theme (1w)
 			assert ("dark gray on white is above it", l_style.contrast_ratio (0x595959, 0xFFFFFF) >= 4.5)
 		end
 
+feature -- Images (1z-a)
+
+	test_canvas_reports_the_wheel_and_a_pinch
+			-- 1z-a: event 68: a canvas hears the wheel (the amount, the modifiers, where) and a
+			-- pinch (its factor and center; on Windows a touchpad's pinch is Control + wheel).
+		local
+			l_window: GUI_WINDOW
+			l_canvas: GUI_CANVAS
+			l_wheels: ARRAYED_LIST [TUPLE [amount, modifiers, x, y: INTEGER]]
+			l_pinches: ARRAYED_LIST [TUPLE [factor: REAL_64; x, y: INTEGER]]
+		do
+			create l_window.make ("Gestures", 300, 220)
+			create l_canvas.make (200, 150)
+			l_window.set_content (l_canvas)
+			l_window.show
+			settle_window
+			create l_wheels.make (2)
+			create l_pinches.make (2)
+			l_canvas.wheel_actions.extend (agent (a_list: ARRAYED_LIST [TUPLE [amount, modifiers, x, y: INTEGER]]; a, m, x, y: INTEGER) do a_list.extend ([a, m, x, y]) end (l_wheels, ?, ?, ?, ?))
+			l_canvas.magnify_actions.extend (agent (a_list: ARRAYED_LIST [TUPLE [factor: REAL_64; x, y: INTEGER]]; f: REAL_64; x, y: INTEGER) do a_list.extend ([f, x, y]) end (l_pinches, ?, ?, ?))
+			driver.wheel (l_canvas, 240, 2, 30, 40)
+			assert ("one wheel: " + l_wheels.count.out, l_wheels.count = 1)
+			assert ("its amount, modifiers and place: " + l_wheels.first.amount.out + " " + l_wheels.first.modifiers.out + " " + l_wheels.first.x.out + "," + l_wheels.first.y.out,
+				l_wheels.first.amount = 240 and l_wheels.first.modifiers = 2 and near (l_wheels.first.x, 30) and near (l_wheels.first.y, 40))
+			driver.wheel (l_canvas, -120, 0, 50, 20)
+			assert ("toward the user is negative", l_wheels.count = 2 and l_wheels.last.amount = -120 and l_wheels.last.modifiers = 0)
+			driver.pinch (l_canvas, 1.5, 60, 70)
+			if {PLATFORM}.is_windows then
+					-- a precision touchpad's pinch reaches Windows as Control + wheel (a named deviation for touchscreens)
+				assert ("Windows: the pinch as Control + wheel: " + l_wheels.count.out, l_wheels.count = 3 and l_wheels.last.modifiers = 2 and l_wheels.last.amount = 218)
+			else
+				assert ("one pinch: " + l_pinches.count.out, l_pinches.count = 1)
+				assert ("its factor and center: " + l_pinches.first.factor.out, (l_pinches.first.factor - 1.5).abs < 0.002 and near (l_pinches.first.x, 60) and near (l_pinches.first.y, 70))
+			end
+			l_window.close
+		end
+
+	test_image_view_fits_and_shows_actual_size
+			-- 1z-a: a 400 by 300 picture in a 200 by 200 view fits at 0.5, whole and centered;
+			-- actual size gives 1.0; the center pixel shows the picture's center pixel both ways.
+		local
+			l_window: GUI_WINDOW
+			l_view: GUI_IMAGE_VIEW
+			l_fit: REAL_64
+			l_center: NATURAL_32
+		do
+			create l_view.make (200, 200)
+			l_window := view_window (l_view, "Fit")
+			l_view.set_image (gradient_picture)
+			let_layout_settle
+			l_fit := (l_view.width / 400).min (l_view.height / 300).min (1.0)
+			assert ("fitted at " + l_view.zoom.out + " in " + l_view.width.out + " x " + l_view.height.out + ", not " + l_fit.out,
+				l_view.is_fitted and (l_view.zoom - l_fit).abs < 0.0001)
+			if l_view.width = 200 and l_view.height = 200 then
+				assert ("a 200 by 200 view fits at 0.5", l_view.zoom = 0.5)
+			end
+			assert ("whole and centered: " + l_view.view_x_of (0).out + " " + l_view.view_y_of (0).out,
+				l_view.view_x_of (0.0).abs < 0.5 and (l_view.view_y_of (0.0) - (l_view.height - 300 * l_view.zoom) / 2).abs < 0.5)
+			l_center := driver.canvas_pixel (l_view, l_view.width // 2, l_view.height // 2)
+			assert ("fitted, the center shows the picture's center square: " + l_center.to_hex_string, is_center_blue (l_center))
+			l_view.actual_size
+			assert ("actual size", l_view.zoom = 1.0 and not l_view.is_fitted)
+			l_center := driver.canvas_pixel (l_view, l_view.width // 2, l_view.height // 2)
+			assert ("actual size, the center still the picture's: " + l_center.to_hex_string, is_center_blue (l_center))
+			assert ("one image pixel a logical pixel", (l_view.image_x_at (10.0) - l_view.image_x_at (0.0) - 10.0).abs < 0.0001)
+			l_window.close
+		end
+
+	test_image_view_zooms_at_a_point_and_clamps_the_pan
+			-- 1z-a: `zoom_at' keeps the point under the pointer still within 1 pixel; the pan is
+			-- clamped at the edges.
+		local
+			l_window: GUI_WINDOW
+			l_view: GUI_IMAGE_VIEW
+			l_x, l_y: REAL_64
+			l_before, l_after: NATURAL_32
+			l_zooms: INTEGER
+		do
+			create l_view.make (200, 200)
+			l_window := view_window (l_view, "Zoom")
+			l_view.set_image (gradient_picture)
+			let_layout_settle
+			l_view.zoom_changed_actions.extend (agent (z: REAL_64) do last_zoom_told := z end)
+			l_x := l_view.image_x_at (60.0)
+			l_y := l_view.image_y_at (80.0)
+			l_before := driver.canvas_pixel (l_view, 60, 80)
+			l_zooms := l_view.zoom_changed_actions.fire_count
+			l_view.zoom_at (2.0, 60.0, 80.0)
+			assert ("zoomed and told", l_view.zoom = 2.0 and l_view.zoom_changed_actions.fire_count = l_zooms + 1 and last_zoom_told = 2.0)
+			assert ("the point stayed: " + l_view.view_x_of (l_x).out + "," + l_view.view_y_of (l_y).out,
+				(l_view.view_x_of (l_x) - 60.0).abs <= 1.0 and (l_view.view_y_of (l_y) - 80.0).abs <= 1.0)
+			l_after := driver.canvas_pixel (l_view, 60, 80)
+			assert ("the same color under it: " + l_before.to_hex_string + " then " + l_after.to_hex_string,
+				(red_of (l_before) - red_of (l_after)).abs <= 2 and (green_of (l_before) - green_of (l_after)).abs <= 2)
+			l_view.set_pan (-1000.0, -1000.0)
+			assert ("clamped at the top left: " + l_view.pan_x.out + "," + l_view.pan_y.out, l_view.pan_x = 0.0 and l_view.pan_y = 0.0)
+			l_view.set_pan (100000.0, 100000.0)
+			assert ("clamped at the bottom right: " + l_view.pan_x.out + "," + l_view.pan_y.out,
+				(l_view.pan_x - (400 - l_view.width / 2)).abs < 0.001 and (l_view.pan_y - (300 - l_view.height / 2)).abs < 0.001)
+			l_view.set_zoom (1000.0)
+			assert ("within the range", l_view.zoom = l_view.maximum_zoom)
+			l_view.set_zoom (0.0001)
+			assert ("a smaller picture is centered", l_view.zoom = l_view.minimum_zoom and l_view.pan_x < 0.0)
+			l_window.close
+		end
+
+	test_image_view_draws_crisp_and_smooth
+			-- 1z-a: at 8x a pixel is a crisp 8 by 8 block (nearest), at 2x it is smooth (good). The board is
+			-- larger than the view at 2x, so it is not centered.
+		local
+			l_window: GUI_WINDOW
+			l_view: GUI_IMAGE_VIEW
+			l_board: IMG_IMAGE
+			l_p: NATURAL_32
+		do
+			create l_view.make (200, 200)
+			l_window := view_window (l_view, "Crisp")
+			l_board := checkerboard (256, 1)
+			l_view.set_image (l_board)
+			l_view.set_zoom (8.0)
+			l_view.set_pan (0.0, 0.0)
+			assert ("8x", l_view.zoom = 8.0 and l_view.pan_x = 0.0)
+			assert ("one block: " + driver.canvas_pixel (l_view, 1, 1).to_hex_string + " " + driver.canvas_pixel (l_view, 6, 6).to_hex_string,
+				driver.canvas_pixel (l_view, 1, 1) = l_board.pixel (0, 0) and driver.canvas_pixel (l_view, 6, 6) = l_board.pixel (0, 0)
+				and driver.canvas_pixel (l_view, 7, 0) = l_board.pixel (0, 0))
+			assert ("the next block: " + driver.canvas_pixel (l_view, 9, 1).to_hex_string,
+				driver.canvas_pixel (l_view, 9, 1) = l_board.pixel (1, 0) and driver.canvas_pixel (l_view, 14, 6) = l_board.pixel (1, 0)
+				and driver.canvas_pixel (l_view, 8, 7) = l_board.pixel (1, 0))
+			l_view.set_zoom (2.0)
+			l_view.set_pan (0.0, 0.0)
+			l_p := driver.canvas_pixel (l_view, 1, 1)
+			assert ("2x is smooth: a blend, not black or white: " + l_p.to_hex_string, red_of (l_p) > 16 and red_of (l_p) < 239)
+			l_window.close
+		end
+
+	test_image_view_takes_the_wheel_a_pinch_keys_and_drags
+			-- 1z-a: Control + wheel and a pinch zoom at the pointer; the wheel scrolls; + and -,
+			-- 0 and 1, and the arrows; dragging pans; a double-click toggles fit and actual size.
+		local
+			l_window: GUI_WINDOW
+			l_view: GUI_IMAGE_VIEW
+			l_x, l_zoom: REAL_64
+		do
+			create l_view.make (200, 200)
+			l_window := view_window (l_view, "Input")
+			l_view.set_image (gradient_picture)
+			let_layout_settle
+			l_zoom := l_view.zoom
+			l_x := l_view.image_x_at (60.0)
+			driver.wheel (l_view, 120, 2, 60, 80)
+			assert ("Control + wheel zooms a step: " + l_view.zoom.out, (l_view.zoom - l_zoom * l_view.Wheel_zoom_step).abs < 0.0001)
+			assert ("at the pointer: " + l_view.view_x_of (l_x).out, (l_view.view_x_of (l_x) - 60.0).abs <= 1.0)
+			l_zoom := l_view.zoom
+			driver.pinch (l_view, 2.0, 60, 80)
+			assert ("a pinch zooms by its factor: " + l_view.zoom.out, (l_view.zoom / l_zoom - 2.0).abs < 0.01)
+			assert ("about its center: " + l_view.view_x_of (l_x).out, (l_view.view_x_of (l_x) - 60.0).abs <= 1.0)
+			l_view.set_pan (100.0, 100.0)
+			driver.wheel (l_view, 120, 0, 60, 80)
+			assert ("the wheel scrolls up: " + l_view.pan_y.out, (l_view.pan_y - (100.0 - l_view.Pan_step / l_view.zoom)).abs < 0.001 and l_view.pan_x = 100.0)
+			l_zoom := l_view.zoom
+			driver.canvas_key (l_view, 0x2B, '+', 0)
+			assert ("+ zooms in", (l_view.zoom - l_zoom * l_view.Key_zoom_step).abs < 0.0001)
+			driver.canvas_key (l_view, 0x2D, '-', 0)
+			assert ("- zooms out", (l_view.zoom - l_zoom).abs < 0.0001)
+			driver.canvas_key (l_view, 0x30, '0', 0)
+			assert ("0 fits", l_view.is_fitted)
+			driver.canvas_key (l_view, 0x31, '1', 0)
+			assert ("1 is actual size", l_view.zoom = 1.0)
+			l_view.set_pan (100.0, 100.0)
+			driver.canvas_key (l_view, 0xFF53, '%U', 0)
+			assert ("Right pans: " + l_view.pan_x.out, (l_view.pan_x - (100.0 + l_view.Pan_step)).abs < 0.001)
+			l_view.set_pan (100.0, 50.0)
+			driver.canvas_pointer (l_view, 1, 100, 100, 1, 0)
+			driver.canvas_pointer (l_view, 3, 80, 100, 0, 0)
+			driver.canvas_pointer (l_view, 3, 60, 90, 0, 0)
+			driver.canvas_pointer (l_view, 2, 60, 90, 1, 0)
+			assert ("a drag pans: " + l_view.pan_x.out + "," + l_view.pan_y.out, (l_view.pan_x - 140.0).abs < 0.001 and (l_view.pan_y - 60.0).abs < 0.001)
+			l_view.zoom_to_fit
+			driver.canvas_double_click (l_view, 50, 50, 1)
+			assert ("a double-click: actual size", l_view.zoom = 1.0 and not l_view.is_fitted)
+			driver.wait (450)
+			driver.canvas_double_click (l_view, 50, 50, 1)
+			assert ("and again: fitted", l_view.is_fitted)
+			l_window.close
+		end
+
+	test_image_view_lens_magnifies_and_leaves
+			-- 1z-a: the lens shows the pixel under the pointer, magnified, at its center, and goes
+			-- when the pointer leaves.
+		local
+			l_window: GUI_WINDOW
+			l_view: GUI_IMAGE_VIEW
+		do
+			create l_view.make (200, 200)
+			l_window := view_window (l_view, "Lens")
+			l_view.set_image (split_picture (400, 400, 100))
+			l_view.actual_size
+			l_view.set_pan (0.0, 0.0)
+			l_view.set_lens (True)
+			l_view.set_lens_radius (40)
+			assert ("left of the split is red", is_red (driver.canvas_pixel (l_view, 90, 60)))
+			assert ("right of it blue", is_blue (driver.canvas_pixel (l_view, 105, 60)))
+			driver.pointer_enter (l_view)
+			driver.canvas_pointer (l_view, 3, 90, 60, 0, 0)
+			assert ("the lens shows", l_view.is_lens_shown and l_view.lens_x = 90 and l_view.lens_y = 60)
+			assert ("its center is the pixel under the pointer: " + driver.canvas_pixel (l_view, 90, 60).to_hex_string, is_red (driver.canvas_pixel (l_view, 90, 60)))
+			assert ("magnified 3x: 15 pixels right is 5 in the picture, still red: " + driver.canvas_pixel (l_view, 105, 60).to_hex_string, is_red (driver.canvas_pixel (l_view, 105, 60)))
+			assert ("further right, the split: " + driver.canvas_pixel (l_view, 125, 60).to_hex_string, is_blue (driver.canvas_pixel (l_view, 125, 60)))
+			driver.pointer_leave (l_view)
+			assert ("gone on leave", not l_view.is_lens_shown)
+			assert ("the picture again: " + driver.canvas_pixel (l_view, 105, 60).to_hex_string, is_blue (driver.canvas_pixel (l_view, 105, 60)))
+			l_window.close
+		end
+
+	test_image_view_keeps_large_images_in_tiles
+			-- 1z-a: an image over 4096 pixels on a side is kept in tiles of 1024, only the tiles in
+			-- view are drawn, and they meet with no seam.
+		local
+			l_window: GUI_WINDOW
+			l_view: GUI_IMAGE_VIEW
+			l_color: NATURAL_32
+		do
+			create l_view.make (200, 200)
+			l_window := view_window (l_view, "Tiles")
+			l_view.set_image (solid_image (300, 20, 0xFF3366CC))
+			assert ("a small image is one surface", l_view.tile_count = 1)
+			l_color := 0xFF3366CC
+			l_view.set_image (solid_image (4100, 20, l_color))
+			assert ("five tiles: " + l_view.tile_count.out, l_view.tile_count = 5)
+			l_view.actual_size
+			l_view.set_pan (0.0, 0.0)
+			assert ("one tile in view: " + l_view.tiles_painted.out, l_view.tiles_painted = 1)
+			l_view.set_pan (1000.0, 0.0)
+			assert ("two tiles in view: " + l_view.tiles_painted.out, l_view.tiles_painted = 2)
+			assert ("the same color across the seam: " + driver.canvas_pixel (l_view, 23, l_view.height // 2).to_hex_string + " "
+				+ driver.canvas_pixel (l_view, 24, l_view.height // 2).to_hex_string + " " + driver.canvas_pixel (l_view, 25, l_view.height // 2).to_hex_string,
+				driver.canvas_pixel (l_view, 23, l_view.height // 2) = l_color and driver.canvas_pixel (l_view, 24, l_view.height // 2) = l_color
+				and driver.canvas_pixel (l_view, 25, l_view.height // 2) = l_color)
+			l_window.close
+		end
+
+	test_image_compare_shows_both_sides_and_moves
+			-- 1z-a: the before pixel left of the divider, the after pixel right of it; the arrow
+			-- keys move it by 1% (Shift by 10%); top and bottom when vertical; dragging the handle.
+		local
+			l_window: GUI_WINDOW
+			l_compare: GUI_IMAGE_COMPARE
+			l_top, l_at: INTEGER
+		do
+			create l_compare.make (solid_image (120, 80, 0xFFE02020), solid_image (120, 80, 0xFF2020E0))
+			l_window := view_window (l_compare, "Compare")
+			assert ("halfway", l_compare.divider = 0.5)
+			l_top := (l_compare.picture_top + 5).truncated_to_integer
+			l_at := l_compare.divider_position.rounded
+			assert ("before on the left: " + driver.canvas_pixel (l_compare, l_at - 6, l_top).to_hex_string, is_red (driver.canvas_pixel (l_compare, l_at - 6, l_top)))
+			assert ("after on the right: " + driver.canvas_pixel (l_compare, l_at + 6, l_top).to_hex_string, is_blue (driver.canvas_pixel (l_compare, l_at + 6, l_top)))
+			driver.canvas_key (l_compare, 0xFF53, '%U', 0)
+			assert ("Right: 1%%: " + l_compare.divider.out, (l_compare.divider - 0.51).abs < 0.000001)
+			driver.canvas_key (l_compare, 0xFF53, '%U', 1)
+			assert ("Shift + Right: 10%%: " + l_compare.divider.out, (l_compare.divider - 0.61).abs < 0.000001)
+			driver.canvas_key (l_compare, 0xFF51, '%U', 0)
+			assert ("Left: back 1%%", (l_compare.divider - 0.60).abs < 0.000001)
+			assert ("told each move", l_compare.divider_changed_actions.fire_count = 3)
+			l_compare.set_divider (0.5)
+			l_compare.set_vertical (True)
+			l_at := l_compare.divider_position.rounded
+			l_top := (l_compare.picture_left + 5).truncated_to_integer
+			assert ("vertical: before above", is_red (driver.canvas_pixel (l_compare, l_top, l_at - 6)))
+			assert ("after below", is_blue (driver.canvas_pixel (l_compare, l_top, l_at + 6)))
+			l_compare.set_vertical (False)
+			l_at := l_compare.divider_position.rounded
+			l_top := (l_compare.picture_top + 5).truncated_to_integer
+			driver.canvas_pointer (l_compare, 1, l_at, l_top, 1, 0)
+			driver.canvas_pointer (l_compare, 3, (l_compare.picture_left + l_compare.picture_width / 4).rounded, l_top, 0, 0)
+			driver.canvas_pointer (l_compare, 2, (l_compare.picture_left + l_compare.picture_width / 4).rounded, l_top, 1, 0)
+			assert ("dragged to a quarter: " + l_compare.divider.out, (l_compare.divider - 0.25).abs < 0.02)
+			l_window.close
+		end
+
+	test_lightbox_scrim_keys_and_focus
+			-- 1z-a: a pixel of the scrim is dark, the picture shows fitted, Right shows the next
+			-- (wrapping), Escape closes it and the focus returns; a click on the scrim closes it.
+		local
+			l_window: GUI_WINDOW
+			l_stack: GUI_STACK
+			l_field: GUI_TEXT_FIELD
+			l_box: GUI_LIGHTBOX
+			l_list: ARRAYED_LIST [IMG_IMAGE]
+			l_scrim, l_middle: NATURAL_32
+		do
+			create l_window.make ("Lightbox", 400, 300)
+			create l_stack.make_vertical
+			create l_field.make
+			l_stack.extend (l_field)
+			l_stack.extend (create {GUI_LABEL}.make ("Under the scrim"))
+			l_window.set_content (l_stack)
+			l_window.show
+			settle_window
+			l_field.focus
+			settle_window
+			if backend.test_has_focus (l_field.id) /= -1 then
+				assert ("the field holds the focus first", backend.test_has_focus (l_field.id) = 1)
+			end
+			assert ("the window says so: " + backend.window_focused (l_window.id).out + " for " + l_field.id.out,
+				attached l_window.focused_widget as al_f and then al_f = l_field)
+			create l_box.make (l_window)
+			assert ("closed at first", not l_box.is_open and not l_box.view.is_shown)
+			create l_list.make (2)
+			l_list.extend (solid_image (60, 40, 0xFFE02020))
+			l_list.extend (solid_image (60, 40, 0xFF2020E0))
+			l_box.show_images (l_list, 1)
+			settle_window
+			let_layout_settle
+			assert ("open on the first", l_box.is_open and l_box.index = 1 and l_box.view.is_shown)
+			assert ("it covers the window: " + l_box.view.width.out + " x " + l_box.view.height.out,
+				l_box.view.width >= 300 and l_box.view.height >= 200)
+			l_scrim := driver.canvas_pixel (l_box.view, 5, 5)
+			assert ("the scrim is dark: " + l_scrim.to_hex_string, red_of (l_scrim) < 0x80 and green_of (l_scrim) < 0x80 and blue_of (l_scrim) < 0x80 and alpha_of (l_scrim) >= 0x80)
+			l_middle := driver.canvas_pixel (l_box.view, l_box.view.width // 2, l_box.view.height // 2)
+			assert ("the picture in the middle: " + l_middle.to_hex_string, is_red (l_middle))
+			if backend.test_has_focus (l_box.view.id) /= -1 then
+				assert ("it takes the focus", backend.test_has_focus (l_box.view.id) = 1)
+			end
+			driver.canvas_key (l_box.view, 0xFF53, '%U', 0)
+			assert ("Right: the next", l_box.index = 2 and is_blue (driver.canvas_pixel (l_box.view, l_box.view.width // 2, l_box.view.height // 2)))
+			driver.canvas_key (l_box.view, 0xFF53, '%U', 0)
+			assert ("Right again wraps", l_box.index = 1 and is_red (driver.canvas_pixel (l_box.view, l_box.view.width // 2, l_box.view.height // 2)))
+			driver.canvas_key (l_box.view, 0xFF51, '%U', 0)
+			assert ("Left wraps back", l_box.index = 2)
+			driver.canvas_key (l_box.view, 0xFF1B, '%U', 0)
+			settle_window
+			assert ("Escape closes it", not l_box.is_open and not l_box.view.is_shown and l_box.closed_actions.fire_count = 1)
+			if backend.test_has_focus (l_field.id) /= -1 then
+				assert ("the focus came back: it is on " + backend.window_focused (l_window.id).out + "; the field is " + l_field.id.out + ", the view " + l_box.view.id.out,
+					backend.test_has_focus (l_field.id) = 1)
+			end
+			l_box.show_image_described (solid_image (60, 40, 0xFFE02020), "A red card")
+			settle_window
+			assert ("said for screen readers", l_box.view.accessible_label.same_string ("A red card"))
+			driver.canvas_pointer (l_box.view, 1, 5, 5, 1, 0)
+			driver.canvas_pointer (l_box.view, 2, 5, 5, 1, 0)
+			assert ("a click on the scrim closes it", not l_box.is_open and l_box.closed_actions.fire_count = 2)
+			l_window.close
+		end
+
+	test_image_effects_give_new_images
+			-- 1z-a: grayscale gives R = G = B; rounded (10) clears the corner and keeps the
+			-- center; circled clears the corners and keeps the center; a blur lowers a
+			-- checkerboard's contrast; a result shows through a view and through GUI_IMAGE.
+		local
+			l_effects: GUI_IMAGE_EFFECTS
+			l_source, l_gray, l_round, l_circle, l_blur: IMG_IMAGE
+			l_window: GUI_WINDOW
+			l_view: GUI_IMAGE_VIEW
+			l_image: GUI_IMAGE
+			l_p: NATURAL_32
+			x, y, l_low, l_high: INTEGER
+		do
+			create l_effects
+			l_source := solid_image (40, 40, 0xFF2080F0)
+			l_gray := l_effects.grayscale (l_source)
+			l_p := l_gray.pixel (7, 9)
+			assert ("gray: R = G = B: " + l_p.to_hex_string, red_of (l_p) = green_of (l_p) and green_of (l_p) = blue_of (l_p) and alpha_of (l_p) = 0xFF)
+			assert ("Rec. 709", red_of (l_p) = (2126 * 0x20 + 7152 * 0x80 + 722 * 0xF0 + 5000) // 10000)
+			assert ("the source kept", l_source.pixel (7, 9) = 0xFF2080F0)
+			l_round := l_effects.rounded (l_source, 10)
+			assert ("rounded: the corner is clear", alpha_of (l_round.pixel (0, 0)) = 0)
+			assert ("and the center kept", l_round.pixel (20, 20) = 0xFF2080F0)
+			l_circle := l_effects.circled (l_source)
+			assert ("circled: the corners are clear", alpha_of (l_circle.pixel (0, 0)) = 0 and alpha_of (l_circle.pixel (39, 0)) = 0
+				and alpha_of (l_circle.pixel (0, 39)) = 0 and alpha_of (l_circle.pixel (39, 39)) = 0)
+			assert ("and the center kept", l_circle.pixel (20, 20) = 0xFF2080F0)
+			l_blur := l_effects.blurred (checkerboard (32, 2), 2)
+			l_low := 255
+			from y := 8 until y > 23 loop
+				from x := 8 until x > 23 loop
+					l_low := l_low.min (red_of (l_blur.pixel (x, y)))
+					l_high := l_high.max (red_of (l_blur.pixel (x, y)))
+					x := x + 1
+				end
+				y := y + 1
+			end
+			assert ("a blur lowers the contrast: " + l_low.out + " to " + l_high.out, l_high - l_low < 128)
+			assert ("the others give new images", l_effects.brightened (l_source, 0.5) /= l_source and l_effects.contrasted (l_source, 1.2) /= l_source
+				and l_effects.saturated (l_source, 0.0) /= l_source and l_effects.vignetted (l_source, 0.4) /= l_source)
+			l_p := l_effects.saturated (l_source, 0.0).pixel (5, 5)
+			assert ("no saturation is gray", (red_of (l_p) - green_of (l_p)).abs <= 1 and (green_of (l_p) - blue_of (l_p)).abs <= 1)
+			create l_view.make (200, 200)
+			l_window := view_window (l_view, "Effects")
+			l_view.set_image (l_gray)
+			l_p := driver.canvas_pixel (l_view, l_view.width // 2, l_view.height // 2)
+			assert ("the view shows the gray: " + l_p.to_hex_string, red_of (l_p) = green_of (l_p) and green_of (l_p) = blue_of (l_p) and (red_of (l_p) - red_of (l_gray.pixel (0, 0))).abs <= 1)
+			l_window.close
+			create l_image.make_from_png (l_effects.circled (l_source).png_bytes)
+			assert ("a GUI_IMAGE takes it as PNG", l_image.is_loaded)
+			l_image.set_image (l_gray)
+			assert ("and by set_image", l_image.is_loaded)
+		end
+
+feature {NONE} -- Fixtures (1z-a)
+
+	last_zoom_told: REAL_64
+			-- The zoom a view last told its agents.
+
+	view_window (a_view: GUI_CANVAS; a_title: STRING): GUI_WINDOW
+			-- A 400 by 300 window with `a_view' at its top leading corner, at the size it asks
+			-- for (an overlay child takes its natural size), shown and laid out.
+		local
+			l_overlay: GUI_OVERLAY
+		do
+			create Result.make (a_title, 400, 300)
+			create l_overlay.make
+			l_overlay.set_base (create {GUI_LABEL}.make (" "))
+			l_overlay.extend_overlay (a_view, l_overlay.Place_top_leading)
+			Result.set_content (l_overlay)
+			Result.show
+			settle_window
+			let_layout_settle
+		end
+
+	solid_image (a_width, a_height: INTEGER; a_color: NATURAL_32): IMG_IMAGE
+			-- `a_width' by `a_height' of `a_color' (0xAARRGGBB).
+		do
+			create Result.make_filled (a_width, a_height, a_color)
+		end
+
+	checkerboard (a_size, a_square: INTEGER): IMG_IMAGE
+			-- `a_size' pixels square, black and white squares of `a_square', black at the top left.
+		local
+			x, y: INTEGER
+		do
+			create Result.make_filled (a_size, a_size, 0xFF000000)
+			from y := 0 until y >= a_size loop
+				from x := 0 until x >= a_size loop
+					if ((x // a_square) + (y // a_square)) \\ 2 = 1 then
+						Result.set_pixel (x, y, 0xFFFFFFFF)
+					end
+					x := x + 1
+				end
+				y := y + 1
+			end
+		end
+
+	gradient_picture: IMG_IMAGE
+			-- 400 by 300: red x // 2, green y // 2, no blue, but for a pure blue 20 by 20 square
+			-- at its center (190 .. 209, 140 .. 159).
+		local
+			x, y: INTEGER
+		do
+			create Result.make (400, 300)
+			from y := 0 until y >= 300 loop
+				from x := 0 until x >= 400 loop
+					if x >= 190 and x < 210 and y >= 140 and y < 160 then
+						Result.set_pixel (x, y, 0xFF0000FF)
+					else
+						Result.set_pixel (x, y, {NATURAL_32} 0xFF000000 | ((x // 2).to_natural_32 |<< 16) | ((y // 2).to_natural_32 |<< 8))
+					end
+					x := x + 1
+				end
+				y := y + 1
+			end
+		end
+
+	split_picture (a_width, a_height, a_split: INTEGER): IMG_IMAGE
+			-- Red left of x = `a_split', blue from it on.
+		local
+			x, y: INTEGER
+		do
+			create Result.make_filled (a_width, a_height, 0xFF2020E0)
+			from y := 0 until y >= a_height loop
+				from x := 0 until x >= a_split loop
+					Result.set_pixel (x, y, 0xFFE02020)
+					x := x + 1
+				end
+				y := y + 1
+			end
+		end
+
+	red_of (a_argb: NATURAL_32): INTEGER
+		do
+			Result := ((a_argb |>> 16) & 0xFF).to_integer_32
+		end
+
+	green_of (a_argb: NATURAL_32): INTEGER
+		do
+			Result := ((a_argb |>> 8) & 0xFF).to_integer_32
+		end
+
+	blue_of (a_argb: NATURAL_32): INTEGER
+		do
+			Result := (a_argb & 0xFF).to_integer_32
+		end
+
+	alpha_of (a_argb: NATURAL_32): INTEGER
+		do
+			Result := (a_argb |>> 24).to_integer_32
+		end
+
+	is_red (a_argb: NATURAL_32): BOOLEAN
+			-- Opaque and mostly red (the fixtures' 0xE02020)?
+		do
+			Result := alpha_of (a_argb) >= 0xF0 and red_of (a_argb) >= 0xB0 and green_of (a_argb) <= 0x50 and blue_of (a_argb) <= 0x50
+		end
+
+	is_blue (a_argb: NATURAL_32): BOOLEAN
+			-- Opaque and mostly blue (the fixtures' 0x2020E0)?
+		do
+			Result := alpha_of (a_argb) >= 0xF0 and blue_of (a_argb) >= 0xB0 and red_of (a_argb) <= 0x50 and green_of (a_argb) <= 0x50
+		end
+
+	is_center_blue (a_argb: NATURAL_32): BOOLEAN
+			-- The gradient picture's center square (pure blue; the gradient has none)?
+		do
+			Result := alpha_of (a_argb) >= 0xF0 and blue_of (a_argb) >= 0xC0
+		end
+
 feature -- App services (1z-c)
 
 	test_open_and_reveal_are_recorded_not_performed
