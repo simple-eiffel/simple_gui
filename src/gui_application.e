@@ -368,6 +368,70 @@ feature -- Monitors (1z-c)
 			end
 		end
 
+feature -- Locale formatting (1z-c)
+
+	locale_name: STRING_8
+			-- The user's locale, "en_US" for example: the name the system gives (simple_i18n's
+			-- SIMPLE_I18N_LOCALES.system_locale_name: the user default locale on Windows, the
+			-- current locale on macOS, LC_ALL, LC_NUMERIC or LANG elsewhere; "C" when none is set),
+			-- until `set_locale_name' overrides it.
+		do
+			if attached locale_name_set as al_name then
+				Result := al_name
+			else
+				Result := system_locale_name
+			end
+		ensure
+			not_empty: not Result.is_empty
+		end
+
+	formatter: SIMPLE_I18N
+			-- Numbers, dates, times and money written for `locale_name' from simple_i18n's own
+			-- CLDR table, so the same strings on every platform: "1,234,567.89" in en_US,
+			-- "1.234.567,89" in de_DE. Only the locale's name comes from the system. A locale the
+			-- table lacks takes its language's formats, then en_US's.
+		do
+			if attached formatter_made as al_formatter then
+				Result := al_formatter
+			else
+				create Result.make_with_locale (locale_name)
+				formatter_made := Result
+			end
+		end
+
+	set_locale_name (a_name: READABLE_STRING_8)
+			-- Use `a_name' ("fr_FR", say) in place of the system's locale, for this program and in
+			-- tests; `formatter' follows it.
+		require
+			name_not_empty: not a_name.is_empty
+		local
+			l_name: STRING_8
+		do
+			create l_name.make_from_string (a_name)
+			locale_name_set := l_name
+			if attached formatter_made as al_formatter then
+				al_formatter.set_locale (l_name)
+			end
+		ensure
+			set: locale_name.same_string (a_name)
+		end
+
+feature {NONE} -- Locale formatting
+
+	system_locale_name: STRING_8
+			-- The locale name the system gives, asked once.
+		once ("OBJECT")
+			Result := (create {SIMPLE_I18N_LOCALES}).system_locale_name
+		ensure
+			not_empty: not Result.is_empty
+		end
+
+	locale_name_set: detachable STRING_8
+			-- `set_locale_name''s name, if one was given.
+
+	formatter_made: detachable SIMPLE_I18N
+			-- `formatter', once asked for.
+
 feature -- Pick and drop (1q)
 
 	pebble_in_flight: detachable ANY
