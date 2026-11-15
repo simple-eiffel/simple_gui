@@ -6865,6 +6865,38 @@ int sga_canvas(int a_width, int a_height)
 	return sga_keep(c);
 }
 
+/* 1z-d: a canvas that stands for something loading (GUI_SKELETON): to assistive technology a
+   busy progress indicator with no value (the shared role "progress-bar"), named by the shared
+   label ("Loading"), and never the key focus. It draws like any canvas. */
+@interface SGABusyCanvas : SGACanvas
+@end
+@implementation SGABusyCanvas
+- (BOOL)acceptsFirstResponder { return NO; }
+- (BOOL)canBecomeKeyView { return NO; }
+- (BOOL)isAccessibilityElement { return YES; }
+- (NSAccessibilityRole)accessibilityRole { return NSAccessibilityProgressIndicatorRole; }
+- (id)accessibilityValue { return nil; }
+- (NSArray *)accessibilityAttributeNames
+{
+	NSArray *l_names = [super accessibilityAttributeNames] ?: @[];
+	return [l_names containsObject:@"AXElementBusy"] ? l_names : [l_names arrayByAddingObject:@"AXElementBusy"];
+}
+- (id)accessibilityAttributeValue:(NSAccessibilityAttributeName)a_name
+{
+	if ([a_name isEqualToString:@"AXElementBusy"]) return @YES;
+	return [super accessibilityAttributeValue:a_name];
+}
+@end
+
+int sga_busy_canvas(int a_width, int a_height)
+{
+	SGABusyCanvas *c = [[SGABusyCanvas alloc] initWithFrame:NSMakeRect(0, 0, a_width, a_height)];
+	c->wanted = NSMakeSize(a_width, a_height);
+	[c setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+	[c setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationVertical];
+	return sga_keep(c);
+}
+
 /* A finished Cairo image surface at device scale: copied (so the caller may reuse
    it), and tagged sRGB so macOS color-manages it (spike mac_color). */
 /* A copy of Cairo image surface `s' (ARGB32, premultiplied) as a CGImage tagged sRGB; NULL if it

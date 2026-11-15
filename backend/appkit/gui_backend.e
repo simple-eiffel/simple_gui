@@ -2706,10 +2706,11 @@ feature -- App identity (1z-d)
 		end
 
 	busy_canvas (a_width, a_height: INTEGER): INTEGER
-			-- 1z-d (PROD's placeholder so the Mac compiles; MACMINI fits it): a plain canvas for now.
-			-- Wanted: NSAccessibilityProgressIndicatorRole with AXElementBusy true, no key focus.
-		do
-			Result := canvas (a_width, a_height)
+			-- 1z-d: a canvas that reads as a busy progress indicator with no value
+			-- (NSAccessibilityProgressIndicatorRole, AXElementBusy YES), takes no key focus,
+			-- and draws like any canvas.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_busy_canvas ($a_width, $a_height);"
 		end
 
 feature -- Test driver
