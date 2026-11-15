@@ -11,6 +11,10 @@
 #import <UserNotifications/UserNotifications.h>
 #import <CoreText/CoreText.h>
 #import <QuartzCore/QuartzCore.h>
+#import <AVKit/AVKit.h>
+#import <AVFoundation/AVFoundation.h>
+#import <CoreMedia/CoreMedia.h>
+#import <CoreVideo/CoreVideo.h>
 #import <objc/runtime.h>
 #include <cairo.h>
 #include <pthread.h>
@@ -13927,4 +13931,217 @@ int sga_window_focused(int a_window)
 		if (l_id > 0) return l_id;
 	}
 	return 0;
+}
+
+/* ------------------------------------------- 1z-b: the media player (AVKit) */
+
+/* Event 66, the media reports: a = kind (1 ready, b = the duration in ms; 2 position, b = ms,
+   while playing and watched, at most every 250 ms; 3 ended; 4 failed, the reason from
+   sga_media_failure; 5 full screen changed, b = 1 on, 0 off). */
+@interface SGAMedia : AVPlayerView
+{
+@public
+	AVPlayerItem *item;
+	AVPlayerItemVideoOutput *output;
+	CVPixelBufferRef last_frame;
+	id time_observer;
+	BOOL watched, loops, ready_told, observing, full_screen;
+	NSString *failure;
+}
+@end
+
+@implementation SGAMedia
+- (BOOL)acceptsFirstResponder { return YES; }
+- (void)dealloc
+{
+	if (observing) [item removeObserver:self forKeyPath:@"status"];
+	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	if (time_observer) [[self player] removeTimeObserver:time_observer];
+	if (last_frame) CVPixelBufferRelease(last_frame);
+}
+- (void)observeValueForKeyPath:(NSString *)a_path ofObject:(id)o change:(NSDictionary *)c context:(void *)x
+{
+	(void)a_path; (void)o; (void)c; (void)x;
+	dispatch_async(dispatch_get_main_queue(), ^{ [self statusChanged]; });
+}
+- (void)statusChanged
+{
+	if ([item status] == AVPlayerItemStatusReadyToPlay && !ready_told) {
+		ready_told = YES;
+		CMTime d = [item duration];
+		int l_ms = CMTIME_IS_NUMERIC(d) ? (int)llround(CMTimeGetSeconds(d) * 1000.0) : 0;
+		sga_push(66, sga_id_of(self), 1, l_ms, 0);
+		sga_wake();
+	} else if ([item status] == AVPlayerItemStatusFailed) {
+		failure = [[item error] localizedDescription] ?: @"the media could not be played";
+		sga_push(66, sga_id_of(self), 4, 0, 0);
+		sga_wake();
+	}
+}
+- (void)ended:(NSNotification *)n
+{
+	if ([n object] != item) return;
+	if (loops) { [[self player] seekToTime:kCMTimeZero toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero]; [[self player] play]; }
+	else { sga_push(66, sga_id_of(self), 3, 0, 0); sga_wake(); }
+}
+- (void)keyDown:(NSEvent *)e
+{
+	NSString *k = [e charactersIgnoringModifiers];
+	unichar ch = [k length] ? [k characterAtIndex:0] : 0;
+	AVPlayer *p = [self player];
+	if (ch == ' ') { if ([p rate] != 0) [p pause]; else [p play]; }
+	else if (ch == NSLeftArrowFunctionKey || ch == NSRightArrowFunctionKey) {
+		double t = CMTimeGetSeconds([p currentTime]) + (ch == NSLeftArrowFunctionKey ? -5.0 : 5.0);
+		[p seekToTime:CMTimeMakeWithSeconds(MAX(0.0, t), 1000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+	}
+	else if (ch == 27 && full_screen) sga_media_set_full_screen(sga_id_of(self), 0);
+	else [super keyDown:e];
+}
+@end
+
+int sga_media_player(void)
+{
+	SGAMedia *m = [[SGAMedia alloc] initWithFrame:NSMakeRect(0, 0, 320, 240)];
+	[m setPlayer:[[AVPlayer alloc] init]];
+	[m setControlsStyle:AVPlayerViewControlsStyleInline];
+	[m setVideoGravity:AVLayerVideoGravityResizeAspect];
+	SGAMedia *l_weak = m;
+	__weak SGAMedia *w = l_weak;
+	m->time_observer = [[m player] addPeriodicTimeObserverForInterval:CMTimeMake(250, 1000) queue:dispatch_get_main_queue() usingBlock:^(CMTime t) {
+		SGAMedia *s = w;
+		if (s && s->watched && [[s player] rate] != 0) {
+			sga_push(66, sga_id_of(s), 2, (int)llround(CMTimeGetSeconds(t) * 1000.0), 0);
+			sga_wake();
+		}
+	}];
+	[[NSNotificationCenter defaultCenter] addObserver:m selector:@selector(ended:) name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
+	return sga_keep(m);
+}
+
+/* Opens `a_path' (UTF-8): ready (66/1) or failed (66/4) follows. */
+void sga_media_open_file(int a_id, const char *a_path)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]]) return;
+	if (m->observing) { [m->item removeObserver:m forKeyPath:@"status"]; m->observing = NO; }
+	if (m->last_frame) { CVPixelBufferRelease(m->last_frame); m->last_frame = NULL; }
+	m->ready_told = NO;
+	m->failure = nil;
+	NSURL *u = [NSURL fileURLWithPath:sga_string(a_path)];
+	m->item = [AVPlayerItem playerItemWithURL:u];
+	m->output = [[AVPlayerItemVideoOutput alloc] initWithPixelBufferAttributes:@{(id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)}];
+	[m->item addOutput:m->output];
+	[m->item addObserver:m forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:NULL];
+	m->observing = YES;
+	[[m player] replaceCurrentItemWithPlayerItem:m->item];
+}
+
+void sga_media_play(int a_id) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) [[m player] play]; }
+void sga_media_pause(int a_id) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) [[m player] pause]; }
+void sga_media_stop(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]]) return;
+	[[m player] pause];
+	[[m player] seekToTime:kCMTimeZero toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+}
+void sga_media_seek(int a_id, int a_ms)
+{
+	SGAMedia *m = sga_get(a_id);
+	if ([m isKindOfClass:[SGAMedia class]])
+		[[m player] seekToTime:CMTimeMake(MAX(0, a_ms), 1000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+}
+int sga_media_position_ms(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]]) return 0;
+	CMTime t = [[m player] currentTime];
+	return CMTIME_IS_NUMERIC(t) ? (int)llround(CMTimeGetSeconds(t) * 1000.0) : 0;
+}
+int sga_media_duration_ms(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]] || [m->item status] != AVPlayerItemStatusReadyToPlay) return 0;
+	CMTime d = [m->item duration];
+	return CMTIME_IS_NUMERIC(d) ? (int)llround(CMTimeGetSeconds(d) * 1000.0) : 0;
+}
+int sga_media_is_playing(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] && [[m player] rate] != 0 ? 1 : 0; }
+double sga_media_volume(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] ? [[m player] volume] : 0; }
+void sga_media_set_volume(int a_id, double a_volume) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) [[m player] setVolume:(float)MAX(0.0, MIN(1.0, a_volume))]; }
+int sga_media_is_muted(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] && [[m player] isMuted] ? 1 : 0; }
+void sga_media_set_muted(int a_id, int a_on) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) [[m player] setMuted:a_on != 0]; }
+/* The natural size of what plays (presentationSize), 0 by 0 for audio or before ready. */
+int sga_media_video_width(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] ? (int)lround([m->item presentationSize].width) : 0; }
+int sga_media_video_height(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] ? (int)lround([m->item presentationSize].height) : 0; }
+int sga_media_has_video(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]] || [m->item status] != AVPlayerItemStatusReadyToPlay) return 0;
+	for (AVPlayerItemTrack *t in [m->item tracks]) if ([[[t assetTrack] mediaType] isEqualToString:AVMediaTypeVideo]) return 1;
+	return 0;
+}
+/* The toolkit's own transport bar: inline, or none. */
+void sga_media_set_controls_visible(int a_id, int a_on)
+{
+	SGAMedia *m = sga_get(a_id);
+	if ([m isKindOfClass:[SGAMedia class]]) [m setControlsStyle:a_on ? AVPlayerViewControlsStyleInline : AVPlayerViewControlsStyleNone];
+}
+void sga_media_set_loops(int a_id, int a_on) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) m->loops = a_on != 0; }
+/* Position reports (66/2) only while watched. */
+void sga_media_set_watched(int a_id, int a_on) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) m->watched = a_on != 0; }
+const char *sga_media_failure(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	return sga_return(Kind_label, [m isKindOfClass:[SGAMedia class]] ? (m->failure ?: @"") : @"");
+}
+
+/* Full screen: the player alone filling the screen (NSView's full-screen mode), reported as
+   66/5 both ways; Escape, or the call, takes it out. */
+void sga_media_set_full_screen(int a_id, int a_on)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]] || (a_on != 0) == m->full_screen) return;
+	if (a_on) {
+		if (![m window]) return;
+		m->full_screen = [m enterFullScreenMode:[[m window] screen] ?: [NSScreen mainScreen] withOptions:@{NSFullScreenModeAllScreens: @NO}];
+		if (m->full_screen) [[m window] makeFirstResponder:m];
+	} else {
+		[m exitFullScreenModeWithOptions:nil];
+		m->full_screen = NO;
+	}
+	sga_push(66, a_id, 5, m->full_screen ? 1 : 0, 0);
+	sga_wake();
+}
+int sga_media_is_full_screen(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] && m->full_screen ? 1 : 0; }
+
+/* ------------------------------------------- 1z-b: media tests (what AVFoundation plays) */
+
+int sga_test_media_position_ms(int a_id) { return sga_media_position_ms(a_id); }
+double sga_test_media_rate(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] ? [[m player] rate] : 0; }
+/* presentationSize as width + height << 16. */
+int sga_test_media_video_size(int a_id) { return sga_media_video_width(a_id) + sga_media_video_height(a_id) * 65536; }
+/* The mean color of the frame shown now, over a 16 by 16 patch at its center, as 0xFFRRGGBB;
+   0 with no frame yet. Read through the item's video output. */
+unsigned int sga_test_media_frame_color(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]] || !m->output) return 0;
+	CMTime t = [m->item currentTime];
+	CVPixelBufferRef b = [m->output copyPixelBufferForItemTime:t itemTimeForDisplay:NULL];
+	if (b) { if (m->last_frame) CVPixelBufferRelease(m->last_frame); m->last_frame = b; }
+	b = m->last_frame;
+	if (!b) return 0;
+	CVPixelBufferLockBaseAddress(b, kCVPixelBufferLock_ReadOnly);
+	size_t w = CVPixelBufferGetWidth(b), h = CVPixelBufferGetHeight(b), l_row = CVPixelBufferGetBytesPerRow(b);
+	unsigned char *l_base = CVPixelBufferGetBaseAddress(b);
+	unsigned long r = 0, g = 0, bl = 0, n = 0;
+	if (l_base && w >= 16 && h >= 16)
+		for (size_t y = h / 2 - 8; y < h / 2 + 8; y++)
+			for (size_t x = w / 2 - 8; x < w / 2 + 8; x++) {
+				unsigned char *p = l_base + y * l_row + x * 4;   /* BGRA */
+				bl += p[0]; g += p[1]; r += p[2]; n++;
+			}
+	CVPixelBufferUnlockBaseAddress(b, kCVPixelBufferLock_ReadOnly);
+	if (!n) return 0;
+	return 0xFF000000u | (unsigned)((r / n) << 16) | (unsigned)((g / n) << 8) | (unsigned)(bl / n);
 }

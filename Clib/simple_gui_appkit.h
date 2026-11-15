@@ -622,3 +622,31 @@ void sga_test_canvas_wheel(int a_id, int an_amount, int a_modifiers, int a_x, in
 void sga_test_canvas_magnify(int a_id, int a_factor_1000, int a_x, int a_y);
 void sga_window_set_cover(int a_window, int a_child);
 int sga_window_focused(int a_window);
+
+/* 1z-b: the media player (event 66) and its tests */
+int sga_media_player(void);
+void sga_media_open_file(int a_id, const char *a_path);
+void sga_media_play(int a_id);
+void sga_media_pause(int a_id);
+void sga_media_stop(int a_id);
+void sga_media_seek(int a_id, int a_ms);
+int sga_media_position_ms(int a_id);
+int sga_media_duration_ms(int a_id);
+int sga_media_is_playing(int a_id);
+double sga_media_volume(int a_id);
+void sga_media_set_volume(int a_id, double a_volume);
+int sga_media_is_muted(int a_id);
+void sga_media_set_muted(int a_id, int a_on);
+int sga_media_video_width(int a_id);
+int sga_media_video_height(int a_id);
+int sga_media_has_video(int a_id);
+void sga_media_set_controls_visible(int a_id, int a_on);
+void sga_media_set_loops(int a_id, int a_on);
+void sga_media_set_watched(int a_id, int a_on);
+const char *sga_media_failure(int a_id);
+void sga_media_set_full_screen(int a_id, int a_on);
+int sga_media_is_full_screen(int a_id);
+int sga_test_media_position_ms(int a_id);
+double sga_test_media_rate(int a_id);
+int sga_test_media_video_size(int a_id);
+unsigned int sga_test_media_frame_color(int a_id);
