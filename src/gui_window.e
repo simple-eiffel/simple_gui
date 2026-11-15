@@ -155,6 +155,30 @@ feature -- Cover and focus (1z-a)
 			Result := application.widget_of (backend.window_focused (id))
 		end
 
+feature -- Icon (1z-d)
+
+	icon: detachable IMG_IMAGE
+			-- This window's own icon set with `set_icon' (a copy); Void: the program's.
+
+	set_icon (an_image: IMG_IMAGE)
+			-- Show `an_image' as this window's icon in place of the program's (title bar and task
+			-- bar on Windows; by a name in the user's icon theme on Linux). Named deviation: macOS
+			-- windows show no icon, so it is kept and ignored there (the Dock shows the program's).
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+			usable: an_image.is_usable
+		local
+			l_surface: CAIRO_SURFACE
+		do
+			icon := an_image.twin
+			l_surface := an_image.to_cairo_surface
+			backend.window_set_icon (id, l_surface.handle)
+			l_surface.destroy
+		ensure
+			set: attached icon as al_icon and then al_icon.is_equal (an_image)
+		end
+
 feature -- Shortcuts and full screen (1m)
 
 	add_shortcut (a_shortcut: READABLE_STRING_GENERAL; an_action: PROCEDURE)

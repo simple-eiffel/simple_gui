@@ -36,7 +36,7 @@ feature {NONE} -- Initialization
 			create resize_actions.make
 			create wheel_actions.make
 			create magnify_actions.make
-			register (backend.canvas (a_width, a_height))
+			register (new_native (a_width, a_height))
 		end
 
 feature -- Access
@@ -101,6 +101,18 @@ feature -- Basic operations
 			valid: a_image.is_valid
 		do
 			backend.canvas_present (id, a_image.handle)
+		end
+
+feature {NONE} -- Implementation
+
+	new_native (a_width, a_height: INTEGER): INTEGER
+			-- The backend's canvas for `make': a plain one (GUI_SKELETON's reads as busy, 1z-d).
+		require
+			sized: a_width > 0 and a_height > 0
+		do
+			Result := backend.canvas (a_width, a_height)
+		ensure
+			named: Result > 0
 		end
 
 feature {GUI_APPLICATION} -- Events

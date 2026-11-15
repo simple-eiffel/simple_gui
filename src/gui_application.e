@@ -227,6 +227,57 @@ feature -- Animation (1x)
 			motion_override := Void
 		end
 
+feature -- App identity (1z-d)
+
+	icon: detachable IMG_IMAGE
+			-- The program's icon set with `set_icon' (a copy), Void for the default.
+
+	set_icon (an_image: IMG_IMAGE)
+			-- Show `an_image' as the program's icon while it runs: the Dock's on macOS; every
+			-- window's (without one of its own) on Windows, big and small, those opened later too;
+			-- on Linux written into the user's icon theme as <identifier>.png at 48 and 256 pixels
+			-- and named as every window's default icon (Larry's ruling 3: only when a program sets
+			-- one). A desktop file naming the identifier is the installer's business.
+		require
+			gui_thread: is_gui_thread
+			available: is_available
+			usable: an_image.is_usable
+		local
+			l_surface: CAIRO_SURFACE
+		do
+			icon := an_image.twin
+			l_surface := an_image.to_cairo_surface
+			backend.app_set_icon (l_surface.handle)
+			l_surface.destroy
+		ensure
+			set: attached icon as al_icon and then al_icon.is_equal (an_image)
+		end
+
+	remove_icon
+			-- Give the program its default icon back (the files written for Linux stay).
+		require
+			gui_thread: is_gui_thread
+			available: is_available
+		do
+			icon := Void
+			backend.app_set_icon (default_pointer)
+		ensure
+			default: icon = Void
+		end
+
+	set_icon_theme_root_for_tests (a_folder: READABLE_STRING_GENERAL)
+			-- Tests: on Linux write icon files under `a_folder' (it holds hicolor) in place of the
+			-- user's ~/.local/share/icons, so no test writes into the real home; empty gives the
+			-- user's folder back. Nothing elsewhere: only Linux writes icon files.
+		require
+			gui_thread: is_gui_thread
+		local
+			l_c: C_STRING
+		do
+			l_c := backend.to_c (a_folder)
+			backend.set_icon_theme_root (l_c.item)
+		end
+
 feature -- Desktop notifications (1o)
 
 	last_notification: STRING_32

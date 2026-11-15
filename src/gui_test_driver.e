@@ -355,6 +355,17 @@ feature -- User actions
 			Result := backend.test_canvas_pixel (a_canvas.id, a_x, a_y)
 		end
 
+	app_icon_pixel (a_x, a_y: INTEGER): NATURAL_32
+			-- 1z-d: what the program's icon shows at (x, y) of it drawn 64 by 64, from its top
+			-- left, read from the toolkit (the Dock's image, the icon theme's lookup, the HICON), as
+			-- 0xAARRGGBB with straight alpha; 0 outside or with none (after letting the loop settle).
+		require
+			has_application: has_application
+		do
+			settle
+			Result := backend.test_app_icon_pixel (a_x, a_y)
+		end
+
 	toggle_expander (an_expander: GUI_EXPANDER)
 			-- Click the expander's title as a user would (fires toggled).
 		require

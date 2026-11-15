@@ -2705,6 +2705,13 @@ feature -- App identity (1z-d)
 		alias "return (EIF_NATURAL_32) sga_test_app_icon_pixel ($a_x, $a_y);"
 		end
 
+	busy_canvas (a_width, a_height: INTEGER): INTEGER
+			-- 1z-d (PROD's placeholder so the Mac compiles; MACMINI fits it): a plain canvas for now.
+			-- Wanted: NSAccessibilityProgressIndicatorRole with AXElementBusy true, no key focus.
+		do
+			Result := canvas (a_width, a_height)
+		end
+
 feature -- Test driver
 
 	test_click (an_id: INTEGER)
