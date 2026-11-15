@@ -2713,6 +2713,150 @@ feature -- App identity (1z-d)
 		alias "return sga_busy_canvas ($a_width, $a_height);"
 		end
 
+feature -- Media player (1z-b)
+
+	media_player : INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_media_player();"
+		end
+
+	media_open_file (an_id: INTEGER; a_path: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_open_file($an_id, (const char *) $a_path);"
+		end
+
+	media_open_url (an_id: INTEGER; a_url: POINTER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_open_url($an_id, (const char *) $a_url);"
+		end
+
+	media_play (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_play($an_id);"
+		end
+
+	media_pause (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_pause($an_id);"
+		end
+
+	media_stop (an_id: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_stop($an_id);"
+		end
+
+	media_seek (an_id, a_ms: INTEGER)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_seek($an_id, $a_ms);"
+		end
+
+	media_position_ms (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_media_position_ms($an_id);"
+		end
+
+	media_duration_ms (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_media_duration_ms($an_id);"
+		end
+
+	media_is_playing (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_BOOLEAN) (sga_media_is_playing($an_id) != 0);"
+		end
+
+	media_volume (an_id: INTEGER): REAL_64
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_REAL_64) sga_media_volume($an_id);"
+		end
+
+	media_set_volume (an_id: INTEGER; a_volume: REAL_64)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_set_volume($an_id, $a_volume);"
+		end
+
+	media_is_muted (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_BOOLEAN) (sga_media_is_muted($an_id) != 0);"
+		end
+
+	media_set_muted (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_set_muted($an_id, ($a_on ? 1 : 0));"
+		end
+
+	media_video_width (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_media_video_width($an_id);"
+		end
+
+	media_video_height (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_media_video_height($an_id);"
+		end
+
+	media_has_video (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_BOOLEAN) (sga_media_has_video($an_id) != 0);"
+		end
+
+	media_set_controls_visible (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_set_controls_visible($an_id, ($a_on ? 1 : 0));"
+		end
+
+	media_set_loops (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_set_loops($an_id, ($a_on ? 1 : 0));"
+		end
+
+	media_set_watched (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_set_watched($an_id, ($a_on ? 1 : 0));"
+		end
+
+	media_failure (an_id: INTEGER): POINTER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_POINTER) sga_media_failure($an_id);"
+		end
+
+	media_set_full_screen (an_id: INTEGER; a_on: BOOLEAN)
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_media_set_full_screen($an_id, ($a_on ? 1 : 0));"
+		end
+
+	media_is_full_screen (an_id: INTEGER): BOOLEAN
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_BOOLEAN) (sga_media_is_full_screen($an_id) != 0);"
+		end
+
+	test_media_position_ms (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_media_position_ms($an_id);"
+		end
+
+	test_media_rate (an_id: INTEGER): REAL_64
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_REAL_64) sga_test_media_rate($an_id);"
+		end
+
+	test_media_video_size (an_id: INTEGER): INTEGER
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return sga_test_media_video_size($an_id);"
+		end
+
+	test_media_key (an_id, a_key: INTEGER)
+			-- 1z-b: a user's key press on player `an_id': 1 space, 2 Left, 3 Right, 4 Escape,
+			-- through the handler the real key reaches.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "sga_test_media_key($an_id, $a_key);"
+		end
+
+	test_media_frame_color (an_id: INTEGER): NATURAL_32
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_NATURAL_32) sga_test_media_frame_color($an_id);"
+		end
+
 feature -- Test driver
 
 	test_click (an_id: INTEGER)

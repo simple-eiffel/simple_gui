@@ -11,6 +11,10 @@
 #import <UserNotifications/UserNotifications.h>
 #import <CoreText/CoreText.h>
 #import <QuartzCore/QuartzCore.h>
+#import <AVKit/AVKit.h>
+#import <AVFoundation/AVFoundation.h>
+#import <CoreMedia/CoreMedia.h>
+#import <CoreVideo/CoreVideo.h>
 #import <objc/runtime.h>
 #include <cairo.h>
 #include <pthread.h>
@@ -14019,3 +14023,319 @@ unsigned int sga_test_app_icon_pixel(int a_x, int a_y)
 	free(l_bits);
 	return l_result;
 }
+
+/* ------------------------------------------- 1z-b: the media player (AVKit) */
+
+/* Event 66, the media reports: a = kind (1 ready, b = the duration in ms; 2 position, b = ms,
+   while playing and watched, at most every 250 ms; 3 ended; 4 failed, the reason from
+   sga_media_failure; 5 full screen changed, b = 1 on, 0 off). */
+@interface SGAMedia : AVPlayerView
+{
+@public
+	AVPlayerItem *item;
+	AVPlayerItemVideoOutput *output;
+	CVPixelBufferRef last_frame;
+	id time_observer;
+	BOOL watched, loops, ready_told, observing, full_screen, wants_full_screen;
+	BOOL window_was_full;   /* was the window full screen before the player went full screen? */
+	NSString *failure;
+	AVPlayerView *filler;   /* while full screen: the view filling the window that shows the player */
+	AVPlayer *av;           /* the player, whichever view shows it */
+}
+- (void)leaveFullScreenView;
+@end
+
+@implementation SGAMedia
+- (BOOL)acceptsFirstResponder { return YES; }
+- (void)dealloc
+{
+	if (observing) [item removeObserver:self forKeyPath:@"status"];
+	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	if (time_observer) [av removeTimeObserver:time_observer];
+	if (last_frame) CVPixelBufferRelease(last_frame);
+}
+- (void)observeValueForKeyPath:(NSString *)a_path ofObject:(id)o change:(NSDictionary *)c context:(void *)x
+{
+	(void)a_path; (void)o; (void)c; (void)x;
+	dispatch_async(dispatch_get_main_queue(), ^{ [self statusChanged]; });
+}
+- (void)statusChanged
+{
+	if ([item status] == AVPlayerItemStatusReadyToPlay && !ready_told) {
+		ready_told = YES;
+		CMTime d = [item duration];
+		int l_ms = CMTIME_IS_NUMERIC(d) ? (int)llround(CMTimeGetSeconds(d) * 1000.0) : 0;
+		sga_push(66, sga_id_of(self), 1, l_ms, 0);
+		sga_wake();
+	} else if ([item status] == AVPlayerItemStatusFailed) {
+		failure = [[item error] localizedDescription] ?: @"the media could not be played";
+		sga_push(66, sga_id_of(self), 4, 0, 0);
+		sga_wake();
+	}
+}
+- (void)ended:(NSNotification *)n
+{
+	if ([n object] != item) return;
+	if (loops) { [av seekToTime:kCMTimeZero toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero]; [av play]; }
+	else { sga_push(66, sga_id_of(self), 3, 0, 0); sga_wake(); }
+}
+- (void)keyDown:(NSEvent *)e
+{
+	NSString *k = [e charactersIgnoringModifiers];
+	unichar ch = [k length] ? [k characterAtIndex:0] : 0;
+	AVPlayer *p = av;
+	if (ch == ' ') { if ([p rate] != 0) [p pause]; else [p play]; }
+	else if (ch == NSLeftArrowFunctionKey || ch == NSRightArrowFunctionKey) {
+		double t = CMTimeGetSeconds([p currentTime]) + (ch == NSLeftArrowFunctionKey ? -5.0 : 5.0);
+		[p seekToTime:CMTimeMakeWithSeconds(MAX(0.0, t), 1000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+	}
+	else if (ch == 27 && full_screen) sga_media_set_full_screen(sga_id_of(self), 0);
+	else [super keyDown:e];
+}
+/* The window's full screen came or went, by the program or the user (the green button, Escape,
+   a gesture): the player fills the window while its full screen was asked for, and 66/5 tells
+   both ways. */
+- (void)windowEntered:(NSNotification *)n
+{
+	if ([n object] != [self window] || !wants_full_screen || full_screen) return;
+	full_screen = YES;
+	sga_push(66, sga_id_of(self), 5, 1, 0);
+	sga_wake();
+}
+- (void)windowExited:(NSNotification *)n
+{
+	if ([n object] != [self window] || !full_screen) return;
+	[self leaveFullScreenView];
+	full_screen = NO;
+	wants_full_screen = NO;
+	sga_push(66, sga_id_of(self), 5, 0, 0);
+	sga_wake();
+}
+/* The player back in its own view, and the filler gone. */
+- (void)leaveFullScreenView
+{
+	if (!filler) return;
+	AVPlayer *p = [filler player];
+	[filler setPlayer:nil];
+	[filler removeFromSuperview];
+	filler = nil;
+	[self setPlayer:p];
+	[[self window] makeFirstResponder:self];
+}
+@end
+
+/* The view filling the window during the player's full screen: it passes its keys to the player
+   it stands for, so space, the arrows and Escape act the same. */
+@interface SGAMediaFiller : AVPlayerView
+{
+@public
+	__weak SGAMedia *media;
+}
+@end
+@implementation SGAMediaFiller
+- (BOOL)acceptsFirstResponder { return YES; }
+- (void)keyDown:(NSEvent *)e { SGAMedia *m = media; if (m) [m keyDown:e]; else [super keyDown:e]; }
+@end
+
+int sga_media_player(void)
+{
+	SGAMedia *m = [[SGAMedia alloc] initWithFrame:NSMakeRect(0, 0, 320, 240)];
+	m->av = [[AVPlayer alloc] init];
+	[m setPlayer:m->av];
+	[m setControlsStyle:AVPlayerViewControlsStyleInline];
+	[m setVideoGravity:AVLayerVideoGravityResizeAspect];
+	SGAMedia *l_weak = m;
+	__weak SGAMedia *w = l_weak;
+	m->time_observer = [m->av addPeriodicTimeObserverForInterval:CMTimeMake(250, 1000) queue:dispatch_get_main_queue() usingBlock:^(CMTime t) {
+		SGAMedia *s = w;
+		if (s && s->watched && [s->av rate] != 0) {
+			sga_push(66, sga_id_of(s), 2, (int)llround(CMTimeGetSeconds(t) * 1000.0), 0);
+			sga_wake();
+		}
+	}];
+	[[NSNotificationCenter defaultCenter] addObserver:m selector:@selector(ended:) name:AVPlayerItemDidPlayToEndTimeNotification object:nil];
+	[[NSNotificationCenter defaultCenter] addObserver:m selector:@selector(windowEntered:) name:NSWindowDidEnterFullScreenNotification object:nil];
+	[[NSNotificationCenter defaultCenter] addObserver:m selector:@selector(windowExited:) name:NSWindowDidExitFullScreenNotification object:nil];
+	return sga_keep(m);
+}
+
+static void sga_media_open(SGAMedia *m, NSURL *u);
+/* Opens `a_path' (UTF-8): ready (66/1) or failed (66/4) follows. */
+void sga_media_open_file(int a_id, const char *a_path)
+{
+	SGAMedia *m = sga_get(a_id);
+	if ([m isKindOfClass:[SGAMedia class]]) sga_media_open(m, [NSURL fileURLWithPath:sga_string(a_path)]);
+}
+/* Opens `a_url' (UTF-8; for a local server, the spec says): as `sga_media_open_file'. A text
+   that is no URL fails at once (66/4). */
+void sga_media_open_url(int a_id, const char *a_url)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]]) return;
+	NSURL *u = [NSURL URLWithString:sga_string(a_url)];
+	if (!u) { m->failure = @"not a URL"; sga_push(66, a_id, 4, 0, 0); sga_wake(); return; }
+	sga_media_open(m, u);
+}
+static void sga_media_open(SGAMedia *m, NSURL *u)
+{
+	if (m->observing) { [m->item removeObserver:m forKeyPath:@"status"]; m->observing = NO; }
+	if (m->last_frame) { CVPixelBufferRelease(m->last_frame); m->last_frame = NULL; }
+	m->ready_told = NO;
+	m->failure = nil;
+	m->item = [AVPlayerItem playerItemWithURL:u];
+	m->output = [[AVPlayerItemVideoOutput alloc] initWithPixelBufferAttributes:@{(id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)}];
+	[m->item addOutput:m->output];
+	[m->item addObserver:m forKeyPath:@"status" options:NSKeyValueObservingOptionNew context:NULL];
+	m->observing = YES;
+	[m->av replaceCurrentItemWithPlayerItem:m->item];
+}
+
+void sga_media_play(int a_id) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) [m->av play]; }
+void sga_media_pause(int a_id) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) [m->av pause]; }
+void sga_media_stop(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]]) return;
+	[m->av pause];
+	[m->av seekToTime:kCMTimeZero toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+}
+void sga_media_seek(int a_id, int a_ms)
+{
+	SGAMedia *m = sga_get(a_id);
+	if ([m isKindOfClass:[SGAMedia class]])
+		[m->av seekToTime:CMTimeMake(MAX(0, a_ms), 1000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+}
+int sga_media_position_ms(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]]) return 0;
+	CMTime t = [m->av currentTime];
+	return CMTIME_IS_NUMERIC(t) ? (int)llround(CMTimeGetSeconds(t) * 1000.0) : 0;
+}
+int sga_media_duration_ms(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]] || [m->item status] != AVPlayerItemStatusReadyToPlay) return 0;
+	CMTime d = [m->item duration];
+	return CMTIME_IS_NUMERIC(d) ? (int)llround(CMTimeGetSeconds(d) * 1000.0) : 0;
+}
+int sga_media_is_playing(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] && [m->av rate] != 0 ? 1 : 0; }
+double sga_media_volume(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] ? [m->av volume] : 0; }
+void sga_media_set_volume(int a_id, double a_volume) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) [m->av setVolume:(float)MAX(0.0, MIN(1.0, a_volume))]; }
+int sga_media_is_muted(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] && [m->av isMuted] ? 1 : 0; }
+void sga_media_set_muted(int a_id, int a_on) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) [m->av setMuted:a_on != 0]; }
+/* The natural size of what plays (presentationSize), 0 by 0 for audio or before ready. */
+int sga_media_video_width(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] ? (int)lround([m->item presentationSize].width) : 0; }
+int sga_media_video_height(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] ? (int)lround([m->item presentationSize].height) : 0; }
+int sga_media_has_video(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]] || [m->item status] != AVPlayerItemStatusReadyToPlay) return 0;
+	for (AVPlayerItemTrack *t in [m->item tracks]) if ([[[t assetTrack] mediaType] isEqualToString:AVMediaTypeVideo]) return 1;
+	return 0;
+}
+/* The toolkit's own transport bar: inline, or none. */
+void sga_media_set_controls_visible(int a_id, int a_on)
+{
+	SGAMedia *m = sga_get(a_id);
+	if ([m isKindOfClass:[SGAMedia class]]) [m setControlsStyle:a_on ? AVPlayerViewControlsStyleInline : AVPlayerViewControlsStyleNone];
+}
+void sga_media_set_loops(int a_id, int a_on) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) m->loops = a_on != 0; }
+/* Position reports (66/2) only while watched. */
+void sga_media_set_watched(int a_id, int a_on) { SGAMedia *m = sga_get(a_id); if ([m isKindOfClass:[SGAMedia class]]) m->watched = a_on != 0; }
+const char *sga_media_failure(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	return sga_return(Kind_label, [m isKindOfClass:[SGAMedia class]] ? (m->failure ?: @"") : @"");
+}
+
+/* Full screen: the window's own full screen (toggleFullScreen:), with the player filling the
+   window, as on Windows and GTK. The player is not moved out of its layout: a view filling the
+   window's content, above everything, takes over the AVPlayer while it lasts, and gives it back
+   after. 66/5 tells both ways when the window's full screen arrives and leaves, however it
+   leaves (this call, Escape, the green button). */
+void sga_media_set_full_screen(int a_id, int a_on)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]] || (a_on != 0) == m->wants_full_screen) return;
+	NSWindow *w = [m window];
+	if (!w) return;
+	BOOL l_window_full = ([w styleMask] & NSWindowStyleMaskFullScreen) != 0;
+	if (a_on) {
+		NSView *c = [w contentView];
+		SGAMediaFiller *f = [[SGAMediaFiller alloc] initWithFrame:[c bounds]];
+		f->media = m;
+		[f setControlsStyle:[m controlsStyle]];
+		[f setVideoGravity:AVLayerVideoGravityResizeAspect];
+		[f setTranslatesAutoresizingMaskIntoConstraints:NO];
+		[c addSubview:f positioned:NSWindowAbove relativeTo:nil];
+		[NSLayoutConstraint activateConstraints:@[[f.leadingAnchor constraintEqualToAnchor:c.leadingAnchor], [f.trailingAnchor constraintEqualToAnchor:c.trailingAnchor],
+			[f.topAnchor constraintEqualToAnchor:c.topAnchor], [f.bottomAnchor constraintEqualToAnchor:c.bottomAnchor]]];
+		AVPlayer *p = m->av;
+		[m setPlayer:nil];
+		[f setPlayer:p];
+		m->filler = f;
+		m->wants_full_screen = YES;
+		m->window_was_full = l_window_full;
+		[w makeFirstResponder:f];
+		if ([w collectionBehavior] & NSWindowCollectionBehaviorFullScreenNone)
+			[w setCollectionBehavior:([w collectionBehavior] & ~NSWindowCollectionBehaviorFullScreenNone) | NSWindowCollectionBehaviorFullScreenPrimary];
+		if (!l_window_full) [w toggleFullScreen:nil];
+		else [m windowEntered:[NSNotification notificationWithName:NSWindowDidEnterFullScreenNotification object:w]];
+	} else {
+			/* the window goes back as it was: still full screen if it was before the player went
+			   full screen (as on Windows and GTK) */
+		if (l_window_full && !m->window_was_full) [w toggleFullScreen:nil];
+		else [m windowExited:[NSNotification notificationWithName:NSWindowDidExitFullScreenNotification object:w]];
+	}
+}
+int sga_media_is_full_screen(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] && m->full_screen ? 1 : 0; }
+
+/* ------------------------------------------- 1z-b: media tests (what AVFoundation plays) */
+
+int sga_test_media_position_ms(int a_id) { return sga_media_position_ms(a_id); }
+double sga_test_media_rate(int a_id) { SGAMedia *m = sga_get(a_id); return [m isKindOfClass:[SGAMedia class]] ? [m->av rate] : 0; }
+/* presentationSize as width + height << 16. */
+int sga_test_media_video_size(int a_id) { return sga_media_video_width(a_id) + sga_media_video_height(a_id) * 65536; }
+/* The mean color of the frame shown now, over a 16 by 16 patch at its center, as 0xFFRRGGBB;
+   0 with no frame yet. Read through the item's video output. */
+unsigned int sga_test_media_frame_color(int a_id)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]] || !m->output) return 0;
+	CMTime t = [m->item currentTime];
+	CVPixelBufferRef b = [m->output copyPixelBufferForItemTime:t itemTimeForDisplay:NULL];
+	if (b) { if (m->last_frame) CVPixelBufferRelease(m->last_frame); m->last_frame = b; }
+	b = m->last_frame;
+	if (!b) return 0;
+	CVPixelBufferLockBaseAddress(b, kCVPixelBufferLock_ReadOnly);
+	size_t w = CVPixelBufferGetWidth(b), h = CVPixelBufferGetHeight(b), l_row = CVPixelBufferGetBytesPerRow(b);
+	unsigned char *l_base = CVPixelBufferGetBaseAddress(b);
+	unsigned long r = 0, g = 0, bl = 0, n = 0;
+	if (l_base && w >= 16 && h >= 16)
+		for (size_t y = h / 2 - 8; y < h / 2 + 8; y++)
+			for (size_t x = w / 2 - 8; x < w / 2 + 8; x++) {
+				unsigned char *p = l_base + y * l_row + x * 4;   /* BGRA */
+				bl += p[0]; g += p[1]; r += p[2]; n++;
+			}
+	CVPixelBufferUnlockBaseAddress(b, kCVPixelBufferLock_ReadOnly);
+	if (!n) return 0;
+	return 0xFF000000u | (unsigned)((r / n) << 16) | (unsigned)((g / n) << 8) | (unsigned)(bl / n);
+}
+
+/* As a user's key press on media player `a_id': 1 space, 2 Left, 3 Right, 4 Escape. A real key
+   event goes through the same keyDown: a user's press reaches (the full-screen view's, which
+   hands it to the player, while full screen). */
+void sga_test_media_key(int a_id, int a_key)
+{
+	SGAMedia *m = sga_get(a_id);
+	if (![m isKindOfClass:[SGAMedia class]]) return;
+	unichar l_char = a_key == 1 ? ' ' : a_key == 2 ? NSLeftArrowFunctionKey : a_key == 3 ? NSRightArrowFunctionKey : 27;
+	unsigned short l_code = a_key == 1 ? 49 : a_key == 2 ? 123 : a_key == 3 ? 124 : 53;
+	NSString *k = [NSString stringWithCharacters:&l_char length:1];
+	NSView *l_target = m->filler ?: m;
+	NSEvent *e = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0
+		windowNumber:[[l_target window] windowNumber] context:nil characters:k charactersIgnoringModifiers:k isARepeat:NO keyCode:l_code];
+	[l_target keyDown:e];
+}
+

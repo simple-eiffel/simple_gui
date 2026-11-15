@@ -628,3 +628,32 @@ void sga_app_set_icon(void *a_cairo_surface);
 void sga_window_set_icon(int a_window, void *a_cairo_surface);
 unsigned int sga_test_app_icon_pixel(int a_x, int a_y);
 int sga_busy_canvas(int a_width, int a_height);   /* 1z-d */
+/* 1z-b: the media player (event 66) and its tests */
+int sga_media_player(void);
+void sga_media_open_file(int a_id, const char *a_path);
+void sga_media_open_url(int a_id, const char *a_url);
+void sga_media_play(int a_id);
+void sga_media_pause(int a_id);
+void sga_media_stop(int a_id);
+void sga_media_seek(int a_id, int a_ms);
+int sga_media_position_ms(int a_id);
+int sga_media_duration_ms(int a_id);
+int sga_media_is_playing(int a_id);
+double sga_media_volume(int a_id);
+void sga_media_set_volume(int a_id, double a_volume);
+int sga_media_is_muted(int a_id);
+void sga_media_set_muted(int a_id, int a_on);
+int sga_media_video_width(int a_id);
+int sga_media_video_height(int a_id);
+int sga_media_has_video(int a_id);
+void sga_media_set_controls_visible(int a_id, int a_on);
+void sga_media_set_loops(int a_id, int a_on);
+void sga_media_set_watched(int a_id, int a_on);
+const char *sga_media_failure(int a_id);
+void sga_media_set_full_screen(int a_id, int a_on);
+int sga_media_is_full_screen(int a_id);
+int sga_test_media_position_ms(int a_id);
+double sga_test_media_rate(int a_id);
+int sga_test_media_video_size(int a_id);
+unsigned int sga_test_media_frame_color(int a_id);
+void sga_test_media_key(int a_id, int a_key);   /* 1z-b: 1 space, 2 Left, 3 Right, 4 Escape */

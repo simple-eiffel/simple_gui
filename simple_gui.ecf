@@ -34,7 +34,7 @@
 				<platform value="macintosh"/>
 			</condition>
 		</external_object>
-		<external_linker_flag value="-framework Cocoa -framework UniformTypeIdentifiers -framework UserNotifications -framework QuartzCore">
+		<external_linker_flag value="-framework Cocoa -framework UniformTypeIdentifiers -framework UserNotifications -framework QuartzCore -framework AVKit -framework AVFoundation -framework CoreMedia -framework CoreVideo">
 			<condition>
 				<platform value="macintosh"/>
 			</condition>
