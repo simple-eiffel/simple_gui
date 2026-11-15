@@ -294,6 +294,24 @@ feature -- User actions
 			settle
 		end
 
+	canvas_double_click (a_canvas: GUI_CANVAS; a_x, a_y, a_button: INTEGER)
+			-- 1z-a: a double-click over `a_canvas' at logical (x, y): press, release, press, release
+			-- reported together and then settled once, as a user's quick clicks arrive. Settling
+			-- after each one, as `canvas_pointer' does, can let more than the double-click time pass
+			-- between them (the Mac's pump runs its whole length).
+		require
+			has_application: has_application
+		local
+			i: INTEGER
+		do
+			from i := 1 until i > 2 loop
+				backend.test_drawn_event (a_canvas.id, 7, a_x, a_y, 1 + a_button * 16)
+				backend.test_drawn_event (a_canvas.id, 7, a_x, a_y, 2 + a_button * 16)
+				i := i + 1
+			end
+			settle
+		end
+
 	canvas_key (a_canvas: GUI_CANVAS; a_key: INTEGER; a_character: CHARACTER_32; a_modifiers: INTEGER)
 			-- 1z-a: a key pressed while `a_canvas' holds the focus (`a_key' a GDK key code), as the
 			-- canvas reports one (event 8).
