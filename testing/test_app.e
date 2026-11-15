@@ -244,6 +244,16 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_font_load_runtime, "font_load_runtime")
 				run_test (agent t.test_high_contrast_drops_colors, "high_contrast_drops_colors")
 				run_test (agent t.test_style_contrast_ratio, "style_contrast_ratio")
+				run_test (agent t.test_canvas_reports_the_wheel_and_a_pinch, "canvas_reports_the_wheel_and_a_pinch")
+				run_test (agent t.test_image_view_fits_and_shows_actual_size, "image_view_fits_and_shows_actual_size")
+				run_test (agent t.test_image_view_zooms_at_a_point_and_clamps_the_pan, "image_view_zooms_at_a_point_and_clamps_the_pan")
+				run_test (agent t.test_image_view_draws_crisp_and_smooth, "image_view_draws_crisp_and_smooth")
+				run_test (agent t.test_image_view_takes_the_wheel_a_pinch_keys_and_drags, "image_view_takes_the_wheel_a_pinch_keys_and_drags")
+				run_test (agent t.test_image_view_lens_magnifies_and_leaves, "image_view_lens_magnifies_and_leaves")
+				run_test (agent t.test_image_view_keeps_large_images_in_tiles, "image_view_keeps_large_images_in_tiles")
+				run_test (agent t.test_image_compare_shows_both_sides_and_moves, "image_compare_shows_both_sides_and_moves")
+				run_test (agent t.test_lightbox_scrim_keys_and_focus, "lightbox_scrim_keys_and_focus")
+				run_test (agent t.test_image_effects_give_new_images, "image_effects_give_new_images")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then

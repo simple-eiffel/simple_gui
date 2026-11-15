@@ -63,4 +63,14 @@ feature -- Element change
 			is_loaded := backend.image_set_bytes (id, a_bytes.item, a_bytes.count)
 		end
 
+	set_image (an_image: IMG_IMAGE)
+			-- 1z-a: show `an_image' (an effect's result, say): handed to the toolkit as PNG
+			-- bytes, so every platform shows the same pixels.
+		require
+			gui_thread: is_gui_thread
+			usable: an_image.is_usable
+		do
+			set_png (an_image.png_bytes)
+		end
+
 end

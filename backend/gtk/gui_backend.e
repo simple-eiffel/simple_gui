@@ -1723,6 +1723,18 @@ feature -- Controls
 		alias "sg_info_bar_set_closable($an_id, $a_on ? 1 : 0);"
 		end
 
+	window_set_cover (a_window, a_child: INTEGER)
+			-- 1z-a: on the window's overlay, over everything, filling it.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_window_set_cover($a_window, $a_child);"
+		end
+
+	window_focused (a_window: INTEGER): INTEGER
+			-- 1z-a: GtkRoot's focus, or its nearest ancestor of ours.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return sg_window_focused($a_window);"
+		end
+
 	window_show_toast (a_window: INTEGER; a_message, an_action_text: POINTER; a_toast_id: INTEGER)
 			-- A pill at the bottom of the window's overlay, gone after 4 s (8 s with an action).
 		external "C inline use %"simple_gui_gtk.h%""
@@ -2631,6 +2643,24 @@ feature -- Canvas
 	test_drawn_event (an_id, a_type, a_a, a_b, a_c: INTEGER)
 		external "C inline use %"simple_gui_gtk.h%""
 		alias "sg_push5($a_type, $an_id, $a_a, $a_b, $a_c);"
+		end
+
+	test_canvas_pixel (an_id, a_x, a_y: INTEGER): NATURAL_32
+			-- 1z-a: the drawing area's snapshot, rendered, read at the point times the scale.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "return (EIF_NATURAL_32) sg_test_canvas_pixel($an_id, $a_x, $a_y);"
+		end
+
+	test_canvas_wheel (an_id, an_amount, a_modifiers, a_x, a_y: INTEGER)
+			-- 1z-a: the scroll controller's own signal, with the pointer at the point.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_canvas_wheel($an_id, $an_amount, $a_modifiers, $a_x, $a_y);"
+		end
+
+	test_canvas_magnify (an_id, a_factor_1000, a_x, a_y: INTEGER)
+			-- 1z-a: the zoom gesture's own scale-changed signal, as a new pinch.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_canvas_magnify($an_id, $a_factor_1000, $a_x, $a_y);"
 		end
 
 	scale_factor (an_id: INTEGER): INTEGER
