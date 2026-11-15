@@ -6867,13 +6867,14 @@ int sga_canvas(int a_width, int a_height)
 
 /* A finished Cairo image surface at device scale: copied (so the caller may reuse
    it), and tagged sRGB so macOS color-manages it (spike mac_color). */
-void sga_canvas_present(int a_id, void *a_cairo_surface)
+/* A copy of Cairo image surface `s' (ARGB32, premultiplied) as a CGImage tagged sRGB; NULL if it
+   is not an image surface. The caller releases it. */
+static CGImageRef sga_cgimage_of_cairo(cairo_surface_t *s)
 {
-	SGACanvas *c = sga_get(a_id);
-	cairo_surface_t *s = (cairo_surface_t *)a_cairo_surface;
-	if (!c || !s || cairo_surface_get_type(s) != CAIRO_SURFACE_TYPE_IMAGE) return;
+	if (!s || cairo_surface_get_type(s) != CAIRO_SURFACE_TYPE_IMAGE) return NULL;
 	cairo_surface_flush(s);
 	int w = cairo_image_surface_get_width(s), h = cairo_image_surface_get_height(s), l_stride = cairo_image_surface_get_stride(s);
+	if (w <= 0 || h <= 0) return NULL;
 	CGColorSpaceRef l_srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
 	CFDataRef l_data = CFDataCreate(NULL, cairo_image_surface_get_data(s), (CFIndex)l_stride * h);
 	CGDataProviderRef l_provider = CGDataProviderCreateWithCFData(l_data);
@@ -6882,6 +6883,16 @@ void sga_canvas_present(int a_id, void *a_cairo_surface)
 	CGDataProviderRelease(l_provider);
 	CFRelease(l_data);
 	CGColorSpaceRelease(l_srgb);
+	return l_image;
+}
+
+void sga_canvas_present(int a_id, void *a_cairo_surface)
+{
+	SGACanvas *c = sga_get(a_id);
+	cairo_surface_t *s = (cairo_surface_t *)a_cairo_surface;
+	if (!c || !s || cairo_surface_get_type(s) != CAIRO_SURFACE_TYPE_IMAGE) return;
+	CGImageRef l_image = sga_cgimage_of_cairo(s);
+	if (!l_image) return;
 	if (c->image) CGImageRelease(c->image);
 	c->image = l_image;
 	[c setNeedsDisplay:YES];
@@ -13927,4 +13938,52 @@ int sga_window_focused(int a_window)
 		if (l_id > 0) return l_id;
 	}
 	return 0;
+}
+
+/* ------------------------------------------- 1z-d: app identity */
+
+/* The program's icon while it runs (GUI_APPLICATION.set_icon): `a_cairo_surface', a Cairo image
+   surface, becomes NSApp.applicationIconImage, the Dock's icon. NULL gives the default back. */
+void sga_app_set_icon(void *a_cairo_surface)
+{
+	if (!a_cairo_surface) { [NSApp setApplicationIconImage:nil]; return; }
+	CGImageRef l_image = sga_cgimage_of_cairo((cairo_surface_t *)a_cairo_surface);
+	if (!l_image) return;
+	NSImage *l_icon = [[NSImage alloc] initWithCGImage:l_image size:NSMakeSize(CGImageGetWidth(l_image), CGImageGetHeight(l_image))];
+	CGImageRelease(l_image);
+	[NSApp setApplicationIconImage:l_icon];
+}
+
+/* GUI_WINDOW.set_icon: macOS windows show no icon (the Dock shows the app's), so the image is
+   kept by shared code and ignored here: a named deviation. */
+void sga_window_set_icon(int a_window, void *a_cairo_surface) { (void)a_window; (void)a_cairo_surface; }
+
+/* What the app icon shows at (x, y) of it drawn at 64 by 64 (from its top left), as 0xAARRGGBB
+   with straight alpha; 0 outside. */
+unsigned int sga_test_app_icon_pixel(int a_x, int a_y)
+{
+	if (a_x < 0 || a_y < 0 || a_x >= 64 || a_y >= 64) return 0;
+	NSImage *l_icon = [NSApp applicationIconImage];
+	if (!l_icon) return 0;
+	unsigned char *l_bits = calloc(64 * 64 * 4, 1);
+	CGColorSpaceRef l_srgb = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+	CGContextRef l_cg = CGBitmapContextCreate(l_bits, 64, 64, 8, 64 * 4, l_srgb, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+	CGColorSpaceRelease(l_srgb);
+	unsigned int l_result = 0;
+	if (l_cg) {
+		/* drawn through an sRGB context of its own, so the color is the image's, not converted
+		   to the display's color space and back */
+		NSGraphicsContext *l_ns = [NSGraphicsContext graphicsContextWithCGContext:l_cg flipped:NO];
+		[NSGraphicsContext saveGraphicsState];
+		[NSGraphicsContext setCurrentContext:l_ns];
+		[l_icon drawInRect:NSMakeRect(0, 0, 64, 64) fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1.0];
+		[NSGraphicsContext restoreGraphicsState];
+		CGContextRelease(l_cg);
+		unsigned char *p = l_bits + (size_t)a_y * 64 * 4 + (size_t)a_x * 4;   /* bitmap rows run top down */
+		unsigned int a = p[3];
+		unsigned int r = a ? (p[0] * 255u + a / 2) / a : 0, g = a ? (p[1] * 255u + a / 2) / a : 0, b = a ? (p[2] * 255u + a / 2) / a : 0;
+		l_result = (a << 24) | (MIN(r, 255u) << 16) | (MIN(g, 255u) << 8) | MIN(b, 255u);
+	}
+	free(l_bits);
+	return l_result;
 }
