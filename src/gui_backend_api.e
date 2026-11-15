@@ -21,6 +21,8 @@ note
 		A canvas (1z-a): 68 gesture (a = kind + modifiers * 16, kind 1 wheel, 2 magnify; b = the
 		amount: a wheel's in 1/120 of a notch, positive away from the user, a magnify's as
 		(1 + magnification) * 1000; c = x + y * 65536, in the canvas's logical pixels).
+		1z-c: 67 monitors changed (id 0), from a backend the system tells; shared code also
+		polls simple_shell's change count on the heartbeat, so a backend need not report it.
 		Text areas report text changed (2) like fields; spin boxes report it with a = the
 		new value; dropdowns report selection (4).
 
@@ -2839,6 +2841,42 @@ feature -- Styles (1w)
 		deferred
 		ensure
 			known: Result >= -1 and Result <= 1
+		end
+
+feature -- Monitors (1z-c)
+
+	monitor_size_units (a_monitors: SHELL_MONITORS; a_index: INTEGER): REAL_64
+			-- 1z-c: how many of simple_shell's units in `a_monitors' make one of monitor
+			-- `a_index''s own logical pixels, for its size and its work area's size (the size a
+			-- window shows on it). macOS: the primary's scale (the fields share one space at the
+			-- main screen's scale, so this gives points); Windows: that monitor's own scale in a
+			-- per-monitor-aware process; GTK: the monitor's whole scale factor (simple_shell
+			-- multiplies GDK's logical geometry by it).
+		require
+			valid: a_monitors.valid_index (a_index)
+		deferred
+		ensure
+			positive: Result > 0
+		end
+
+	monitor_position_units (a_monitors: SHELL_MONITORS; a_index: INTEGER): REAL_64
+			-- 1z-c: how many of simple_shell's units in `a_monitors' make one of the primary
+			-- monitor's logical pixels, for monitor `a_index''s x and y (the platform's own
+			-- arrangement). macOS and Windows: the primary's scale; GTK: as GDK gives them.
+		require
+			valid: a_monitors.valid_index (a_index)
+		deferred
+		ensure
+			positive: Result > 0
+		end
+
+	window_monitor_index (a_window: INTEGER; a_monitors: SHELL_MONITORS): INTEGER
+			-- 1z-c: the monitor in `a_monitors' holding most of window `a_window' (Windows'
+			-- MonitorFromWindow, AppKit's [window screen], GDK's monitor at the surface); 0
+			-- where the toolkit cannot say, such as before the window is first shown.
+		deferred
+		ensure
+			valid: Result = 0 or a_monitors.valid_index (Result)
 		end
 
 feature -- Test driver

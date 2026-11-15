@@ -357,6 +357,20 @@ feature -- Size (1x-e)
 			-- The size last asked for (`make', `set_size', `animate_size'): the one the window
 			-- opens at, and its breakpoints are chosen at before it is first shown (1y).
 
+feature -- Monitors (1z-c)
+
+	monitor_index: INTEGER
+			-- The monitor holding most of the window, as an index into the application's
+			-- `monitors'; 0 where the toolkit cannot say, such as before it is first shown.
+		require
+			gui_thread: is_gui_thread
+			open: not is_closed
+		do
+			Result := backend.window_monitor_index (id, application.monitors.shell)
+		ensure
+			valid: Result = 0 or application.monitors.valid_index (Result)
+		end
+
 feature {GUI_PRINT_JOB} -- Printing (1v-c)
 
 	native_handle: POINTER

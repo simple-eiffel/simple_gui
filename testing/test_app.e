@@ -26,6 +26,8 @@ feature {NONE} -- Initialization
 				print ("  SKIP: no display (the toolkit did not start)%N")
 			else
 				create t.make (l_app)
+					-- 1z-c: no test opens a browser, a file manager or a file
+				l_app.set_open_test_mode (True)
 				run_test (agent t.test_label_text_roundtrip, "label_text_roundtrip")
 				run_test (agent t.test_hebrew_and_greek_roundtrip, "hebrew_and_greek_roundtrip")
 				run_test (agent t.test_button_click_fires_agents, "button_click_fires_agents")
@@ -175,6 +177,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_the_pointer_and_the_focus_come_and_go, "the_pointer_and_the_focus_come_and_go")
 				run_test (agent t.test_a_part_shows_on_hover_and_on_focus, "a_part_shows_on_hover_and_on_focus")
 				run_test (agent t.test_an_overlay_places_its_children, "an_overlay_places_its_children")
+				run_test (agent t.test_geometry_is_the_box_the_user_sees, "geometry_is_the_box_the_user_sees")
 				run_test (agent t.test_an_overlay_offset_moves_on_the_manual_clock, "an_overlay_offset_moves_on_the_manual_clock")
 				run_test (agent t.test_a_list_reports_its_scroll_and_fraction, "a_list_reports_its_scroll_and_fraction")
 				run_test (agent t.test_near_end_fills_a_short_list_and_loads_more_at_the_end, "near_end_fills_a_short_list_and_loads_more_at_the_end")
@@ -254,6 +257,10 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_image_compare_shows_both_sides_and_moves, "image_compare_shows_both_sides_and_moves")
 				run_test (agent t.test_lightbox_scrim_keys_and_focus, "lightbox_scrim_keys_and_focus")
 				run_test (agent t.test_image_effects_give_new_images, "image_effects_give_new_images")
+				run_test (agent t.test_open_and_reveal_are_recorded_not_performed, "open_and_reveal_are_recorded_not_performed")
+				run_test (agent t.test_network_status_answers_at_once_and_tells_changes, "network_status_answers_at_once_and_tells_changes")
+				run_test (agent t.test_monitors_have_sizes_work_areas_and_scales, "monitors_have_sizes_work_areas_and_scales")
+				run_test (agent t.test_a_monitor_change_takes_a_new_snapshot_and_tells, "a_monitor_change_takes_a_new_snapshot_and_tells")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then

@@ -251,6 +251,123 @@ feature -- Desktop notifications (1o)
 			send_notification (a_title, a_body, notification_actions.count)
 		end
 
+feature -- Opening and revealing (1z-c)
+
+	open_url (a_url: READABLE_STRING_GENERAL): BOOLEAN
+			-- Open `a_url' in the user's browser, or in the application for its scheme (mail
+			-- for mailto:), through simple_shell's SHELL_DESKTOP.open_externally. True when the
+			-- system took the request; whether the user sees it is the system's business.
+			-- Recorded in `test_open_requests' instead under `set_open_test_mode'.
+		require
+			gui_thread: is_gui_thread
+			named: not a_url.is_empty
+		do
+			Result := desktop.open_externally (a_url)
+		ensure
+			recorded: is_open_test_mode implies test_open_requests.count = old test_open_requests.count + 1
+		end
+
+	open_file (a_path: READABLE_STRING_GENERAL): BOOLEAN
+			-- Open the file at `a_path' with its default application. True when the system
+			-- took the request. Recorded in `test_open_requests' instead under
+			-- `set_open_test_mode'.
+		require
+			gui_thread: is_gui_thread
+			named: not a_path.is_empty
+		do
+			Result := desktop.open_externally (a_path)
+		ensure
+			recorded: is_open_test_mode implies test_open_requests.count = old test_open_requests.count + 1
+		end
+
+	reveal_file (a_path: READABLE_STRING_GENERAL): BOOLEAN
+			-- Show the file or folder at `a_path' selected in Explorer, the Finder or Files.
+			-- True when it exists and the system took the request. Linux, where no file
+			-- manager answers the FileManager1 call: the folder holding it opens with nothing
+			-- selected (a named deviation). Recorded in `test_open_requests' instead under
+			-- `set_open_test_mode'.
+		require
+			gui_thread: is_gui_thread
+			named: not a_path.is_empty
+		do
+			Result := desktop.reveal (a_path)
+		ensure
+			recorded: is_open_test_mode implies test_open_requests.count = old test_open_requests.count + 1
+		end
+
+	is_open_test_mode: BOOLEAN
+			-- Are `open_url', `open_file' and `reveal_file' recorded instead of performed?
+		do
+			Result := desktop.is_test_mode
+		end
+
+	set_open_test_mode (a_on: BOOLEAN)
+			-- Tests: record every `open_url', `open_file' and `reveal_file' in
+			-- `test_open_requests' instead of performing it (`a_on'), so no browser, file
+			-- manager or file opens; or perform them again. Turning it on empties the list.
+		require
+			gui_thread: is_gui_thread
+		do
+			desktop.set_test_mode (a_on)
+		ensure
+			set: is_open_test_mode = a_on
+			started_empty: a_on implies test_open_requests.is_empty
+		end
+
+	test_open_requests: LIST [STRING_32]
+			-- The requests made under `set_open_test_mode', oldest first: "open " or "reveal "
+			-- and the URL or path as it was given.
+		do
+			Result := desktop.test_open_requests
+		end
+
+feature -- Network status (1z-c)
+
+	is_online: BOOLEAN
+			-- Does the system have a usable route to a network now (not: does a given server
+			-- answer)? simple_shell's SHELL_NETWORK, a cached answer its platform monitor keeps:
+			-- asking costs nothing and never waits. A change runs `network_changed_actions'.
+		do
+			Result := network.is_online
+			watch_network (Result)
+		end
+
+	network_changed_actions: GUI_ACTIONS [TUPLE [online: BOOLEAN]]
+			-- Run when `is_online' changes, with its new answer: shared code polls it on the
+			-- heartbeat (every 250 milliseconds), so network status has no event.
+		attribute
+			create Result.make
+		end
+
+	report_network_for_tests (a_online: BOOLEAN)
+			-- Tests: answer `is_online' with `a_online' until the network really changes
+			-- (simple_shell's SHELL_NETWORK.test_report); `network_changed_actions' run on the
+			-- heartbeat as for a real change.
+		require
+			gui_thread: is_gui_thread
+		do
+			watch_network (network.is_online)
+			network.test_report (a_online)
+		ensure
+			reported: is_online = a_online
+		end
+
+feature -- Monitors (1z-c)
+
+	monitors: GUI_MONITORS
+			-- The monitors attached to the desktop, taken when first asked for; a new snapshot
+			-- and `changed_actions' whenever they change.
+		require
+			gui_thread: is_gui_thread
+		do
+			if attached monitors_taken as al_monitors then
+				Result := al_monitors
+			else
+				create Result.make
+				monitors_taken := Result
+			end
+		end
+
 feature -- Pick and drop (1q)
 
 	pebble_in_flight: detachable ANY
@@ -607,6 +724,11 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 				when 62 then
 						-- 1x: a frame tick, `l_a' milliseconds after the last one
 					animation_clock.frame_tick (l_a.max (0))
+				when 67 then
+						-- 1z-c: the monitors changed (a backend that is told reports it)
+					if attached monitors_taken as al_monitors then
+						al_monitors.take_change
+					end
 				when 24 then
 					if attached timers.item (l_a) as al_timer then
 						al_timer.fire
@@ -618,6 +740,34 @@ feature {GUI_WIDGET, GUI_TEST_DRIVER} -- Registration and dispatch
 					if attached widgets.item (l_id) as al_widget then
 						al_widget.dispatch (l_type, l_a, l_b, l_c)
 					end
+				end
+			end
+			poll_services
+		end
+
+	poll_services
+			-- 1z-c, on the heartbeat (at most every `Heartbeat_ms'): run
+			-- `network_changed_actions' when `is_online' changed, and take a change of the
+			-- monitors. Both are cached by simple_shell, so a poll costs nothing; neither is
+			-- asked before a program first does.
+		local
+			l_now: REAL_64
+			l_online: BOOLEAN
+		do
+			l_now := desktop.now_ms
+			if l_now - last_services_poll >= Heartbeat_ms or l_now < last_services_poll then
+				last_services_poll := l_now
+				if is_network_watched or network_changed_actions.count > 0 then
+					l_online := network.is_online
+					if not is_network_watched then
+						watch_network (l_online)
+					elseif l_online /= last_online then
+						last_online := l_online
+						network_changed_actions.call ([l_online])
+					end
+				end
+				if attached monitors_taken as al_monitors then
+					al_monitors.poll
 				end
 			end
 		end
@@ -745,6 +895,44 @@ feature {NONE} -- Animation (1x)
 			-- animation completed at once).
 		do
 			after (1, an_action).do_nothing
+		end
+
+feature {NONE} -- Services (1z-c)
+
+	desktop: SHELL_DESKTOP
+			-- simple_shell's open, reveal and clock.
+		attribute
+			create Result
+		end
+
+	network: SHELL_NETWORK
+			-- simple_shell's network status.
+		attribute
+			create Result
+		end
+
+	monitors_taken: detachable GUI_MONITORS
+			-- `monitors', once a program has asked for them.
+
+	is_network_watched: BOOLEAN
+			-- Has `last_online' been taken, so the heartbeat tells changes from it?
+
+	last_online: BOOLEAN
+			-- `is_online' as the heartbeat last saw it.
+
+	last_services_poll: REAL_64
+			-- When `poll_services' last looked, in simple_shell's milliseconds.
+
+	watch_network (a_online: BOOLEAN)
+			-- Start telling changes of the network from `a_online', unless already telling them.
+		do
+			if not is_network_watched then
+				last_online := a_online
+				is_network_watched := True
+			end
+		ensure
+			watched: is_network_watched
+			first_kept: not (old is_network_watched) implies last_online = a_online
 		end
 
 feature {NONE} -- Implementation

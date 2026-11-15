@@ -2289,6 +2289,62 @@ feature -- Controls
 			end
 		end
 
+	monitor_size_units (a_monitors: SHELL_MONITORS; a_index: INTEGER): REAL_64
+			-- 1z-c: Windows gives a per-monitor-aware process each monitor in its own physical
+			-- pixels, so that monitor's own scale; a system-aware one (simple_shell's windows make
+			-- the process so) every monitor at the system's DPI, so the system's scale (`dpi').
+		do
+			if c_is_per_monitor_aware then
+				Result := (a_monitors.scale (a_index) / 100).max (0.01)
+			else
+				Result := dpi
+			end
+		end
+
+	monitor_position_units (a_monitors: SHELL_MONITORS; a_index: INTEGER): REAL_64
+			-- 1z-c: the primary's scale: its own in a per-monitor-aware process, the system's
+			-- (`dpi') in a system-aware one.
+		do
+			if c_is_per_monitor_aware and then a_monitors.primary_index > 0 then
+				Result := (a_monitors.scale (a_monitors.primary_index) / 100).max (0.01)
+			else
+				Result := dpi
+			end
+		end
+
+	window_monitor_index (a_window: INTEGER; a_monitors: SHELL_MONITORS): INTEGER
+			-- 1z-c: MonitorFromWindow (the monitor holding most of it), matched to `a_monitors'
+			-- by the device name both answer; 0 before the window has a handle.
+		local
+			l_handle: POINTER
+			l_buffer: MANAGED_POINTER
+			l_name: STRING_32
+			l_n, i: INTEGER
+		do
+			if attached floats.item (a_window) as al_f then
+				if al_f.is_open then
+					l_handle := al_f.panel.handle
+				end
+			elseif attached windows.item (a_window) as al_w and then al_w.is_window_open then
+				l_handle := al_w.hwnd
+			end
+			if l_handle /= default_pointer then
+				create l_buffer.make (64)
+				l_n := c_window_monitor_name (l_handle, l_buffer.item, 32)
+				create l_name.make (l_n)
+				from i := 0 until i >= l_n loop
+					l_name.append_character (l_buffer.read_natural_16 (i * 2).to_character_32)
+					i := i + 1
+				end
+				from i := 1 until Result > 0 or l_name.is_empty or i > a_monitors.count loop
+					if a_monitors.device_name (i).same_string (l_name) then
+						Result := i
+					end
+					i := i + 1
+				end
+			end
+		end
+
 	follow_system_appearance
 			-- Every window follows the Windows light or dark setting again.
 		local
@@ -7120,6 +7176,43 @@ feature {NONE} -- Timers, shortcuts and full screen (1m)
 			-- Each full-screen window: its style and rectangle before, to go back to.
 		once ("OBJECT")
 			create Result.make (2)
+		end
+
+	c_is_per_monitor_aware: BOOLEAN
+			-- 1z-c: is this thread per-monitor DPI aware (v1 or v2)? Both calls are looked up at
+			-- run time (Windows 10 1607), beyond the SDK level ISE's C is built for.
+		external
+			"C inline use <windows.h>"
+		alias
+			"[
+				typedef void* (WINAPI *l_context_fn)(void);
+				typedef int (WINAPI *l_awareness_fn)(void*);
+				HMODULE l_user = GetModuleHandleW(L"user32.dll");
+				l_context_fn l_context = l_user ? (l_context_fn)(void*)GetProcAddress(l_user, "GetThreadDpiAwarenessContext") : 0;
+				l_awareness_fn l_awareness = l_user ? (l_awareness_fn)(void*)GetProcAddress(l_user, "GetAwarenessFromDpiAwarenessContext") : 0;
+				return (EIF_BOOLEAN) (l_context && l_awareness && l_awareness(l_context()) == 2);
+			]"
+		end
+
+	c_window_monitor_name (a_hwnd, a_buffer: POINTER; a_capacity: INTEGER): INTEGER
+			-- 1z-c: the device name of the monitor holding most of `a_hwnd' (\\.\DISPLAY1),
+			-- UTF-16 into `a_buffer' of `a_capacity' units; its length, 0 when there is none.
+		external
+			"C inline use <windows.h>"
+		alias
+			"[
+				MONITORINFOEXW l_info;
+				HMONITOR l_monitor = MonitorFromWindow((HWND) $a_hwnd, MONITOR_DEFAULTTONEAREST);
+				int l_n = 0;
+				wchar_t *l_out = (wchar_t *) $a_buffer;
+				ZeroMemory(&l_info, sizeof(l_info));
+				l_info.cbSize = sizeof(l_info);
+				if (l_monitor && GetMonitorInfoW(l_monitor, (LPMONITORINFO) &l_info)) {
+					while (l_n < $a_capacity - 1 && l_n < 31 && l_info.szDevice[l_n]) { l_out[l_n] = l_info.szDevice[l_n]; l_n++; }
+				}
+				l_out[l_n] = 0;
+				return (EIF_INTEGER) l_n;
+			]"
 		end
 
 	c_set_client_size (a_hwnd: POINTER; a_width, a_height: INTEGER)

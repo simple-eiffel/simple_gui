@@ -1238,6 +1238,15 @@ feature -- User actions
 			Result := backend.from_c (backend.pill_tip_shown (a_widget.id))
 		end
 
+	tell_monitors_changed
+			-- 1z-c: the monitors changed, as event 67 tells it: the application's `monitors'
+			-- take a new snapshot and run their `changed_actions'.
+		require
+			has_application: has_application
+		do
+			application.monitors.take_change
+		end
+
 feature -- Evidence
 
 	snapshot (a_window: GUI_WINDOW; a_path: PATH): BOOLEAN
