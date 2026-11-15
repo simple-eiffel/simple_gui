@@ -177,6 +177,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_the_pointer_and_the_focus_come_and_go, "the_pointer_and_the_focus_come_and_go")
 				run_test (agent t.test_a_part_shows_on_hover_and_on_focus, "a_part_shows_on_hover_and_on_focus")
 				run_test (agent t.test_an_overlay_places_its_children, "an_overlay_places_its_children")
+				run_test (agent t.test_geometry_is_the_box_the_user_sees, "geometry_is_the_box_the_user_sees")
 				run_test (agent t.test_an_overlay_offset_moves_on_the_manual_clock, "an_overlay_offset_moves_on_the_manual_clock")
 				run_test (agent t.test_a_list_reports_its_scroll_and_fraction, "a_list_reports_its_scroll_and_fraction")
 				run_test (agent t.test_near_end_fills_a_short_list_and_loads_more_at_the_end, "near_end_fills_a_short_list_and_loads_more_at_the_end")

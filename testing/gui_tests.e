@@ -4037,11 +4037,11 @@ feature -- The remaining controls (1j)
 			l_window: GUI_WINDOW
 			l_overlay: GUI_OVERLAY
 			l_base, l_badge, l_veil: GUI_LABEL
-			l_button: GUI_LABEL
+			l_button: GUI_BUTTON
 			ox, oy, ow, oh: INTEGER
 		do
-				-- labels: GTK reports a padded widget's content box, the others the whole widget
-				-- (a closeout item), so a label's box is the same everywhere
+				-- a button: its x, y, width and height are the box the user sees on every platform
+				-- (SIMPLE_GUI_SPEC, "Geometry: the box the user sees")
 			create l_window.make ("Overlay", 400, 300)
 			create l_overlay.make
 			create l_base.make ("The picture")
@@ -4072,6 +4072,73 @@ feature -- The remaining controls (1j)
 			l_overlay.set_base_direction (Direction_right_to_left)
 			let_layout_settle
 			assert ("trailing is the left under right-to-left: " + l_badge.x.out, near (l_badge.x, ox))
+			l_window.close
+		end
+
+	test_geometry_is_the_box_the_user_sees
+			-- A widget's x, y, width and height are the box the user sees (SIMPLE_GUI_SPEC, "Geometry:
+			-- the box the user sees"): boxes a row lays out with no spacing touch and share their top;
+			-- a column's gaps are its spacing; a button's padding adds exactly to its width.
+		local
+			l_window: GUI_WINDOW
+			l_column, l_row, l_items: GUI_STACK
+			l_label, l_below: GUI_LABEL
+			l_padded, l_plain, l_top_button: GUI_BUTTON
+			l_box: GUI_CHECK_BOX
+			l_drop: GUI_DROPDOWN
+			l_style: GUI_STYLE
+		do
+			create l_window.make ("Geometry", 500, 300)
+			create l_items.make_vertical
+			l_items.set_spacing (20)
+				-- a row with no spacing, children at the top
+			create l_row.make_horizontal
+			l_row.set_spacing (0)
+			l_row.set_alignment (l_row.Align_start)
+			create l_label.make ("Name")
+			create l_padded.make ("Padded")
+			l_padded.set_style (l_padded.Style_flat)
+			create l_style.make
+			l_style.set_padding (0, 8, 0, 8)
+			l_padded.set_own_style (l_style)
+			create l_box.make ("Check")
+			create l_plain.make ("Padded")
+			l_plain.set_style (l_plain.Style_flat)
+			l_row.extend (l_label)
+			l_row.extend (l_padded)
+			l_row.extend (l_box)
+			l_row.extend (l_plain)
+				-- a column spaced 10
+			create l_column.make_vertical
+			l_column.set_spacing (10)
+			l_column.set_alignment (l_column.Align_start)
+			create l_top_button.make ("Top")
+			create l_below.make ("Below")
+			create l_drop.make
+			l_drop.extend ("One")
+			l_drop.extend ("Two")
+			l_column.extend (l_top_button)
+			l_column.extend (l_below)
+			l_column.extend (l_drop)
+			l_items.extend (l_row)
+			l_items.extend (l_column)
+			l_window.set_content (l_items)
+			l_window.show
+			settle_window
+			let_layout_settle
+			assert ("a label and a button touch: " + (l_label.x + l_label.width).out + " vs " + l_padded.x.out,
+				(l_padded.x - (l_label.x + l_label.width)).abs <= 1)
+			assert ("a button and a check box touch: " + (l_padded.x + l_padded.width).out + " vs " + l_box.x.out,
+				(l_box.x - (l_padded.x + l_padded.width)).abs <= 1)
+			assert ("a check box and a button touch: " + (l_box.x + l_box.width).out + " vs " + l_plain.x.out,
+				(l_plain.x - (l_box.x + l_box.width)).abs <= 1)
+			assert ("the row's tops agree: " + l_label.y.out + " " + l_padded.y.out + " " + l_box.y.out + " " + l_plain.y.out,
+				(l_padded.y - l_label.y).abs <= 1 and (l_box.y - l_label.y).abs <= 1 and (l_plain.y - l_label.y).abs <= 1)
+			assert ("the column's gaps are 10: " + (l_below.y - (l_top_button.y + l_top_button.height)).out + " and "
+				+ (l_drop.y - (l_below.y + l_below.height)).out,
+				(l_below.y - (l_top_button.y + l_top_button.height) - 10).abs <= 1 and (l_drop.y - (l_below.y + l_below.height) - 10).abs <= 1)
+			assert ("padding 8 each side adds 16: " + l_padded.width.out + " vs " + l_plain.width.out,
+				(l_padded.width - l_plain.width - 16).abs <= 1)
 			l_window.close
 		end
 

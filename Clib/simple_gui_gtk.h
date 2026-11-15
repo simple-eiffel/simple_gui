@@ -3243,13 +3243,21 @@ G_GNUC_END_IGNORE_DEPRECATIONS
 
 /* ---------- position in the window's content (logical pixels, y down) ---------- */
 
-static int sg_point(int id, int want_y) {
+/* Spec #74: a widget's x, y, width and height are the box the user sees, its border box (where
+   CSS draws its background and border: a button's bezel, an entry's frame), from one
+   gtk_widget_compute_bounds against the window's content. gtk_widget_get_width answers the
+   content box, inside padding and border, which put a padded button's box off by its padding. */
+static int sg_box(int id, int which, graphene_rect_t *b) {
     GtkWidget *w = sg_w[id];
-    GtkRoot *root = gtk_widget_get_root(w);
+    GtkRoot *root = w ? gtk_widget_get_root(w) : NULL;
     GtkWidget *content = root ? g_object_get_data(G_OBJECT(root), "sg-content") : NULL;
-    graphene_point_t src = GRAPHENE_POINT_INIT(0, 0), dst;
-    if (!content || !gtk_widget_compute_point(w, content, &src, &dst)) return 0;
-    return (int) (want_y ? dst.y : dst.x);
+    (void) which;
+    return w && content && !GTK_IS_WINDOW(w) && gtk_widget_compute_bounds(w, content, b);
+}
+static int sg_point(int id, int want_y) {
+    graphene_rect_t b;
+    if (!sg_box(id, 0, &b)) return 0;
+    return (int) floor((want_y ? b.origin.y : b.origin.x) + 0.5);
 }
 static int sg_x(int id) { return sg_point(id, 0); }
 static int sg_y(int id) { return sg_point(id, 1); }
@@ -3619,8 +3627,17 @@ static int sg_canvas(int w, int h) {
 }
 static int sg_scale_factor(int id) { return gtk_widget_get_scale_factor(sg_w[id]); }
 /* 0 for a slot that went empty (a drawn view destroyed with its window). */
-static int sg_width(int id) { return sg_w[id] ? gtk_widget_get_width(sg_w[id]) : 0; }
-static int sg_height(int id) { return sg_w[id] ? gtk_widget_get_height(sg_w[id]) : 0; }
+/* The border box's size (spec #74); a window, or a widget not yet in one, answers its own size. */
+static int sg_width(int id) {
+    graphene_rect_t b;
+    if (sg_box(id, 0, &b)) return (int) floor(b.size.width + 0.5);
+    return sg_w[id] ? gtk_widget_get_width(sg_w[id]) : 0;
+}
+static int sg_height(int id) {
+    graphene_rect_t b;
+    if (sg_box(id, 0, &b)) return (int) floor(b.size.height + 0.5);
+    return sg_w[id] ? gtk_widget_get_height(sg_w[id]) : 0;
+}
 /* ---------- 1y: size reports. After each frame a window paints (its frame clock's after-paint,
    so after layout), every watched widget's size is read, and event 9 (a, b = width, height, as
    sg_width and sg_height answer) is pushed for each one that changed and has a size. The list
@@ -10375,14 +10392,18 @@ static void sg_css_text(GString *c, const SgStyle *s, unsigned m) {
     if (m & SGM(SGK_ITALIC))
         g_string_append_printf(c, "font-style: %s; ", atoi(s->v[SGK_ITALIC]) ? "italic" : "normal");
 }
-/* The box declarations of `s' that are in `m'; `rtl': the start side is the right one. */
-static void sg_css_box(GString *c, const SgStyle *s, unsigned m, int rtl) {
+/* The box declarations of `s' that are in `m'; `rtl': the start side is the right one.
+   A style's padding adds to the widget's own, `native' (physical sides; NULL for none): the
+   spec's geometry rule has padding add to the platform's look, not replace it. */
+static void sg_css_box(GString *c, const SgStyle *s, unsigned m, int rtl, const GtkBorder *native) {
     double d[4];
+    GtkBorder n = {0, 0, 0, 0};
+    if (native) n = *native;
     if (m & SGM(SGK_BG)) g_string_append_printf(c, "background-color: #%s; background-image: none; ", s->v[SGK_BG]);
     if ((m & SGM(SGK_PAD)) && sg_style_nums(s->v[SGK_PAD], d, 4) == 4) {   /* top, end, bottom, start */
         g_string_append(c, "padding: ");
-        sg_css_num(c, MAX(d[0], 0), "px "); sg_css_num(c, MAX(rtl ? d[3] : d[1], 0), "px ");
-        sg_css_num(c, MAX(d[2], 0), "px "); sg_css_num(c, MAX(rtl ? d[1] : d[3], 0), "px; ");
+        sg_css_num(c, n.top + MAX(d[0], 0), "px "); sg_css_num(c, n.right + MAX(rtl ? d[3] : d[1], 0), "px ");
+        sg_css_num(c, n.bottom + MAX(d[2], 0), "px "); sg_css_num(c, n.left + MAX(rtl ? d[1] : d[3], 0), "px; ");
     }
     if ((m & SGM(SGK_BORDER)) && sg_style_nums(s->v[SGK_BORDER], d, 1) == 1) {
         g_string_append(c, "border-style: solid; border-width: "); sg_css_num(c, MAX(d[0], 0), "px; ");
@@ -10401,8 +10422,9 @@ static void sg_css_box(GString *c, const SgStyle *s, unsigned m, int rtl) {
         sg_css_num(c, CLAMP(d[3], 0, 100) / 100.0, "); ");
     }
 }
-/* The rules for widget `id' from `s', for the keys in `m'. `cls' is the widget's own class. */
-static void sg_style_css(GString *c, int id, const char *cls, const SgStyle *s, unsigned m) {
+/* The rules for widget `id' from `s', for the keys in `m'. `cls' is the widget's own class;
+   `native' the widget's own padding, which a style's padding adds to. */
+static void sg_style_css(GString *c, int id, const char *cls, const SgStyle *s, unsigned m, const GtkBorder *native) {
     int rtl = gtk_widget_get_direction(sg_w[id]) == GTK_TEXT_DIR_RTL;
     switch (sg_kind[id]) {
     case 10: case 49:   /* the class is on the scrolled window; the text view inside paints */
@@ -10421,7 +10443,7 @@ static void sg_style_css(GString *c, int id, const char *cls, const SgStyle *s, 
         g_string_append_printf(c, ".%s { ", cls);
     }
     sg_css_text(c, s, m);
-    sg_css_box(c, s, m, rtl);
+    sg_css_box(c, s, m, rtl, native);
     g_string_append(c, "} ");
     if (m & SGM(SGK_PLACEHOLDER))
         g_string_append_printf(c, ".%s placeholder { color: #%s; } ", cls, s->v[SGK_PLACEHOLDER]);
@@ -10456,6 +10478,20 @@ static void sg_style_scroll(int id, int kind) {
     }
 }
 
+/* Widget `w''s own padding, as its theme gives it without our style class `cls' (taken off for
+   the reading, so a change of look, a button's, is read anew); kept as "sg-native-pad". A box
+   has none. */
+static GtkBorder sg_style_native_padding(GtkWidget *w, const char *cls) {
+    GtkBorder b = {0, 0, 0, 0}, *kept;
+    if (gtk_widget_has_css_class(w, cls)) gtk_widget_remove_css_class(w, cls);
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    gtk_style_context_get_padding(gtk_widget_get_style_context(w), &b);
+    G_GNUC_END_IGNORE_DEPRECATIONS
+    kept = g_new(GtkBorder, 1);
+    *kept = b;
+    g_object_set_data_full(G_OBJECT(w), "sg-native-pad", kept, g_free);
+    return b;
+}
 static void sg_style_provider_free(gpointer p) {
     GdkDisplay *d = gdk_display_get_default();
     if (d) gtk_style_context_remove_provider_for_display(d, GTK_STYLE_PROVIDER(p));
@@ -10478,7 +10514,9 @@ static void sg_style_apply(int id) {
         g_object_set_data(G_OBJECT(w), "sg-style-css", NULL);   /* frees the provider, if there was one */
     } else {
         GString *css = g_string_new(NULL);
-        sg_style_css(css, id, cls, &s, m);
+        GtkBorder native = {0, 0, 0, 0};
+        if (m & SGM(SGK_PAD)) native = sg_style_native_padding(w, cls);
+        sg_style_css(css, id, cls, &s, m, &native);
         p = g_object_get_data(G_OBJECT(w), "sg-style-css");
         if (!p) {
             p = gtk_css_provider_new();
