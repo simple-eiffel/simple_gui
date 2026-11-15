@@ -6973,7 +6973,12 @@ static void sg_on_after_paint(GdkFrameClock *clock, gpointer d) {
     }
 }
 static void sg_stop_frame_ticks(void) {
-    if (sg_fr_clock && sg_fr_handler) g_signal_handler_disconnect(sg_fr_clock, sg_fr_handler);
+    /* the clock is held (a reference taken in sg_start_frame_ticks): the window it came from may
+       be gone, and a handler disconnected from a freed clock was a GLib critical (1z-d); a clock
+       disposed with its surface has dropped its handlers already, so ask before disconnecting */
+    if (sg_fr_clock && sg_fr_handler && g_signal_handler_is_connected(sg_fr_clock, sg_fr_handler))
+        g_signal_handler_disconnect(sg_fr_clock, sg_fr_handler);
+    if (sg_fr_clock) g_object_unref(sg_fr_clock);
     sg_fr_clock = NULL;
     sg_fr_handler = 0;
     if (sg_tick_widget) {
@@ -6999,6 +7004,7 @@ static int sg_start_frame_ticks(void) {
     sg_tick_last = g_get_monotonic_time();
     sg_tick_id = gtk_widget_add_tick_callback(sg_tick_widget, sg_on_frame, NULL, NULL);
     sg_fr_clock = gtk_widget_get_frame_clock(sg_tick_widget);
+    if (sg_fr_clock) g_object_ref(sg_fr_clock);
     sg_fr_value_set = 0;
     if (sg_fr_clock) sg_fr_handler = g_signal_connect(sg_fr_clock, "after-paint", G_CALLBACK(sg_on_after_paint), NULL);
     return 1;

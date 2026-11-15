@@ -9325,8 +9325,8 @@ feature -- Loading states and app identity (1z-d)
 			assert ("between the first two, no line: " + driver.canvas_pixel (l_skeleton, w // 2, 19).to_hex_string, not same_color (driver.canvas_pixel (l_skeleton, w // 2, 19), l_fill))
 			assert ("past the short line's end: " + driver.canvas_pixel (l_skeleton, (w * 0.8).floor, 55).to_hex_string, not same_color (driver.canvas_pixel (l_skeleton, (w * 0.8).floor, 55), l_fill))
 			assert ("standing still", not l_skeleton.is_shimmering)
-			app.clear_reduces_motion_for_tests
 			l_window.close
+			app.clear_reduces_motion_for_tests
 		end
 
 	test_skeleton_disc_and_block_shapes
@@ -9349,8 +9349,8 @@ feature -- Loading states and app identity (1z-d)
 			assert ("its middle: " + driver.canvas_pixel (l_block, 40, 20).to_hex_string, same_color (driver.canvas_pixel (l_block, 40, 20), l_block.fill_color))
 			assert ("near its corner: " + driver.canvas_pixel (l_block, 2, 20).to_hex_string, same_color (driver.canvas_pixel (l_block, 2, 20), l_block.fill_color))
 			assert ("its corner is rounded: " + driver.canvas_pixel (l_block, 0, 0).to_hex_string, not same_color (driver.canvas_pixel (l_block, 0, 0), l_block.fill_color))
-			app.clear_reduces_motion_for_tests
 			l_window.close
+			app.clear_reduces_motion_for_tests
 		end
 
 	test_skeleton_band_sweeps_on_the_clock
@@ -9484,8 +9484,8 @@ feature -- Loading states and app identity (1z-d)
 			l_base.show_loading (l_base.Loading_skeleton)
 			l_base.hide_loading
 			assert ("disabled before, disabled after", not l_base.is_enabled and not l_base.is_loading)
-			app.clear_reduces_motion_for_tests
 			l_window.close
+			app.clear_reduces_motion_for_tests
 		end
 
 	test_app_icon_shows_the_image

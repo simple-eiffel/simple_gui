@@ -429,11 +429,12 @@ feature {NONE} -- Sweeping
 			-- What redraws the skeleton when light and dark switch; Void once it has let go.
 
 	should_sweep: BOOLEAN
-			-- Should the band be sweeping: shimmer on, motion allowed, shown, with a size, and its
-			-- window open?
+			-- Should the band be sweeping: shimmer on, motion allowed, shown, drawn once (it has had a
+			-- size), and its window open? Not its size now: GTK answers 0 for a widget shown again
+			-- until its next layout, and sends no new size when it is the same as before.
 		do
 			Result := has_shimmer and not is_paused and not is_let_go and then not application.reduces_motion
-				and then width > 0 and then height > 0
+				and then frame_count > 0
 		end
 
 	keep_sweeping
