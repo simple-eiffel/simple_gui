@@ -627,3 +627,4 @@ int sga_window_focused(int a_window);
 void sga_app_set_icon(void *a_cairo_surface);
 void sga_window_set_icon(int a_window, void *a_cairo_surface);
 unsigned int sga_test_app_icon_pixel(int a_x, int a_y);
+int sga_busy_canvas(int a_width, int a_height);   /* 1z-d */
