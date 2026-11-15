@@ -622,3 +622,4 @@ void sga_test_canvas_wheel(int a_id, int an_amount, int a_modifiers, int a_x, in
 void sga_test_canvas_magnify(int a_id, int a_factor_1000, int a_x, int a_y);
 void sga_window_set_cover(int a_window, int a_child);
 int sga_window_focused(int a_window);
+double sga_test_caret_shown(int a_id, int a_caret);   /* #116 */

@@ -2683,6 +2683,15 @@ feature -- Monitors (1z-c)
 		alias "return sga_window_monitor ($a_window);"
 		end
 
+feature -- Carets (#116)
+
+	test_caret_shown (an_id, a_caret: INTEGER): REAL_64
+			-- #116: how much of caret `a_caret' of code area `an_id' shows now, 0 to 1 (1 is the
+			-- main caret, 2 on the extras); -1 when there is no such caret. From the screen.
+		external "C inline use %"simple_gui_appkit.h%""
+		alias "return (EIF_REAL_64) sga_test_caret_shown ($an_id, $a_caret);"
+		end
+
 feature -- Test driver
 
 	test_click (an_id: INTEGER)

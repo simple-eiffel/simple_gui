@@ -13988,3 +13988,22 @@ int sga_window_focused(int a_window)
 	}
 	return 0;
 }
+
+/* #116's test hook: how much of caret `a_caret' of code view `a_id' shows now, 0 to 1 (1 is
+   the main caret; 2 on are the extra carets, in order); -1 when there is no such caret.
+   Read from what is on screen: a layer's presentation opacity. */
+double sga_test_caret_shown(int a_id, int a_caret)
+{
+	SGACodeView *v = sga_code_of(a_id);   /* the id names the editor's scroll view */
+	if (!v) return -1;
+	if (a_caret == 1) {
+		for (NSView *x in [v subviews])
+			if ([x isKindOfClass:NSClassFromString(@"NSTextInsertionIndicator")] && ![v->extra_marks containsObject:x])
+				return sga_shown_opacity([x layer]);
+		return 0;
+	}
+	NSInteger k = a_caret - 2;
+	if (k < 0 || k >= (NSInteger)[v->extra_marks count]) return -1;
+	return sga_shown_opacity([v->extra_marks[k] layer]);
+}
+
