@@ -250,6 +250,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_open_and_reveal_are_recorded_not_performed, "open_and_reveal_are_recorded_not_performed")
 				run_test (agent t.test_network_status_answers_at_once_and_tells_changes, "network_status_answers_at_once_and_tells_changes")
 				run_test (agent t.test_monitors_have_sizes_work_areas_and_scales, "monitors_have_sizes_work_areas_and_scales")
+				run_test (agent t.test_locale_formats_the_same_on_every_platform, "locale_formats_the_same_on_every_platform")
 				run_test (agent t.test_a_monitor_change_takes_a_new_snapshot_and_tells, "a_monitor_change_takes_a_new_snapshot_and_tells")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")

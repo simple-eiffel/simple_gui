@@ -8704,6 +8704,28 @@ feature -- App services (1z-c)
 			app.network_changed_actions.prune (l_agent)
 		end
 
+	test_locale_formats_the_same_on_every_platform
+			-- 1z-c: the system names the locale, and simple_i18n's own table writes it, so the
+			-- strings are the same on every platform; `set_locale_name' overrides the name, and
+			-- the formatter follows.
+		local
+			l_system: STRING_8
+		do
+			l_system := app.locale_name
+			assert ("the system names a locale", not l_system.is_empty)
+			app.set_locale_name ("en_US")
+			assert ("en_US number", app.formatter.format_number (1234567.89).same_string ({STRING_32} "1,234,567.89"))
+			app.set_locale_name ("de_DE")
+			assert ("the override is the locale", app.locale_name.same_string ("de_DE"))
+			assert ("de_DE number", app.formatter.format_number (1234567.89).same_string ({STRING_32} "1.234.567,89"))
+			assert ("de_DE integer", app.formatter.format_integer (1234567).same_string ({STRING_32} "1.234.567"))
+			assert ("de_DE money", app.formatter.format_currency (1234.5).same_string ({STRING_32} "1.234,50%/160/%/8364/"))
+			app.set_locale_name ("xx_YY")
+			assert ("an unknown language formats as en_US", app.formatter.formatting_locale_name.same_string ("en_US"))
+			app.set_locale_name (l_system)
+			assert ("back to the system's", app.locale_name.same_string (l_system))
+		end
+
 	test_monitors_have_sizes_work_areas_and_scales
 			-- 1z-c: the monitors' shape, from the real machine: at least one; a primary, which holds
 			-- its work area; each sized, named and scaled at least 1; and a shown window's
