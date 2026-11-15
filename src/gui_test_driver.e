@@ -422,6 +422,18 @@ feature -- User actions
 			Result := backend.test_media_frame_color (a_player.id)
 		end
 
+	media_key (a_player: GUI_MEDIA_PLAYER; a_key: INTEGER)
+			-- 1z-b: a user's key press on `a_player': 1 space (play or pause), 2 Left (5 s back),
+			-- 3 Right (5 s on), 4 Escape (leave full screen), through the handler the real key
+			-- reaches; then let the loop settle.
+		require
+			has_application: has_application
+			known_key: a_key >= 1 and a_key <= 4
+		do
+			backend.test_media_key (a_player.id, a_key)
+			settle
+		end
+
 	toggle_expander (an_expander: GUI_EXPANDER)
 			-- Click the expander's title as a user would (fires toggled).
 		require

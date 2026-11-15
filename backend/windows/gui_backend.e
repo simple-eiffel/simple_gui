@@ -7123,6 +7123,39 @@ feature -- Media player (1z-b)
 			end
 		end
 
+	test_media_key (an_id, a_key: INTEGER)
+			-- As a user: the view a key reaches (the filler while full screen, else the player's
+			-- own view) holds the focus, as a click on it gives, and the key goes down through
+			-- the window's own key-down itinerary (`simulate_key_down', the routine a WM_KEYDOWN's
+			-- event 4 runs) to that view's `handle_key', and so to `media_key'.
+		local
+			l_target: GUI_SW_MEDIA_VIEW
+			l_window: detachable GUI_SW_WINDOW
+		do
+			if attached media_players.item (an_id) as al_m then
+				if al_m.is_full_screen and then attached al_m.filler as al_filler then
+					l_target := al_filler
+					l_window := windows.item (al_m.full_screen_window)
+				else
+					l_target := al_m.view
+					l_window := window_of (al_m.view)
+				end
+				if attached l_window as al_w and then al_w.is_window_open then
+					al_w.give_focus (l_target)
+					inspect a_key
+					when 1 then
+						al_w.simulate_key_down (32, False, False, False)
+					when 2 then
+						al_w.simulate_key_down (37, False, False, False)
+					when 3 then
+						al_w.simulate_key_down (39, False, False, False)
+					else
+						al_w.simulate_key_down (27, False, False, False)
+					end
+				end
+			end
+		end
+
 feature {NONE} -- Media player (1z-b)
 
 	media_players: HASH_TABLE [GUI_SW_MEDIA, INTEGER]

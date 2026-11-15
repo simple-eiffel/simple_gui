@@ -3095,6 +3095,17 @@ feature -- Media player (1z-b)
 		deferred
 		end
 
+	test_media_key (an_id, a_key: INTEGER)
+			-- Tests only, 1z-b: a user's key press on player `an_id' (1 space, 2 Left, 3 Right,
+			-- 4 Escape), delivered through the handler the real key reaches: the player's, or
+			-- while full screen the view filling the window, which acts on the same player.
+			-- AppKit: an NSEvent to its keyDown:; GTK: its key controller's key-pressed; Windows:
+			-- the window's own key-down itinerary (`simulate_key_down') to the focused view.
+		require
+			known_key: a_key >= 1 and a_key <= 4
+		deferred
+		end
+
 feature -- Test driver
 
 	test_click (an_id: INTEGER)

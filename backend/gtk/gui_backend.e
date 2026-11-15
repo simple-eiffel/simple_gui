@@ -2975,6 +2975,13 @@ feature -- Media player (1z-b)
 		alias "return sg_test_media_video_size($an_id);"
 		end
 
+	test_media_key (an_id, a_key: INTEGER)
+			-- The key-pressed signal of the key controller on the box the key reaches (the
+			-- filler while full screen), so `sg_media_on_key' runs as for a real press.
+		external "C inline use %"simple_gui_gtk.h%""
+		alias "sg_test_media_key($an_id, $a_key);"
+		end
+
 	test_media_frame_color (an_id: INTEGER): NATURAL_32
 			-- The paintable's snapshot drawn with Cairo, its center 16 by 16.
 		external "C inline use %"simple_gui_gtk.h%""

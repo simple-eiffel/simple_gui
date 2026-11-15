@@ -9774,6 +9774,63 @@ feature -- Media player (1z-b)
 			end
 		end
 
+	test_media_keys_play_seek_and_leave_full_screen
+			-- 1z-b: a user's keys on the player, through the handler a real press reaches: space
+			-- plays and space again pauses; Right from the start goes 5 s on, held at the 1 s
+			-- clip's end; Left from there goes 5 s back, held at 0; and Escape leaves full screen.
+			-- The Escape part is skipped with no window manager (SIMPLE_GUI_TEST_NO_WM set), as
+			-- in `test_media_full_screen_reports_both_ways'.
+		local
+			l_window: GUI_WINDOW
+			l_player: GUI_MEDIA_PLAYER
+			l_changes: ARRAYED_LIST [BOOLEAN]
+			l_end: INTEGER
+		do
+			l_window := media_window ("Media keys")
+			l_player := last_media_player
+			create l_changes.make (2)
+			l_player.full_screen_actions.extend (agent l_changes.extend)
+			l_player.open_file (clip_path)
+			l_player.set_muted (True)
+			assert ("ready: " + as_utf8 (l_player.failure), wait_settled (l_player) and l_player.is_ready)
+			assert ("not playing yet", not l_player.is_playing)
+				-- space, twice
+			driver.media_key (l_player, 1)
+			assert ("space plays", driver.wait_until (agent is_playing (l_player), 3000))
+			driver.media_key (l_player, 1)
+			assert ("space again pauses", driver.wait_until (agent is_not_playing (l_player), 3000))
+				-- Right from the start, then Left from the end
+			l_player.seek (0)
+			assert ("back at the start: " + driver.media_position_ms (l_player).out,
+				driver.wait_until (agent position_at_most (l_player, 50), 3000))
+			l_end := l_player.duration_ms
+			driver.media_key (l_player, 3)
+			assert ("Right goes to the end: " + driver.media_position_ms (l_player).out + " of " + l_end.out,
+				driver.wait_until (agent position_at_least (l_player, l_end - 100), 3000))
+			assert ("held at the end: " + driver.media_position_ms (l_player).out + " of " + l_end.out,
+				driver.media_position_ms (l_player) <= l_end + 50)
+			driver.media_key (l_player, 2)
+			assert ("Left comes back to 0: " + driver.media_position_ms (l_player).out,
+				driver.wait_until (agent position_at_most (l_player, 50), 3000))
+			assert ("the keys never played it on", not l_player.is_playing)
+				-- Escape
+			if attached (create {EXECUTION_ENVIRONMENT}).item ("SIMPLE_GUI_TEST_NO_WM") as al_no_wm and then not al_no_wm.is_empty then
+				io.put_string ("    SKIP (Escape): no window manager on this display grants full screen%N")
+			else
+				l_player.set_full_screen (True)
+				assert ("full screen reported", driver.wait_until (agent count_at_least_booleans (l_changes, 1), 8000))
+				assert ("as on", l_changes.first and l_player.is_full_screen)
+				driver.media_key (l_player, 4)
+				assert ("Escape leaves full screen", driver.wait_until (agent count_at_least_booleans (l_changes, 2), 8000))
+				assert ("as off", not l_changes.last and not l_player.is_full_screen)
+				assert ("twice in all: " + l_changes.count.out, l_changes.count = 2)
+				driver.media_key (l_player, 4)
+				assert ("Escape again does nothing", not driver.wait_until (agent count_at_least_booleans (l_changes, 3), 500))
+				settle_window
+			end
+			l_window.close
+		end
+
 feature {NONE} -- Fixtures (1z-b)
 
 	clip_path: PATH
@@ -9836,6 +9893,22 @@ feature {NONE} -- Fixtures (1z-b)
 			-- Is what plays at `a_ms' or later?
 		do
 			Result := driver.media_position_ms (a_player) >= a_ms
+		end
+
+	position_at_most (a_player: GUI_MEDIA_PLAYER; a_ms: INTEGER): BOOLEAN
+			-- Is what plays at `a_ms' or earlier?
+		do
+			Result := driver.media_position_ms (a_player) <= a_ms
+		end
+
+	is_playing (a_player: GUI_MEDIA_PLAYER): BOOLEAN
+		do
+			Result := a_player.is_playing
+		end
+
+	is_not_playing (a_player: GUI_MEDIA_PLAYER): BOOLEAN
+		do
+			Result := not a_player.is_playing
 		end
 
 	position_at_least_or_ended (a_player: GUI_MEDIA_PLAYER; a_ms: INTEGER): BOOLEAN

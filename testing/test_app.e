@@ -277,6 +277,7 @@ feature {NONE} -- Initialization
 				run_test (agent t.test_media_tone_plays_without_video, "media_tone_plays_without_video")
 				run_test (agent t.test_media_missing_file_fails_with_a_reason, "media_missing_file_fails_with_a_reason")
 				run_test (agent t.test_media_full_screen_reports_both_ways, "media_full_screen_reports_both_ways")
+				run_test (agent t.test_media_keys_play_seek_and_leave_full_screen, "media_keys_play_seek_and_leave_full_screen")
 			end
 			print ("%N=== Results: " + passed.out + " passed, " + failed.out + " failed ===%N")
 			if failed = 0 and passed > 0 then

@@ -11370,6 +11370,7 @@ static void sg_media_fill_view(sg_media *m, GtkWidget *box, GtkWidget **picture,
     gtk_widget_set_focusable(box, TRUE);
     gtk_widget_set_focus_on_click(box, TRUE);
     g_signal_connect(k, "key-pressed", G_CALLBACK(sg_media_on_key), m->box);
+    g_object_set_data(G_OBJECT(box), "sg-media-keys", k);   /* the test hook's door (1z-b) */
     gtk_widget_add_controller(box, k);
     *picture = pic;
     *controls = ctl;
@@ -11673,6 +11674,22 @@ static int sg_test_media_position_ms(int id) { return sg_media_position_ms(id); 
 /* GtkMediaStream has no rate: 1 while playing, 0 otherwise. */
 static double sg_test_media_rate(int id) { return sg_media_is_playing(id) ? 1.0 : 0.0; }
 static int sg_test_media_video_size(int id) { return sg_media_video_width(id) + sg_media_video_height(id) * 65536; }
+/* As a user, a key press on player `id' (1 space, 2 Left, 3 Right, 4 Escape): the key-pressed
+   signal of the key controller on the box a real key reaches, the filler while it fills the
+   window, else the player's own, so sg_media_on_key runs as for a real press. */
+static void sg_test_media_key(int id, int key) {
+    sg_media *m = sg_media_of(id);
+    GtkWidget *l_target;
+    GtkEventController *k;
+    gboolean handled = FALSE;
+    guint l_keyval;
+    if (!m) return;
+    l_target = (m->wants_full_screen && m->filler) ? m->filler : m->box;
+    k = l_target ? (GtkEventController *) g_object_get_data(G_OBJECT(l_target), "sg-media-keys") : NULL;
+    if (!k) return;
+    l_keyval = key == 1 ? GDK_KEY_space : key == 2 ? GDK_KEY_Left : key == 3 ? GDK_KEY_Right : GDK_KEY_Escape;
+    g_signal_emit_by_name(k, "key-pressed", l_keyval, (guint) 0, (GdkModifierType) 0, &handled);
+}
 /* The mean color over the center 16 by 16 of the frame shown now (the paintable's snapshot,
    drawn at its own size with Cairo), 0xFFRRGGBB; 0 with no frame. */
 static unsigned int sg_test_media_frame_color(int id) {
