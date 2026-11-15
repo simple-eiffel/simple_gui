@@ -220,7 +220,7 @@ feature -- The store contract
 			assert ("starts empty", s.count = 0 and not s.has ("a") and s.item ("a") = Void)
 			s.put ("a", {STRING_32} "x%/31/y")
 			assert ("kept", s.has ("a") and attached s.item ("a") as al and then al.same_string ({STRING_32} "x%/31/y"))
-			l_hebrew := {STRING_32} "בְּרֵאשִׁית%/31/ἐν ἀρχῇ"
+			l_hebrew := {STRING_32} "%/1489/%/1456/%/1468/%/1512/%/1461/%/1488/%/1513/%/1460/%/1473/%/1497/%/1514/%/31/%/7952/%/957/ %/7936/%/961/%/967/%/8135/"
 			s.put ("h", l_hebrew)
 			assert ("any script", attached s.item ("h") as al and then al.same_string (l_hebrew))
 			from i := 1 until i > 3_000 loop
@@ -338,7 +338,7 @@ feature -- Encryption
 		do
 			s.set_encrypted (True)
 			assert ("encrypted", s.is_encrypted)
-			l_hebrew := {STRING_32} "בְּרֵאשִׁית"
+			l_hebrew := {STRING_32} "%/1489/%/1456/%/1468/%/1512/%/1461/%/1488/%/1513/%/1460/%/1473/%/1497/%/1514/"
 			from i := 1 until i > 200 loop
 				s.put (i.out, {STRING_32} "Secret row " + i.out + "%/31/" + l_hebrew)
 				i := i + 1
